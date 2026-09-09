@@ -1,0 +1,88 @@
+{"engine":"pglite-query","case":"aggregate_expression","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"aggregate_expression","states":0,"status":"unsupported","restriction":"expression containing an aggregate in it is not supported on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"aggregate_filter","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"aggregate_filter","states":0,"status":"unsupported","restriction":"aggregate function with FILTER clause is not supported on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"aggregate_limit_zero","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"aggregate_limit_zero","states":0,"status":"unsupported","restriction":"LIMIT/OFFSET clause is not supported on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"bag_topk","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"bag_topk","states":0,"status":"unsupported","restriction":"ORDER BY clause is not supported on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"case_cast","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"case_cast","states":174,"status":"ok","restriction":null,"mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"comma_filter","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"comma_filter","states":174,"status":"ok","restriction":null,"mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"compound_topk","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"compound_topk","states":0,"status":"unsupported","restriction":"ORDER BY clause is not supported on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"cross_join","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"cross_join","states":174,"status":"ok","restriction":null,"mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"cte_columns","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"cte_columns","states":174,"status":"ok","restriction":null,"mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"cte_shared","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"cte_shared","states":174,"status":"ok","restriction":null,"mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"distinct_aggs","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"distinct_aggs","states":0,"status":"unsupported","restriction":"aggregate function with DISTINCT arguments is not supported on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"distinct_topk","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"distinct_topk","states":0,"status":"unsupported","restriction":"ORDER BY clause is not supported on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"empty_having","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"empty_having","states":0,"status":"unsupported","restriction":"HAVING clause is not supported on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"filtered_exists","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"filtered_exists","states":174,"status":"ok","restriction":null,"mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"filtered_not_exists","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"filtered_not_exists","states":0,"status":"unsupported","restriction":"this query is not allowed on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"full_join","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"full_join","states":174,"status":"ok","restriction":null,"mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"full_residual","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"full_residual","states":0,"status":"unsupported","restriction":"this query is not allowed on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"group_only","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"group_only","states":0,"status":"unsupported","restriction":"GROUP BY clause without aggregate is not supported on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"group_ordinals","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"group_ordinals","states":174,"status":"ok","restriction":null,"mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"group_topk","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"group_topk","states":0,"status":"unsupported","restriction":"HAVING clause is not supported on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"group_window","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"group_window","states":0,"status":"unsupported","restriction":"ORDER BY clause is not supported on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"having","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"having","states":0,"status":"unsupported","restriction":"HAVING clause is not supported on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"having_alias","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"having_alias","states":0,"status":"unsupported","restriction":"HAVING clause is not supported on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"hidden_order","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"hidden_order","states":0,"status":"unsupported","restriction":"ORDER BY clause is not supported on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"joined_exists","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"joined_exists","states":174,"status":"ok","restriction":null,"mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"left_residual","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"left_residual","states":0,"status":"unsupported","restriction":"this query is not allowed on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"like","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"like","states":174,"status":"ok","restriction":null,"mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"natural_left","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"natural_left","states":0,"status":"unsupported","restriction":"this query is not allowed on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"nested_distinct","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"nested_distinct","states":0,"status":"unsupported","restriction":"DISTINCT clause in nested query are not supported on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"nullable_sum","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"nullable_sum","states":174,"status":"ok","restriction":null,"mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"ordinal_order","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"ordinal_order","states":0,"status":"unsupported","restriction":"ORDER BY clause is not supported on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"outer_aggregate","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"outer_aggregate","states":0,"status":"unsupported","restriction":"this query is not allowed on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"outer_chain","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"outer_chain","states":174,"status":"ok","restriction":null,"mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"qualified_star","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"qualified_star","states":0,"status":"unsupported","restriction":"this query is not allowed on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"right_join","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"right_join","states":174,"status":"ok","restriction":null,"mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"self_outer","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"self_outer","states":174,"status":"ok","restriction":null,"mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"theta_join","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"theta_join","states":174,"status":"ok","restriction":null,"mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"using_full","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"using_full","states":174,"status":"mismatch","restriction":null,"mismatches":168,"first_mismatch":{"step":6,"mutation":"DELETE FROM b WHERE bid=1","actual":[[2,2,2,4,2],[3,3,null,5,null],[4,4,4,2,4],[null,1,null,1,null],[null,null,null,3,null],[null,null,null,null,3]],"expected":[[1,1,null,1,null],[2,2,2,4,2],[3,3,null,5,null],[4,4,4,2,4],[null,null,null,3,null],[null,null,null,null,3]]},"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"using_inner","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"using_inner","states":174,"status":"ok","restriction":null,"mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"using_star","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"using_star","states":0,"status":"unsupported","restriction":"this query is not allowed on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"window_frame","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"window_frame","states":0,"status":"unsupported","restriction":"window functions are not supported on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"window_multi","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"window_multi","states":0,"status":"unsupported","restriction":"window functions are not supported on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"window_named","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"window_named","states":0,"status":"unsupported","restriction":"window functions are not supported on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}
+{"engine":"pglite-query","case":"window_topk","states":174,"status":"ok","input_output_verified":true}
+{"engine":"pglite-ivm","case":"window_topk","states":0,"status":"unsupported","restriction":"ORDER BY clause is not supported on incrementally maintainable materialized view","mismatches":0,"first_mismatch":null,"pg_ivm_version":"1.13"}

@@ -1,0 +1,12 @@
+✔ semantic gate rejects missing, duplicate, and invalid state receipts and preserves unsupported/errors (3.218208ms)
+✔ timing excludes warmups, needs all repetitions and semantic acceptance, and preserves cell dimensions (9.390209ms)
+✔ DD executable validates every declared contract and detects injected wrong algebra (33.281167ms)
+✔ Prolog computes values independently and rejects a wrong expected bag (62.906625ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 156.58925

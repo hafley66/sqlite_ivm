@@ -1,0 +1,13 @@
+{"case":"signed_map_filter_flatmap","engine":"dd","oracle":"independent finite weighted-map or graph traversal","states":5,"status":"ok","wall_ms":2.8362079999999996}
+{"case":"signed_concat_negate","engine":"dd","oracle":"independent finite weighted-map or graph traversal","states":5,"status":"ok","wall_ms":2.867792}
+{"case":"weighted_join","engine":"dd","oracle":"independent finite weighted-map or graph traversal","states":5,"status":"ok","wall_ms":2.870417}
+{"case":"shared_arrangement_join","engine":"dd","oracle":"independent finite weighted-map or graph traversal","states":5,"status":"ok","wall_ms":2.872333}
+{"case":"custom_weighted_reduce","engine":"dd","oracle":"independent finite weighted-map or graph traversal","states":5,"status":"ok","wall_ms":2.874125}
+{"case":"count_total","engine":"dd","oracle":"independent finite weighted-map or graph traversal","states":5,"status":"ok","wall_ms":2.8759580000000002}
+{"case":"positive_threshold","engine":"dd","oracle":"independent finite weighted-map or graph traversal","states":5,"status":"ok","wall_ms":2.877792}
+{"case":"binary_transitive_closure","engine":"dd","oracle":"independent finite weighted-map or graph traversal","states":5,"status":"ok","wall_ms":4.156292}
+{"case":"mutual_even_odd_recursion","engine":"dd","oracle":"independent finite weighted-map or graph traversal","states":5,"status":"ok","wall_ms":4.164625}
+{"case":"recursive_min_distance","engine":"dd","oracle":"independent finite weighted-map or graph traversal","states":5,"status":"ok","wall_ms":4.166708}
+{"case":"nested_fixed_points","engine":"dd","oracle":"independent finite weighted-map or graph traversal","states":5,"status":"ok","wall_ms":4.1682500000000005}
+{"case":"stratified_antijoin_after_recursion","engine":"dd","oracle":"independent finite weighted-map or graph traversal","states":5,"status":"ok","wall_ms":4.169625}
+{"case":"incomparable_times_join_lub_and_held_frontier","engine":"dd","oracle":"independent finite weighted-map or graph traversal","states":2,"status":"ok","wall_ms":0.095}
