@@ -1,0 +1,10 @@
+{
+  "name": "sprefa-postgres-pglite-ivm-shootout",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "@electric-sql/pglite-pg_ivm": "0.0.9",
+    "pg": "8.16.3"
+  }
+}
