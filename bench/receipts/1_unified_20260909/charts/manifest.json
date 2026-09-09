@@ -1,0 +1,181 @@
+{
+  "schema": 1,
+  "source_report": "/Users/chrishafley/projects/sprefa/sqlite_ivm/bench/receipts/1_unified_20260909/report.json",
+  "source_performance": "/Users/chrishafley/projects/sprefa/sqlite_ivm/bench/receipts/1_unified_20260909/performance.jsonl",
+  "generated_at": "2026-09-09T17:28:20.851Z",
+  "plotting": {
+    "available": true,
+    "reason": null
+  },
+  "charts": [
+    {
+      "case": "pipeline",
+      "file": "00_pipeline.png",
+      "unavailable_reason": null,
+      "timing_cells": 8,
+      "inventory_snapshots": 0,
+      "logical_output_snapshots": 312
+    },
+    {
+      "case": "fanout_fanin",
+      "file": "01_fanout_fanin.png",
+      "unavailable_reason": null,
+      "timing_cells": 6,
+      "inventory_snapshots": 0,
+      "logical_output_snapshots": 234
+    },
+    {
+      "case": "distinct",
+      "file": "02_distinct.png",
+      "unavailable_reason": null,
+      "timing_cells": 8,
+      "inventory_snapshots": 0,
+      "logical_output_snapshots": 312
+    },
+    {
+      "case": "join",
+      "file": "03_join.png",
+      "unavailable_reason": null,
+      "timing_cells": 8,
+      "inventory_snapshots": 0,
+      "logical_output_snapshots": 312
+    },
+    {
+      "case": "self_join",
+      "file": "04_self_join.png",
+      "unavailable_reason": null,
+      "timing_cells": 8,
+      "inventory_snapshots": 0,
+      "logical_output_snapshots": 312
+    },
+    {
+      "case": "chain",
+      "file": "05_chain.png",
+      "unavailable_reason": null,
+      "timing_cells": 8,
+      "inventory_snapshots": 0,
+      "logical_output_snapshots": 312
+    },
+    {
+      "case": "diamond",
+      "file": "06_diamond.png",
+      "unavailable_reason": null,
+      "timing_cells": 6,
+      "inventory_snapshots": 0,
+      "logical_output_snapshots": 234
+    },
+    {
+      "case": "semijoin",
+      "file": "07_semijoin.png",
+      "unavailable_reason": null,
+      "timing_cells": 8,
+      "inventory_snapshots": 0,
+      "logical_output_snapshots": 312
+    },
+    {
+      "case": "antijoin",
+      "file": "08_antijoin.png",
+      "unavailable_reason": null,
+      "timing_cells": 6,
+      "inventory_snapshots": 0,
+      "logical_output_snapshots": 234
+    },
+    {
+      "case": "aggregate_churn",
+      "file": "09_aggregate_churn.png",
+      "unavailable_reason": null,
+      "timing_cells": 8,
+      "inventory_snapshots": 0,
+      "logical_output_snapshots": 312
+    },
+    {
+      "case": "reach_cycle",
+      "file": "10_reach_cycle.png",
+      "unavailable_reason": null,
+      "timing_cells": 6,
+      "inventory_snapshots": 0,
+      "logical_output_snapshots": 234
+    },
+    {
+      "case": "minmax",
+      "file": "11_minmax.png",
+      "unavailable_reason": null,
+      "timing_cells": 8,
+      "inventory_snapshots": 0,
+      "logical_output_snapshots": 312
+    },
+    {
+      "case": "count_distinct",
+      "file": "12_count_distinct.png",
+      "unavailable_reason": null,
+      "timing_cells": 6,
+      "inventory_snapshots": 0,
+      "logical_output_snapshots": 234
+    },
+    {
+      "case": "union_set",
+      "file": "13_union_set.png",
+      "unavailable_reason": null,
+      "timing_cells": 6,
+      "inventory_snapshots": 0,
+      "logical_output_snapshots": 234
+    },
+    {
+      "case": "except_set",
+      "file": "14_except_set.png",
+      "unavailable_reason": null,
+      "timing_cells": 6,
+      "inventory_snapshots": 0,
+      "logical_output_snapshots": 234
+    },
+    {
+      "case": "intersect_set",
+      "file": "15_intersect_set.png",
+      "unavailable_reason": null,
+      "timing_cells": 6,
+      "inventory_snapshots": 0,
+      "logical_output_snapshots": 234
+    },
+    {
+      "case": "topk",
+      "file": "16_topk.png",
+      "unavailable_reason": null,
+      "timing_cells": 6,
+      "inventory_snapshots": 0,
+      "logical_output_snapshots": 234
+    },
+    {
+      "case": "window_rank",
+      "file": "17_window_rank.png",
+      "unavailable_reason": null,
+      "timing_cells": 6,
+      "inventory_snapshots": 0,
+      "logical_output_snapshots": 234
+    },
+    {
+      "case": "subquery",
+      "file": "18_subquery.png",
+      "unavailable_reason": null,
+      "timing_cells": 8,
+      "inventory_snapshots": 0,
+      "logical_output_snapshots": 312
+    },
+    {
+      "case": "cte",
+      "file": "19_cte.png",
+      "unavailable_reason": null,
+      "timing_cells": 8,
+      "inventory_snapshots": 0,
+      "logical_output_snapshots": 312
+    }
+  ],
+  "files": {
+    "overview": "overview.png",
+    "inventory_json": "inventory.json",
+    "inventory_tsv": "inventory.tsv",
+    "telemetry_json": "telemetry.json",
+    "telemetry_tsv": "telemetry.tsv",
+    "html_index": "index.html",
+    "markdown_index": "index.md"
+  }
+}

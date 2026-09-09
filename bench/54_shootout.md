@@ -92,6 +92,11 @@ just ivm-shootout full --details
 just ivm-shootout quick --out /tmp/ivm-comparison-run
 ```
 
+Quick charts contain the measured 400-row tier for all 20 workload families.
+Full charts contain the measured 400-row and 12,000-row tiers for its six
+selected workload families. Chart lines connect measured tiers only; they do
+not extrapolate between or beyond those inputs.
+
 The dimensions are printed as rows, batch size and fanout. Each case applies
 initial loading, duplicate support, support removal, a batch key/value move,
 right/third-side changes, root/edge clearing, a cyclic seed, alternate-path
@@ -101,6 +106,24 @@ fixture and oracle.
 
 Timed work includes mutations, maintenance completion and output materialization.
 Source/output validation and fixture generation occur outside that interval.
+After each validated state, an untimed `state_inventory` snapshot records physical
+relations, roles, row counts, allocated/data/index bytes, database and WAL sizes,
+and metric-specific unavailable reasons. PostgreSQL's database size is the
+overhead-inclusive result of `pg_database_size`, separate from relation sizes.
+SQLite relation allocation comes from `dbstat`, separate from filesystem length.
+DD and Prolog durable-storage metrics are unavailable rather than zero; process
+peak RSS is recorded by the parent runner with its process or process-group scope.
+The process receipt also retains the raw `/usr/bin/time` output and normalizes
+available CPU time, elapsed time, faults, swaps, context switches, instructions,
+cycles and block-I/O operations. PostgreSQL adapters record `pg_stat_database`
+deltas for cache blocks, tuples, transactions and temporary files/bytes. Those
+are database-wide page-cache and logical activity counters since the case
+baseline, including validation and telemetry queries; they are not physical
+disk operation or byte counts.
+The resulting run is instrumented: catalog/count/dbstat probes can warm caches
+before the next mutation. Process high-water RSS covers the adapter, validation,
+and telemetry code. PostgreSQL process-group RSS can include shared pages in more
+than one process. It is not a measurement of the maintained view's heap alone.
 The report separates initial load, whole-edge clearing and the sum of the other
 11 mutation states, taking medians across measured repetitions. Warmups are
 excluded. Missing states, repetitions, failed semantic gates or wrong input/output
@@ -124,6 +147,11 @@ Each result directory contains:
 - coverage.tsv: every requested engine/case, including unsupported and unwired cases with reasons.
 - run.json: commands, revision, source hashes, dependencies, logs and exit statuses.
 - circuits.jsonl, performance.jsonl, dd-contracts.jsonl and features/*.jsonl: execution receipts.
+- charts/index.html and charts/index.md: clickable indexes for the overview and one numbered PNG per measured workload family.
+- charts/overview.png and charts/NN_workload.png: dark-background coverage and per-workload timing/state charts. PNG generation requires gnuplot; the data exports are still written when it is unavailable.
+- charts/telemetry.json and charts/telemetry.tsv: raw receipt metrics, report telemetry, per-state and per-phase latency distributions, throughput, process resources and unavailable reasons.
+- charts/inventory.json and charts/inventory.tsv: every state inventory snapshot and relation-level count, role, allocation, data/index byte metric and unavailable reason.
+- charts/manifest.json: source paths, generated files, workload cells and PNG availability.
 - Shared fixtures and per-process stdout/stderr for reproduction.
 
 Successful per-case database copies are discarded after their receipts are
@@ -156,3 +184,9 @@ rows with three measured repetitions per row. Native pg_ivm 1.15 and bundled
 pg_ivm 1.13 each have the recorded using_full mismatch; there are no incomplete
 or other failed execution cells in that run. The report therefore returns the
 mismatch status and exit code 1.
+
+The recorded instrumented quick run is described by its
+[receipt README](receipts/3_telemetry_20260909/README.md) and
+[chart index](receipts/3_telemetry_20260909/charts/index.md). It covers all 20
+workloads at the 400-row tier, with 140 validated timing cells, 20 unsupported
+cells, 5,460 measured state inventories, and 480 process-resource samples.

@@ -6,6 +6,9 @@ import os
 import sqlite3
 import sys
 import time
+from importlib import import_module
+
+sqlite_inventory = import_module('30a_state_inventory').sqlite_inventory
 
 
 def emit(**record):
@@ -95,7 +98,8 @@ def main():
         emit(event='mutation', status='ok', state=state['name'], exact_input_output_validated=True,
              input_hash=input_hash, checksum=checksum, affected_rows=len(state['writes']), output_rows=len(output),
              output_bytes=len(canonical(output,'S').encode()), update_transaction_ms=update_ms,
-             query_compute_ms=query_ms, update_plus_query_ms=update_ms+query_ms)
+             query_compute_ms=query_ms, update_plus_query_ms=update_ms+query_ms,
+             state_inventory=sqlite_inventory(db, args.db, 'circuit_view' if args.extension else None))
     emit(event='case-total', status='ok', update_plus_query_ms=total, final_input_hash=input_hash,
          final_checksum=checksum, disk={'database_bytes':os.path.getsize(args.db),
          'wal_bytes':os.path.getsize(args.db+'-wal') if os.path.exists(args.db+'-wal') else 0})

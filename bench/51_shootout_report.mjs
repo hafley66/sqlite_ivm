@@ -10,6 +10,8 @@ const features=JSON.parse(fs.readFileSync(new URL('../tests/fixtures/1_features.
 export const featureNames=features.cases.map(c=>c.name);
 const aliases={'sqlite-ivm-native':'sqlite-ivm',pg_ivm:'pg-ivm','postgres-query':'pg-query'};
 export const median=xs=>{const s=xs.toSorted((a,b)=>a-b);return s.length%2?s[(s.length-1)/2]:(s[s.length/2-1]+s[s.length/2])/2;};
+const percentile=(xs,p)=>{const s=xs.toSorted((a,b)=>a-b);return s[Math.max(0,Math.ceil(p*s.length)-1)];};
+const distribution=xs=>({samples:xs.length,p50_ms:percentile(xs,.5),p95_ms:percentile(xs,.95),p99_ms:percentile(xs,.99)});
 export function parseRecords(text){return text.split('\n').filter(x=>x.trim()).map((line,i)=>{try{return JSON.parse(line);}catch{throw new Error(`invalid JSON receipt at line ${i+1}`);}});}
 const fixtureCache=new Map();
 function expectedFixture(spec){const key=JSON.stringify([spec.circuit,spec.rows,spec.batch_size,spec.fanout]);if(!fixtureCache.has(key))fixtureCache.set(key,(Object.hasOwn(semanticCircuits,spec.circuit)?makeSemanticFixture:makeCircuitFixture)(spec.circuit,spec.rows,spec.batch_size,spec.fanout));return fixtureCache.get(key);}
@@ -46,7 +48,10 @@ export function performanceRows(records,gate){
   }
   const complete=acceptedGate&&sums.length===expectedReps&&expectedReps>0;
   const rejected=selected.find(r=>r.event==='capability');
-  result.push({case:spec.circuit,rows:spec.rows,batch:spec.batch_size,fanout:spec.fanout,engine,status:complete?'ok':rejected?.status??'excluded',repetitions:complete?expectedReps:0,...(complete?{total_ms:median(sums.map(x=>x.total)),initial_ms:median(sums.map(x=>x.initial)),clear_ms:median(sums.map(x=>x.clear)),changes_ms:median(sums.map(x=>x.changes))}:{}),algorithm:selected.find(r=>r.event==='case-setup')?.algorithm,durability:selected.find(r=>r.event==='case-setup')?.durability});
+  const state_inventories=complete?selected.filter(r=>r.repetition===1&&r.event==='mutation'&&r.state_inventory).map((r,index)=>({state:r.state,sequence:index,measured_at:r.state_inventory.measured_at,inventory:r.state_inventory})):[];
+  const rate=(samples,numerator,elapsed)=>{const rates=samples.map(r=>Number.isFinite(r[elapsed])&&r[elapsed]>0?r[numerator]/(r[elapsed]/1000):null);return rates.some(x=>x===null)?{value:null,unit:'rows/second',unavailable_reason:'one or more elapsed samples are zero or non-finite',partial:true,known_samples:rates.filter(x=>x!==null).length}:{value:median(rates),unit:'rows/second',unavailable_reason:null,partial:false};};
+  const telemetry=complete?{latency_by_state:Object.fromEntries(expected.states.map(state=>{const samples=selected.filter(r=>r.event==='mutation'&&r.state===state.name).map(r=>r.update_plus_query_ms);return[state.name,distribution(samples)];})),latency_by_phase:{initial:distribution(sums.map(x=>x.initial)),changes:distribution(sums.map(x=>x.changes)),clear:distribution(sums.map(x=>x.clear))},throughput_by_state:Object.fromEntries(expected.states.map(state=>{const samples=selected.filter(r=>r.event==='mutation'&&r.state===state.name);return[state.name,{logical_input_changes_per_second:rate(samples,'affected_rows','update_transaction_ms'),output_rows_per_second:rate(samples,'output_rows','query_compute_ms'),definition:'fixture logical writes per update transaction second; materialized output rows per query second'}];})),process_resources:selected.filter(r=>r.event==='case-process').map(r=>r.process_resources).filter(Boolean)}:undefined;
+  result.push({case:spec.circuit,rows:spec.rows,batch:spec.batch_size,fanout:spec.fanout,engine,status:complete?'ok':rejected?.status??'excluded',repetitions:complete?expectedReps:0,...(complete?{total_ms:median(sums.map(x=>x.total)),initial_ms:median(sums.map(x=>x.initial)),clear_ms:median(sums.map(x=>x.clear)),changes_ms:median(sums.map(x=>x.changes)),state_inventories,telemetry}:{}),algorithm:selected.find(r=>r.event==='case-setup')?.algorithm,durability:selected.find(r=>r.event==='case-setup')?.durability});
  }
  return result;
 }
@@ -108,6 +113,10 @@ export function render(report,{color=false,details=false}={}){
  lines.push('case                      rows  batch fanout engine          reps  initial ms  changes ms  clear ms');
  for(const r of report.timing.filter(r=>r.status==='ok'))lines.push(`${r.case.padEnd(25)} ${String(r.rows).padStart(5)} ${String(r.batch).padStart(6)} ${String(r.fanout).padStart(6)} ${r.engine.padEnd(15)} ${String(r.repetitions).padStart(4)} ${r.initial_ms.toFixed(3).padStart(11)} ${r.changes_ms.toFixed(3).padStart(11)} ${r.clear_ms.toFixed(3).padStart(9)}`);
  lines.push('changes = median sum of 11 mutation states; initial load and whole-edge deletion separate.');
+ title('TELEMETRY: INSTRUMENTED PROCESS / DATABASE RUN');
+ lines.push('case                      engine          change p95 ms   initial rows/s   peak RSS MiB   input ops  output ops');
+ for(const r of report.timing.filter(r=>r.status==='ok')){const resources=r.telemetry?.process_resources??[];const peak=Math.max(...resources.map(x=>x?.peak_rss_bytes?.value??0));const inputs=resources.map(x=>x?.filesystem_input_operations?.value).filter(Number.isFinite);const outputs=resources.map(x=>x?.filesystem_output_operations?.value).filter(Number.isFinite);const throughput=r.telemetry?.throughput_by_state?.initial?.logical_input_changes_per_second?.value;lines.push(`${r.case.padEnd(25)} ${r.engine.padEnd(15)} ${String(r.telemetry?.latency_by_phase?.changes?.p95_ms?.toFixed(3)??'n/a').padStart(13)} ${String(Number.isFinite(throughput)?throughput.toFixed(1):'n/a').padStart(16)} ${String(peak?(peak/1048576).toFixed(1):'n/a').padStart(14)} ${String(inputs.length?inputs.reduce((a,b)=>a+b,0):'n/a').padStart(11)} ${String(outputs.length?outputs.reduce((a,b)=>a+b,0):'n/a').padStart(11)}`);}
+ lines.push('RSS covers the adapter, validation, and telemetry. Block I/O counters cover the whole adapter process and do not specify transferred bytes.');
  lines.push('SQLite/PG are durable; DD/Prolog are volatile. Prolog recomputes bag predicates; reach uses incremental tabling. PGlite uses NodeFS.');
  lines.push(`Full matrices and reasons: ${path.join(report.receipts,'coverage.tsv')}`,`Machine-readable report: ${path.join(report.receipts,'report.json')}`);
  return lines.join('\n')+'\n';

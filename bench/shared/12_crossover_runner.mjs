@@ -5,6 +5,8 @@ import { arch, hostname, platform, release, totalmem } from "node:os";
 import { dirname, join } from "node:path";
 import { semanticCircuits, makeSemanticFixture } from "./36_semantic_catalog.mjs";
 import { circuits, makeCircuitFixture } from "./30_circuit_workload.mjs";
+const activeProcessGroups=new Set();
+for(const signal of ["SIGINT","SIGTERM"]){process.on(signal,()=>{for(const pid of activeProcessGroups){try{process.kill(-pid,"SIGKILL");}catch{}}process.exit(128+(signal==="SIGINT"?2:15));});}
 import { makeCrossoverFixture } from "./9_crossover_workload.mjs";
 
 const circuitCatalog={...circuits,...semanticCircuits};
@@ -282,7 +284,11 @@ async function runProcess(testCase, maintenance, runKind, repetition) {
     ? [fixture.columns?"31b_circuit_sqlite.py":"31_circuit_sqlite.py","--fixture",fixturePath,"--db",join(childRoot,"circuit.sqlite"),...(plugin?["--extension",sqliteExtension]:[])]
     : ["31a_circuit_postgres.mjs",fixturePath,maintenance,...(embedded?[join(childRoot,"pglite")]:[])];
   if (testCase.circuit && sqlite && sqliteBinary) args=["--fixture",fixturePath,"--db",join(childRoot,"circuit.sqlite"),...(plugin?["--extension",sqliteExtension]:[])];
-  const child = spawn(swi ? "swipl" : sqlite ? (sqliteBinary || "python3") : dd ? (fixture.columns ? semanticDdBinary : testCase.circuit ? circuitDdBinary : ddBinary) : process.execPath, args, {
+  const adapterCommand=swi ? "swipl" : sqlite ? (sqliteBinary || "python3") : dd ? (fixture.columns ? semanticDdBinary : testCase.circuit ? circuitDdBinary : ddBinary) : process.execPath;
+  const kernelUsage=sqlite||dd||swi||embedded;
+  const resourcePath=join(childRoot,"process-resources.txt");
+  const timeArgs=platform()==="darwin"?["-l","-o",resourcePath]:["-v","-o",resourcePath];
+  const child = spawn(kernelUsage?"/usr/bin/time":adapterCommand, kernelUsage?[...timeArgs,adapterCommand,...args]:args, {
     cwd: labDir,
     env: {
       ...process.env,
@@ -290,8 +296,10 @@ async function runProcess(testCase, maintenance, runKind, repetition) {
       PGDATABASE: maintenance === "query" ? process.env.PGDATABASE_NATIVE_QUERY : process.env.PGDATABASE_NATIVE_IVM,
       NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --max-old-space-size=1024`.trim(),
     },
+    detached: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  activeProcessGroups.add(child.pid);
   let stdout = "";
   let stderr = "";
   let timedOut = false;
@@ -302,18 +310,39 @@ async function runProcess(testCase, maintenance, runKind, repetition) {
   child.stderr.on("data", (chunk) => { stderr += chunk; });
   const timer = setTimeout(() => {
     timedOut = true;
-    child.kill("SIGKILL");
+    try { process.kill(-child.pid,"SIGKILL"); } catch { child.kill("SIGKILL"); }
   }, Math.min(timeoutMs, Math.max(1, deadlineEpochMs - Date.now())));
-  const memoryTimer = setInterval(() => {
+  const sampleMemory = () => {
     const rss = descendantsRss(sqlite || dd || swi || embedded ? child.pid : process.env.IVM_POSTMASTER_PID);
     if (rss !== null) observedGroupPeakRssKb = Math.max(observedGroupPeakRssKb, rss);
-  }, 50);
+  };
+  sampleMemory();
+  const memoryTimer = setInterval(sampleMemory, 5);
   const exit = await new Promise((resolve) => {
     child.on("exit", (code, signal) => resolve({ code, signal }));
     child.on("error", (error) => { stderr += error.stack; resolve({ code: -1, signal: null }); });
   });
+  activeProcessGroups.delete(child.pid);
   clearTimeout(timer);
   clearInterval(memoryTimer);
+  const resourceText=kernelUsage?(await readFile(resourcePath,"utf8").catch(()=>""))+"\n"+stderr:"";
+  const highwaterMatch=platform()==="darwin"?resourceText.match(/\n?\s*(\d+)\s+maximum resident set size/):resourceText.match(/Maximum resident set size \(kbytes\):\s*(\d+)/);
+  const inputOpsMatch=platform()==="darwin"?resourceText.match(/\n?\s*(\d+)\s+block input operations/):resourceText.match(/File system inputs:\s*(\d+)/);
+  const outputOpsMatch=platform()==="darwin"?resourceText.match(/\n?\s*(\d+)\s+block output operations/):resourceText.match(/File system outputs:\s*(\d+)/);
+  const kernelPeakRssBytes=highwaterMatch?Number(highwaterMatch[1])*(platform()==="darwin"?1:1024):null;
+  const kernelInputOps=inputOpsMatch?Number(inputOpsMatch[1]):null;const kernelOutputOps=outputOpsMatch?Number(outputOpsMatch[1]):null;
+  const resourceMetric=(value,unit,reason="counter absent from /usr/bin/time output")=>({value:Number.isFinite(value)?value:null,unit,unavailable_reason:Number.isFinite(value)?null:reason});
+  const matchedNumber=(darwinPattern,linuxPattern)=>{const match=resourceText.match(platform()==="darwin"?darwinPattern:linuxPattern);return match?Number(match[1]):null;};
+  const cpuLine=resourceText.match(/([\d.]+) real\s+([\d.]+) user\s+([\d.]+) sys/);
+  const elapsedSeconds=platform()==="darwin"?(cpuLine?Number(cpuLine[1]):null):(()=>{const match=resourceText.match(/Elapsed \(wall clock\) time \([^)]*\):\s*([\d:.]+)/);return match?match[1].split(':').reduce((seconds,part)=>seconds*60+Number(part),0):null;})();
+  const userSeconds=platform()==="darwin"?(cpuLine?Number(cpuLine[2]):null):matchedNumber(/$^/,/User time \(seconds\):\s*([\d.]+)/);
+  const systemSeconds=platform()==="darwin"?(cpuLine?Number(cpuLine[3]):null):matchedNumber(/$^/,/System time \(seconds\):\s*([\d.]+)/);
+  const minorFaults=matchedNumber(/\n?\s*(\d+)\s+page reclaims/,/Minor \(reclaiming a frame\) page faults:\s*(\d+)/);
+  const majorFaults=matchedNumber(/\n?\s*(\d+)\s+page faults/,/Major \(requiring I\/O\) page faults:\s*(\d+)/);
+  const swaps=matchedNumber(/\n?\s*(\d+)\s+swaps/,/Swaps:\s*(\d+)/);
+  const voluntary=matchedNumber(/\n?\s*(\d+)\s+voluntary context switches/,/Voluntary context switches:\s*(\d+)/);
+  const involuntary=matchedNumber(/\n?\s*(\d+)\s+involuntary context switches/,/Involuntary context switches:\s*(\d+)/);
+  const instructions=matchedNumber(/\n?\s*(\d+)\s+instructions retired/,/$^/);const cycles=matchedNumber(/\n?\s*(\d+)\s+cycles elapsed/,/$^/);
   await writeFile(join(childRoot, "stdout.log"), stdout);
   await writeFile(join(childRoot, "stderr.log"), stderr);
   const processWallMs = Number(process.hrtime.bigint() - processStarted) / 1_000_000;
@@ -322,7 +351,8 @@ async function runProcess(testCase, maintenance, runKind, repetition) {
       [rssField]: observedGroupPeakRssKb || null, ...context });
     return false;
   }
-  if (exit.code !== 0) {
+  const adapterSucceededDespiteTime=kernelUsage&&platform()==="darwin"&&exit.code!==0&&stderr.includes("sysctl kern.clockrate: Operation not permitted")&&(stdout.includes('"event":"case-total"')||stdout.includes('"event":"capability"'));
+  if (exit.code !== 0 && !adapterSucceededDespiteTime) {
     const status = exit.signal === "SIGKILL" ? "oom-or-external-sigkill" : "error";
     append({
       event: "case-status",
@@ -341,6 +371,7 @@ async function runProcess(testCase, maintenance, runKind, repetition) {
   for (const line of stdout.split("\n").filter(Boolean)) {
     try {
       const parsed = JSON.parse(line);
+      if(parsed.state_inventory){parsed.state_inventory.process_memory={peak_rss_bytes:{value:kernelUsage?kernelPeakRssBytes:observedGroupPeakRssKb?observedGroupPeakRssKb*1024:null,unit:"bytes",unavailable_reason:(kernelUsage?kernelPeakRssBytes:observedGroupPeakRssKb)?null:"peak RSS counter unavailable"},scope:kernelUsage?"adapter process lifetime high-water RSS":"PostgreSQL server process group sampled peak RSS"};}
       append({ ...parsed, ...context });
       if (parsed.status !== "ok" && !(parsed.event === "capability" && parsed.status === "unsupported")) failed = true;
     } catch {
@@ -354,6 +385,7 @@ async function runProcess(testCase, maintenance, runKind, repetition) {
     process_wall_ms: processWallMs,
     memory_free_percent_before: freePercent,
     [rssField]: observedGroupPeakRssKb || null,
+    process_resources:{scope:kernelUsage?"adapter process lifetime":"PostgreSQL server process group sampling",source:kernelUsage?"/usr/bin/time process high-water and getrusage-compatible counters":"5 ms descendant RSS sampling",raw_time_output:kernelUsage?resourceText:null,peak_rss_bytes:{value:kernelUsage?kernelPeakRssBytes:observedGroupPeakRssKb?observedGroupPeakRssKb*1024:null,unit:"bytes",unavailable_reason:(kernelUsage?kernelPeakRssBytes:observedGroupPeakRssKb)?null:"peak RSS counter unavailable"},elapsed_seconds:resourceMetric(kernelUsage?elapsedSeconds:null,"seconds",kernelUsage?undefined:"not collected for PostgreSQL server group"),user_cpu_seconds:resourceMetric(kernelUsage?userSeconds:null,"seconds",kernelUsage?undefined:"not collected for PostgreSQL server group"),system_cpu_seconds:resourceMetric(kernelUsage?systemSeconds:null,"seconds",kernelUsage?undefined:"not collected for PostgreSQL server group"),minor_page_faults:resourceMetric(kernelUsage?minorFaults:null,"faults"),major_page_faults:resourceMetric(kernelUsage?majorFaults:null,"faults"),swaps:resourceMetric(kernelUsage?swaps:null,"swaps"),voluntary_context_switches:resourceMetric(kernelUsage?voluntary:null,"switches"),involuntary_context_switches:resourceMetric(kernelUsage?involuntary:null,"switches"),instructions_retired:resourceMetric(kernelUsage?instructions:null,"instructions",platform()==="darwin"?undefined:"GNU time does not expose instructions retired"),cycles_elapsed:resourceMetric(kernelUsage?cycles:null,"cycles",platform()==="darwin"?undefined:"GNU time does not expose CPU cycles"),filesystem_input_operations:{value:kernelUsage?kernelInputOps:null,unit:"operations",unavailable_reason:kernelUsage&&kernelInputOps!==null?null:"whole-process block input counter unavailable"},filesystem_output_operations:{value:kernelUsage?kernelOutputOps:null,unit:"operations",unavailable_reason:kernelUsage&&kernelOutputOps!==null?null:"whole-process block output counter unavailable"},filesystem_io_bytes:{value:null,unit:"bytes",unavailable_reason:"operating-system block I/O counter does not specify transferred byte size"},io_definition:kernelUsage?"whole-process block I/O operations reported by /usr/bin/time; not logical rows or database-page operations":"PostgreSQL server I/O operations unavailable from process sampling"},
     ...context,
   });
   if(process.env.IVM_COMPACT_ARTIFACTS === "1" && !failed){

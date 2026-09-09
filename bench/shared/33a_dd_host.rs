@@ -30,6 +30,16 @@ fn canonical(prefix: &str, rows: &[Vec<i64>]) -> String {
         })
         .collect()
 }
+fn unavailable(unit: &str, reason: &str) -> Value {
+    json!({"value":null,"unit":unit,"unavailable_reason":reason})
+}
+fn native_inventory(keyed: &[BTreeMap<i64, [i64; 3]>; 3], output_rows: usize) -> Value {
+    let reason="DD arrangement/trace records and heap bytes are not exposed by this adapter; source/output bags are a partial native-state inventory";
+    let source_rows = keyed.iter().map(BTreeMap::len).sum::<usize>();
+    let mut relations=keyed.iter().enumerate().map(|(i,rows)|{let name=["a","b","c"][i];json!({"name":name,"kind":"native-collection","role":"source","counted_in_totals":true,"row_count":{"value":rows.len(),"unit":"rows","unavailable_reason":null},"bytes":{"allocated":unavailable("bytes",reason),"data":unavailable("bytes",reason),"index":unavailable("bytes",reason)}})}).collect::<Vec<_>>();
+    relations.push(json!({"name":"output-bag","kind":"native-collection","role":"result","counted_in_totals":true,"row_count":{"value":output_rows,"unit":"rows","unavailable_reason":null},"bytes":{"allocated":unavailable("bytes",reason),"data":unavailable("bytes",reason),"index":unavailable("bytes",reason)}}));
+    json!({"schema_version":1,"measured_at":"after-output-validation","outside_timed_region":true,"scope":"adapter-observed DD input collections and consolidated output bag","relations":relations,"summary":{"table_count":{"value":0,"unit":"tables","unavailable_reason":null},"index_count":unavailable("indexes",reason),"native_collection_count":{"value":4,"unit":"collections","unavailable_reason":null},"total_rows":{"value":source_rows+output_rows,"unit":"rows","unavailable_reason":null,"partial":true},"rows_by_role":{"source":{"value":source_rows,"unit":"rows","unavailable_reason":null},"result":{"value":output_rows,"unit":"rows","unavailable_reason":null},"support":unavailable("rows",reason)},"table_bytes":unavailable("bytes","DD has no SQL tables"),"index_bytes":unavailable("bytes",reason),"total_relation_bytes":unavailable("bytes",reason)},"storage":{"database_file_bytes":unavailable("bytes","volatile DD adapter has no database file"),"wal_file_bytes":unavailable("bytes","volatile DD adapter has no WAL file"),"database_allocated_bytes":unavailable("bytes","volatile DD adapter has no database allocation"),"database_size_scope":"no durable database"},"process_memory":{"rss_bytes":unavailable("bytes","measured by parent runner")},"limitations":[reason]})
+}
 type Graph = for<'s> fn(
     &str,
     VecCollection<'s, u64, [i64; 3]>,
@@ -168,14 +178,15 @@ pub fn run(graph: Graph) {
             assert_eq!(last_input, state["input_hash"].as_str().unwrap());
             assert_eq!(last_output, state["expected"]["checksum"].as_str().unwrap());
             total += update + compute;
+            let inventory = native_inventory(&keyed, rows.len());
             println!(
                 "{}",
-                json!({"event":"mutation","status":"ok","state":state["name"],"exact_input_output_validated":true,"input_hash":last_input,"checksum":last_output,"affected_rows":state["writes"].as_array().unwrap().len(),"output_rows":rows.len(),"output_bytes":canonical("S",&rows).len(),"update_transaction_ms":update,"query_compute_ms":compute,"update_plus_query_ms":update+compute,"epoch":epoch})
+                json!({"event":"mutation","status":"ok","state":state["name"],"exact_input_output_validated":true,"input_hash":last_input,"checksum":last_output,"affected_rows":state["writes"].as_array().unwrap().len(),"output_rows":rows.len(),"output_bytes":canonical("S",&rows).len(),"update_transaction_ms":update,"query_compute_ms":compute,"update_plus_query_ms":update+compute,"epoch":epoch,"state_inventory":inventory})
             );
         }
         println!(
             "{}",
-            json!({"event":"case-total","status":"ok","update_plus_query_ms":total,"final_input_hash":last_input,"final_checksum":last_output,"disk":{"database_bytes":0}})
+            json!({"event":"case-total","status":"ok","update_plus_query_ms":total,"final_input_hash":last_input,"final_checksum":last_output,"disk":{"database_bytes":null,"unavailable_reason":"volatile DD adapter has no database file"}})
         );
     });
 }

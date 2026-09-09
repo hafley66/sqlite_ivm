@@ -32,6 +32,173 @@ fn rows(db: &Connection, sql: &str) -> Result<Vec<Vec<i64>>> {
     rows.sort();
     Ok(rows)
 }
+fn metric(value: Option<u64>, unit: &str, reason: Option<&str>) -> Value {
+    json!({"value":value,"unit":unit,"unavailable_reason":reason})
+}
+fn quote(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+fn state_inventory(db: &Connection, path: &PathBuf, maintained: bool) -> Result<Value> {
+    let mut allocations = std::collections::BTreeMap::new();
+    let dbstat_reason =
+        match db.prepare("SELECT name,sum(pgsize),sum(payload) FROM dbstat GROUP BY name") {
+            Ok(mut statement) => match statement.query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
+            }) {
+                Ok(mapped) => {
+                    for item in mapped {
+                        let (name, allocated, payload) = item?;
+                        allocations.insert(name, (allocated as u64, payload as u64));
+                    }
+                    None
+                }
+                Err(error) => Some(format!("SQLite dbstat unavailable: {error}")),
+            },
+            Err(error) => Some(format!("SQLite dbstat unavailable: {error}")),
+        };
+    let mut owned = std::collections::BTreeSet::new();
+    if maintained {
+        let mut statement = db.prepare("SELECT object_type,object_name FROM __ivm_objects WHERE view_name='circuit_view' AND object_type IN ('table','index')")?;
+        for item in
+            statement.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+        {
+            owned.insert(item?);
+        }
+    }
+    let owned_tables = owned
+        .iter()
+        .filter(|(kind, _)| kind == "table")
+        .map(|(_, name)| name.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    let catalogs = [
+        "__ivm_schema",
+        "__ivm_views",
+        "__ivm_sources",
+        "__ivm_columns",
+        "__ivm_objects",
+    ];
+    let mut relations = Vec::new();
+    let mut statement = db.prepare("SELECT type,name,tbl_name,rootpage FROM sqlite_schema WHERE type IN ('table','index') ORDER BY type,name")?;
+    let catalog = statement
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>>>()?;
+    for (kind, name, table_name, rootpage) in catalog {
+        if kind == "table" && name.starts_with("sqlite_") {
+            continue;
+        }
+        let role = if kind == "table" {
+            if ["a", "b", "c"].contains(&name.as_str()) {
+                "source"
+            } else if owned.contains(&(kind.clone(), name.clone())) {
+                if name.ends_with("_result") || name.ends_with("_state") {
+                    "result"
+                } else {
+                    "support"
+                }
+            } else if catalogs.contains(&name.as_str()) {
+                "catalog"
+            } else {
+                continue;
+            }
+        } else if ["a", "b", "c"].contains(&table_name.as_str()) {
+            "source-index"
+        } else if owned.contains(&(kind.clone(), name.clone()))
+            || owned_tables.contains(&table_name)
+        {
+            "support-index"
+        } else if catalogs.contains(&table_name.as_str()) {
+            "catalog-index"
+        } else {
+            continue;
+        };
+        let row_count = if kind == "table" {
+            Some(db.query_row(
+                &format!("SELECT count(*) FROM main.{}", quote(&name)),
+                [],
+                |r| r.get::<_, i64>(0),
+            )? as u64)
+        } else {
+            None
+        };
+        let allocation = allocations.get(&name).copied();
+        let missing = dbstat_reason.as_deref().unwrap_or(if rootpage == 0 {
+            "relation has no physical root page"
+        } else {
+            "relation has no dbstat pages"
+        });
+        relations.push(json!({"name":name,"kind":kind,"role":role,"counted_in_totals":true,
+            "row_count":metric(row_count,"rows",if row_count.is_none(){Some("row count does not apply to an index")}else{None}),
+            "bytes":{"allocated":metric(allocation.map(|x|x.0),"bytes",if allocation.is_none(){Some(missing)}else{None}),
+                     "data":metric(allocation.map(|x|x.1),"bytes",if allocation.is_none(){Some(missing)}else{None}),
+                     "index":metric(if kind=="index"{allocation.map(|x|x.0)}else{None},"bytes",if kind=="table"{Some("index allocation is reported on separate index relations")}else if allocation.is_none(){Some(missing)}else{None})}}));
+    }
+    fn aggregate(relations: &[Value], kind: &str, field: &str) -> Value {
+        let selected = relations
+            .iter()
+            .filter(|r| r["kind"] == kind)
+            .collect::<Vec<_>>();
+        let values = selected
+            .iter()
+            .map(|r| {
+                if field == "rows" {
+                    r["row_count"]["value"].as_u64()
+                } else {
+                    r["bytes"]["allocated"]["value"].as_u64()
+                }
+            })
+            .collect::<Vec<_>>();
+        if values.iter().any(Option::is_none) {
+            json!({"value":null,"unit":if field=="rows"{"rows"}else{"bytes"},"unavailable_reason":"one or more included relations are unavailable","partial":true,"known_value":values.into_iter().flatten().sum::<u64>()})
+        } else {
+            json!({"value":values.into_iter().flatten().sum::<u64>(),"unit":if field=="rows"{"rows"}else{"bytes"},"unavailable_reason":null,"partial":false})
+        }
+    }
+    let table_bytes = aggregate(&relations, "table", "bytes");
+    let index_bytes = aggregate(&relations, "index", "bytes");
+    let total_relation = match (table_bytes["value"].as_u64(), index_bytes["value"].as_u64()) {
+        (Some(a), Some(b)) => {
+            json!({"value":a+b,"unit":"bytes","unavailable_reason":null,"partial":false})
+        }
+        _ => {
+            json!({"value":null,"unit":"bytes","unavailable_reason":"table or index allocation unavailable","partial":true})
+        }
+    };
+    let page_count = db.query_row("PRAGMA page_count", [], |r| r.get::<_, i64>(0))? as u64;
+    let page_size = db.query_row("PRAGMA page_size", [], |r| r.get::<_, i64>(0))? as u64;
+    let mut rows_by_role = serde_json::Map::new();
+    for role in ["source", "result", "support", "catalog"] {
+        let selected = relations
+            .iter()
+            .filter(|r| r["kind"] == "table" && r["role"] == role)
+            .cloned()
+            .collect::<Vec<_>>();
+        if !selected.is_empty() {
+            rows_by_role.insert(role.into(), aggregate(&selected, "table", "rows"));
+        }
+    }
+    let database_file = std::fs::metadata(path);
+    let wal_path = format!("{}-wal", path.display());
+    let wal_file = std::fs::metadata(&wal_path);
+    Ok(
+        json!({"schema_version":1,"measured_at":"after-output-validation","outside_timed_region":true,
+      "scope":"SQLite source relations and indexes plus sqlite_ivm-owned result/support/catalog relations; unrelated relations excluded","relations":relations,
+      "summary":{"table_count":metric(Some(relations.iter().filter(|r|r["kind"]=="table").count() as u64),"tables",None),"index_count":metric(Some(relations.iter().filter(|r|r["kind"]=="index").count() as u64),"indexes",None),"native_collection_count":metric(None,"collections",Some("SQL adapter has no native collection inventory")),"total_rows":aggregate(&relations,"table","rows"),"rows_by_role":rows_by_role,"table_bytes":table_bytes,"index_bytes":index_bytes,"total_relation_bytes":total_relation},
+      "storage":{"database_file_bytes":metric(database_file.as_ref().ok().map(std::fs::Metadata::len),"bytes",database_file.as_ref().err().map(|_|"database filesystem metadata unavailable")),"wal_file_bytes":metric(match &wal_file{Ok(m)=>Some(m.len()),Err(e) if e.kind()==std::io::ErrorKind::NotFound=>Some(0),Err(_)=>None},"bytes",match &wal_file{Err(e) if e.kind()!=std::io::ErrorKind::NotFound=>Some("WAL filesystem metadata unavailable"),_=>None}),"database_allocated_bytes":metric(Some(page_count*page_size),"bytes",None),"database_size_scope":"SQLite main database page allocation; database and WAL filesystem lengths are separate"},
+      "process_memory":{"rss_bytes":metric(None,"bytes",Some("measured by the parent runner as process peak RSS, outside this snapshot"))},
+      "limitations":if maintained{Vec::<&str>::new()}else{vec!["plain query has no durable result relation; output_bytes is transient serialized query output"]}}),
+    )
+}
 fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let fixture: Value = serde_json::from_str(&std::fs::read_to_string(
         argument("--fixture").ok_or("--fixture required")?,
@@ -105,9 +272,10 @@ fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
             return Err("checksum mismatch".into());
         }
         total += update + compute;
+        let inventory = state_inventory(&db, &path, extension.is_some())?;
         println!(
             "{}",
-            json!({"event":"mutation","status":"ok","state":state["name"],"exact_input_output_validated":true,"input_hash":input_hash,"checksum":checksum,"affected_rows":state["writes"].as_array().unwrap().len(),"output_rows":actual.len(),"output_bytes":canonical.len(),"update_transaction_ms":update,"query_compute_ms":compute,"update_plus_query_ms":update+compute})
+            json!({"event":"mutation","status":"ok","state":state["name"],"exact_input_output_validated":true,"input_hash":input_hash,"checksum":checksum,"affected_rows":state["writes"].as_array().unwrap().len(),"output_rows":actual.len(),"output_bytes":canonical.len(),"update_transaction_ms":update,"query_compute_ms":compute,"update_plus_query_ms":update+compute,"state_inventory":inventory})
         );
     }
     if let Some(extension) = &extension {

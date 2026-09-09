@@ -1,0 +1,350 @@
+
+ IVM SHOOTOUT  MISMATCH  quick 
+Fresh execution receipts. Counts are cases, never inferred engine support.
+
+ SEMANTIC COVERAGE 
+engine        circuits                 typed SQL                            DD contracts
+sqlite-ivm    20 pass                  44 pass                              13 unwired  
+dd            20 pass                  44 pass                              13 pass     
+prolog        20 pass                  44 pass                              13 unwired  
+pg-ivm        10 pass, 10 unsupported  16 pass, 27 unsupported, 1 mismatch  13 unwired  
+pg-query      20 pass                  44 pass                              13 unwired  
+sqlite-query  20 pass                  44 oracle                            13 unwired  
+pglite-ivm    10 pass, 10 unsupported  16 pass, 27 unsupported, 1 mismatch  13 unwired  
+pglite-query  20 pass                  44 pass                              13 unwired  
+
+ DD / DBSP OPERATOR CONTRACTS 
+PASS         signed_map_filter_flatmap  [5 states]
+PASS         signed_concat_negate  [5 states]
+PASS         weighted_join  [5 states]
+PASS         shared_arrangement_join  [5 states]
+PASS         custom_weighted_reduce  [5 states]
+PASS         count_total  [5 states]
+PASS         positive_threshold  [5 states]
+PASS         binary_transitive_closure  [5 states]
+PASS         mutual_even_odd_recursion  [5 states]
+PASS         recursive_min_distance  [5 states]
+PASS         nested_fixed_points  [5 states]
+PASS         stratified_antijoin_after_recursion  [5 states]
+PASS         incomparable_times_join_lub_and_held_frontier  [2 states]
+
+ SHARED CIRCUIT OPERATORS 
+case                       sqlite-ivm    dd            prolog        pg-ivm        pg-query      sqlite-query  pglite-ivm    pglite-query  
+pipeline                   PASS          PASS          PASS          PASS          PASS          PASS          PASS          PASS          
+fanout_fanin               PASS          PASS          PASS          UNSUPPORTED   PASS          PASS          UNSUPPORTED   PASS          
+distinct                   PASS          PASS          PASS          PASS          PASS          PASS          PASS          PASS          
+join                       PASS          PASS          PASS          PASS          PASS          PASS          PASS          PASS          
+self_join                  PASS          PASS          PASS          PASS          PASS          PASS          PASS          PASS          
+chain                      PASS          PASS          PASS          PASS          PASS          PASS          PASS          PASS          
+diamond                    PASS          PASS          PASS          UNSUPPORTED   PASS          PASS          UNSUPPORTED   PASS          
+semijoin                   PASS          PASS          PASS          PASS          PASS          PASS          PASS          PASS          
+antijoin                   PASS          PASS          PASS          UNSUPPORTED   PASS          PASS          UNSUPPORTED   PASS          
+aggregate_churn            PASS          PASS          PASS          PASS          PASS          PASS          PASS          PASS          
+reach_cycle                PASS          PASS          PASS          UNSUPPORTED   PASS          PASS          UNSUPPORTED   PASS          
+minmax                     PASS          PASS          PASS          PASS          PASS          PASS          PASS          PASS          
+count_distinct             PASS          PASS          PASS          UNSUPPORTED   PASS          PASS          UNSUPPORTED   PASS          
+union_set                  PASS          PASS          PASS          UNSUPPORTED   PASS          PASS          UNSUPPORTED   PASS          
+except_set                 PASS          PASS          PASS          UNSUPPORTED   PASS          PASS          UNSUPPORTED   PASS          
+intersect_set              PASS          PASS          PASS          UNSUPPORTED   PASS          PASS          UNSUPPORTED   PASS          
+topk                       PASS          PASS          PASS          UNSUPPORTED   PASS          PASS          UNSUPPORTED   PASS          
+window_rank                PASS          PASS          PASS          UNSUPPORTED   PASS          PASS          UNSUPPORTED   PASS          
+subquery                   PASS          PASS          PASS          PASS          PASS          PASS          PASS          PASS          
+cte                        PASS          PASS          PASS          PASS          PASS          PASS          PASS          PASS          
+
+ MISMATCHES / INCOMPLETE EXECUTION 
+MISMATCH pg-ivm typed/using_full: state 6: DELETE FROM b WHERE bid=1
+MISMATCH pglite-ivm typed/using_full: state 6: DELETE FROM b WHERE bid=1
+phase features-pg: exit 1; /private/tmp/ivm-telemetry-final-20260909/logs/features-pg.log
+phase features-pglite: exit 1; /private/tmp/ivm-telemetry-final-20260909/logs/features-pglite.log
+
+ PERFORMANCE: VALIDATED CASES ONLY 
+Times include mutation + maintenance completion + result read. Warmups excluded.
+case                      rows  batch fanout engine          reps  initial ms  changes ms  clear ms
+pipeline                    400     10     10 sqlite-ivm         3      13.592       2.923     9.891
+pipeline                    400     10     10 dd                 3       0.194       0.249     0.119
+pipeline                    400     10     10 prolog             3       2.019       0.856     0.703
+pipeline                    400     10     10 pg-ivm             3      41.944       6.410    32.171
+pipeline                    400     10     10 pg-query           3       8.269       3.546     3.516
+pipeline                    400     10     10 sqlite-query       3       1.411       1.852     0.573
+pipeline                    400     10     10 pglite-ivm         3      90.389      14.553    64.443
+pipeline                    400     10     10 pglite-query       3      23.284       8.128     8.682
+fanout_fanin                400     10     10 sqlite-ivm         3      14.672       3.382    12.073
+fanout_fanin                400     10     10 dd                 3       0.229       0.289     0.135
+fanout_fanin                400     10     10 prolog             3       1.408       1.420     1.951
+fanout_fanin                400     10     10 pg-query           3       8.776       4.816     3.508
+fanout_fanin                400     10     10 sqlite-query       3       1.401       2.066     0.541
+fanout_fanin                400     10     10 pglite-query       3      23.547      12.383     9.475
+distinct                    400     10     10 sqlite-ivm         3      19.080       3.599    15.071
+distinct                    400     10     10 dd                 3       0.274       0.374     0.215
+distinct                    400     10     10 prolog             3       2.137       0.616     0.707
+distinct                    400     10     10 pg-ivm             3      63.167       7.801    43.934
+distinct                    400     10     10 pg-query           3       8.455       4.388     3.720
+distinct                    400     10     10 sqlite-query       3       1.440       1.916     0.536
+distinct                    400     10     10 pglite-ivm         3     134.123      16.743    84.056
+distinct                    400     10     10 pglite-query       3      22.870      10.130     9.710
+join                        400     10     10 sqlite-ivm         3      15.571       4.246     9.775
+join                        400     10     10 dd                 3       0.188       0.347     0.096
+join                        400     10     10 prolog             3       1.071       0.387     0.688
+join                        400     10     10 pg-ivm             3      50.966       8.406    25.880
+join                        400     10     10 pg-query           3       7.706       2.800     3.847
+join                        400     10     10 sqlite-query       3       1.355       1.725     0.556
+join                        400     10     10 pglite-ivm         3     108.111      17.642    47.025
+join                        400     10     10 pglite-query       3      21.927       6.903     8.862
+self_join                   400     10     10 sqlite-ivm         3      33.962      16.943    48.132
+self_join                   400     10     10 dd                 3       0.363       0.557     0.241
+self_join                   400     10     10 prolog             3       1.765       4.254     0.779
+self_join                   400     10     10 pg-ivm             3      95.538      53.911   122.818
+self_join                   400     10     10 pg-query           3      10.297      11.922     3.613
+self_join                   400     10     10 sqlite-query       3       1.704       3.666     0.562
+self_join                   400     10     10 pglite-ivm         3     195.150     109.332   230.204
+self_join                   400     10     10 pglite-query       3      29.426      35.022     8.964
+chain                       400     10     10 sqlite-ivm         3      19.943      17.948     9.920
+chain                       400     10     10 dd                 3       0.248       0.578     0.110
+chain                       400     10     10 prolog             3       1.207       0.943     0.759
+chain                       400     10     10 pg-ivm             3      73.496      18.214    35.655
+chain                       400     10     10 pg-query           3       8.303       4.815     3.613
+chain                       400     10     10 sqlite-query       3       1.461       2.245     0.548
+chain                       400     10     10 pglite-ivm         3     147.552      37.813    62.552
+chain                       400     10     10 pglite-query       3      22.212      14.193     9.382
+diamond                     400     10     10 sqlite-ivm         3      21.289      11.728    29.035
+diamond                     400     10     10 dd                 3       0.286       0.526     0.151
+diamond                     400     10     10 prolog             3       1.282       1.537     0.850
+diamond                     400     10     10 pg-query           3       9.677       6.574     3.641
+diamond                     400     10     10 sqlite-query       3       1.581       2.441     0.578
+diamond                     400     10     10 pglite-query       3      26.335      16.138     8.631
+semijoin                    400     10     10 sqlite-ivm         3      17.806       4.850    11.816
+semijoin                    400     10     10 dd                 3       0.235       0.513     0.113
+semijoin                    400     10     10 prolog             3       1.262       0.397     0.680
+semijoin                    400     10     10 pg-ivm             3      53.959       9.670    24.644
+semijoin                    400     10     10 pg-query           3       7.956       3.274     3.447
+semijoin                    400     10     10 sqlite-query       3       1.373       1.788     0.560
+semijoin                    400     10     10 pglite-ivm         3     115.964      20.768    47.234
+semijoin                    400     10     10 pglite-query       3      21.631       7.309     9.132
+antijoin                    400     10     10 sqlite-ivm         3      22.450       4.052    18.141
+antijoin                    400     10     10 dd                 3       0.289       0.534     0.167
+antijoin                    400     10     10 prolog             3       1.279       0.717     0.708
+antijoin                    400     10     10 pg-query           3       8.862       4.344     3.619
+antijoin                    400     10     10 sqlite-query       3       1.540       2.036     0.586
+antijoin                    400     10     10 pglite-query       3      22.300      10.682     9.449
+aggregate_churn             400     10     10 sqlite-ivm         3      17.199       3.776    17.431
+aggregate_churn             400     10     10 dd                 3       0.222       0.404     0.102
+aggregate_churn             400     10     10 prolog             3       1.155       0.469     0.684
+aggregate_churn             400     10     10 pg-ivm             3      56.758      11.135    27.716
+aggregate_churn             400     10     10 pg-query           3       7.502       3.129     3.745
+aggregate_churn             400     10     10 sqlite-query       3       1.334       1.825     0.527
+aggregate_churn             400     10     10 pglite-ivm         3     121.926      20.352    55.242
+aggregate_churn             400     10     10 pglite-query       3      22.699       6.922     8.870
+reach_cycle                 400     10     10 sqlite-ivm         3      16.904       6.623    10.417
+reach_cycle                 400     10     10 dd                 3       0.299       1.082     0.128
+reach_cycle                 400     10     10 prolog             3       1.470       1.214     1.553
+reach_cycle                 400     10     10 pg-query           3       8.861       6.632     3.979
+reach_cycle                 400     10     10 sqlite-query       3       1.427       1.705     0.555
+reach_cycle                 400     10     10 pglite-query       3      23.008       8.573     8.842
+minmax                      400     10     10 sqlite-ivm         3      23.549       3.443    18.223
+minmax                      400     10     10 dd                 3       0.235       0.313     0.165
+minmax                      400     10     10 prolog             3       1.332       0.978     0.701
+minmax                      400     10     10 pg-ivm             3      74.672       8.075    62.964
+minmax                      400     10     10 pg-query           3       7.703       2.924     3.829
+minmax                      400     10     10 sqlite-query       3       1.389       1.815     0.594
+minmax                      400     10     10 pglite-ivm         3     149.426      18.406   111.028
+minmax                      400     10     10 pglite-query       3      23.920       7.347     8.645
+count_distinct              400     10     10 sqlite-ivm         3      23.270       3.086    17.271
+count_distinct              400     10     10 dd                 3       0.245       0.434     0.185
+count_distinct              400     10     10 prolog             3       1.166       1.155     0.707
+count_distinct              400     10     10 pg-query           3       7.745       3.117     3.574
+count_distinct              400     10     10 sqlite-query       3       1.405       1.943     0.549
+count_distinct              400     10     10 pglite-query       3      20.879       6.694     8.527
+union_set                   400     10     10 sqlite-ivm         3      20.914       4.315    16.941
+union_set                   400     10     10 dd                 3       0.265       0.395     0.226
+union_set                   400     10     10 prolog             3       1.935       0.857     0.692
+union_set                   400     10     10 pg-query           3       8.048       4.799     3.689
+union_set                   400     10     10 sqlite-query       3       1.459       2.190     0.562
+union_set                   400     10     10 pglite-query       3      24.100      10.766     9.696
+except_set                  400     10     10 sqlite-ivm         3      20.940       4.127    16.935
+except_set                  400     10     10 dd                 3       0.328       0.531     0.240
+except_set                  400     10     10 prolog             3       2.055       0.926     0.704
+except_set                  400     10     10 pg-query           3       8.414       4.339     3.735
+except_set                  400     10     10 sqlite-query       3       1.422       2.055     0.536
+except_set                  400     10     10 pglite-query       3      22.095       9.561     8.561
+intersect_set               400     10     10 sqlite-ivm         3      19.417       3.909    13.278
+intersect_set               400     10     10 dd                 3       0.253       0.482     0.192
+intersect_set               400     10     10 prolog             3       1.139       0.407     0.694
+intersect_set               400     10     10 pg-query           3       7.805       3.233     3.607
+intersect_set               400     10     10 sqlite-query       3       1.318       1.665     0.554
+intersect_set               400     10     10 pglite-query       3      21.108       5.980     8.883
+topk                        400     10     10 sqlite-ivm         3      23.341       3.250    18.218
+topk                        400     10     10 dd                 3       0.215       0.374     0.159
+topk                        400     10     10 prolog             3       1.354       2.110     0.702
+topk                        400     10     10 pg-query           3       7.966       2.853     3.527
+topk                        400     10     10 sqlite-query       3       1.456       2.055     0.586
+topk                        400     10     10 pglite-query       3      25.380       5.966     9.321
+window_rank                 400     10     10 sqlite-ivm         3      37.679       5.958    38.209
+window_rank                 400     10     10 dd                 3       0.342       0.493     0.330
+window_rank                 400     10     10 prolog             3       1.373       1.394     0.784
+window_rank                 400     10     10 pg-query           3       9.599       5.500     3.921
+window_rank                 400     10     10 sqlite-query       3       1.580       3.195     0.603
+window_rank                 400     10     10 pglite-query       3      22.878      14.626     9.168
+subquery                    400     10     10 sqlite-ivm         3      13.553       2.594    10.451
+subquery                    400     10     10 dd                 3       0.206       0.216     0.124
+subquery                    400     10     10 prolog             3       1.956       0.576     0.703
+subquery                    400     10     10 pg-ivm             3      45.511       6.619    33.177
+subquery                    400     10     10 pg-query           3       8.257       3.989     3.738
+subquery                    400     10     10 sqlite-query       3       1.412       1.757     0.544
+subquery                    400     10     10 pglite-ivm         3      94.849      14.203    65.469
+subquery                    400     10     10 pglite-query       3      21.302       8.286     9.190
+cte                         400     10     10 sqlite-ivm         3      13.767       3.040    10.139
+cte                         400     10     10 dd                 3       0.242       0.234     0.117
+cte                         400     10     10 prolog             3       2.032       0.588     0.708
+cte                         400     10     10 pg-ivm             3      45.211       6.604    34.556
+cte                         400     10     10 pg-query           3       8.250       3.452     3.589
+cte                         400     10     10 sqlite-query       3       1.431       1.817     0.542
+cte                         400     10     10 pglite-ivm         3      98.316      14.854    66.519
+cte                         400     10     10 pglite-query       3      21.998       8.483     9.022
+changes = median sum of 11 mutation states; initial load and whole-edge deletion separate.
+
+ TELEMETRY: INSTRUMENTED PROCESS / DATABASE RUN 
+case                      engine          change p95 ms   initial rows/s   peak RSS MiB   input ops  output ops
+pipeline                  sqlite-ivm              3.216          30594.1            8.7           0           0
+pipeline                  dd                      0.316        2167539.3            6.1           0           0
+pipeline                  prolog                  0.913         217681.1           14.8           0           0
+pipeline                  pg-ivm                  7.209          10092.8           36.4         n/a         n/a
+pipeline                  pg-query                3.635          56391.1           34.0         n/a         n/a
+pipeline                  sqlite-query            1.993         308188.7            6.9           0           0
+pipeline                  pglite-ivm             14.805           4634.8         1109.6           0           0
+pipeline                  pglite-query            9.844          18928.7         1106.3           0           0
+fanout_fanin              sqlite-ivm              3.459          28388.2           10.3           0           0
+fanout_fanin              dd                      0.354        1864512.1            6.4           0           0
+fanout_fanin              prolog                  1.570         343034.7           17.1           0           0
+fanout_fanin              pg-query                4.819          55812.1           34.4         n/a         n/a
+fanout_fanin              sqlite-query            2.572         317251.3            6.8           0           0
+fanout_fanin              pglite-query           13.558          19505.4         1015.8           0           0
+distinct                  sqlite-ivm              3.638          21771.8            9.2           0           0
+distinct                  dd                      0.379        1532862.1            7.0           0           0
+distinct                  prolog                  0.641         201653.9           15.0           0           0
+distinct                  pg-ivm                  8.973           6682.5           36.7         n/a         n/a
+distinct                  pg-query                4.703          56274.8           34.3         n/a         n/a
+distinct                  sqlite-query            2.035         309610.0            6.6           0           0
+distinct                  pglite-ivm             17.359           3121.9          993.5           0           0
+distinct                  pglite-query           10.409          19656.8          966.6           0           0
+join                      sqlite-ivm              4.556          26650.4            8.7           0           0
+join                      dd                      0.359        2212424.8            6.3           0           0
+join                      prolog                  0.432         401954.1           14.6           0           0
+join                      pg-ivm                  9.184           8194.9           36.3         n/a         n/a
+join                      pg-query                2.896          57848.2           34.1         n/a         n/a
+join                      sqlite-query            1.766         313844.4            5.6           0           0
+join                      pglite-ivm             17.857           3848.3          936.4           0           0
+join                      pglite-query            7.132          20014.3          951.7           0           0
+self_join                 sqlite-ivm             18.280          12341.8           12.9           0           0
+self_join                 dd                      0.693        1234590.0           10.3           0           0
+self_join                 prolog                  4.491         378062.7           22.7           0           0
+self_join                 pg-ivm                 54.240           4477.8           40.1         n/a         n/a
+self_join                 pg-query               14.517          56746.3           34.6         n/a         n/a
+self_join                 sqlite-query            3.839         310131.9            9.9           0           0
+self_join                 pglite-ivm            115.719           2193.6          992.6           0           0
+self_join                 pglite-query           35.207          18918.7         1037.5           0           0
+chain                     sqlite-ivm             18.124          20880.9            9.8           0           0
+chain                     dd                      0.644        1716353.9            6.6           0           0
+chain                     prolog                  0.957         385447.7           17.7           0           0
+chain                     pg-ivm                 18.530           5759.4           37.6         n/a         n/a
+chain                     pg-query                5.319          59450.0           34.9         n/a         n/a
+chain                     sqlite-query            2.376         311805.7            6.5           0           0
+chain                     pglite-ivm             37.974           2838.4         1075.3           0           0
+chain                     pglite-query           14.602          20855.8          999.3           0           0
+diamond                   sqlite-ivm             11.918          19603.4           10.8           0           0
+diamond                   dd                      0.556        1497065.5            7.1           0           0
+diamond                   prolog                  1.577         393929.6           17.0           0           0
+diamond                   pg-query                7.410          56376.4           35.5         n/a         n/a
+diamond                   sqlite-query            2.542         296996.0            7.0           0           0
+diamond                   pglite-query           22.630          19856.2          980.0           0           0
+semijoin                  sqlite-ivm              4.907          23302.6            9.0           0           0
+semijoin                  dd                      0.523        1775231.7            6.3           0           0
+semijoin                  prolog                  0.426         342425.9           14.6           0           0
+semijoin                  pg-ivm                  9.980           7737.1           35.7         n/a         n/a
+semijoin                  pg-query                3.297          56629.9           33.7         n/a         n/a
+semijoin                  sqlite-query            1.888         311024.9            5.8           0           0
+semijoin                  pglite-ivm             22.223           3587.8         1008.5           0           0
+semijoin                  pglite-query            7.417          20142.8          873.9           0           0
+antijoin                  sqlite-ivm              4.457          18521.8            9.3           0           0
+antijoin                  dd                      0.735        1458388.4            7.7           0           0
+antijoin                  prolog                  0.750         350796.3           17.2           0           0
+antijoin                  pg-query                4.359          54975.5           32.7         n/a         n/a
+antijoin                  sqlite-query            2.111         285829.3            6.5           0           0
+antijoin                  pglite-query           11.304          20110.7         1004.7           0           0
+aggregate_churn           sqlite-ivm              4.367          24115.7            8.6           0           0
+aggregate_churn           dd                      0.425        1867321.0            5.8           0           0
+aggregate_churn           prolog                  0.505         398906.9           15.2           0           0
+aggregate_churn           pg-ivm                 11.564           7341.6           37.3         n/a         n/a
+aggregate_churn           pg-query                3.478          59000.3           35.1         n/a         n/a
+aggregate_churn           sqlite-query            2.038         320982.2            6.0           0           0
+aggregate_churn           pglite-ivm             21.256           3409.2         1045.0           0           0
+aggregate_churn           pglite-query            7.427          19565.4          827.6           0           0
+reach_cycle               sqlite-ivm             12.809          24529.2           12.0           0           0
+reach_cycle               dd                      1.123        1385964.3            6.2           0           0
+reach_cycle               prolog                  1.539         347010.8           15.0           0           0
+reach_cycle               pg-query                8.523          52018.8           62.6         n/a         n/a
+reach_cycle               sqlite-query            2.109         298566.7            7.1           0           0
+reach_cycle               pglite-query            9.525          20214.2          910.3           0           0
+minmax                    sqlite-ivm              3.945          17603.6            8.8           0           0
+minmax                    dd                      0.339        1770486.8            5.8           0           0
+minmax                    prolog                  1.075         375609.3           15.0           0           0
+minmax                    pg-ivm                  8.349           5583.3           37.0         n/a         n/a
+minmax                    pg-query                3.008          58479.7           33.8         n/a         n/a
+minmax                    sqlite-query            2.127         313033.8            5.5           0           0
+minmax                    pglite-ivm             19.014           2781.9         1041.1           0           0
+minmax                    pglite-query            8.334          18390.5          888.6           0           0
+count_distinct            sqlite-ivm              3.320          17816.2            8.1           0           0
+count_distinct            dd                      0.469        1695852.5            5.8           0           0
+count_distinct            prolog                  1.216         406280.3           14.5           0           0
+count_distinct            pg-query                3.289          57807.4           34.7         n/a         n/a
+count_distinct            sqlite-query            1.959         312502.1            5.4           0           0
+count_distinct            pglite-query            6.884          20973.8          957.4           0           0
+union_set                 sqlite-ivm              4.322          19862.8            9.6           0           0
+union_set                 dd                      0.431        1584689.0            6.7           0           0
+union_set                 prolog                  0.901         231803.7           14.8           0           0
+union_set                 pg-query                5.388          59896.9           34.4         n/a         n/a
+union_set                 sqlite-query            2.209         311453.8            6.1           0           0
+union_set                 pglite-query           11.066          18705.3         1020.4           0           0
+except_set                sqlite-ivm              4.224          19848.8            9.0           0           0
+except_set                dd                      0.535        1276954.1            5.8           0           0
+except_set                prolog                  0.932         219386.2           14.6           0           0
+except_set                pg-query                4.746          57159.3           34.4         n/a         n/a
+except_set                sqlite-query            2.131         315038.5            6.0           0           0
+except_set                pglite-query            9.963          20303.8         1013.4           0           0
+intersect_set             sqlite-ivm              4.141          21370.2           10.3           0           0
+intersect_set             dd                      0.519        1640682.6            5.7           0           0
+intersect_set             prolog                  0.409         388726.6           15.5           0           0
+intersect_set             pg-query                3.437          56060.5           34.8         n/a         n/a
+intersect_set             sqlite-query            1.839         323490.1            5.7           0           0
+intersect_set             pglite-query            6.080          20413.3          948.9           0           0
+topk                      sqlite-ivm              3.396          17755.1            9.3           0           0
+topk                      dd                      0.627        1926701.6            6.4           0           0
+topk                      prolog                  2.149         385105.8           14.9           0           0
+topk                      pg-query                3.710          55169.0           34.0         n/a         n/a
+topk                      sqlite-query            2.116         292829.7            6.6           0           0
+topk                      pglite-query            6.000          16860.0          888.3           0           0
+window_rank               sqlite-ivm              6.256          11020.4           10.4           0           0
+window_rank               dd                      0.613        1237819.9            6.5           0           0
+window_rank               prolog                  1.439         369298.6           17.5           0           0
+window_rank               pg-query                5.756          51350.4           36.0         n/a         n/a
+window_rank               sqlite-query            3.398         318410.6            6.9           0           0
+window_rank               pglite-query           15.978          20714.2          979.8           0           0
+subquery                  sqlite-ivm              2.753          30699.1            8.6           0           0
+subquery                  dd                      0.272        2045707.2            5.8           0           0
+subquery                  prolog                  0.615         219719.3           15.3           0           0
+subquery                  pg-ivm                  6.895           9325.8           37.1         n/a         n/a
+subquery                  pg-query                6.187          56276.1           35.2         n/a         n/a
+subquery                  sqlite-query            1.807         308773.0            5.8           0           0
+subquery                  pglite-ivm             14.701           4415.5          859.8           0           0
+subquery                  pglite-query            8.787          20641.2         1058.7           0           0
+cte                       sqlite-ivm              3.074          30199.3            9.0           0           0
+cte                       dd                      0.262        1740717.2            5.8           0           0
+cte                       prolog                  0.624         211761.2           15.4           0           0
+cte                       pg-ivm                  6.607           9341.7           39.2         n/a         n/a
+cte                       pg-query                3.636          55815.2           37.4         n/a         n/a
+cte                       sqlite-query            1.970         307587.4            5.8           0           0
+cte                       pglite-ivm             15.533           4258.3         1046.5           0           0
+cte                       pglite-query            9.005          19986.1          893.3           0           0
+RSS covers the adapter, validation, and telemetry. Block I/O counters cover the whole adapter process and do not specify transferred bytes.
+SQLite/PG are durable; DD/Prolog are volatile. Prolog recomputes bag predicates; reach uses incremental tabling. PGlite uses NodeFS.
+Full matrices and reasons: /private/tmp/ivm-telemetry-final-20260909/coverage.tsv
+Machine-readable report: /private/tmp/ivm-telemetry-final-20260909/report.json

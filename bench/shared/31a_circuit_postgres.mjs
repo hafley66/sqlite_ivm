@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import assert from 'node:assert/strict';
 import { sortRows, inputText, outputText, digest } from './30_circuit_workload.mjs';
+import {postgresInventory,postgresStatistics} from './30b_postgres_inventory.mjs';
 const fixture=JSON.parse(await readFile(process.argv[2],'utf8'));
 const embedded=process.argv[3].startsWith('pglite-');
 const ivm=['pg_ivm','pglite-ivm'].includes(process.argv[3]);
@@ -33,6 +34,7 @@ try {
   emit({event:'case-setup',status:'ok',setup_ms:performance.now()-start,algorithm:ivm?'pg_ivm':'full-query',durability:embedded?'PGlite NodeFS; fsync behavior is WASM host dependent':'fsync synchronous_commit full_page_writes on',runtime:embedded?'PGlite':'PostgreSQL',version:(await db.query('SELECT version()')).rows[0].version});
   let total=0, input_hash,checksum;
   const rows = async sql=>sortRows((await db.query(sql)).rows.map(r=>Object.values(r).map(x=>{const n=Number(x);assert(Number.isSafeInteger(n));return n;})));
+  const statisticsBaseline=await postgresStatistics(db);
   for(const state of fixture.states){
     let start=performance.now();await db.query(`BEGIN;${state.mutation_sql}COMMIT;`);const update=performance.now()-start;
     start=performance.now();const output=await rows(query);const compute=performance.now()-start;
@@ -41,7 +43,9 @@ try {
     assert.deepEqual(output,state.expected.rows,state.name);assert.deepEqual(output,await rows(fixture.query));
     input_hash=digest(inputText(inputs));checksum=digest(outputText(output));assert.equal(input_hash,state.input_hash);assert.equal(checksum,state.expected.checksum);
     total+=update+compute;
-    emit({event:'mutation',status:'ok',state:state.name,exact_input_output_validated:true,input_hash,checksum,affected_rows:state.writes.length,output_rows:output.length,output_bytes:Buffer.byteLength(outputText(output)),update_transaction_ms:update,query_compute_ms:compute,update_plus_query_ms:update+compute});
+    const state_inventory=await postgresInventory(db,{ivm,embedded});
+    const database_statistics=await postgresStatistics(db,statisticsBaseline);
+    emit({event:'mutation',status:'ok',state:state.name,exact_input_output_validated:true,input_hash,checksum,affected_rows:state.writes.length,output_rows:output.length,output_bytes:Buffer.byteLength(outputText(output)),update_transaction_ms:update,query_compute_ms:compute,update_plus_query_ms:update+compute,state_inventory,database_statistics});
   }
   emit({event:'case-total',status:'ok',update_plus_query_ms:total,final_input_hash:input_hash,final_checksum:checksum,disk:{database_bytes:(await db.query('SELECT pg_database_size(current_database()) AS bytes')).rows[0].bytes}});
 } finally {await db.end();}
