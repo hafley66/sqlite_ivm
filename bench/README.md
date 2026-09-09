@@ -1,5 +1,16 @@
 # Native feature acceptance and circuit benchmark
 
+Run the combined report from the repository root:
+
+```bash
+just ivm-shootout
+```
+
+This builds and executes SQLite IVM, DD, Prolog, PostgreSQL/pg_ivm and PGlite,
+then prints semantic coverage, DD operator contracts, and repeated timings.
+[Command, engine contracts, profiles and exit codes](54_shootout.md).
+The commands below remain available for individual phases.
+
 The current query-feature gate is described in [46_feature_acceptance.md](46_feature_acceptance.md).
 It checks 44 combinations over 174 states against loaded SQLite IVM, independent
 DD graphs, a separate SQLite connection, and PostgreSQL. Value, collation,

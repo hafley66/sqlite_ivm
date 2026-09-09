@@ -1,14 +1,15 @@
 // Shared SQL adapter core; preserves 32 transport and timers with explicit fixture columns.
-import pg from 'pg';
+import {openPostgres} from './1a_postgres_client.mjs';
 import { readFile } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import assert from 'node:assert/strict';
 import { sortRows, inputText, outputText, digest } from './30_circuit_workload.mjs';
 const fixture=JSON.parse(await readFile(process.argv[2],'utf8'));
-const ivm=process.argv[3]==='pg_ivm';
-const db=new pg.Client();
+const embedded=process.argv[3].startsWith('pglite-');
+const ivm=['pg_ivm','pglite-ivm'].includes(process.argv[3]);
+const db=await openPostgres(embedded,process.argv[4]);
 const emit=record=>console.log(JSON.stringify(record));
-await db.connect();
+
 try {
   const start=performance.now();
   await db.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public');
@@ -29,7 +30,7 @@ try {
     }
     query=`SELECT ${Array.from({length:fixture.columns ?? (fixture.circuit==='aggregate_churn'?3:fixture.circuit==='reach_cycle'?1:2)},(_,i)=>`c${i}`).join(',')} FROM circuit_view`;
   }
-  emit({event:'case-setup',status:'ok',setup_ms:performance.now()-start,algorithm:ivm?'pg_ivm':'full-query',durability:'fsync synchronous_commit full_page_writes on',version:(await db.query('SELECT version()')).rows[0].version});
+  emit({event:'case-setup',status:'ok',setup_ms:performance.now()-start,algorithm:ivm?'pg_ivm':'full-query',durability:embedded?'PGlite NodeFS; fsync behavior is WASM host dependent':'fsync synchronous_commit full_page_writes on',runtime:embedded?'PGlite':'PostgreSQL',version:(await db.query('SELECT version()')).rows[0].version});
   let total=0, input_hash,checksum;
   const rows = async sql=>sortRows((await db.query(sql)).rows.map(r=>Object.values(r).map(x=>{const n=Number(x);assert(Number.isSafeInteger(n));return n;})));
   for(const state of fixture.states){

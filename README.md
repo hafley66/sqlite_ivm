@@ -187,3 +187,17 @@ rusqlite 0.40.2 and sqlite3-parser 0.17.0 are pinned in Cargo.lock. Rusqlite own
 the virtual-table adapters. A narrow ABI descriptor adapter adds xRename and
 xShadowName through its public repr(transparent) Module layout; recheck that
 layout before upgrading. No C source is required.
+
+## Combined engine report
+
+```bash
+just ivm-shootout
+# Or: bash sqlite_ivm/scripts/16_shootout.sh
+```
+
+Builds and runs semantic and performance comparisons across the native extension,
+DD, Prolog, native PostgreSQL/pg_ivm, SQLite queries, and PGlite. The report includes
+13 DD-specific operator/recursion/time contracts, 20 shared circuits, and 44 typed
+query compositions. Unsupported definitions and result mismatches remain visible.
+See [the command contract](bench/54_shootout.md) for dependencies, profiles,
+artifacts and exit codes.

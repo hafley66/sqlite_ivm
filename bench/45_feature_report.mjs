@@ -8,13 +8,14 @@ const read=(f)=>fs.readFileSync(f,'utf8').trim().split('\n').filter(Boolean).map
 const fixture=JSON.parse(fs.readFileSync(path.join(root,'tests/fixtures/1_features.json')));
 const names=fixture.cases.map(c=>c.name).sort();const states=fixture.mutations.length+1;
 const hash=(f)=>crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
-if(mode==='pg-baseline'){
-  const receipt=read(path.join(directory,'pg.jsonl'));
-  const queries=receipt.filter(r=>r.engine==='postgres-query');assert.deepEqual(queries.map(r=>r.case).sort(),names);for(const q of queries){assert.equal(q.status,'ok');assert.equal(q.states,states);}
-  const expected=JSON.parse(fs.readFileSync(path.join(root,'bench/44_pg_ivm_1_15_expected.json')));
-  const ivm=receipt.filter(r=>r.engine==='pg_ivm');assert.deepEqual(ivm.map(r=>r.case).sort(),names);
+if(mode==='pg-baseline'||mode==='pglite-baseline'){
+  const embedded=mode==='pglite-baseline';
+  const receipt=read(path.join(directory,embedded?'pglite.jsonl':'pg.jsonl'));
+  const queries=receipt.filter(r=>r.engine===(embedded?'pglite-query':'postgres-query'));assert.deepEqual(queries.map(r=>r.case).sort(),names);for(const q of queries){assert.equal(q.status,'ok');assert.equal(q.states,states);}
+  const expected=JSON.parse(fs.readFileSync(path.join(root,embedded?'bench/44a_pglite_1_13_expected.json':'bench/44_pg_ivm_1_15_expected.json')));
+  const ivm=receipt.filter(r=>r.engine===(embedded?'pglite-ivm':'pg_ivm'));assert.deepEqual(ivm.map(r=>r.case).sort(),names);
   for(const row of ivm){assert.equal(row.pg_ivm_version,expected.version);const before=expected.cases.find(c=>c.name===row.case);assert.deepEqual({name:row.case,status:row.status,mismatches:row.mismatches,first_mismatch:row.first_mismatch},before,`pg_ivm behavior changed: ${row.case}`);}
-  console.log(JSON.stringify({check:'pg_ivm_1_15_recorded_behavior',status:'ok',ordinary_query_cases:queries.length,maintained_cases:ivm.filter(r=>r.status==='ok').length,unsupported_cases:ivm.filter(r=>r.status==='unsupported').length,known_mismatch_cases:ivm.filter(r=>r.status==='mismatch').length}));
+  console.log(JSON.stringify({check:embedded?'pglite_pg_ivm_1_13_recorded_behavior':'pg_ivm_1_15_recorded_behavior',status:'ok',ordinary_query_cases:queries.length,maintained_cases:ivm.filter(r=>r.status==='ok').length,unsupported_cases:ivm.filter(r=>r.status==='unsupported').length,known_mismatch_cases:ivm.filter(r=>r.status==='mismatch').length}));
 }else if(mode==='manifest'){
   const native=read(path.join(directory,'native.jsonl')),dd=read(path.join(directory,'dd.jsonl'));
   for(const rows of [native,dd.filter(r=>r.case)]){assert.deepEqual(rows.map(r=>r.case).sort(),names);for(const row of rows){assert.equal(row.status,'ok');assert.equal(row.states,states);}}

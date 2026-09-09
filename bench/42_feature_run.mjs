@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {createRequire} from 'node:module';
+import {openPostgres} from './shared/1a_postgres_client.mjs';
 const [mode,directory,binary]=process.argv.slice(2);
 const files=fs.readdirSync(directory).filter(f=>f.endsWith('.json')).sort().map(f=>path.join(directory,f));
 if(mode==='dd'){
@@ -13,9 +13,9 @@ if(mode==='dd'){
   const result=spawnSync(binary,[file],{encoding:'utf8',timeout:60000,maxBuffer:1024*1024});
   assert.equal(result.signal,null);assert.notEqual(result.status,0);assert.match(result.stderr,/nullable_sum state 1/);
   console.log(JSON.stringify({engine:'dd',check:'injected_wrong_count',status:'ok',mismatch_detected:true}));
-}else if(mode==='pg'){
-  const require=createRequire(new URL('./shared/32_circuit_postgres.mjs',import.meta.url));const {Client}=require('pg');
-  const client=new Client({database:'postgres'});await client.connect();
+}else if(mode==='pg'||mode==='pglite'){
+  const embedded=mode==='pglite';
+  const client=await openPostgres(embedded,embedded?binary:undefined);
   try{
     await client.query('CREATE EXTENSION IF NOT EXISTS pg_ivm');
     const version=(await client.query("SELECT extversion FROM pg_extension WHERE extname='pg_ivm'")).rows[0].extversion;
@@ -43,10 +43,10 @@ if(mode==='dd'){
         if(supported){const actual=canonical(await client.query({text:`SELECT ${projection} FROM result`,rowMode:'array'}));if(JSON.stringify(actual)!==JSON.stringify(oracle)){mismatches++;firstMismatch??={step:state.step,mutation:state.mutation,actual,expected:oracle};}}
         for(const [table,pk]of [['a','id'],['b','bid'],['c','cid']]){const input=canonical(await client.query({text:`SELECT * FROM ${table} ORDER BY ${pk}`,rowMode:'array'}));assert.deepEqual(input,state.inputs[table],`${name} ${table} input state ${state.step}`);}
       }
-      console.log(JSON.stringify({engine:'postgres-query',case:name,states:fixture.states.length,status:'ok',input_output_verified:true}));
-      console.log(JSON.stringify({engine:'pg_ivm',case:name,states:supported?fixture.states.length:0,status:mismatches?'mismatch':supported?'ok':'unsupported',restriction,mismatches,first_mismatch:firstMismatch,pg_ivm_version:version}));
+      console.log(JSON.stringify({engine:embedded?'pglite-query':'postgres-query',case:name,states:fixture.states.length,status:'ok',input_output_verified:true}));
+      console.log(JSON.stringify({engine:embedded?'pglite-ivm':'pg_ivm',case:name,states:supported?fixture.states.length:0,status:mismatches?'mismatch':supported?'ok':'unsupported',restriction,mismatches,first_mismatch:firstMismatch,pg_ivm_version:version}));
       if(mismatches)failedCases++;
     }
     if(failedCases)process.exitCode=1;
   }finally{await client.end();}
-}else{throw new Error('expected dd or pg mode');}
+}else{throw new Error('expected dd, pg or pglite mode');}

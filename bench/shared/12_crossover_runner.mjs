@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile, readdir } from "node:fs/promises";
+import { mkdir, readFile, writeFile, readdir, rm } from "node:fs/promises";
 import { arch, hostname, platform, release, totalmem } from "node:os";
 import { dirname, join } from "node:path";
 import { semanticCircuits, makeSemanticFixture } from "./36_semantic_catalog.mjs";
@@ -11,6 +11,7 @@ const circuitCatalog={...circuits,...semanticCircuits};
 // Reuse only the current case's immutable fixture. Oracle generation and JSON
 // serialization remain outside the measured child update/materialization interval.
 let cachedFixtureKey, cachedFixture;
+const writtenFixtures=new Set();
 function circuitFixture(circuit,rows,batch,fanout){
   const key=`${circuit}:${rows}:${batch}:${fanout}`;
   if(key!==cachedFixtureKey){cachedFixture=Object.hasOwn(semanticCircuits,circuit)?makeSemanticFixture(circuit,rows,batch,fanout):makeCircuitFixture(circuit,rows,batch,fanout);cachedFixtureKey=key;}
@@ -127,7 +128,7 @@ const repetitions = Number(argument("repetitions", profile === "full" ? "3" : "1
 const maxRows = Number(argument("max-rows", "Infinity"));
 const cases = buildCases(profile, budget).filter((testCase) => testCase.rows <= maxRows);
 const arms = argument("arms", (profile === "circuits" ? "query,pg_ivm,sqlite-query" : "query,pg_ivm")).split(",");
-if (arms.some((arm) => !["query", "pg_ivm", "sqlite-query", "swi-circuit", "sqlite-template-group", "sqlite-plugin-delta", "sqlite-plugin-logged", "dd"].includes(arm))) throw new Error(`bad arms: ${arms}`);
+if (arms.some((arm) => !["query", "pg_ivm", "sqlite-query", "swi-circuit", "sqlite-template-group", "sqlite-plugin-delta", "sqlite-plugin-logged", "dd", "pglite-query", "pglite-ivm"].includes(arm))) throw new Error(`bad arms: ${arms}`);
 if (profile !== "circuits" && arms.some(a=>["sqlite-query","swi-circuit"].includes(a))) throw new Error("circuit-only arm requires circuits profile");
 const ddBinary = argument("dd-bin", new URL("../../../sprefa-store/target/release/examples/crossover_dd", import.meta.url).pathname);
 const circuitDdBinary = argument("circuit-dd-bin", "");
@@ -193,7 +194,7 @@ append({
   node_version: process.version,
   runner_sha256: await fileSha256(new URL("12_crossover_runner.mjs",labDir)),
   sqlite_sources: sqliteBinary ? await Promise.all((await readdir(new URL("../../src/",labDir))).filter(f=>f.endsWith(".rs")).sort().map(async file=>({file,sha256:await fileSha256(new URL(`../../src/${file}`,labDir))}))) : null,
-  circuit_sources: profile === "circuits" ? await Promise.all(["30_circuit_workload.mjs","31_circuit_sqlite.py","32_circuit_postgres.mjs","34_circuit_dd.rs","35_circuit_swi.pl","36_semantic_catalog.mjs","37_semantic_graphs.rs","31a_circuit_postgres.mjs","31b_circuit_sqlite.py","33a_dd_host.rs","38a_semantic_dd.rs","39_semantic_swi.pl"].map(async file=>({file,sha256:await fileSha256(new URL(file,labDir))}))) : null,
+  circuit_sources: profile === "circuits" ? await Promise.all(["30_circuit_workload.mjs","31_circuit_sqlite.py","32_circuit_postgres.mjs","34_circuit_dd.rs","35_circuit_swi.pl","36_semantic_catalog.mjs","37_semantic_graphs.rs","31a_circuit_postgres.mjs","1a_postgres_client.mjs","31b_circuit_sqlite.py","33a_dd_host.rs","38a_semantic_dd.rs","39_semantic_swi.pl"].map(async file=>({file,sha256:await fileSha256(new URL(file,labDir))}))) : null,
   semantic_dd_sha256: semanticDdBinary ? await fileSha256(semanticDdBinary) : null,
   circuit_dd_sha256: circuitDdBinary ? await fileSha256(circuitDdBinary) : null,
   sqlite_adapter_sha256: sqliteBinary ? await fileSha256(sqliteBinary) : null,
@@ -209,7 +210,8 @@ async function runProcess(testCase, maintenance, runKind, repetition) {
   const sqlite = template || plugin || maintenance === "sqlite-query";
   const dd = maintenance === "dd";
   const swi = maintenance === "swi-circuit";
-  const rssField = swi ? "swi_process_observed_peak_rss_kb" : sqlite ? "sqlite_process_observed_peak_rss_kb" : dd ? "dd_process_observed_peak_rss_kb" : "postgres_group_observed_peak_rss_kb";
+  const embedded = maintenance.startsWith("pglite-");
+  const rssField = embedded ? "pglite_process_observed_peak_rss_kb" : swi ? "swi_process_observed_peak_rss_kb" : sqlite ? "sqlite_process_observed_peak_rss_kb" : dd ? "dd_process_observed_peak_rss_kb" : "postgres_group_observed_peak_rss_kb";
   const context = {
     arm: sqlite ? maintenance : `native-${maintenance}`,
     maintenance,
@@ -265,8 +267,8 @@ async function runProcess(testCase, maintenance, runKind, repetition) {
       state.mutation_sql = sql;
     }
   }
-  const fixturePath = join(childRoot, "fixture.json");
-  await writeFile(fixturePath, JSON.stringify(fixture));
+  const fixturePath = process.env.IVM_COMPACT_ARTIFACTS === "1" ? join(runRoot,"fixtures",`${caseKey(testCase)}.json`) : join(childRoot,"fixture.json");
+  if(!writtenFixtures.has(fixturePath)){await mkdir(dirname(fixturePath),{recursive:true});await writeFile(fixturePath,JSON.stringify(fixture));writtenFixtures.add(fixturePath);}
   if (template) {
     args = ["19_sqlite_template_adapter.py", "--program", sqliteProgram,
       "--fixture", fixturePath, "--db", join(childRoot, "maintained.sqlite"),
@@ -278,7 +280,7 @@ async function runProcess(testCase, maintenance, runKind, repetition) {
   else args.push("--fixture", fixturePath);
   if (testCase.circuit) args = swi ? ["-q","-s",fixture.columns?"39_semantic_swi.pl":"35_circuit_swi.pl","--",fixturePath] : dd ? [fixturePath] : sqlite
     ? [fixture.columns?"31b_circuit_sqlite.py":"31_circuit_sqlite.py","--fixture",fixturePath,"--db",join(childRoot,"circuit.sqlite"),...(plugin?["--extension",sqliteExtension]:[])]
-    : [fixture.columns?"31a_circuit_postgres.mjs":"32_circuit_postgres.mjs",fixturePath,maintenance];
+    : ["31a_circuit_postgres.mjs",fixturePath,maintenance,...(embedded?[join(childRoot,"pglite")]:[])];
   if (testCase.circuit && sqlite && sqliteBinary) args=["--fixture",fixturePath,"--db",join(childRoot,"circuit.sqlite"),...(plugin?["--extension",sqliteExtension]:[])];
   const child = spawn(swi ? "swipl" : sqlite ? (sqliteBinary || "python3") : dd ? (fixture.columns ? semanticDdBinary : testCase.circuit ? circuitDdBinary : ddBinary) : process.execPath, args, {
     cwd: labDir,
@@ -303,7 +305,7 @@ async function runProcess(testCase, maintenance, runKind, repetition) {
     child.kill("SIGKILL");
   }, Math.min(timeoutMs, Math.max(1, deadlineEpochMs - Date.now())));
   const memoryTimer = setInterval(() => {
-    const rss = descendantsRss(sqlite || dd || swi ? child.pid : process.env.IVM_POSTMASTER_PID);
+    const rss = descendantsRss(sqlite || dd || swi || embedded ? child.pid : process.env.IVM_POSTMASTER_PID);
     if (rss !== null) observedGroupPeakRssKb = Math.max(observedGroupPeakRssKb, rss);
   }, 50);
   const exit = await new Promise((resolve) => {
@@ -354,6 +356,9 @@ async function runProcess(testCase, maintenance, runKind, repetition) {
     [rssField]: observedGroupPeakRssKb || null,
     ...context,
   });
+  if(process.env.IVM_COMPACT_ARTIFACTS === "1" && !failed){
+    for(const filename of ["pglite","circuit.sqlite","circuit.sqlite-wal","circuit.sqlite-shm","maintained.sqlite","maintained.sqlite-wal","maintained.sqlite-shm"])await rm(join(childRoot,filename),{recursive:true,force:true});
+  }
   return true;
 }
 
