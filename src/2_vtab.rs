@@ -80,6 +80,7 @@ impl Table {
         }
         let name = text(name)?;
         let conn = unsafe { Connection::from_handle(db.handle())? };
+        conn.set_prepared_statement_cache_capacity(128);
         let stored: bool = conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM main.sqlite_schema WHERE name='__ivm_schema')",
             [],
