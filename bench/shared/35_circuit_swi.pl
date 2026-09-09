@@ -37,6 +37,18 @@ canonical(Prefix,Rows,Text) :- with_output_to(string(Text),forall(member(Row,Row
 hash(Text,Hash) :- crypto_data_hash(Text,Hash,[algorithm(sha256),encoding(utf8)]).
 emit(Record) :- json_write_dict(current_output,Record,[width(0)]),nl,flush_output.
 check(Goal,Label) :- (call(Goal)->true;throw(error(mismatch(Label),_))).
+unavailable(Unit,Reason,_{value:null,unit:Unit,unavailable_reason:Reason}).
+state_inventory(A,B,C,Rows,Inventory) :-
+    length(A,NA),length(B,NB),length(C,NC),length(Rows,NO),NS is NA+NB+NC,Total is NS+NO,
+    Reason='SWI internal table/index bytes and incremental-table support state are not exposed by this adapter',
+    unavailable(bytes,Reason,Bytes),unavailable(rows,Reason,SupportRows),unavailable(indexes,Reason,Indexes),
+    Relations=[_{name:a,kind:'native-relation',role:source,counted_in_totals:true,row_count:_{value:NA,unit:rows,unavailable_reason:null},bytes:_{allocated:Bytes,data:Bytes,index:Bytes}},
+      _{name:b,kind:'native-relation',role:source,counted_in_totals:true,row_count:_{value:NB,unit:rows,unavailable_reason:null},bytes:_{allocated:Bytes,data:Bytes,index:Bytes}},
+      _{name:c,kind:'native-relation',role:source,counted_in_totals:true,row_count:_{value:NC,unit:rows,unavailable_reason:null},bytes:_{allocated:Bytes,data:Bytes,index:Bytes}},
+      _{name:'output-bag',kind:'native-relation',role:result,counted_in_totals:true,row_count:_{value:NO,unit:rows,unavailable_reason:null},bytes:_{allocated:Bytes,data:Bytes,index:Bytes}}],
+    Inventory=_{schema_version:1,measured_at:'after-output-validation',outside_timed_region:true,scope:'adapter-observed SWI dynamic source relations and output bag',relations:Relations,
+      summary:_{table_count:_{value:0,unit:tables,unavailable_reason:null},index_count:Indexes,native_collection_count:_{value:4,unit:relations,unavailable_reason:null},total_rows:_{value:Total,unit:rows,unavailable_reason:null,partial:true},rows_by_role:_{source:_{value:NS,unit:rows,unavailable_reason:null},result:_{value:NO,unit:rows,unavailable_reason:null},support:SupportRows},table_bytes:Bytes,index_bytes:Bytes,total_relation_bytes:Bytes},
+      storage:_{database_file_bytes:_{value:null,unit:bytes,unavailable_reason:'volatile SWI adapter has no database file'},wal_file_bytes:_{value:null,unit:bytes,unavailable_reason:'volatile SWI adapter has no WAL file'},database_allocated_bytes:_{value:null,unit:bytes,unavailable_reason:'volatile SWI adapter has no database allocation'},database_size_scope:'no durable database'},process_memory:_{rss_bytes:_{value:null,unit:bytes,unavailable_reason:'measured by parent runner'}},limitations:[Reason]}.
 
 states([],_,Total,Input,Output) :- emit(_{event:'case-total',status:ok,update_plus_query_ms:Total,final_input_hash:Input,final_checksum:Output,disk:_{database_bytes:0}}).
 states([State|Rest],Family,Total,_,_) :-
@@ -50,8 +62,9 @@ states([State|Rest],Family,Total,_,_) :-
     hash(InputText,InputHash),canonical('S',Rows,OutputText),hash(OutputText,OutputHash),
     atom_string(InputHash,IH),atom_string(OutputHash,OH),check(IH==State.input_hash,input_hash),check(OH==State.expected.checksum,output_hash),
     length(Rows,Count),length(State.writes,Affected),string_length(OutputText,Bytes),
+    state_inventory(A,B,C,Rows,Inventory),
     emit(_{event:mutation,status:ok,state:State.name,exact_input_output_validated:true,input_hash:IH,checksum:OH,
-           affected_rows:Affected,output_rows:Count,output_bytes:Bytes,update_transaction_ms:Update,query_compute_ms:Query,update_plus_query_ms:Combined}),
+           affected_rows:Affected,output_rows:Count,output_bytes:Bytes,update_transaction_ms:Update,query_compute_ms:Query,update_plus_query_ms:Combined,state_inventory:Inventory}),
     Next is Total+Combined,states(Rest,Family,Next,IH,OH).
 main :- get_time(SetupStart), current_prolog_flag(argv,[Path]),
     setup_call_cleanup(open(Path,read,In),json_read_dict(In,Fixture),close(In)),

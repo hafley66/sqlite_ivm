@@ -4,6 +4,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import {spawn,spawnSync} from 'node:child_process';
 import {engines,arms,circuitNames,featureNames,ddContracts,writeReport} from './51_shootout_report.mjs';
+import {renderAll} from './55_shootout_plot.mjs';
 const root=path.resolve(import.meta.dirname,'..'),repo=path.dirname(root);
 const args=process.argv.slice(2);const profile=args[0]&&!args[0].startsWith('--')?args.shift():'quick';
 const option=(name,fallback)=>{const i=args.indexOf('--'+name);if(i<0)return fallback;if(!args[i+1]||args[i+1].startsWith('--'))throw new Error(`--${name} needs a value`);return args[i+1];};
@@ -19,7 +20,7 @@ if(process.platform==='darwin'&&!env.SQLITE3_LIB_DIR){const brew=spawnSync('brew
 const revision=spawnSync('git',['rev-parse','HEAD'],{cwd:repo,encoding:'utf8'}).stdout?.trim()??null;
 const manifest={schema:1,profile,started_at:new Date().toISOString(),engines:requested,availability:{},phases:[],revision,sources:{},artifacts:env.IVM_COMPACT_ARTIFACTS==='1'?'shared fixtures and receipts; successful per-case databases discarded':'full per-case databases retained',performance:{repetitions:profile==='smoke'?1:profile==='quick'?3:5,warmups:profile==='smoke'?0:1}};
 for(const base of ['src','tests','examples','bench','scripts']){
- const walk=dir=>{for(const entry of fs.readdirSync(dir,{withFileTypes:true})){if(['target','results','receipts','node_modules','.work'].includes(entry.name))continue;const p=path.join(dir,entry.name);if(entry.isDirectory())walk(p);else if(/\.(rs|mjs|pl|sh|json|toml|lock)$/.test(p))manifest.sources[path.relative(root,p)]=crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');}};walk(path.join(root,base));
+ const walk=dir=>{for(const entry of fs.readdirSync(dir,{withFileTypes:true})){if(['target','results','receipts','node_modules','.work'].includes(entry.name))continue;const p=path.join(dir,entry.name);if(entry.isDirectory())walk(p);else if(/\.(rs|mjs|py|pl|sh|json|toml|lock)$/.test(p))manifest.sources[path.relative(root,p)]=crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');}};walk(path.join(root,base));
 }
 const save=()=>fs.writeFileSync(path.join(directory,'run.json'),JSON.stringify(manifest,null,2)+'\n');
 const executable=command=>spawnSync(command,['--version'],{env,encoding:'utf8',timeout:10000}).status===0;
@@ -95,4 +96,6 @@ try{
 }catch(error){manifest.phases.push({name:'orchestrator',status:2,error:error.stack,log:path.join(directory,'run.json')});}
 finally{stopCluster();manifest.finished_at=new Date().toISOString();save();}
 const report=writeReport(directory,{details:args.includes('--details'),color:(process.stdout.isTTY&&!env.NO_COLOR)||args.includes('--color')});
+const chartDirectory=path.join(directory,'charts');renderAll(path.join(directory,'report.json'),chartDirectory);
+process.stdout.write(`Chart index: ${path.join(chartDirectory,'index.html')}\nTelemetry TSV: ${path.join(chartDirectory,'telemetry.tsv')}\nInventory TSV: ${path.join(chartDirectory,'inventory.tsv')}\n`);
 process.exitCode=report.status==='ok'?0:report.status==='mismatch'?1:2;

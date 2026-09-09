@@ -1,0 +1,404 @@
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8): No such file or directory
+   Compiling libsqlite3-sys v0.38.2
+    Building [====================>      ] 45/57: libsqlite3-sys(build)           Building [====================>      ] 46/57: libsqlite3-sys                 Compiling rusqlite v0.40.2
+    Building [====================>      ] 46/57: libsqlite3-sys, rusqlite        Building [=====================>     ] 47/57: rusqlite                       Compiling sqlite-ivm v0.2.0 (/Users/chrishafley/projects/sprefa/sqlite_ivm)
+    Building [=====================>     ] 48/57: sqlite_ivm(test), sqlite-ivm    Building [======================>    ] 49/57: sqlite-ivm                      Building [=======================>   ] 51/57: 4_features(test), 1_mainten…    Building [=======================>   ] 52/57: 4_features(test), 1_mainten…    Building [========================>  ] 53/57: 3_relational(test), 1_maint…    Building [========================>  ] 54/57: 2_vtab(test), 3_relational(…    Building [=========================> ] 55/57: 2_vtab(test), 3_relational(…    Building [=========================> ] 56/57: 3_relational(test)              Finished `test` profile [unoptimized] target(s) in 2.17s
+     Running unittests src/lib.rs (sqlite_ivm/target/debug/build/sqlite-ivm/d33f37c934b923c1/out/sqlite_ivm-d33f37c934b923c1)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/0_query.rs (sqlite_ivm/target/debug/build/sqlite-ivm/6a7f1375e1915045/out/0_query-6a7f1375e1915045)
+
+running 6 tests
+test temporary_shadowing_is_rejected ... ok
+test accepted_queries_bind_catalog_names_and_output_order ... ok
+test binding_is_read_only_and_matches_sqlite_results_through_crud ... ok
+test composite_join_binding_preserves_pairs_and_rejects_other_predicates ... ok
+test unsupported_filter_forms_are_rejected_before_mutation ... ok
+test unsupported_queries_are_rejected_without_changing_schema_or_rows ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/1_maintenance.rs (sqlite_ivm/target/debug/build/sqlite-ivm/be40cd487dfed657/out/1_maintenance-be40cd487dfed657)
+
+running 13 tests
+test columns_used_only_by_filters_are_checked_at_install_and_on_writes ... ok
+test drop_uses_exact_catalog_ownership_and_rejects_missing_or_changed_objects ... ok
+test failed_drop_restores_objects_metadata_and_caller_transaction ... ok
+test filters_cover_all_four_update_transitions_from_both_join_sides ... ok
+test install_failure_rolls_back_created_objects_and_preserves_caller_transaction ... ok
+test managed_drop_preserves_sources_and_other_views_and_rolls_back ... ok
+test joins_maintain_both_sides_duplicates_moves_conflicts_and_rollback ... ok
+test rejected_values_overflow_and_writer_settings_preserve_state ... ok
+test single_table_integer_boundaries_and_public_view_are_enforced ... ok
+test unrelated_groups_are_never_written_and_join_keys_are_indexed ... ok
+test composite_keys_isolate_partial_matches_and_maintain_moves_on_both_sides ... ok
+test single_table_filters_boolean_precedence_integer_limits_and_rollback ... ok
+test deterministic_mutations_match_original_join_after_every_statement ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s
+
+     Running tests/2_vtab.rs (sqlite_ivm/target/debug/build/sqlite-ivm/b12f8623a479e886/out/2_vtab-b12f8623a479e886)
+
+running 5 tests
+test defensive_shadow_protection_allows_source_dml_and_native_lifecycle ... ok
+test ddl_rename_preserves_state_without_writes_and_drop_preserves_sources ... ok
+test indexed_cursors_preserve_output_order_affinity_and_simultaneous_reads ... ok
+test catalog_identity_survives_vacuum_and_rename_rejects_modified_hooks ... ok
+test ddl_rename_rollback_savepoints_and_failure_restore_usable_names ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+     Running tests/3_relational.rs (sqlite_ivm/target/debug/build/sqlite-ivm/00609d66fb50235e/out/3_relational-00609d66fb50235e)
+
+running 9 tests
+test ignored_and_replaced_source_updates_preserve_arrangements ... ok
+test null_recursive_keys_weighted_overflow_and_aggregate_exists ... ok
+test nullable_text_composite_groups_outer_join_and_rollback ... ok
+test narrow_source_column_order_changes_are_transactional ... ok
+test relational_group_locality_and_ddl_preserve_btrees ... ok
+test unsupported_clause_combinations_fail_before_install ... ok
+test global_empty_aggregates_and_source_ddl ... ok
+test deterministic_relational_mutations_and_type_contract ... ok
+test shared_circuit_states ... ok
+
+test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.44s
+
+     Running tests/4_features.rs (sqlite_ivm/target/debug/build/sqlite-ivm/6a39b6c01457fdf0/out/4_features-6a39b6c01457fdf0)
+
+running 6 tests
+test materialized_output_affinity_matches_ordinary_view_consumers ... ok
+test parenthesized_join_scopes_and_nonrecursive_union_cte ... ok
+test recursive_delete_preserves_alternate_null_support_and_collated_roots ... ok
+test blobs_and_adjacent_floats_survive_trigger_transport ... ok
+test collations_control_group_distinct_join_and_outer_predicates ... ok
+test feature_compositions_against_sqlite ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.30s
+
+     Running tests/5_transactions.rs (sqlite_ivm/target/debug/build/sqlite-ivm/6fef786cad9f3204/out/5_transactions-6fef786cad9f3204)
+
+running 3 tests
+test deterministic_registered_scalars_and_rejected_volatile_functions ... ok
+test wal_snapshots_writer_contention_and_failed_maintenance_are_atomic ... ok
+test cascades_generated_values_and_user_trigger_writes_compose ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+   Doc-tests sqlite_ivm
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8): No such file or directory
+   Compiling libsqlite3-sys v0.38.2
+    Building [=======================>   ] 32/36: libsqlite3-sys(build)           Building [=======================>   ] 33/36: libsqlite3-sys                 Compiling rusqlite v0.40.2
+    Building [=======================>   ] 33/36: libsqlite3-sys, rusqlite        Building [========================>  ] 34/36: rusqlite                       Compiling sqlite-ivm v0.2.0 (/Users/chrishafley/projects/sprefa/sqlite_ivm)
+    Building [=========================> ] 35/36: sqlite-ivm                      Finished `dev` profile [unoptimized] target(s) in 2.08s
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8): No such file or directory
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ load_extension('/Users/chrishafley/projects/sprefa/sqlite_ivm/target/debug/libsqlite_ivm.dylib') │
+╞══════════════════════════════════════════════════════════════════════════════════════════════════╡
+│                                                                                                  │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────────────────────────────────────────────────╮
+│                     sqlite_ivm_create('totals', '                      │
+│   SELECT group_id, COUNT(*) AS item_count, SUM(amount) AS total_amount │
+│                                FROM items                              │
+│                            GROUP BY group_id                           │
+│                                   ')                                   │
+╞════════════════════════════════════════════════════════════════════════╡
+│ totals                                                                 │
+╰────────────────────────────────────────────────────────────────────────╯
+EMPTY: expect no groups
+INSERT: expect (4,2,10), (9,1,-2), (12,1,0)
+╭──────────┬────────────┬──────────────╮
+│ group_id │ item_count │ total_amount │
+╞══════════╪════════════╪══════════════╡
+│        4 │          2 │           10 │
+│        9 │          1 │           -2 │
+│       12 │          1 │            0 │
+╰──────────┴────────────┴──────────────╯
+UPDATE AMOUNT: group 4 sum becomes 14
+╭──────────┬────────────┬──────────────╮
+│ group_id │ item_count │ total_amount │
+╞══════════╪════════════╪══════════════╡
+│        4 │          2 │           14 │
+│        9 │          1 │           -2 │
+│       12 │          1 │            0 │
+╰──────────┴────────────┴──────────────╯
+MOVE GROUP + CHANGE AMOUNT: expect (4,1,3), (9,2,5), (12,1,0)
+╭──────────┬────────────┬──────────────╮
+│ group_id │ item_count │ total_amount │
+╞══════════╪════════════╪══════════════╡
+│        4 │          1 │            3 │
+│        9 │          2 │            5 │
+│       12 │          1 │            0 │
+╰──────────┴────────────┴──────────────╯
+MULTIROW UPDATE: group 9 sum becomes 7
+╭──────────┬────────────┬──────────────╮
+│ group_id │ item_count │ total_amount │
+╞══════════╪════════════╪══════════════╡
+│        4 │          1 │            3 │
+│        9 │          2 │            7 │
+│       12 │          1 │            0 │
+╰──────────┴────────────┴──────────────╯
+DELETE NEGATIVE ROW: group 9 becomes (9,1,8)
+╭──────────┬────────────┬──────────────╮
+│ group_id │ item_count │ total_amount │
+╞══════════╪════════════╪══════════════╡
+│        4 │          1 │            3 │
+│        9 │          1 │            8 │
+│       12 │          1 │            0 │
+╰──────────┴────────────┴──────────────╯
+DELETE LAST ROW IN GROUP: group 4 disappears
+╭──────────┬────────────┬──────────────╮
+│ group_id │ item_count │ total_amount │
+╞══════════╪════════════╪══════════════╡
+│        9 │          1 │            8 │
+│       12 │          1 │            0 │
+╰──────────┴────────────┴──────────────╯
+DELETE INSIDE TRANSACTION: expect no groups
+ROLLBACK: expect (9,1,8), (12,1,0)
+╭──────────┬────────────┬──────────────╮
+│ group_id │ item_count │ total_amount │
+╞══════════╪════════════╪══════════════╡
+│        9 │          1 │            8 │
+│       12 │          1 │            0 │
+╰──────────┴────────────┴──────────────╯
+DELETE ALL: expect no groups
+PASS: all CRUD and rollback assertions passed
+╭──────────────────────────────┬────╮
+│             step             │ ok │
+╞══════════════════════════════╪════╡
+│ empty                        │  1 │
+│ insert                       │  1 │
+│ update amount                │  1 │
+│ move group and change amount │  1 │
+│ multirow update              │  1 │
+│ delete negative row          │  1 │
+│ delete last row in group     │  1 │
+│ rollback restores groups     │  1 │
+│ delete all                   │  1 │
+╰──────────────────────────────┴────╯
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8): No such file or directory
+╭────────────────────────────────────────────────────────────────────────╮
+│                     sqlite_ivm_create('totals', '                      │
+│     SELECT i.group_id AS g, COUNT(*) AS n, SUM(i.amount*d.factor) AS s │
+│          FROM items i JOIN dimensions d ON i.join_key=d.join_key       │
+│                            GROUP BY i.group_id                         │
+│                                   ')                                   │
+╞════════════════════════════════════════════════════════════════════════╡
+│ totals                                                                 │
+╰────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────────────────────────────────────────────────╮
+│                    sqlite_ivm_create('positive', '                     │
+│     SELECT i.group_id AS g, COUNT(*) AS n, SUM(i.amount*d.factor) AS s │
+│          FROM items i JOIN dimensions d ON i.join_key=d.join_key       │
+│                      WHERE i.amount>0 AND d.factor<>0                  │
+│                            GROUP BY i.group_id                         │
+│                                   ')                                   │
+╞════════════════════════════════════════════════════════════════════════╡
+│ positive                                                               │
+╰────────────────────────────────────────────────────────────────────────╯
+INSERT ITEMS WITHOUT MATCHES: expect no result rows
+INSERT DIMENSIONS WITH DUPLICATE KEYS: expect (4,4,10), (9,1,-8)
+╭───┬───┬────╮
+│ g │ n │ s  │
+╞═══╪═══╪════╡
+│ 4 │ 4 │ 10 │
+│ 9 │ 1 │ -8 │
+╰───┴───┴────╯
+INSERT MATCHING ITEM: expect group 4 = (4,6,15)
+╭───┬───┬────╮
+│ g │ n │ s  │
+╞═══╪═══╪════╡
+│ 4 │ 6 │ 15 │
+│ 9 │ 1 │ -8 │
+╰───┴───┴────╯
+UPDATE ITEM KEY, GROUP AND AMOUNT: expect (4,4,8), (9,2,36)
+╭───┬───┬────╮
+│ g │ n │ s  │
+╞═══╪═══╪════╡
+│ 4 │ 4 │  8 │
+│ 9 │ 2 │ 36 │
+╰───┴───┴────╯
+UPDATE DIMENSION JOIN KEY: expect (4,2,16), (9,4,27)
+╭───┬───┬────╮
+│ g │ n │ s  │
+╞═══╪═══╪════╡
+│ 4 │ 2 │ 16 │
+│ 9 │ 4 │ 27 │
+╰───┴───┴────╯
+DELETE NEGATIVE ITEM: expect group 9 = (9,2,33)
+╭───┬───┬────╮
+│ g │ n │ s  │
+╞═══╪═══╪════╡
+│ 4 │ 2 │ 16 │
+│ 9 │ 2 │ 33 │
+╰───┴───┴────╯
+DELETE DIMENSIONS INSIDE TRANSACTION, THEN ROLLBACK
+╭───┬───┬────╮
+│ g │ n │ s  │
+╞═══╪═══╪════╡
+│ 4 │ 2 │ 16 │
+│ 9 │ 2 │ 33 │
+╰───┴───┴────╯
+DELETE ALL MATCHES FOR GROUP 9: expect only (4,2,16)
+╭───┬───┬────╮
+│ g │ n │ s  │
+╞═══╪═══╪════╡
+│ 4 │ 2 │ 16 │
+╰───┴───┴────╯
+ITEM LEAVES FILTER: positive result is (4,1,10)
+╭───┬───┬────╮
+│ g │ n │ s  │
+╞═══╪═══╪════╡
+│ 4 │ 1 │ 10 │
+╰───┴───┴────╯
+ITEM ENTERS FILTER: positive result is (4,2,16)
+╭───┬───┬────╮
+│ g │ n │ s  │
+╞═══╪═══╪════╡
+│ 4 │ 2 │ 16 │
+╰───┴───┴────╯
+DIMENSION LEAVES FILTER: positive result is empty
+DIMENSION ENTERS FILTER: positive result is (4,2,16)
+╭───┬───┬────╮
+│ g │ n │ s  │
+╞═══╪═══╪════╡
+│ 4 │ 2 │ 16 │
+╰───┴───┴────╯
+╭─────────────────────────┬────╮
+│          step           │ ok │
+╞═════════════════════════╪════╡
+│ unmatched items         │  1 │
+│ dimension inserts       │  1 │
+│ matching item insert    │  1 │
+│ item update             │  1 │
+│ dimension update        │  1 │
+│ item delete             │  1 │
+│ rollback                │  1 │
+│ dimension delete        │  1 │
+│ item leaves filter      │  1 │
+│ item enters filter      │  1 │
+│ dimension leaves filter │  1 │
+│ dimension enters filter │  1 │
+╰─────────────────────────┴────╯
+FRESH WRITER, MODULE LOADED: factor update gives (4,2,24)
+╭───┬───┬────╮
+│ g │ n │ s  │
+╞═══╪═══╪════╡
+│ 4 │ 2 │ 24 │
+╰───┴───┴────╯
+FRESH WRITER FILTER EXIT: positive result is empty
+DELETE ALL ITEMS: expect no result rows
+PASS: native join CRUD, filters, rollback and fresh-writer assertions passed
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8): No such file or directory
+earnings
+BOOTSTRAP: same crop at different farms gets its own price
+╭────────┬─────────┬─────────╮
+│ farmer │ matches │ dollars │
+╞════════╪═════════╪═════════╡
+│    101 │       2 │     230 │
+│    102 │       1 │     240 │
+╰────────┴─────────┴─────────╯
+╭────────┬─────────┬─────────╮
+│ farmer │ matches │ dollars │
+╞════════╪═════════╪═════════╡
+│    101 │       3 │     376 │
+╰────────┴─────────┴─────────╯
+╭─────────────────────────────────┬────╮
+│              step               │ ok │
+╞═════════════════════════════════╪════╡
+│ module loaded                   │  1 │
+│ bootstrap                       │  1 │
+│ duplicate full key              │  1 │
+│ price update isolates farm 2    │  1 │
+│ first key component move        │  1 │
+│ right second key component move │  1 │
+│ left second key component move  │  1 │
+│ price delete                    │  1 │
+│ lot move with duplicate matches │  1 │
+│ filter exit                     │  1 │
+│ filter entry                    │  1 │
+│ rollback restores both sources  │  1 │
+│ multirow price update           │  1 │
+│ lot delete                      │  1 │
+│ delete all                      │  1 │
+╰─────────────────────────────────┴────╯
+PASS: composite join CRUD, duplicate keys, filters and rollback in a fresh writer
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8): No such file or directory
+earnings
+eligible_earnings
+earnings
+earnings
+persisted catalog|1
+schema restored|1
+catalog restored|1
+restored triggers work|1
+surviving triggers work|1
+drop committed|1
+metadata removed|1
+module loaded|1
+fresh writer filter entry|1
+fresh writer delete|1
+eligible_earnings
+PASS: persistent catalog, managed drop, rollback, surviving view and fresh connection writes
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8): No such file or directory
+          defensive on
+QUERY PLAN
+`--SCAN income VIRTUAL TABLE INDEX 1:group_key
+initial earnings|1
+shadow classification|1
+rename rollback|1
+renamed persisted state|1
+          defensive on
+reconnect renamed table|1
+insert after reconnect|1
+joined price update|1
+delete after reconnect|1
+rename savepoint rollback|1
+drop rollback restored hooks|1
+drop removes owned objects|1
+source rows preserved|1
+PASS: native CREATE, ALTER, DROP, defensive writes, rollback and reconnect
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8): No such file or directory
+          defensive on
+growers
+cost
+orchards
+          defensive on
+growers
+growers
+reopen source DDL|1
+maintain rewritten query|1
+cascade rollback|1
+cascade cleanup|1
+PASS: native source rename, column rename, cascade, rollback and reopen
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8): No such file or directory
+    Finished `release` profile [optimized] target(s) in 0.08s
+    Finished `release` profile [optimized] target(s) in 0.03s
+PASS: native pipeline, 13 states, reopen, rename, rollback
+PASS: native fanout_fanin, 13 states, reopen, rename, rollback
+PASS: native distinct, 13 states, reopen, rename, rollback
+PASS: native join, 13 states, reopen, rename, rollback
+PASS: native self_join, 13 states, reopen, rename, rollback
+PASS: native chain, 13 states, reopen, rename, rollback
+PASS: native diamond, 13 states, reopen, rename, rollback
+PASS: native semijoin, 13 states, reopen, rename, rollback
+PASS: native antijoin, 13 states, reopen, rename, rollback
+PASS: native aggregate_churn, 13 states, reopen, rename, rollback
+PASS: native reach_cycle, 13 states, reopen, rename, rollback
+PASS: native minmax, 13 states, reopen, rename, rollback
+PASS: native count_distinct, 13 states, reopen, rename, rollback
+PASS: native union_set, 13 states, reopen, rename, rollback
+PASS: native except_set, 13 states, reopen, rename, rollback
+PASS: native intersect_set, 13 states, reopen, rename, rollback
+PASS: native topk, 13 states, reopen, rename, rollback
+PASS: native window_rank, 13 states, reopen, rename, rollback
+PASS: native subquery, 13 states, reopen, rename, rollback
+PASS: native cte, 13 states, reopen, rename, rollback

@@ -1,0 +1,617 @@
+suite	case	engine	status	states	reason
+circuits	pipeline	sqlite-ivm	ok	13	
+circuits	pipeline	dd	ok	13	
+circuits	pipeline	prolog	ok	13	
+circuits	pipeline	pg-ivm	ok	13	
+circuits	pipeline	pg-query	ok	13	
+circuits	pipeline	sqlite-query	ok	13	
+circuits	pipeline	pglite-ivm	ok	13	
+circuits	pipeline	pglite-query	ok	13	
+circuits	fanout_fanin	sqlite-ivm	ok	13	
+circuits	fanout_fanin	dd	ok	13	
+circuits	fanout_fanin	prolog	ok	13	
+circuits	fanout_fanin	pg-ivm	unsupported	0	UNION/INTERSECT/EXCEPT statements are not supported on incrementally maintainable materialized view
+circuits	fanout_fanin	pg-query	ok	13	
+circuits	fanout_fanin	sqlite-query	ok	13	
+circuits	fanout_fanin	pglite-ivm	unsupported	0	UNION/INTERSECT/EXCEPT statements are not supported on incrementally maintainable materialized view
+circuits	fanout_fanin	pglite-query	ok	13	
+circuits	distinct	sqlite-ivm	ok	13	
+circuits	distinct	dd	ok	13	
+circuits	distinct	prolog	ok	13	
+circuits	distinct	pg-ivm	ok	13	
+circuits	distinct	pg-query	ok	13	
+circuits	distinct	sqlite-query	ok	13	
+circuits	distinct	pglite-ivm	ok	13	
+circuits	distinct	pglite-query	ok	13	
+circuits	join	sqlite-ivm	ok	13	
+circuits	join	dd	ok	13	
+circuits	join	prolog	ok	13	
+circuits	join	pg-ivm	ok	13	
+circuits	join	pg-query	ok	13	
+circuits	join	sqlite-query	ok	13	
+circuits	join	pglite-ivm	ok	13	
+circuits	join	pglite-query	ok	13	
+circuits	self_join	sqlite-ivm	ok	13	
+circuits	self_join	dd	ok	13	
+circuits	self_join	prolog	ok	13	
+circuits	self_join	pg-ivm	ok	13	
+circuits	self_join	pg-query	ok	13	
+circuits	self_join	sqlite-query	ok	13	
+circuits	self_join	pglite-ivm	ok	13	
+circuits	self_join	pglite-query	ok	13	
+circuits	chain	sqlite-ivm	ok	13	
+circuits	chain	dd	ok	13	
+circuits	chain	prolog	ok	13	
+circuits	chain	pg-ivm	ok	13	
+circuits	chain	pg-query	ok	13	
+circuits	chain	sqlite-query	ok	13	
+circuits	chain	pglite-ivm	ok	13	
+circuits	chain	pglite-query	ok	13	
+circuits	diamond	sqlite-ivm	ok	13	
+circuits	diamond	dd	ok	13	
+circuits	diamond	prolog	ok	13	
+circuits	diamond	pg-ivm	unsupported	0	UNION/INTERSECT/EXCEPT statements are not supported on incrementally maintainable materialized view
+circuits	diamond	pg-query	ok	13	
+circuits	diamond	sqlite-query	ok	13	
+circuits	diamond	pglite-ivm	unsupported	0	UNION/INTERSECT/EXCEPT statements are not supported on incrementally maintainable materialized view
+circuits	diamond	pglite-query	ok	13	
+circuits	semijoin	sqlite-ivm	ok	13	
+circuits	semijoin	dd	ok	13	
+circuits	semijoin	prolog	ok	13	
+circuits	semijoin	pg-ivm	ok	13	
+circuits	semijoin	pg-query	ok	13	
+circuits	semijoin	sqlite-query	ok	13	
+circuits	semijoin	pglite-ivm	ok	13	
+circuits	semijoin	pglite-query	ok	13	
+circuits	antijoin	sqlite-ivm	ok	13	
+circuits	antijoin	dd	ok	13	
+circuits	antijoin	prolog	ok	13	
+circuits	antijoin	pg-ivm	unsupported	0	this query is not allowed on incrementally maintainable materialized view
+circuits	antijoin	pg-query	ok	13	
+circuits	antijoin	sqlite-query	ok	13	
+circuits	antijoin	pglite-ivm	unsupported	0	this query is not allowed on incrementally maintainable materialized view
+circuits	antijoin	pglite-query	ok	13	
+circuits	aggregate_churn	sqlite-ivm	ok	13	
+circuits	aggregate_churn	dd	ok	13	
+circuits	aggregate_churn	prolog	ok	13	
+circuits	aggregate_churn	pg-ivm	ok	13	
+circuits	aggregate_churn	pg-query	ok	13	
+circuits	aggregate_churn	sqlite-query	ok	13	
+circuits	aggregate_churn	pglite-ivm	ok	13	
+circuits	aggregate_churn	pglite-query	ok	13	
+circuits	reach_cycle	sqlite-ivm	ok	13	
+circuits	reach_cycle	dd	ok	13	
+circuits	reach_cycle	prolog	ok	13	
+circuits	reach_cycle	pg-ivm	unsupported	0	recursive query is not supported on incrementally maintainable materialized view
+circuits	reach_cycle	pg-query	ok	13	
+circuits	reach_cycle	sqlite-query	ok	13	
+circuits	reach_cycle	pglite-ivm	unsupported	0	recursive query is not supported on incrementally maintainable materialized view
+circuits	reach_cycle	pglite-query	ok	13	
+circuits	minmax	sqlite-ivm	ok	13	
+circuits	minmax	dd	ok	13	
+circuits	minmax	prolog	ok	13	
+circuits	minmax	pg-ivm	ok	13	
+circuits	minmax	pg-query	ok	13	
+circuits	minmax	sqlite-query	ok	13	
+circuits	minmax	pglite-ivm	ok	13	
+circuits	minmax	pglite-query	ok	13	
+circuits	count_distinct	sqlite-ivm	ok	13	
+circuits	count_distinct	dd	ok	13	
+circuits	count_distinct	prolog	ok	13	
+circuits	count_distinct	pg-ivm	unsupported	0	aggregate function with DISTINCT arguments is not supported on incrementally maintainable materialized view
+circuits	count_distinct	pg-query	ok	13	
+circuits	count_distinct	sqlite-query	ok	13	
+circuits	count_distinct	pglite-ivm	unsupported	0	aggregate function with DISTINCT arguments is not supported on incrementally maintainable materialized view
+circuits	count_distinct	pglite-query	ok	13	
+circuits	union_set	sqlite-ivm	ok	13	
+circuits	union_set	dd	ok	13	
+circuits	union_set	prolog	ok	13	
+circuits	union_set	pg-ivm	unsupported	0	UNION/INTERSECT/EXCEPT statements are not supported on incrementally maintainable materialized view
+circuits	union_set	pg-query	ok	13	
+circuits	union_set	sqlite-query	ok	13	
+circuits	union_set	pglite-ivm	unsupported	0	UNION/INTERSECT/EXCEPT statements are not supported on incrementally maintainable materialized view
+circuits	union_set	pglite-query	ok	13	
+circuits	except_set	sqlite-ivm	ok	13	
+circuits	except_set	dd	ok	13	
+circuits	except_set	prolog	ok	13	
+circuits	except_set	pg-ivm	unsupported	0	UNION/INTERSECT/EXCEPT statements are not supported on incrementally maintainable materialized view
+circuits	except_set	pg-query	ok	13	
+circuits	except_set	sqlite-query	ok	13	
+circuits	except_set	pglite-ivm	unsupported	0	UNION/INTERSECT/EXCEPT statements are not supported on incrementally maintainable materialized view
+circuits	except_set	pglite-query	ok	13	
+circuits	intersect_set	sqlite-ivm	ok	13	
+circuits	intersect_set	dd	ok	13	
+circuits	intersect_set	prolog	ok	13	
+circuits	intersect_set	pg-ivm	unsupported	0	UNION/INTERSECT/EXCEPT statements are not supported on incrementally maintainable materialized view
+circuits	intersect_set	pg-query	ok	13	
+circuits	intersect_set	sqlite-query	ok	13	
+circuits	intersect_set	pglite-ivm	unsupported	0	UNION/INTERSECT/EXCEPT statements are not supported on incrementally maintainable materialized view
+circuits	intersect_set	pglite-query	ok	13	
+circuits	topk	sqlite-ivm	ok	13	
+circuits	topk	dd	ok	13	
+circuits	topk	prolog	ok	13	
+circuits	topk	pg-ivm	unsupported	0	ORDER BY clause is not supported on incrementally maintainable materialized view
+circuits	topk	pg-query	ok	13	
+circuits	topk	sqlite-query	ok	13	
+circuits	topk	pglite-ivm	unsupported	0	ORDER BY clause is not supported on incrementally maintainable materialized view
+circuits	topk	pglite-query	ok	13	
+circuits	window_rank	sqlite-ivm	ok	13	
+circuits	window_rank	dd	ok	13	
+circuits	window_rank	prolog	ok	13	
+circuits	window_rank	pg-ivm	unsupported	0	window functions are not supported on incrementally maintainable materialized view
+circuits	window_rank	pg-query	ok	13	
+circuits	window_rank	sqlite-query	ok	13	
+circuits	window_rank	pglite-ivm	unsupported	0	window functions are not supported on incrementally maintainable materialized view
+circuits	window_rank	pglite-query	ok	13	
+circuits	subquery	sqlite-ivm	ok	13	
+circuits	subquery	dd	ok	13	
+circuits	subquery	prolog	ok	13	
+circuits	subquery	pg-ivm	ok	13	
+circuits	subquery	pg-query	ok	13	
+circuits	subquery	sqlite-query	ok	13	
+circuits	subquery	pglite-ivm	ok	13	
+circuits	subquery	pglite-query	ok	13	
+circuits	cte	sqlite-ivm	ok	13	
+circuits	cte	dd	ok	13	
+circuits	cte	prolog	ok	13	
+circuits	cte	pg-ivm	ok	13	
+circuits	cte	pg-query	ok	13	
+circuits	cte	sqlite-query	ok	13	
+circuits	cte	pglite-ivm	ok	13	
+circuits	cte	pglite-query	ok	13	
+typed	right_join	sqlite-ivm	ok	174	
+typed	right_join	dd	ok	174	
+typed	right_join	prolog	ok	174	
+typed	right_join	pg-ivm	ok	174	
+typed	right_join	pg-query	ok	174	
+typed	right_join	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	right_join	pglite-ivm	ok	174	
+typed	right_join	pglite-query	ok	174	
+typed	full_join	sqlite-ivm	ok	174	
+typed	full_join	dd	ok	174	
+typed	full_join	prolog	ok	174	
+typed	full_join	pg-ivm	ok	174	
+typed	full_join	pg-query	ok	174	
+typed	full_join	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	full_join	pglite-ivm	ok	174	
+typed	full_join	pglite-query	ok	174	
+typed	left_residual	sqlite-ivm	ok	174	
+typed	left_residual	dd	ok	174	
+typed	left_residual	prolog	ok	174	
+typed	left_residual	pg-ivm	unsupported	0	this query is not allowed on incrementally maintainable materialized view
+typed	left_residual	pg-query	ok	174	
+typed	left_residual	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	left_residual	pglite-ivm	unsupported	0	this query is not allowed on incrementally maintainable materialized view
+typed	left_residual	pglite-query	ok	174	
+typed	full_residual	sqlite-ivm	ok	174	
+typed	full_residual	dd	ok	174	
+typed	full_residual	prolog	ok	174	
+typed	full_residual	pg-ivm	unsupported	0	this query is not allowed on incrementally maintainable materialized view
+typed	full_residual	pg-query	ok	174	
+typed	full_residual	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	full_residual	pglite-ivm	unsupported	0	this query is not allowed on incrementally maintainable materialized view
+typed	full_residual	pglite-query	ok	174	
+typed	theta_join	sqlite-ivm	ok	174	
+typed	theta_join	dd	ok	174	
+typed	theta_join	prolog	ok	174	
+typed	theta_join	pg-ivm	ok	174	
+typed	theta_join	pg-query	ok	174	
+typed	theta_join	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	theta_join	pglite-ivm	ok	174	
+typed	theta_join	pglite-query	ok	174	
+typed	cross_join	sqlite-ivm	ok	174	
+typed	cross_join	dd	ok	174	
+typed	cross_join	prolog	ok	174	
+typed	cross_join	pg-ivm	ok	174	
+typed	cross_join	pg-query	ok	174	
+typed	cross_join	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	cross_join	pglite-ivm	ok	174	
+typed	cross_join	pglite-query	ok	174	
+typed	comma_filter	sqlite-ivm	ok	174	
+typed	comma_filter	dd	ok	174	
+typed	comma_filter	prolog	ok	174	
+typed	comma_filter	pg-ivm	ok	174	
+typed	comma_filter	pg-query	ok	174	
+typed	comma_filter	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	comma_filter	pglite-ivm	ok	174	
+typed	comma_filter	pglite-query	ok	174	
+typed	using_inner	sqlite-ivm	ok	174	
+typed	using_inner	dd	ok	174	
+typed	using_inner	prolog	ok	174	
+typed	using_inner	pg-ivm	ok	174	
+typed	using_inner	pg-query	ok	174	
+typed	using_inner	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	using_inner	pglite-ivm	ok	174	
+typed	using_inner	pglite-query	ok	174	
+typed	using_full	sqlite-ivm	ok	174	
+typed	using_full	dd	ok	174	
+typed	using_full	prolog	ok	174	
+typed	using_full	pg-ivm	mismatch	174	
+typed	using_full	pg-query	ok	174	
+typed	using_full	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	using_full	pglite-ivm	mismatch	174	
+typed	using_full	pglite-query	ok	174	
+typed	natural_left	sqlite-ivm	ok	174	
+typed	natural_left	dd	ok	174	
+typed	natural_left	prolog	ok	174	
+typed	natural_left	pg-ivm	unsupported	0	this query is not allowed on incrementally maintainable materialized view
+typed	natural_left	pg-query	ok	174	
+typed	natural_left	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	natural_left	pglite-ivm	unsupported	0	this query is not allowed on incrementally maintainable materialized view
+typed	natural_left	pglite-query	ok	174	
+typed	using_star	sqlite-ivm	ok	174	
+typed	using_star	dd	ok	174	
+typed	using_star	prolog	ok	174	
+typed	using_star	pg-ivm	unsupported	0	this query is not allowed on incrementally maintainable materialized view
+typed	using_star	pg-query	ok	174	
+typed	using_star	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	using_star	pglite-ivm	unsupported	0	this query is not allowed on incrementally maintainable materialized view
+typed	using_star	pglite-query	ok	174	
+typed	qualified_star	sqlite-ivm	ok	174	
+typed	qualified_star	dd	ok	174	
+typed	qualified_star	prolog	ok	174	
+typed	qualified_star	pg-ivm	unsupported	0	this query is not allowed on incrementally maintainable materialized view
+typed	qualified_star	pg-query	ok	174	
+typed	qualified_star	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	qualified_star	pglite-ivm	unsupported	0	this query is not allowed on incrementally maintainable materialized view
+typed	qualified_star	pglite-query	ok	174	
+typed	self_outer	sqlite-ivm	ok	174	
+typed	self_outer	dd	ok	174	
+typed	self_outer	prolog	ok	174	
+typed	self_outer	pg-ivm	ok	174	
+typed	self_outer	pg-query	ok	174	
+typed	self_outer	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	self_outer	pglite-ivm	ok	174	
+typed	self_outer	pglite-query	ok	174	
+typed	outer_chain	sqlite-ivm	ok	174	
+typed	outer_chain	dd	ok	174	
+typed	outer_chain	prolog	ok	174	
+typed	outer_chain	pg-ivm	ok	174	
+typed	outer_chain	pg-query	ok	174	
+typed	outer_chain	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	outer_chain	pglite-ivm	ok	174	
+typed	outer_chain	pglite-query	ok	174	
+typed	filtered_exists	sqlite-ivm	ok	174	
+typed	filtered_exists	dd	ok	174	
+typed	filtered_exists	prolog	ok	174	
+typed	filtered_exists	pg-ivm	ok	174	
+typed	filtered_exists	pg-query	ok	174	
+typed	filtered_exists	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	filtered_exists	pglite-ivm	ok	174	
+typed	filtered_exists	pglite-query	ok	174	
+typed	filtered_not_exists	sqlite-ivm	ok	174	
+typed	filtered_not_exists	dd	ok	174	
+typed	filtered_not_exists	prolog	ok	174	
+typed	filtered_not_exists	pg-ivm	unsupported	0	this query is not allowed on incrementally maintainable materialized view
+typed	filtered_not_exists	pg-query	ok	174	
+typed	filtered_not_exists	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	filtered_not_exists	pglite-ivm	unsupported	0	this query is not allowed on incrementally maintainable materialized view
+typed	filtered_not_exists	pglite-query	ok	174	
+typed	joined_exists	sqlite-ivm	ok	174	
+typed	joined_exists	dd	ok	174	
+typed	joined_exists	prolog	ok	174	
+typed	joined_exists	pg-ivm	ok	174	
+typed	joined_exists	pg-query	ok	174	
+typed	joined_exists	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	joined_exists	pglite-ivm	ok	174	
+typed	joined_exists	pglite-query	ok	174	
+typed	nullable_sum	sqlite-ivm	ok	174	
+typed	nullable_sum	dd	ok	174	
+typed	nullable_sum	prolog	ok	174	
+typed	nullable_sum	pg-ivm	ok	174	
+typed	nullable_sum	pg-query	ok	174	
+typed	nullable_sum	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	nullable_sum	pglite-ivm	ok	174	
+typed	nullable_sum	pglite-query	ok	174	
+typed	group_only	sqlite-ivm	ok	174	
+typed	group_only	dd	ok	174	
+typed	group_only	prolog	ok	174	
+typed	group_only	pg-ivm	unsupported	0	GROUP BY clause without aggregate is not supported on incrementally maintainable materialized view
+typed	group_only	pg-query	ok	174	
+typed	group_only	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	group_only	pglite-ivm	unsupported	0	GROUP BY clause without aggregate is not supported on incrementally maintainable materialized view
+typed	group_only	pglite-query	ok	174	
+typed	group_ordinals	sqlite-ivm	ok	174	
+typed	group_ordinals	dd	ok	174	
+typed	group_ordinals	prolog	ok	174	
+typed	group_ordinals	pg-ivm	ok	174	
+typed	group_ordinals	pg-query	ok	174	
+typed	group_ordinals	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	group_ordinals	pglite-ivm	ok	174	
+typed	group_ordinals	pglite-query	ok	174	
+typed	aggregate_expression	sqlite-ivm	ok	174	
+typed	aggregate_expression	dd	ok	174	
+typed	aggregate_expression	prolog	ok	174	
+typed	aggregate_expression	pg-ivm	unsupported	0	expression containing an aggregate in it is not supported on incrementally maintainable materialized view
+typed	aggregate_expression	pg-query	ok	174	
+typed	aggregate_expression	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	aggregate_expression	pglite-ivm	unsupported	0	expression containing an aggregate in it is not supported on incrementally maintainable materialized view
+typed	aggregate_expression	pglite-query	ok	174	
+typed	having	sqlite-ivm	ok	174	
+typed	having	dd	ok	174	
+typed	having	prolog	ok	174	
+typed	having	pg-ivm	unsupported	0	HAVING clause is not supported on incrementally maintainable materialized view
+typed	having	pg-query	ok	174	
+typed	having	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	having	pglite-ivm	unsupported	0	HAVING clause is not supported on incrementally maintainable materialized view
+typed	having	pglite-query	ok	174	
+typed	having_alias	sqlite-ivm	ok	174	
+typed	having_alias	dd	ok	174	
+typed	having_alias	prolog	ok	174	
+typed	having_alias	pg-ivm	unsupported	0	HAVING clause is not supported on incrementally maintainable materialized view
+typed	having_alias	pg-query	ok	174	
+typed	having_alias	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	having_alias	pglite-ivm	unsupported	0	HAVING clause is not supported on incrementally maintainable materialized view
+typed	having_alias	pglite-query	ok	174	
+typed	empty_having	sqlite-ivm	ok	174	
+typed	empty_having	dd	ok	174	
+typed	empty_having	prolog	ok	174	
+typed	empty_having	pg-ivm	unsupported	0	HAVING clause is not supported on incrementally maintainable materialized view
+typed	empty_having	pg-query	ok	174	
+typed	empty_having	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	empty_having	pglite-ivm	unsupported	0	HAVING clause is not supported on incrementally maintainable materialized view
+typed	empty_having	pglite-query	ok	174	
+typed	aggregate_filter	sqlite-ivm	ok	174	
+typed	aggregate_filter	dd	ok	174	
+typed	aggregate_filter	prolog	ok	174	
+typed	aggregate_filter	pg-ivm	unsupported	0	aggregate function with FILTER clause is not supported on incrementally maintainable materialized view
+typed	aggregate_filter	pg-query	ok	174	
+typed	aggregate_filter	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	aggregate_filter	pglite-ivm	unsupported	0	aggregate function with FILTER clause is not supported on incrementally maintainable materialized view
+typed	aggregate_filter	pglite-query	ok	174	
+typed	distinct_aggs	sqlite-ivm	ok	174	
+typed	distinct_aggs	dd	ok	174	
+typed	distinct_aggs	prolog	ok	174	
+typed	distinct_aggs	pg-ivm	unsupported	0	aggregate function with DISTINCT arguments is not supported on incrementally maintainable materialized view
+typed	distinct_aggs	pg-query	ok	174	
+typed	distinct_aggs	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	distinct_aggs	pglite-ivm	unsupported	0	aggregate function with DISTINCT arguments is not supported on incrementally maintainable materialized view
+typed	distinct_aggs	pglite-query	ok	174	
+typed	case_cast	sqlite-ivm	ok	174	
+typed	case_cast	dd	ok	174	
+typed	case_cast	prolog	ok	174	
+typed	case_cast	pg-ivm	ok	174	
+typed	case_cast	pg-query	ok	174	
+typed	case_cast	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	case_cast	pglite-ivm	ok	174	
+typed	case_cast	pglite-query	ok	174	
+typed	like	sqlite-ivm	ok	174	
+typed	like	dd	ok	174	
+typed	like	prolog	ok	174	
+typed	like	pg-ivm	ok	174	
+typed	like	pg-query	ok	174	
+typed	like	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	like	pglite-ivm	ok	174	
+typed	like	pglite-query	ok	174	
+typed	cte_columns	sqlite-ivm	ok	174	
+typed	cte_columns	dd	ok	174	
+typed	cte_columns	prolog	ok	174	
+typed	cte_columns	pg-ivm	ok	174	
+typed	cte_columns	pg-query	ok	174	
+typed	cte_columns	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	cte_columns	pglite-ivm	ok	174	
+typed	cte_columns	pglite-query	ok	174	
+typed	cte_shared	sqlite-ivm	ok	174	
+typed	cte_shared	dd	ok	174	
+typed	cte_shared	prolog	ok	174	
+typed	cte_shared	pg-ivm	ok	174	
+typed	cte_shared	pg-query	ok	174	
+typed	cte_shared	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	cte_shared	pglite-ivm	ok	174	
+typed	cte_shared	pglite-query	ok	174	
+typed	distinct_topk	sqlite-ivm	ok	174	
+typed	distinct_topk	dd	ok	174	
+typed	distinct_topk	prolog	ok	174	
+typed	distinct_topk	pg-ivm	unsupported	0	ORDER BY clause is not supported on incrementally maintainable materialized view
+typed	distinct_topk	pg-query	ok	174	
+typed	distinct_topk	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	distinct_topk	pglite-ivm	unsupported	0	ORDER BY clause is not supported on incrementally maintainable materialized view
+typed	distinct_topk	pglite-query	ok	174	
+typed	group_topk	sqlite-ivm	ok	174	
+typed	group_topk	dd	ok	174	
+typed	group_topk	prolog	ok	174	
+typed	group_topk	pg-ivm	unsupported	0	HAVING clause is not supported on incrementally maintainable materialized view
+typed	group_topk	pg-query	ok	174	
+typed	group_topk	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	group_topk	pglite-ivm	unsupported	0	HAVING clause is not supported on incrementally maintainable materialized view
+typed	group_topk	pglite-query	ok	174	
+typed	aggregate_limit_zero	sqlite-ivm	ok	174	
+typed	aggregate_limit_zero	dd	ok	174	
+typed	aggregate_limit_zero	prolog	ok	174	
+typed	aggregate_limit_zero	pg-ivm	unsupported	0	LIMIT/OFFSET clause is not supported on incrementally maintainable materialized view
+typed	aggregate_limit_zero	pg-query	ok	174	
+typed	aggregate_limit_zero	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	aggregate_limit_zero	pglite-ivm	unsupported	0	LIMIT/OFFSET clause is not supported on incrementally maintainable materialized view
+typed	aggregate_limit_zero	pglite-query	ok	174	
+typed	hidden_order	sqlite-ivm	ok	174	
+typed	hidden_order	dd	ok	174	
+typed	hidden_order	prolog	ok	174	
+typed	hidden_order	pg-ivm	unsupported	0	ORDER BY clause is not supported on incrementally maintainable materialized view
+typed	hidden_order	pg-query	ok	174	
+typed	hidden_order	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	hidden_order	pglite-ivm	unsupported	0	ORDER BY clause is not supported on incrementally maintainable materialized view
+typed	hidden_order	pglite-query	ok	174	
+typed	ordinal_order	sqlite-ivm	ok	174	
+typed	ordinal_order	dd	ok	174	
+typed	ordinal_order	prolog	ok	174	
+typed	ordinal_order	pg-ivm	unsupported	0	ORDER BY clause is not supported on incrementally maintainable materialized view
+typed	ordinal_order	pg-query	ok	174	
+typed	ordinal_order	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	ordinal_order	pglite-ivm	unsupported	0	ORDER BY clause is not supported on incrementally maintainable materialized view
+typed	ordinal_order	pglite-query	ok	174	
+typed	compound_topk	sqlite-ivm	ok	174	
+typed	compound_topk	dd	ok	174	
+typed	compound_topk	prolog	ok	174	
+typed	compound_topk	pg-ivm	unsupported	0	ORDER BY clause is not supported on incrementally maintainable materialized view
+typed	compound_topk	pg-query	ok	174	
+typed	compound_topk	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	compound_topk	pglite-ivm	unsupported	0	ORDER BY clause is not supported on incrementally maintainable materialized view
+typed	compound_topk	pglite-query	ok	174	
+typed	bag_topk	sqlite-ivm	ok	174	
+typed	bag_topk	dd	ok	174	
+typed	bag_topk	prolog	ok	174	
+typed	bag_topk	pg-ivm	unsupported	0	ORDER BY clause is not supported on incrementally maintainable materialized view
+typed	bag_topk	pg-query	ok	174	
+typed	bag_topk	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	bag_topk	pglite-ivm	unsupported	0	ORDER BY clause is not supported on incrementally maintainable materialized view
+typed	bag_topk	pglite-query	ok	174	
+typed	window_multi	sqlite-ivm	ok	174	
+typed	window_multi	dd	ok	174	
+typed	window_multi	prolog	ok	174	
+typed	window_multi	pg-ivm	unsupported	0	window functions are not supported on incrementally maintainable materialized view
+typed	window_multi	pg-query	ok	174	
+typed	window_multi	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	window_multi	pglite-ivm	unsupported	0	window functions are not supported on incrementally maintainable materialized view
+typed	window_multi	pglite-query	ok	174	
+typed	window_frame	sqlite-ivm	ok	174	
+typed	window_frame	dd	ok	174	
+typed	window_frame	prolog	ok	174	
+typed	window_frame	pg-ivm	unsupported	0	window functions are not supported on incrementally maintainable materialized view
+typed	window_frame	pg-query	ok	174	
+typed	window_frame	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	window_frame	pglite-ivm	unsupported	0	window functions are not supported on incrementally maintainable materialized view
+typed	window_frame	pglite-query	ok	174	
+typed	window_named	sqlite-ivm	ok	174	
+typed	window_named	dd	ok	174	
+typed	window_named	prolog	ok	174	
+typed	window_named	pg-ivm	unsupported	0	window functions are not supported on incrementally maintainable materialized view
+typed	window_named	pg-query	ok	174	
+typed	window_named	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	window_named	pglite-ivm	unsupported	0	window functions are not supported on incrementally maintainable materialized view
+typed	window_named	pglite-query	ok	174	
+typed	window_topk	sqlite-ivm	ok	174	
+typed	window_topk	dd	ok	174	
+typed	window_topk	prolog	ok	174	
+typed	window_topk	pg-ivm	unsupported	0	ORDER BY clause is not supported on incrementally maintainable materialized view
+typed	window_topk	pg-query	ok	174	
+typed	window_topk	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	window_topk	pglite-ivm	unsupported	0	ORDER BY clause is not supported on incrementally maintainable materialized view
+typed	window_topk	pglite-query	ok	174	
+typed	group_window	sqlite-ivm	ok	174	
+typed	group_window	dd	ok	174	
+typed	group_window	prolog	ok	174	
+typed	group_window	pg-ivm	unsupported	0	ORDER BY clause is not supported on incrementally maintainable materialized view
+typed	group_window	pg-query	ok	174	
+typed	group_window	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	group_window	pglite-ivm	unsupported	0	ORDER BY clause is not supported on incrementally maintainable materialized view
+typed	group_window	pglite-query	ok	174	
+typed	outer_aggregate	sqlite-ivm	ok	174	
+typed	outer_aggregate	dd	ok	174	
+typed	outer_aggregate	prolog	ok	174	
+typed	outer_aggregate	pg-ivm	unsupported	0	this query is not allowed on incrementally maintainable materialized view
+typed	outer_aggregate	pg-query	ok	174	
+typed	outer_aggregate	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	outer_aggregate	pglite-ivm	unsupported	0	this query is not allowed on incrementally maintainable materialized view
+typed	outer_aggregate	pglite-query	ok	174	
+typed	nested_distinct	sqlite-ivm	ok	174	
+typed	nested_distinct	dd	ok	174	
+typed	nested_distinct	prolog	ok	174	
+typed	nested_distinct	pg-ivm	unsupported	0	DISTINCT clause in nested query are not supported on incrementally maintainable materialized view
+typed	nested_distinct	pg-query	ok	174	
+typed	nested_distinct	sqlite-query	oracle	174	Separate SQLite connection used by the native feature adapter
+typed	nested_distinct	pglite-ivm	unsupported	0	DISTINCT clause in nested query are not supported on incrementally maintainable materialized view
+typed	nested_distinct	pglite-query	ok	174	
+dd-contracts	signed_map_filter_flatmap	sqlite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	signed_map_filter_flatmap	dd	ok	5	
+dd-contracts	signed_map_filter_flatmap	prolog	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	signed_map_filter_flatmap	pg-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	signed_map_filter_flatmap	pg-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	signed_map_filter_flatmap	sqlite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	signed_map_filter_flatmap	pglite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	signed_map_filter_flatmap	pglite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	signed_concat_negate	sqlite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	signed_concat_negate	dd	ok	5	
+dd-contracts	signed_concat_negate	prolog	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	signed_concat_negate	pg-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	signed_concat_negate	pg-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	signed_concat_negate	sqlite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	signed_concat_negate	pglite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	signed_concat_negate	pglite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	weighted_join	sqlite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	weighted_join	dd	ok	5	
+dd-contracts	weighted_join	prolog	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	weighted_join	pg-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	weighted_join	pg-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	weighted_join	sqlite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	weighted_join	pglite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	weighted_join	pglite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	shared_arrangement_join	sqlite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	shared_arrangement_join	dd	ok	5	
+dd-contracts	shared_arrangement_join	prolog	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	shared_arrangement_join	pg-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	shared_arrangement_join	pg-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	shared_arrangement_join	sqlite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	shared_arrangement_join	pglite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	shared_arrangement_join	pglite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	custom_weighted_reduce	sqlite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	custom_weighted_reduce	dd	ok	5	
+dd-contracts	custom_weighted_reduce	prolog	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	custom_weighted_reduce	pg-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	custom_weighted_reduce	pg-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	custom_weighted_reduce	sqlite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	custom_weighted_reduce	pglite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	custom_weighted_reduce	pglite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	count_total	sqlite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	count_total	dd	ok	5	
+dd-contracts	count_total	prolog	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	count_total	pg-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	count_total	pg-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	count_total	sqlite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	count_total	pglite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	count_total	pglite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	positive_threshold	sqlite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	positive_threshold	dd	ok	5	
+dd-contracts	positive_threshold	prolog	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	positive_threshold	pg-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	positive_threshold	pg-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	positive_threshold	sqlite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	positive_threshold	pglite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	positive_threshold	pglite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	binary_transitive_closure	sqlite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	binary_transitive_closure	dd	ok	5	
+dd-contracts	binary_transitive_closure	prolog	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	binary_transitive_closure	pg-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	binary_transitive_closure	pg-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	binary_transitive_closure	sqlite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	binary_transitive_closure	pglite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	binary_transitive_closure	pglite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	mutual_even_odd_recursion	sqlite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	mutual_even_odd_recursion	dd	ok	5	
+dd-contracts	mutual_even_odd_recursion	prolog	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	mutual_even_odd_recursion	pg-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	mutual_even_odd_recursion	pg-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	mutual_even_odd_recursion	sqlite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	mutual_even_odd_recursion	pglite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	mutual_even_odd_recursion	pglite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	recursive_min_distance	sqlite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	recursive_min_distance	dd	ok	5	
+dd-contracts	recursive_min_distance	prolog	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	recursive_min_distance	pg-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	recursive_min_distance	pg-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	recursive_min_distance	sqlite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	recursive_min_distance	pglite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	recursive_min_distance	pglite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	nested_fixed_points	sqlite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	nested_fixed_points	dd	ok	5	
+dd-contracts	nested_fixed_points	prolog	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	nested_fixed_points	pg-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	nested_fixed_points	pg-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	nested_fixed_points	sqlite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	nested_fixed_points	pglite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	nested_fixed_points	pglite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	stratified_antijoin_after_recursion	sqlite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	stratified_antijoin_after_recursion	dd	ok	5	
+dd-contracts	stratified_antijoin_after_recursion	prolog	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	stratified_antijoin_after_recursion	pg-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	stratified_antijoin_after_recursion	pg-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	stratified_antijoin_after_recursion	sqlite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	stratified_antijoin_after_recursion	pglite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	stratified_antijoin_after_recursion	pglite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	incomparable_times_join_lub_and_held_frontier	sqlite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	incomparable_times_join_lub_and_held_frontier	dd	ok	2	
+dd-contracts	incomparable_times_join_lub_and_held_frontier	prolog	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	incomparable_times_join_lub_and_held_frontier	pg-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	incomparable_times_join_lub_and_held_frontier	pg-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	incomparable_times_join_lub_and_held_frontier	sqlite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	incomparable_times_join_lub_and_held_frontier	pglite-ivm	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite
+dd-contracts	incomparable_times_join_lub_and_held_frontier	pglite-query	adapter-missing	0	DD-specific timestamp/weighted/recursive graph contract; no equivalent adapter in this suite

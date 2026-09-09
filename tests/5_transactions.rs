@@ -72,15 +72,27 @@ fn wal_snapshots_writer_contention_and_failed_maintenance_are_atomic() -> Result
         rows(&writer, "SELECT * FROM result")?,
         rows(&writer, query)?
     );
-    // The verification query must detect intentional state corruption.
-    writer.execute_batch("BEGIN;UPDATE result_state SET c2=1234567")?;
+    // SQLite protects module-declared shadow tables from external writes while
+    // the module is registered. Use an unregistered connection to simulate
+    // on-disk corruption, then verify that the ordinary query detects it.
+    drop(reader);
+    drop(contender);
+    drop(writer);
+    let raw = Connection::open(&path)?;
+    raw.execute_batch("UPDATE result_state SET c2=1234567")?;
+    drop(raw);
+    let writer = open(&path)?;
     assert_ne!(
         rows(&writer, "SELECT * FROM result")?,
         rows(&writer, query)?
     );
-    writer.execute_batch("ROLLBACK")?;
-    drop(reader);
-    drop(contender);
+    // A no-op source update runs the normal maintenance path and repairs the
+    // deliberately corrupted aggregate state.
+    writer.execute_batch("UPDATE a SET v=v")?;
+    assert_eq!(
+        rows(&writer, "SELECT * FROM result")?,
+        rows(&writer, query)?
+    );
     drop(writer);
     let reopened = open(&path)?;
     assert_eq!(
