@@ -1,0 +1,24 @@
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8): No such file or directory
+   Compiling sqlite-ivm v0.2.0 (/Users/chrishafley/projects/sprefa/sqlite_ivm)
+    Building [========================>  ] 48/51: sqlite-ivm                      Building [========================>  ] 49/51: 5_transactions(test), 4_fea…    Building [=========================> ] 50/51: 5_transactions(test)            Finished `test` profile [unoptimized] target(s) in 2.41s
+     Running tests/4_features.rs (sqlite_ivm/target/debug/build/sqlite-ivm/9c23b753781426c1/out/4_features-9c23b753781426c1)
+
+running 6 tests
+test materialized_output_affinity_matches_ordinary_view_consumers ... ok
+test parenthesized_join_scopes_and_nonrecursive_union_cte ... ok
+test recursive_delete_preserves_alternate_null_support_and_collated_roots ... ok
+test blobs_and_adjacent_floats_survive_trigger_transport ... ok
+test collations_control_group_distinct_join_and_outer_predicates ... ok
+test feature_compositions_against_sqlite ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.92s
+
+     Running tests/5_transactions.rs (sqlite_ivm/target/debug/build/sqlite-ivm/36168870db3eeda9/out/5_transactions-36168870db3eeda9)
+
+running 3 tests
+test deterministic_registered_scalars_and_rejected_volatile_functions ... ok
+test wal_snapshots_writer_contention_and_failed_maintenance_are_atomic ... ok
+test cascades_generated_values_and_user_trigger_writes_compose ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+

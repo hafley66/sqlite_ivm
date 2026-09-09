@@ -1,0 +1,41 @@
+[package]
+name = "sqlite-ivm"
+version = "0.2.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Transactional incremental SQL views for SQLite using persistent virtual-table operator state"
+readme = "README.md"
+
+[workspace]
+
+[lib]
+name = "sqlite_ivm"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Ordinary cargo test links SQLite; native extension builds opt into the host ABI.
+default = []
+extension = ["rusqlite/loadable_extension"]
+bench = ["rusqlite/load_extension"]
+
+[dependencies]
+rusqlite = { version = "=0.40.2", features = ["functions", "vtab"] }
+sqlite3-parser = "=0.17.0"
+
+[profile.dev]
+debug = 0
+
+[dev-dependencies]
+serde_json = "1"
+sha2 = "0.10"
+
+[[example]]
+name = "4_sqlite_case"
+path = "examples/4_sqlite_case.rs"
+required-features = ["bench"]
+
+[[example]]
+name = "5_feature_case"
+path = "examples/5_feature_case.rs"
+required-features = ["bench"]

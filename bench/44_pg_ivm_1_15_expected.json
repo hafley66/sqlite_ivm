@@ -1,0 +1,360 @@
+{
+  "version": "1.15",
+  "cases": [
+    {
+      "name": "aggregate_expression",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "aggregate_filter",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "aggregate_limit_zero",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "bag_topk",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "case_cast",
+      "status": "ok",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "comma_filter",
+      "status": "ok",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "compound_topk",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "cross_join",
+      "status": "ok",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "cte_columns",
+      "status": "ok",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "cte_shared",
+      "status": "ok",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "distinct_aggs",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "distinct_topk",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "empty_having",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "filtered_exists",
+      "status": "ok",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "filtered_not_exists",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "full_join",
+      "status": "ok",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "full_residual",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "group_only",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "group_ordinals",
+      "status": "ok",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "group_topk",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "group_window",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "having",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "having_alias",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "hidden_order",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "joined_exists",
+      "status": "ok",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "left_residual",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "like",
+      "status": "ok",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "natural_left",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "nested_distinct",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "nullable_sum",
+      "status": "ok",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "ordinal_order",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "outer_aggregate",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "outer_chain",
+      "status": "ok",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "qualified_star",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "right_join",
+      "status": "ok",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "self_outer",
+      "status": "ok",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "theta_join",
+      "status": "ok",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "using_full",
+      "status": "mismatch",
+      "mismatches": 168,
+      "first_mismatch": {
+        "step": 6,
+        "mutation": "DELETE FROM b WHERE bid=1",
+        "actual": [
+          [
+            2,
+            2,
+            2,
+            4,
+            2
+          ],
+          [
+            3,
+            3,
+            null,
+            5,
+            null
+          ],
+          [
+            4,
+            4,
+            4,
+            2,
+            4
+          ],
+          [
+            null,
+            1,
+            null,
+            1,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            3,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            3
+          ]
+        ],
+        "expected": [
+          [
+            1,
+            1,
+            null,
+            1,
+            null
+          ],
+          [
+            2,
+            2,
+            2,
+            4,
+            2
+          ],
+          [
+            3,
+            3,
+            null,
+            5,
+            null
+          ],
+          [
+            4,
+            4,
+            4,
+            2,
+            4
+          ],
+          [
+            null,
+            null,
+            null,
+            3,
+            null
+          ],
+          [
+            null,
+            null,
+            null,
+            null,
+            3
+          ]
+        ]
+      }
+    },
+    {
+      "name": "using_inner",
+      "status": "ok",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "using_star",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "window_frame",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "window_multi",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "window_named",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    },
+    {
+      "name": "window_topk",
+      "status": "unsupported",
+      "mismatches": 0,
+      "first_mismatch": null
+    }
+  ]
+}

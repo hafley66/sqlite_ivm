@@ -1,0 +1,16 @@
+#[path = "0a_catalog.rs"]
+pub mod catalog;
+#[path = "3_extension.rs"]
+pub mod extension;
+#[path = "1_maintenance.rs"]
+pub mod maintenance;
+#[path = "0_query.rs"]
+pub mod query;
+#[path = "0b_relational.rs"]
+pub mod relational;
+#[path = "1a_relational.rs"]
+pub mod relational_maintenance;
+#[path = "2a_source_ddl.rs"]
+pub mod source_ddl;
+#[path = "2_vtab.rs"]
+pub mod vtab;
