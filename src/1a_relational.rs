@@ -384,6 +384,13 @@ impl Plan {
         row: Row,
         d: i64,
     ) -> Result<()> {
+        let _span = tracing::debug_span!(
+            "maintain",
+            view = name,
+            source = self.sources[source].name.as_str(),
+            sign = d.signum()
+        )
+        .entered();
         for (value, affinity) in row.iter().zip(&self.sources[source].affinities) {
             let valid = match value {
                 Value::Null => true,
@@ -728,6 +735,21 @@ impl Plan {
         d: i64,
         rules: &[Rule],
     ) -> Result<Vec<Delta>> {
+        let span = tracing::debug_span!(
+            "fixpoint",
+            view = name,
+            node = id,
+            rows_in = d.abs(),
+            rounds = tracing::field::Empty
+        )
+        .entered();
+        let round_count = std::cell::Cell::new(0usize);
+        let round_span = |phase: &'static str| {
+            let index = round_count.get();
+            round_count.set(index + 1);
+            span.record("rounds", index + 1);
+            tracing::debug_span!("round", phase, index, rows = tracing::field::Empty).entered()
+        };
         let node = &self.nodes[id];
         let (old, new) = change(db, &table(name, id, side), &key(db, row)?, row, d)?;
         if (old > 0) == (new > 0) {
@@ -763,9 +785,12 @@ impl Plan {
                 if hi == lo {
                     return Ok(());
                 }
+                let round = round_span("derive");
+                let mut written = 0;
                 for rule in rules.iter().filter(|r| r.member().is_some()) {
-                    derive(&all, rule, &roles(name, id, side, rule, None, Role::Range(all.clone(), lo, hi)), false)?;
+                    written += derive(&all, rule, &roles(name, id, side, rule, None, Role::Range(all.clone(), lo, hi)), false)?;
                 }
+                round.record("rows", written);
                 lo = hi;
             }
         };
@@ -797,13 +822,16 @@ impl Plan {
             if hi == lo {
                 break;
             }
+            let round = round_span("delete");
             db.execute_cached(
                 &format!("DELETE FROM {all} WHERE __k IN (SELECT __k FROM {work} WHERE rowid>?1 AND rowid<=?2)"),
                 rusqlite::params![lo, hi],
             )?;
+            let mut written = 0;
             for rule in rules.iter().filter(|r| r.member().is_some()) {
-                derive(&work, rule, &roles(name, id, side, rule, None, Role::Range(work.clone(), lo, hi)), true)?;
+                written += derive(&work, rule, &roles(name, id, side, rule, None, Role::Range(work.clone(), lo, hi)), true)?;
             }
+            round.record("rows", written);
             lo = hi;
         }
         let mut params = vec![];

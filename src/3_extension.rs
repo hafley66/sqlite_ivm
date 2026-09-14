@@ -1,7 +1,47 @@
 use crate::query::{error, quote};
+use hafley_observe::{Config, FormatConfig, OutputFormat};
 use rusqlite::{functions::FunctionFlags, Connection, Result};
+use std::io::IsTerminal;
+use tracing_subscriber::{
+    fmt::{format::FmtSpan, writer::BoxMakeWriter},
+    layer::SubscriberExt,
+    util::SubscriberInitExt,
+};
+
+static OBSERVE: std::sync::Once = std::sync::Once::new();
+
+// Maintenance logs no events, so spans report on close with their busy/idle time.
+// A host process that already owns a global subscriber keeps it; try_init fails quietly.
+fn observe() {
+    OBSERVE.call_once(|| {
+        let ansi = std::io::stderr().is_terminal();
+        let version = env!("CARGO_PKG_VERSION");
+        let config = Config::from_env("sqlite_ivm", version, "warn", ansi).unwrap_or(Config {
+            service_name: "sqlite_ivm",
+            service_version: version,
+            default_filter: "warn",
+            format: OutputFormat::Human,
+            ansi,
+        });
+        let format = FormatConfig {
+            span_events: FmtSpan::CLOSE,
+            ..FormatConfig::standard(config.format, config.ansi)
+        };
+        let installed = tracing_subscriber::registry()
+            .with(hafley_observe::env_filter(config.default_filter))
+            .with(hafley_observe::format_layer(
+                format,
+                BoxMakeWriter::new(std::io::stderr),
+            ))
+            .try_init();
+        if installed.is_ok() {
+            hafley_observe::startup(&config);
+        }
+    });
+}
 
 pub fn register(db: &Connection) -> Result<()> {
+    observe();
     crate::vtab::register(db)?;
     crate::source_ddl::register(db)?;
     db.create_scalar_function(

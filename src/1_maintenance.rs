@@ -105,6 +105,13 @@ pub fn maintain(
     adding: bool,
     payload: &str,
 ) -> Result<()> {
+    let _span = tracing::debug_span!(
+        "maintain",
+        view = name,
+        source = query.tables[source].as_str(),
+        sign = if adding { 1 } else { -1 }
+    )
+    .entered();
     let store = quote(&format!("{name}_state"));
     let delta = quote(&format!("{name}_delta"));
     let columns = used_columns(query)

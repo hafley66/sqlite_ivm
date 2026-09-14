@@ -142,6 +142,14 @@ maintenance interfaces, not a security boundary. Direct internal commands and
 catalog edits are outside the supported API. No persistent triggers are installed
 on shadow tables, which is required for reopening on SQLite 3.53.2.
 
+Maintenance emits `tracing` spans through `hafley-observe`, installed once on the
+first `register` (extension load included) unless the host process already owns a
+global subscriber. The default filter is `warn`, so nothing prints until
+`RUST_LOG=sqlite_ivm=debug` (or another `RUST_LOG` filter) asks for it;
+`HAFLEY_LOG_FORMAT=json` switches the format. Spans are `maintain` (view, source
+table, sign), `fixpoint` (view, node, rows in, rounds) and `round` (phase, index,
+rows written). Fields carry names and integers, never row contents.
+
 ## Build, test, package
 
 ```bash
