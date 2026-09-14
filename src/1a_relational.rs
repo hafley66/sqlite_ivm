@@ -296,7 +296,7 @@ impl Plan {
                 for side in [member, member + 1] {
                     let t = format!("{name}_op{id}_{side}");
                     db.execute_batch(&format!(
-                        "CREATE TABLE main.{}(__k TEXT NOT NULL UNIQUE,{},__n INTEGER NOT NULL DEFAULT 0)",
+                        "CREATE TABLE main.{}(__k TEXT NOT NULL UNIQUE,{})",
                         quote(&t),
                         columns(node.fields.len())
                     ))?;
@@ -775,9 +775,6 @@ impl Plan {
                 .map(|r| (r, sign))
                 .collect())
         };
-        if std::env::var_os("SQLITE_IVM_COUNTING").is_some() {
-            return self.fixpoint_counting(db, name, id, side, row, new > 0, rules, &all, &work);
-        }
         if new > 0 {
             let lo = max_rowid(db, &all)?;
             for rule in rules.iter().filter(|r| r.mentions(side)) {
@@ -844,88 +841,6 @@ impl Plan {
             &[],
             -1,
         )?;
-        db.execute_cached(&format!("DELETE FROM {work}"), [])?;
-        Ok(removed)
-    }
-    /// EXPERIMENT (throwaway): support counting without rederivation.
-    #[allow(clippy::too_many_arguments)]
-    fn fixpoint_counting(
-        &self,
-        db: &Connection,
-        name: &str,
-        id: usize,
-        side: usize,
-        row: &Row,
-        appeared: bool,
-        rules: &[Rule],
-        all: &str,
-        work: &str,
-    ) -> Result<Vec<Delta>> {
-        let width = self.nodes[id].fields.len();
-        let cols = columns(width);
-        let counted = |rule: &Rule, roles: &[Role<'_>], params: &mut Vec<Value>| {
-            let from = rule_from(rule, roles, params);
-            format!(
-                "SELECT __k,{cols},count(*) AS __d FROM (SELECT {} AS __k,{} {from}{}) GROUP BY __k",
-                rule.key,
-                rule.head.iter().enumerate().map(|(i, h)| format!("{h} AS c{i}")).collect::<Vec<_>>().join(","),
-                rule_where(rule, None)
-            )
-        };
-        let add = |rule: &Rule, roles: &[Role<'_>]| -> Result<()> {
-            let mut params = vec![];
-            let select = counted(rule, roles, &mut params);
-            db.execute_cached(
-                &format!("INSERT INTO {all}(__k,{cols},__n) SELECT * FROM ({select}) WHERE true ON CONFLICT(__k) DO UPDATE SET __n=__n+excluded.__n"),
-                params_from_iter(params),
-            )?;
-            Ok(())
-        };
-        let subtract = |rule: &Rule, roles: &[Role<'_>]| -> Result<()> {
-            let mut params = vec![];
-            let select = counted(rule, roles, &mut params);
-            db.execute_cached(
-                &format!("UPDATE {all} SET __n=__n-d.__d FROM ({select}) d WHERE {all}.__k=d.__k"),
-                params_from_iter(params),
-            )?;
-            Ok(())
-        };
-        if appeared {
-            let mut lo = max_rowid(db, all)?;
-            let start = lo;
-            for rule in rules.iter().filter(|r| r.mentions(side)) {
-                add(rule, &roles(name, id, side, rule, Some(row), Role::Table(all.to_string())))?;
-            }
-            loop {
-                let hi = max_rowid(db, all)?;
-                if hi == lo {
-                    break;
-                }
-                for rule in rules.iter().filter(|r| r.member().is_some()) {
-                    add(rule, &roles(name, id, side, rule, None, Role::Range(all.to_string(), lo, hi)))?;
-                }
-                lo = hi;
-            }
-            return Ok(rows(db, &format!("SELECT {cols} FROM {all} WHERE rowid>?1"), &[Value::Integer(start)])?.into_iter().map(|r| (r, 1)).collect());
-        }
-        db.execute_cached(&format!("DELETE FROM {work}"), [])?;
-        for rule in rules.iter().filter(|r| r.mentions(side)) {
-            subtract(rule, &roles(name, id, side, rule, Some(row), Role::Table(all.to_string())))?;
-        }
-        let mut lo = 0;
-        loop {
-            db.execute_cached(&format!("INSERT INTO {work}(__k,{cols}) SELECT __k,{cols} FROM {all} WHERE __n<=0"), [])?;
-            db.execute_cached(&format!("DELETE FROM {all} WHERE __n<=0"), [])?;
-            let hi = max_rowid(db, work)?;
-            if hi == lo {
-                break;
-            }
-            for rule in rules.iter().filter(|r| r.member().is_some()) {
-                subtract(rule, &roles(name, id, side, rule, None, Role::Range(work.to_string(), lo, hi)))?;
-            }
-            lo = hi;
-        }
-        let removed = rows(db, &format!("SELECT {cols} FROM {work}"), &[])?.into_iter().map(|r| (r, -1)).collect();
         db.execute_cached(&format!("DELETE FROM {work}"), [])?;
         Ok(removed)
     }

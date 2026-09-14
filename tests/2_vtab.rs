@@ -26,14 +26,12 @@ fn verify(db: &Connection, name: &str) -> Result<()> {
         rows(&format!("SELECT * FROM {name} ORDER BY 1"))?,
         rows(&format!("{QUERY} ORDER BY 1"))?
     );
-    for suffix in ["delta"] {
-        assert_eq!(
-            db.query_row(&format!("SELECT COUNT(*) FROM {name}_{suffix}"), [], |r| {
-                r.get::<_, i64>(0)
-            })?,
-            0
-        );
-    }
+    assert_eq!(
+        db.query_row(&format!("SELECT COUNT(*) FROM {name}_delta"), [], |r| {
+            r.get::<_, i64>(0)
+        })?,
+        0
+    );
     Ok(())
 }
 fn schema(db: &Connection) -> Result<Vec<(String, String, String)>> {

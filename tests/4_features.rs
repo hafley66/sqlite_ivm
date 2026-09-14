@@ -415,33 +415,3 @@ fn recursion_statement_count_is_linear_in_new_closure_rows() -> Result<()> {
     Ok(())
 }
 
-// EXPERIMENT (throwaway): DRed vs support counting on fixture rows 1 and 2.
-#[test]
-fn measure_recursion_strategies() -> Result<()> {
-    let fixture: serde_json::Value =
-        serde_json::from_str(include_str!("fixtures/1_features.json")).unwrap();
-    for wanted in ["closure_binary", "parity_recursion", "row1_cycles", "row2_cycles"] {
-        let (schema, query, mutations): (String, String, Vec<String>) = match wanted {
-            "row1_cycles" => (GRAPH.into(), "WITH RECURSIVE path(src,dst) AS(SELECT a,b FROM edges UNION SELECT p.src,e.b FROM path p JOIN edges e ON p.dst=e.a) SELECT src,dst FROM path".into(), GRAPH_MUTATIONS.iter().map(|s| s.to_string()).collect()),
-            "row2_cycles" => (GRAPH.into(), "WITH RECURSIVE parity(node,odd) AS(SELECT k,0 FROM roots UNION SELECT e.b,1-p.odd FROM parity p JOIN edges e ON p.node=e.a) SELECT node,odd FROM parity".into(), GRAPH_MUTATIONS.iter().map(|s| s.to_string()).collect()),
-            _ => {
-                let case = fixture["cases"].as_array().unwrap().iter().find(|c| c["name"] == wanted).unwrap();
-                (fixture["schema"].as_str().unwrap().into(), case["query"].as_str().unwrap().into(), fixture["mutations"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect())
-            }
-        };
-        let db = recursion_database(&schema)?;
-        db.execute_batch(&format!("CREATE VIRTUAL TABLE result USING sqlite_ivm('{}')", query.replace('\'', "''")))?;
-        let start = std::time::Instant::now();
-        let mut mismatches = 0;
-        let mut first = None;
-        for (step, sql) in mutations.iter().enumerate() {
-            db.execute_batch(sql)?;
-            if rows(&db, "SELECT * FROM result")? != rows(&db, &query)? {
-                mismatches += 1;
-                first.get_or_insert(step);
-            }
-        }
-        println!("MEASURE mode={} case={wanted} states={} mismatches={mismatches} first={first:?} wall_ms={:.1}", if std::env::var_os("SQLITE_IVM_COUNTING").is_some() { "counting" } else { "dred" }, mutations.len() + 1, start.elapsed().as_secs_f64() * 1000.0);
-    }
-    Ok(())
-}
