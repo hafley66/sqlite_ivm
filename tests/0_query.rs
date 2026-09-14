@@ -338,7 +338,41 @@ fn recursive_shapes_bind_to_one_fixpoint_node_or_name_their_rejection() -> Resul
         ("WITH RECURSIVE r(a) AS(SELECT k FROM roots UNION SELECT e.b FROM r JOIN edges e USING(a)) SELECT a FROM r".into(), "unsupported recursive step"),
     ];
     for (sql, message) in rejected {
-        assert_eq!(bind_plan(&db, &sql).unwrap_err().to_string(), message, "{sql}");
+        assert_eq!(
+            bind_plan(&db, &sql).unwrap_err().to_string(),
+            message,
+            "{sql}"
+        );
     }
+    Ok(())
+}
+
+#[test]
+fn comma_joins_take_equality_keys_from_where() -> Result<()> {
+    use sqlite_ivm::relational::{bind as bind_plan, Kind};
+    let db = database()?;
+    let sql = "SELECT i.id AS x,p.id AS y,q.id AS z FROM items i, items p, items q
+        WHERE p.group_id=i.group_id AND q.group_id=i.group_id";
+    let plan = bind_plan(&db, sql)?;
+    let joins = plan
+        .nodes
+        .iter()
+        .filter_map(|n| match &n.kind {
+            Kind::Join { left, right, .. } => Some((left.len(), right.len())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(joins, vec![(1, 1), (1, 1)], "{sql}");
+    let sql = "SELECT i.id AS x,p.id AS y FROM items i, items p WHERE p.group_id=i.group_id AND i.amount>0";
+    let plan = bind_plan(&db, sql)?;
+    let joins = plan
+        .nodes
+        .iter()
+        .filter_map(|n| match &n.kind {
+            Kind::Join { left, right, .. } => Some((left.len(), right.len())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(joins, vec![(1, 1)], "{sql}");
     Ok(())
 }

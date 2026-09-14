@@ -283,13 +283,25 @@ fn verify_recursion(query: &str) -> Result<()> {
         "CREATE VIRTUAL TABLE result USING sqlite_ivm('{}')",
         query.replace('\'', "''")
     ))?;
-    assert_eq!(rows(&db, "SELECT * FROM result")?, rows(&db, query)?, "empty");
+    assert_eq!(
+        rows(&db, "SELECT * FROM result")?,
+        rows(&db, query)?,
+        "empty"
+    );
     for sql in GRAPH_MUTATIONS {
         db.execute_batch(sql)?;
-        assert_eq!(rows(&db, "SELECT * FROM result")?, rows(&db, query)?, "{sql}");
+        assert_eq!(
+            rows(&db, "SELECT * FROM result")?,
+            rows(&db, query)?,
+            "{sql}"
+        );
     }
     db.execute_batch("ALTER TABLE result RENAME TO renamed;INSERT INTO roots VALUES(4);INSERT INTO edges VALUES(4,5),(5,4)")?;
-    assert_eq!(rows(&db, "SELECT * FROM renamed")?, rows(&db, query)?, "renamed");
+    assert_eq!(
+        rows(&db, "SELECT * FROM renamed")?,
+        rows(&db, query)?,
+        "renamed"
+    );
     db.execute_batch("DROP TABLE renamed")?;
     assert_eq!(
         db.query_row("SELECT count(*) FROM sqlite_schema WHERE name LIKE '%result%' OR name LIKE '%renamed%'",[],|r| r.get::<_, i64>(0))?,
@@ -370,7 +382,11 @@ fn trace(db: &Connection, mask: std::ffi::c_uint) {
         rusqlite::ffi::sqlite3_trace_v2(
             db.handle(),
             mask,
-            if mask == 0 { None } else { Some(count_statement) },
+            if mask == 0 {
+                None
+            } else {
+                Some(count_statement)
+            },
             std::ptr::null_mut(),
         );
     }
@@ -379,7 +395,9 @@ fn closure_statements(chain: i64) -> Result<(usize, i64)> {
     let db = recursion_database("CREATE TABLE edges(a INTEGER,b INTEGER)")?;
     let query = "WITH RECURSIVE path(src,dst) AS(SELECT a,b FROM edges UNION SELECT p.src,e.b FROM path p JOIN edges e ON p.dst=e.a) SELECT src,dst FROM path";
     db.execute_batch(&format!("WITH RECURSIVE n(i) AS(SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<{chain}) INSERT INTO edges SELECT i,i+1 FROM n WHERE i<{chain}"))?;
-    db.execute_batch(&format!("CREATE VIRTUAL TABLE closure USING sqlite_ivm('{query}')"))?;
+    db.execute_batch(&format!(
+        "CREATE VIRTUAL TABLE closure USING sqlite_ivm('{query}')"
+    ))?;
     let before: i64 = db.query_row("SELECT count(*) FROM closure", [], |r| r.get(0))?;
     trace(&db, rusqlite::ffi::SQLITE_TRACE_STMT);
     STATEMENTS.store(0, std::sync::atomic::Ordering::Relaxed);
@@ -390,7 +408,11 @@ fn closure_statements(chain: i64) -> Result<(usize, i64)> {
     let statements = STATEMENTS.load(std::sync::atomic::Ordering::Relaxed);
     trace(&db, 0);
     let after: i64 = db.query_row("SELECT count(*) FROM closure", [], |r| r.get(0))?;
-    assert_eq!(after - before, chain, "new closure rows for one appended edge");
+    assert_eq!(
+        after - before,
+        chain,
+        "new closure rows for one appended edge"
+    );
     assert_eq!(rows(&db, "SELECT * FROM closure")?, rows(&db, query)?);
     Ok((statements, chain))
 }
@@ -415,3 +437,89 @@ fn recursion_statement_count_is_linear_in_new_closure_rows() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn comma_join_star_predicate_matches_plain_query() -> Result<()> {
+    let db = Connection::open_in_memory()?;
+    register(&db)?;
+    db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON")?;
+    db.execute_batch(
+        "CREATE TABLE a(id INTEGER PRIMARY KEY,k INTEGER);
+        CREATE TABLE b(id INTEGER PRIMARY KEY,k INTEGER);
+        CREATE TABLE c(id INTEGER PRIMARY KEY,k INTEGER);
+        WITH RECURSIVE s(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM s WHERE x<1000)
+        INSERT INTO a SELECT x,x FROM s;
+        WITH RECURSIVE s(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM s WHERE x<1000)
+        INSERT INTO b SELECT x,x FROM s;
+        WITH RECURSIVE s(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM s WHERE x<1000)
+        INSERT INTO c SELECT x,x FROM s;",
+    )?;
+    let query = "SELECT a.id AS x,b.id AS y,c.id AS z FROM a,b,c WHERE b.k=a.k AND c.k=a.k";
+    db.execute_batch(&format!(
+        "CREATE VIRTUAL TABLE result USING sqlite_ivm('{query}')"
+    ))?;
+    let compare = |tag: &str| -> Result<()> {
+        assert_eq!(
+            rows(&db, "SELECT * FROM result")?,
+            rows(&db, query)?,
+            "{tag}"
+        );
+        Ok(())
+    };
+    compare("empty")?;
+    for sql in [
+        "INSERT INTO a VALUES(1001,1001)",
+        "INSERT INTO b VALUES(1001,1001)",
+        "INSERT INTO c VALUES(1001,1001)",
+        "UPDATE b SET k=2000 WHERE id=1",
+        "DELETE FROM b WHERE k=2000",
+        "DELETE FROM a WHERE id=2",
+        "DELETE FROM c",
+    ] {
+        db.execute_batch(sql)?;
+        compare(sql)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn comma_join_arrangements_hold_side_row_counts_never_the_product() -> Result<()> {
+    let db = Connection::open_in_memory()?;
+    register(&db)?;
+    db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON")?;
+    db.execute_batch(
+        "CREATE TABLE a(id INTEGER PRIMARY KEY,k INTEGER);
+        CREATE TABLE b(id INTEGER PRIMARY KEY,k INTEGER);
+        CREATE TABLE c(id INTEGER PRIMARY KEY,k INTEGER);
+        WITH RECURSIVE s(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM s WHERE x<1000)
+        INSERT INTO a SELECT x,x FROM s;
+        WITH RECURSIVE s(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM s WHERE x<1000)
+        INSERT INTO b SELECT x,x FROM s;
+        WITH RECURSIVE s(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM s WHERE x<1000)
+        INSERT INTO c SELECT x,x FROM s;",
+    )?;
+    let query = "SELECT a.id AS x,b.id AS y,c.id AS z FROM a,b,c WHERE b.k=a.k AND c.k=a.k";
+    db.execute_batch(&format!(
+        "CREATE VIRTUAL TABLE result USING sqlite_ivm('{query}')"
+    ))?;
+    let arrangements = rows(
+        &db,
+        "SELECT object_name FROM main.__ivm_objects
+        WHERE view_name='result' AND object_type='table' AND object_name LIKE 'result_op%'",
+    )?
+    .into_iter()
+    .map(|r| match &r[0] {
+        Value::Text(s) => s.clone(),
+        v => panic!("unexpected object name {v:?}"),
+    })
+    .collect::<Vec<_>>();
+    assert_eq!(arrangements.len(), 4, "{arrangements:?}");
+    for name in arrangements {
+        let (n, total): (i64, i64) = db.query_row(
+            &format!("SELECT COUNT(*),COALESCE(SUM(__n),0) FROM main.\"{name}\""),
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        assert_eq!((n, total), (1000, 1000), "{name}");
+    }
+    Ok(())
+}

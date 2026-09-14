@@ -40,7 +40,7 @@ The general virtual-table reader currently scans stored output rows.
 | Operator | Implemented contract |
 |---|---|
 | Projection and selection | Arithmetic and bit operations, comparisons, CASE, CAST, LIKE/GLOB, NULL tests, literal IN/BETWEEN, deterministic SQLite and registered scalar functions |
-| Joins | INNER, LEFT, RIGHT, FULL, CROSS; ON, USING, NATURAL; composite keys, residual predicates, non-equality conditions, self joins, parenthesized join trees |
+| Joins | INNER, LEFT, RIGHT, FULL, CROSS; ON, USING, NATURAL; comma joins and `JOIN` without ON take their equality keys from WHERE conjuncts; composite keys, residual predicates, non-equality conditions, self joins, parenthesized join trees |
 | Existence | Correlated EXISTS / NOT EXISTS under AND, including filtered and joined subqueries |
 | Aggregation | Composite groups and ordinals; COUNT, SUM, AVG, MIN, MAX; DISTINCT arguments, FILTER, aggregate expressions, HAVING, empty global aggregates |
 | Sets | DISTINCT, UNION ALL, UNION, EXCEPT, INTERSECT |

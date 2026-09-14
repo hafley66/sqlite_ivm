@@ -759,7 +759,11 @@ impl Plan {
         let cols = columns(width);
         let all = table(name, id, node.inputs.len());
         let work = table(name, id, node.inputs.len() + 1);
-        let derive = |target: &str, rule: &Rule, roles: &[Role<'_>], only_present: bool| -> Result<usize> {
+        let derive = |target: &str,
+                      rule: &Rule,
+                      roles: &[Role<'_>],
+                      only_present: bool|
+         -> Result<usize> {
             let mut params = vec![];
             let from = rule_from(rule, roles, &mut params);
             let sql = if only_present {
@@ -788,7 +792,12 @@ impl Plan {
                 let round = round_span("derive");
                 let mut written = 0;
                 for rule in rules.iter().filter(|r| r.member().is_some()) {
-                    written += derive(&all, rule, &roles(name, id, side, rule, None, Role::Range(all.clone(), lo, hi)), false)?;
+                    written += derive(
+                        &all,
+                        rule,
+                        &roles(name, id, side, rule, None, Role::Range(all.clone(), lo, hi)),
+                        false,
+                    )?;
                 }
                 round.record("rows", written);
                 lo = hi;
@@ -803,7 +812,12 @@ impl Plan {
         if new > 0 {
             let lo = max_rowid(db, &all)?;
             for rule in rules.iter().filter(|r| r.mentions(side)) {
-                derive(&all, rule, &roles(name, id, side, rule, Some(row), Role::Table(all.clone())), false)?;
+                derive(
+                    &all,
+                    rule,
+                    &roles(name, id, side, rule, Some(row), Role::Table(all.clone())),
+                    false,
+                )?;
             }
             rounds(lo)?;
             return read(
@@ -814,7 +828,12 @@ impl Plan {
         }
         db.execute_cached(&format!("DELETE FROM {work}"), [])?;
         for rule in rules.iter().filter(|r| r.mentions(side)) {
-            derive(&work, rule, &roles(name, id, side, rule, Some(row), Role::Table(all.clone())), true)?;
+            derive(
+                &work,
+                rule,
+                &roles(name, id, side, rule, Some(row), Role::Table(all.clone())),
+                true,
+            )?;
         }
         let mut lo = 0;
         loop {
@@ -829,7 +848,19 @@ impl Plan {
             )?;
             let mut written = 0;
             for rule in rules.iter().filter(|r| r.member().is_some()) {
-                written += derive(&work, rule, &roles(name, id, side, rule, None, Role::Range(work.clone(), lo, hi)), true)?;
+                written += derive(
+                    &work,
+                    rule,
+                    &roles(
+                        name,
+                        id,
+                        side,
+                        rule,
+                        None,
+                        Role::Range(work.clone(), lo, hi),
+                    ),
+                    true,
+                )?;
             }
             round.record("rows", written);
             lo = hi;
@@ -837,7 +868,11 @@ impl Plan {
         let mut params = vec![];
         let mut derivable = vec![];
         for rule in rules {
-            let from = rule_from(rule, &roles(name, id, side, rule, None, Role::Table(all.clone())), &mut params);
+            let from = rule_from(
+                rule,
+                &roles(name, id, side, rule, None, Role::Table(all.clone())),
+                &mut params,
+            );
             let matched = rule
                 .head
                 .iter()

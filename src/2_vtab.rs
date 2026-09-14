@@ -183,7 +183,11 @@ impl Table {
         conn.execute_batch("CREATE TABLE IF NOT EXISTS main.__ivm_schema(id INTEGER PRIMARY KEY,declaration TEXT NOT NULL,generic INTEGER NOT NULL,roles TEXT NOT NULL,format_version INTEGER NOT NULL)")?;
         // Format 3 is the fixpoint member layout; plans without recursion keep
         // format 2 so the 0.2.x extension still maintains them.
-        let format = if plan.as_ref().is_some_and(recursive) { 3 } else { 2 };
+        let format = if plan.as_ref().is_some_and(recursive) {
+            3
+        } else {
+            2
+        };
         conn.execute(
             "INSERT INTO main.__ivm_schema VALUES(?1,?2,?3,?4,?5)",
             rusqlite::params![

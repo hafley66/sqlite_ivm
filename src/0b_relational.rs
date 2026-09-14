@@ -630,11 +630,13 @@ impl Compiler<'_> {
     }
     fn table(&mut self, t: &SelectTable<'_>) -> Result<usize> {
         if let SelectTable::Sub(from, None) = t {
-            return self.from(from);
+            return self.from(from, &mut vec![]);
         }
         let (id, q) = match t {
             SelectTable::Select(s, a) => (self.select(s)?, alias(a).unwrap_or_default()),
-            SelectTable::Sub(from, a) => (self.from(from)?, alias(a).unwrap_or_default()),
+            SelectTable::Sub(from, a) => {
+                (self.from(from, &mut vec![])?, alias(a).unwrap_or_default())
+            }
             SelectTable::Table(t, a, _) => {
                 if t.db_name
                     .as_ref()
@@ -755,22 +757,39 @@ impl Compiler<'_> {
         &mut self,
         left: usize,
         right: usize,
-        on: &Expr<'_>,
+        ons: &[&Expr<'_>],
         mode: &'static str,
     ) -> Result<usize> {
         let split = self.plan.nodes[left].fields.len();
         let mut fields = self.plan.nodes[left].fields.clone();
         fields.extend(self.plan.nodes[right].fields.clone());
         let (mut l, mut r) = (vec![], vec![]);
-        index_pairs(on, &fields, split, &mut l, &mut r);
+        for on in ons {
+            index_pairs(on, &fields, split, &mut l, &mut r);
+        }
         let (mut strict_l, mut strict_r) = (vec![], vec![]);
-        let pure = pairs(on, &fields, split, &mut strict_l, &mut strict_r).is_ok()
+        let pure = ons
+            .iter()
+            .all(|on| pairs(on, &fields, split, &mut strict_l, &mut strict_r).is_ok())
             && strict_l == l
             && strict_r == r;
         let predicate = if pure {
             None
         } else {
-            Some(expression(on, &fields, false)?)
+            Some(
+                ons.iter()
+                    .map(|on| {
+                        expression(on, &fields, false).map(|s| {
+                            if ons.len() > 1 {
+                                format!("({s})")
+                            } else {
+                                s
+                            }
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?
+                    .join(" AND "),
+            )
         };
         if mode == "semi" || mode == "anti" {
             fields.truncate(split);
@@ -786,7 +805,11 @@ impl Compiler<'_> {
             fields,
         ))
     }
-    fn from(&mut self, from: &FromClause<'_>) -> Result<usize> {
+    fn from<'a>(
+        &mut self,
+        from: &FromClause<'a>,
+        where_keys: &mut Vec<&'a Expr<'a>>,
+    ) -> Result<usize> {
         let mut id = self.table(from.select.ok_or_else(|| error("source required"))?)?;
         if let Some(joins) = &from.joins {
             for join in joins {
@@ -801,8 +824,32 @@ impl Compiler<'_> {
                     (false, true) => "right",
                     _ => "inner",
                 };
+                if join.constraint.is_none()
+                    && mode == "inner"
+                    && !typ.contains(JoinType::NATURAL)
+                    && matches!(
+                        join.operator,
+                        JoinOperator::Comma | JoinOperator::TypedJoin(None)
+                    )
+                {
+                    let split = self.plan.nodes[id].fields.len();
+                    let mut fields = self.plan.nodes[id].fields.clone();
+                    fields.extend(self.plan.nodes[right].fields.clone());
+                    let taken = where_keys_for_step(where_keys, &fields, split);
+                    if !taken.is_empty() {
+                        let taken_ons = taken
+                            .iter()
+                            .map(|&i| where_keys[i] as &'a Expr<'a>)
+                            .collect::<Vec<_>>();
+                        for i in taken.into_iter().rev() {
+                            where_keys.remove(i);
+                        }
+                        id = self.joined(id, right, &taken_ons, mode)?;
+                        continue;
+                    }
+                }
                 if let Some(JoinConstraint::On(on)) = &join.constraint {
-                    id = self.joined(id, right, on, mode)?;
+                    id = self.joined(id, right, &[on], mode)?;
                     continue;
                 }
                 let split = self.plan.nodes[id].fields.len();
@@ -962,7 +1009,7 @@ impl Compiler<'_> {
             if s.limit.is_some() || s.body.compounds.is_some() || s.with.is_some() {
                 return Err(error("EXISTS with LIMIT, compound or WITH unsupported"));
             }
-            let right = self.from(f)?;
+            let right = self.from(f, &mut vec![])?;
             // An aggregate SELECT returns a row even for empty input. The
             // existence operator here requires the non-aggregate row shape.
             if let OneSelect::Select { columns, .. } = &s.body.select {
@@ -979,7 +1026,7 @@ impl Compiler<'_> {
                     }
                 }
             }
-            return self.joined(id, right, on, mode);
+            return self.joined(id, right, &[on], mode);
         }
         let fields = self.plan.nodes[id].fields.clone();
         let predicate = Some(expression(e, &fields, false)?);
@@ -1011,8 +1058,12 @@ impl Compiler<'_> {
         else {
             return Err(error("unsupported SELECT core"));
         };
-        let mut id = self.from(from)?;
+        let mut where_keys = vec![];
         if let Some(e) = where_clause {
+            conjuncts(e, &mut where_keys);
+        }
+        let mut id = self.from(from, &mut where_keys)?;
+        for e in where_keys {
             id = self.predicate(id, e)?;
         }
         let mut fields = self.plan.nodes[id].fields.clone();
@@ -1610,7 +1661,9 @@ impl Compiler<'_> {
                 match column {
                     ResultColumn::Star | ResultColumn::TableStar(_) => {
                         for (i, f) in fields.iter().enumerate().filter(|(_, f)| match column {
-                            ResultColumn::TableStar(q) => f.qualifier.eq_ignore_ascii_case(&name(q.0)),
+                            ResultColumn::TableStar(q) => {
+                                f.qualifier.eq_ignore_ascii_case(&name(q.0))
+                            }
                             _ => f.visible,
                         }) {
                             head.push((format!("c{i}"), f.affinity.clone(), f.collation.clone()));
@@ -1684,6 +1737,42 @@ fn table_mentions(t: &SelectTable<'_>, member: &str) -> bool {
         SelectTable::Sub(from, _) => from_mentions(from, member),
         SelectTable::TableCall(..) => false,
     }
+}
+/// Flattens an AND chain into its equality and filter leaves.
+fn conjuncts<'a>(e: &'a Expr<'a>, out: &mut Vec<&'a Expr<'a>>) {
+    if let Expr::Binary(a, Operator::And, b) = e {
+        conjuncts(a, out);
+        conjuncts(b, out);
+    } else {
+        out.push(e);
+    }
+}
+fn column_pair<'a>(e: &'a Expr<'a>, fields: &[Field], split: usize) -> Option<(usize, usize)> {
+    let inner = |e: &'a Expr<'a>| match e {
+        Expr::Parenthesized(es) if es.len() == 1 => &es[0],
+        _ => e,
+    };
+    let Expr::Binary(a, Operator::Equals, b) = inner(e) else {
+        return None;
+    };
+    let (x, y) = (resolve(a, fields).ok()?, resolve(b, fields).ok()?);
+    if x < split && y >= split {
+        Some((x, y - split))
+    } else if y < split && x >= split {
+        Some((y, x - split))
+    } else {
+        None
+    }
+}
+/// Positions of conjuncts that are an equality between one column of the
+/// already-joined left fields and one column of the incoming right table.
+/// Those conjuncts become the step's ON; the rest stay in WHERE.
+fn where_keys_for_step(keys: &[&Expr<'_>], fields: &[Field], split: usize) -> Vec<usize> {
+    keys.iter()
+        .enumerate()
+        .filter(|(_, e)| column_pair(e, fields, split).is_some())
+        .map(|(i, _)| i)
+        .collect()
 }
 fn from_mentions(from: &FromClause<'_>, member: &str) -> bool {
     from.select.is_some_and(|t| table_mentions(t, member))
@@ -1796,7 +1885,9 @@ fn recursion_shape(s: &Select<'_>) -> Result<()> {
             }
         }
     }
-    for part in std::iter::once(&s.body.select).chain(s.body.compounds.iter().flatten().map(|c| &c.select)) {
+    for part in
+        std::iter::once(&s.body.select).chain(s.body.compounds.iter().flatten().map(|c| &c.select))
+    {
         if let OneSelect::Select {
             from: Some(from), ..
         } = part
