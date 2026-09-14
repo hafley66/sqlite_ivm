@@ -12,7 +12,7 @@ then prints semantic coverage, DD operator contracts, and repeated timings.
 The commands below remain available for individual phases.
 
 The current query-feature gate is described in [46_feature_acceptance.md](46_feature_acceptance.md).
-It checks 44 combinations over 174 states against loaded SQLite IVM, independent
+It checks 51 combinations over 174 states against loaded SQLite IVM, independent
 DD graphs, a separate SQLite connection, and PostgreSQL. Value, collation,
 recursive deletion, trigger/cascade, failure and concurrency probes also run
 through the loaded extension. DDL is outside this feature gate.

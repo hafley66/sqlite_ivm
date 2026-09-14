@@ -51,7 +51,7 @@ just ivm-shootout smoke --engines sqlite-ivm,dd,prolog,sqlite-query
   projection/filter, fan-in, duplicates, joins, self/chain/diamond joins,
   semi/antijoin, aggregate churn, cyclic reachability, min/max, distinct
   aggregates, sets, top-k, rank, subqueries and CTEs.
-- 44 typed SQL compositions, with 174 states each. The independent Prolog
+- 51 typed SQL compositions, with 174 states each. The independent Prolog
   implementation computes the fixture's answers through predicates, without
   executing SQL. DD applies signed keyed changes. SQLite/PostgreSQL/PGlite
   exercise their SQL statements, including transaction and savepoint changes.

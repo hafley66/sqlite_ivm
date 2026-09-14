@@ -4,7 +4,7 @@ The component and standalone DD harness were formatted before commit. Fresh
 local execution against SQLite 3.53.2 passed:
 
 - 42 Rust integration tests, six Bash CRUD/lifecycle scenarios, and 20 native circuit families.
-- 44 feature cases with 174 states each: 7,656 checks per native/DD arm, including independent source/output comparisons.
+- 51 feature cases with 174 states each: 8,874 checks per native/DD arm, including independent source/output comparisons.
 - Nine tests against the loaded native library for features, values and transactions.
 
 The native library SHA-256 is

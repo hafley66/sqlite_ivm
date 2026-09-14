@@ -46,7 +46,36 @@ pub enum Kind {
         having: Option<String>,
         window: bool,
     },
-    Reach,
+    Fixpoint {
+        rules: Vec<Rule>,
+    },
+}
+#[derive(Clone, Debug, PartialEq)]
+pub enum Occurrence {
+    Input(usize),
+    Member,
+}
+/// One UNION term of a recursive CTE. Anchor rules have no `Member` occurrence;
+/// step rules have exactly one, which is the SQLite grammar limit.
+#[derive(Clone, Debug)]
+pub struct Rule {
+    pub occurrences: Vec<(Occurrence, usize)>,
+    pub head: Vec<String>,
+    pub key: String,
+    pub predicate: Option<String>,
+    pub indexes: Vec<(Occurrence, String)>,
+}
+impl Rule {
+    pub fn member(&self) -> Option<usize> {
+        self.occurrences
+            .iter()
+            .position(|(o, _)| *o == Occurrence::Member)
+    }
+    pub fn mentions(&self, side: usize) -> bool {
+        self.occurrences
+            .iter()
+            .any(|(o, _)| *o == Occurrence::Input(side))
+    }
 }
 #[derive(Clone, Debug)]
 pub struct Node {
@@ -141,6 +170,25 @@ pub fn key_expression(value: &str, collation: &str) -> String {
             format!("CASE WHEN typeof({value})='text' THEN rtrim({value},' ') ELSE {value} END")
         }
         _ => value.into(),
+    }
+}
+/// UNION distinct identity in SQL: integral reals fold to integers, other reals
+/// and blobs are tagged objects, text is collation-normalized, NULL equals NULL.
+pub fn key_sql(parts: &[(String, String)]) -> String {
+    let normalized = parts
+        .iter()
+        .map(|(value, collation)| {
+            let x = format!("({})", key_expression(value, collation));
+            format!("CASE typeof({x}) WHEN 'blob' THEN json_object('blob',hex({x})) WHEN 'real' THEN CASE WHEN {x}=CAST({x} AS INTEGER) THEN CAST({x} AS INTEGER) ELSE json_object('real',printf('%!.17g',{x})) END ELSE {x} END")
+        })
+        .collect::<Vec<_>>();
+    format!("json_array({})", normalized.join(","))
+}
+pub fn column_reference(index: usize, affinity: &str) -> String {
+    if affinity.is_empty() {
+        format!("c{index}")
+    } else {
+        format!("CAST(c{index} AS {affinity})")
     }
 }
 pub fn expression(e: &Expr<'_>, fields: &[Field], aggregate: bool) -> Result<String> {
@@ -1296,21 +1344,12 @@ impl Compiler<'_> {
         let mark = self.ctes.len();
         if let Some(with) = &s.with {
             for cte in with.ctes {
-                let refers = |t: &SelectTable<'_>| matches!(t,SelectTable::Table(n,_,_) if name(n.name.0).eq_ignore_ascii_case(&name(cte.tbl_name.0)));
+                let member = name(cte.tbl_name.0);
                 let recursive = with.recursive
                     && cte.select.body.compounds.as_ref().is_some_and(|parts| {
-                        parts.iter().any(|part| match &part.select {
-                            OneSelect::Select {
-                                from: Some(from), ..
-                            } => {
-                                from.select.is_some_and(refers)
-                                    || from
-                                        .joins
-                                        .as_ref()
-                                        .is_some_and(|joins| joins.iter().any(|j| refers(&j.table)))
-                            }
-                            _ => false,
-                        })
+                        parts
+                            .iter()
+                            .any(|part| part_mentions(&part.select, &member))
                     });
                 let mut id = if recursive {
                     self.recursive(cte)?
@@ -1410,128 +1449,390 @@ impl Compiler<'_> {
         if cte.select.order_by.is_some() || cte.select.limit.is_some() {
             return Err(error("recursive ordering and LIMIT unsupported"));
         }
-        let parts = cte
+        let compounds = cte
             .select
             .body
             .compounds
             .as_ref()
             .ok_or_else(|| error("recursive UNION required"))?;
-        if parts.len() != 1 || parts[0].operator != CompoundOperator::Union {
-            return Err(error("recursive reachability requires UNION distinct"));
+        if compounds
+            .iter()
+            .any(|c| c.operator == CompoundOperator::UnionAll)
+        {
+            return Err(error("recursive UNION ALL unsupported"));
         }
-        let roots = self.core(&cte.select.body.select, None, None)?;
-        if self.plan.nodes[roots].fields.len() != 1 {
-            return Err(error("recursive reachability requires one node column"));
+        if compounds
+            .iter()
+            .any(|c| c.operator != CompoundOperator::Union)
+        {
+            return Err(error("recursive compound requires UNION distinct"));
         }
-        let OneSelect::Select {
-            distinctness: None,
-            columns,
-            from: Some(from),
-            where_clause: None,
-            group_by: None,
-            having: None,
-            window_clause: None,
-        } = &parts[0].select
-        else {
-            return Err(error("unsupported recursive step"));
+        let member = name(cte.tbl_name.0);
+        let parts = std::iter::once(&cte.select.body.select)
+            .chain(compounds.iter().map(|c| &c.select))
+            .collect::<Vec<_>>();
+        let (steps, anchors): (Vec<&OneSelect<'_>>, Vec<&OneSelect<'_>>) = parts
+            .into_iter()
+            .partition(|part| part_mentions(part, &member));
+        let mut inputs = vec![];
+        for anchor in &anchors {
+            inputs.push(self.core(anchor, None, None)?);
+        }
+        let width = self.plan.nodes[inputs[0]].fields.len();
+        if inputs
+            .iter()
+            .any(|id| self.plan.nodes[*id].fields.len() != width)
+        {
+            return Err(error("compound column count mismatch"));
+        }
+        let mut member_fields = self.plan.nodes[inputs[0]].fields.clone();
+        if let Some(columns) = cte.columns {
+            if columns.len() != width {
+                return Err(error("CTE column count mismatch"));
+            }
+            for (f, c) in member_fields.iter_mut().zip(columns) {
+                f.name = name(c.col_name.0);
+            }
+        }
+        for (i, f) in member_fields.iter_mut().enumerate() {
+            f.qualifier = member.clone();
+            f.visible = true;
+            f.unqualified = true;
+            f.position = i;
+            f.merged_star = false;
+        }
+        let key_parts = |head: &[String]| {
+            head.iter()
+                .zip(&member_fields)
+                .map(|(h, f)| (h.clone(), f.collation.clone()))
+                .collect::<Vec<_>>()
         };
-        let joins = from
+        let mut rules = vec![];
+        for side in 0..inputs.len() {
+            let head = (0..width).map(|i| format!("c{i}")).collect::<Vec<_>>();
+            rules.push(Rule {
+                occurrences: vec![(Occurrence::Input(side), width)],
+                key: key_sql(&key_parts(&head)),
+                head,
+                predicate: None,
+                indexes: vec![],
+            });
+        }
+        for step in steps {
+            let OneSelect::Select {
+                columns,
+                from: Some(from),
+                where_clause,
+                group_by: None,
+                having: None,
+                window_clause: None,
+                ..
+            } = step
+            else {
+                return Err(error("unsupported recursive step"));
+            };
+            let mut items = vec![(
+                from.select
+                    .ok_or_else(|| error("recursive source missing"))?,
+                None,
+            )];
+            for join in from.joins.as_ref().map(|j| j.as_slice()).unwrap_or(&[]) {
+                let inner = match join.operator {
+                    JoinOperator::Comma | JoinOperator::TypedJoin(None) => true,
+                    JoinOperator::TypedJoin(Some(t)) => {
+                        t == JoinType::INNER || t == JoinType::CROSS
+                    }
+                };
+                if !inner {
+                    return Err(error("recursive step requires inner join"));
+                }
+                let on = match &join.constraint {
+                    None => None,
+                    Some(JoinConstraint::On(e)) => Some(e),
+                    Some(JoinConstraint::Using(_)) => {
+                        return Err(error("unsupported recursive step"))
+                    }
+                };
+                items.push((&join.table, on));
+            }
+            let mut occurrences = vec![];
+            let mut fields = vec![];
+            let mut conjuncts = vec![];
+            for (item, on) in items {
+                match item {
+                    SelectTable::Table(n, a, _)
+                        if n.db_name.is_none() && name(n.name.0).eq_ignore_ascii_case(&member) =>
+                    {
+                        if occurrences.iter().any(|(o, _)| *o == Occurrence::Member) {
+                            return Err(error("recursive step requires one recursive reference"));
+                        }
+                        let qualifier = alias(a).unwrap_or_else(|| member.clone());
+                        occurrences.push((Occurrence::Member, width));
+                        fields.extend(member_fields.iter().cloned().map(|mut f| {
+                            f.qualifier = qualifier.clone();
+                            f
+                        }));
+                    }
+                    _ => {
+                        if table_mentions(item, &member) {
+                            return Err(error("unsupported recursive step"));
+                        }
+                        let id = self.table(item)?;
+                        inputs.push(id);
+                        occurrences.push((
+                            Occurrence::Input(inputs.len() - 1),
+                            self.plan.nodes[id].fields.len(),
+                        ));
+                        fields.extend(self.plan.nodes[id].fields.clone());
+                    }
+                }
+                if let Some(on) = on {
+                    conjuncts.push(on);
+                }
+            }
+            if !occurrences.iter().any(|(o, _)| *o == Occurrence::Member) {
+                return Err(error("recursive step requires one recursive reference"));
+            }
+            if let Some(e) = where_clause {
+                conjuncts.push(e);
+            }
+            let predicate = conjuncts
+                .iter()
+                .map(|e| expression(e, &fields, false).map(|s| format!("({s})")))
+                .collect::<Result<Vec<_>>>()?;
+            let predicate = if predicate.is_empty() {
+                None
+            } else {
+                Some(predicate.join(" AND "))
+            };
+            let mut head = vec![];
+            for column in columns.iter() {
+                match column {
+                    ResultColumn::Star | ResultColumn::TableStar(_) => {
+                        for (i, f) in fields.iter().enumerate().filter(|(_, f)| match column {
+                            ResultColumn::TableStar(q) => f.qualifier.eq_ignore_ascii_case(&name(q.0)),
+                            _ => f.visible,
+                        }) {
+                            head.push((format!("c{i}"), f.affinity.clone(), f.collation.clone()));
+                        }
+                    }
+                    ResultColumn::Expr(e, _) => {
+                        if has_aggregate(e) {
+                            return Err(error(
+                                "recursive step may not aggregate or negate its own relation",
+                            ));
+                        }
+                        head.push((
+                            expression(e, &fields, false)?,
+                            expression_affinity(e, &fields),
+                            collation(e, &fields),
+                        ));
+                    }
+                }
+            }
+            if head.len() != width {
+                return Err(error("compound column count mismatch"));
+            }
+            for ((_, affinity, coll), f) in head.iter().zip(&member_fields) {
+                if !affinity.is_empty() && !f.affinity.is_empty() && *affinity != f.affinity {
+                    return Err(error("recursive key affinities must match"));
+                }
+                if *coll != f.collation {
+                    return Err(error("recursive key collations must match"));
+                }
+            }
+            let head = head.into_iter().map(|(h, _, _)| h).collect::<Vec<_>>();
+            let mut indexes = vec![];
+            let mut equal = vec![];
+            for e in &conjuncts {
+                equalities(e, &fields, &mut equal);
+            }
+            for (field, coll) in equal {
+                let (mut local, mut occurrence) = (field, 0);
+                while local >= occurrences[occurrence].1 {
+                    local -= occurrences[occurrence].1;
+                    occurrence += 1;
+                }
+                let entry = (
+                    occurrences[occurrence].0.clone(),
+                    format!(
+                        "{} COLLATE {coll}",
+                        column_reference(local, &fields[field].affinity)
+                    ),
+                );
+                if !indexes.contains(&entry) {
+                    indexes.push(entry);
+                }
+            }
+            rules.push(Rule {
+                occurrences,
+                key: key_sql(&key_parts(&head)),
+                head,
+                predicate,
+                indexes,
+            });
+        }
+        Ok(self.push(Kind::Fixpoint { rules }, inputs, member_fields))
+    }
+}
+fn table_mentions(t: &SelectTable<'_>, member: &str) -> bool {
+    match t {
+        SelectTable::Table(n, _, _) => {
+            n.db_name.is_none() && name(n.name.0).eq_ignore_ascii_case(member)
+        }
+        SelectTable::Select(s, _) => select_mentions(s, member),
+        SelectTable::Sub(from, _) => from_mentions(from, member),
+        SelectTable::TableCall(..) => false,
+    }
+}
+fn from_mentions(from: &FromClause<'_>, member: &str) -> bool {
+    from.select.is_some_and(|t| table_mentions(t, member))
+        || from
             .joins
             .as_ref()
-            .ok_or_else(|| error("recursive step requires a join"))?;
-        if joins.iter().any(|j| {
-            !matches!(j.operator, JoinOperator::TypedJoin(None))
-                && !matches!(j.operator,JoinOperator::TypedJoin(Some(t)) if t==JoinType::INNER)
-        }) {
-            return Err(error("recursive step requires inner join"));
+            .is_some_and(|joins| joins.iter().any(|j| table_mentions(&j.table, member)))
+}
+fn part_mentions(part: &OneSelect<'_>, member: &str) -> bool {
+    match part {
+        OneSelect::Select {
+            from: Some(from), ..
+        } => from_mentions(from, member),
+        _ => false,
+    }
+}
+fn select_mentions(s: &Select<'_>, member: &str) -> bool {
+    s.with
+        .as_ref()
+        .is_some_and(|w| w.ctes.iter().any(|c| select_mentions(c.select, member)))
+        || std::iter::once(&s.body.select)
+            .chain(s.body.compounds.iter().flatten().map(|c| &c.select))
+            .any(|part| part_mentions(part, member) || part_expressions_mention(part, member))
+}
+fn part_expressions_mention(part: &OneSelect<'_>, member: &str) -> bool {
+    let OneSelect::Select {
+        columns,
+        where_clause,
+        having,
+        ..
+    } = part
+    else {
+        return false;
+    };
+    columns
+        .iter()
+        .any(|c| matches!(c, ResultColumn::Expr(e, _) if expr_mentions(e, member)))
+        || where_clause.is_some_and(|e| expr_mentions(e, member))
+        || having.is_some_and(|e| expr_mentions(e, member))
+}
+fn expr_mentions(e: &Expr<'_>, member: &str) -> bool {
+    let sub = |e: &Expr<'_>| expr_mentions(e, member);
+    match e {
+        Expr::Exists(s) | Expr::Subquery(s) => select_mentions(s, member),
+        Expr::InSelect { lhs, rhs, .. } => sub(lhs) || select_mentions(rhs, member),
+        Expr::Binary(a, _, b) => sub(a) || sub(b),
+        Expr::Unary(_, e)
+        | Expr::IsNull(e)
+        | Expr::NotNull(e)
+        | Expr::Cast { expr: e, .. }
+        | Expr::Collate(e, _) => sub(e),
+        Expr::Parenthesized(es) => es.iter().any(sub),
+        Expr::Case {
+            base,
+            when_then_pairs,
+            else_expr,
+        } => {
+            base.is_some_and(sub)
+                || else_expr.is_some_and(sub)
+                || when_then_pairs.iter().any(|(a, b)| sub(a) || sub(b))
         }
-        if joins.len() != 1 || columns.len() != 1 {
-            return Err(error(
-                "recursive step requires one edge join and one output",
-            ));
+        Expr::Between {
+            lhs, start, end, ..
+        } => sub(lhs) || sub(start) || sub(end),
+        Expr::Like {
+            lhs, rhs, escape, ..
+        } => sub(lhs) || sub(rhs) || escape.is_some_and(sub),
+        Expr::InList { lhs, rhs, .. } => sub(lhs) || rhs.unwrap_or(&[]).iter().any(sub),
+        Expr::FunctionCall { args, .. } => args.unwrap_or(&[]).iter().any(sub),
+        _ => false,
+    }
+}
+/// Named errors for recursion shapes SQLite itself rejects during prepare, so
+/// the reason surfaces before SQLite's own message.
+fn recursion_shape(s: &Select<'_>) -> Result<()> {
+    if let Some(with) = &s.with {
+        for cte in with.ctes {
+            recursion_shape(cte.select)?;
+            if !with.recursive {
+                continue;
+            }
+            let member = name(cte.tbl_name.0);
+            for part in cte.select.body.compounds.iter().flatten() {
+                let step = part_mentions(&part.select, &member)
+                    || part_expressions_mention(&part.select, &member);
+                if !step {
+                    continue;
+                }
+                if part.operator == CompoundOperator::UnionAll {
+                    return Err(error("recursive UNION ALL unsupported"));
+                }
+                if let OneSelect::Select {
+                    columns,
+                    group_by,
+                    having,
+                    ..
+                } = &part.select
+                {
+                    let aggregates = group_by.is_some()
+                        || having.is_some()
+                        || columns
+                            .iter()
+                            .any(|c| matches!(c, ResultColumn::Expr(e, _) if has_aggregate(e)));
+                    if aggregates || part_expressions_mention(&part.select, &member) {
+                        return Err(error(
+                            "recursive step may not aggregate or negate its own relation",
+                        ));
+                    }
+                }
+            }
         }
-        let first = from
-            .select
-            .ok_or_else(|| error("recursive source missing"))?;
-        let second = &joins[0].table;
-        let is_recursive = |t: &SelectTable<'_>| matches!(t,SelectTable::Table(n,_,_) if name(n.name.0).eq_ignore_ascii_case(&name(cte.tbl_name.0)));
-        let (edge, recursive) = if is_recursive(first) && !is_recursive(second) {
-            (second, first)
-        } else if is_recursive(second) && !is_recursive(first) {
-            (first, second)
-        } else {
-            return Err(error("recursive step requires one recursive reference"));
-        };
-        let edges = self.table(edge)?;
-        let edge_fields = self.plan.nodes[edges].fields.clone();
-        let split = edge_fields.len();
-        let SelectTable::Table(_, a, _) = recursive else {
-            unreachable!()
-        };
-        let recursive_name = alias(a).unwrap_or_else(|| name(cte.tbl_name.0));
-        let node_name = cte
-            .columns
-            .and_then(|c| c.first())
-            .map(|c| name(c.col_name.0))
-            .unwrap_or_else(|| self.plan.nodes[roots].fields[0].name.clone());
-        let mut fields = edge_fields.clone();
-        fields.push(Field {
-            collation: self.plan.nodes[roots].fields[0].collation.clone(),
-            merged_star: false,
-            position: 0,
-            visible: true,
-            unqualified: true,
-            qualifier: recursive_name,
-            name: node_name.clone(),
-            affinity: self.plan.nodes[roots].fields[0].affinity.clone(),
-        });
-        let Some(JoinConstraint::On(on)) = &joins[0].constraint else {
-            return Err(error("recursive edge equality required"));
-        };
-        let (mut left, mut right) = (vec![], vec![]);
-        pairs(on, &fields, split, &mut left, &mut right)?;
-        if left.len() != 1 {
-            return Err(error("recursive node equality required"));
-        }
-        let ResultColumn::Expr(target, _) = &columns[0] else {
-            return Err(error("recursive target column required"));
-        };
-        let target = resolve(target, &fields)?;
-        if target >= split {
-            return Err(error("recursive target must come from the edge"));
-        }
-        if edge_fields[left[0]].affinity != self.plan.nodes[roots].fields[0].affinity
-            || edge_fields[target].affinity != self.plan.nodes[roots].fields[0].affinity
+    }
+    for part in std::iter::once(&s.body.select).chain(s.body.compounds.iter().flatten().map(|c| &c.select)) {
+        if let OneSelect::Select {
+            from: Some(from), ..
+        } = part
         {
-            return Err(error("recursive key affinities must match"));
+            for t in from
+                .select
+                .into_iter()
+                .chain(from.joins.iter().flatten().map(|j| &j.table))
+            {
+                if let SelectTable::Select(inner, _) = t {
+                    recursion_shape(inner)?;
+                }
+            }
         }
-        if edge_fields[left[0]].collation != self.plan.nodes[roots].fields[0].collation
-            || edge_fields[target].collation != self.plan.nodes[roots].fields[0].collation
-        {
-            return Err(error("recursive key collations must match"));
+    }
+    Ok(())
+}
+fn equalities(e: &Expr<'_>, fields: &[Field], out: &mut Vec<(usize, String)>) {
+    match e {
+        Expr::Parenthesized(es) if es.len() == 1 => equalities(&es[0], fields, out),
+        Expr::Binary(a, Operator::And, b) => {
+            equalities(a, fields, out);
+            equalities(b, fields, out);
         }
-        let mapped = self.push(
-            Kind::Map {
-                expressions: vec![format!("c{}", left[0]), format!("c{target}")],
-                predicate: None,
-            },
-            vec![edges],
-            vec![edge_fields[left[0]].clone(), edge_fields[target].clone()],
-        );
-        Ok(self.push(
-            Kind::Reach,
-            vec![roots, mapped],
-            vec![Field {
-                collation: self.plan.nodes[roots].fields[0].collation.clone(),
-                merged_star: false,
-                position: 0,
-                visible: true,
-                unqualified: true,
-                qualifier: name(cte.tbl_name.0),
-                name: node_name,
-                affinity: self.plan.nodes[roots].fields[0].affinity.clone(),
-            }],
-        ))
+        Expr::Binary(a, Operator::Equals, b) => {
+            if let (Ok(l), Ok(r)) = (resolve(a, fields), resolve(b, fields)) {
+                let coll = explicit_collation(a)
+                    .or_else(|| explicit_collation(b))
+                    .or_else(|| implicit_collation(a, fields))
+                    .or_else(|| implicit_collation(b, fields))
+                    .unwrap_or("BINARY".into());
+                out.push((l, coll.clone()));
+                out.push((r, coll));
+            }
+        }
+        _ => {}
     }
 }
 pub fn bind(db: &Connection, sql: &str) -> Result<Plan> {
@@ -1547,6 +1848,7 @@ pub fn bind(db: &Connection, sql: &str) -> Result<Plan> {
     if parser.next().map_err(|e| error(e.to_string()))?.is_some() {
         return Err(error("one SELECT required"));
     }
+    recursion_shape(select)?;
     let statement = db.prepare(sql)?;
     if statement.parameter_count() != 0 {
         return Err(error("persistent queries cannot contain bind parameters"));

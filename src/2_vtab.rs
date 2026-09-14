@@ -35,6 +35,11 @@ struct Table {
     plan: Option<crate::relational::Plan>,
 }
 
+fn recursive(plan: &crate::relational::Plan) -> bool {
+    plan.nodes
+        .iter()
+        .any(|n| matches!(n.kind, crate::relational::Kind::Fixpoint { .. }))
+}
 fn text(bytes: &[u8]) -> Result<&str> {
     std::str::from_utf8(bytes).map_err(|e| error(e.to_string()))
 }
@@ -92,7 +97,7 @@ impl Table {
                 return Err(error("sqlite_ivm storage format 1 requires the matching older extension; automatic migration is unavailable"));
             }
             let incompatible: bool = conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM main.__ivm_schema WHERE format_version!=2)",
+                "SELECT EXISTS(SELECT 1 FROM main.__ivm_schema WHERE format_version NOT IN (2,3))",
                 [],
                 |r| r.get(0),
             )?;
@@ -176,8 +181,11 @@ impl Table {
             (1..=plan.as_ref().unwrap().names.len() as c_int).collect()
         };
         conn.execute_batch("CREATE TABLE IF NOT EXISTS main.__ivm_schema(id INTEGER PRIMARY KEY,declaration TEXT NOT NULL,generic INTEGER NOT NULL,roles TEXT NOT NULL,format_version INTEGER NOT NULL)")?;
+        // Format 3 is the fixpoint member layout; plans without recursion keep
+        // format 2 so the 0.2.x extension still maintains them.
+        let format = if plan.as_ref().is_some_and(recursive) { 3 } else { 2 };
         conn.execute(
-            "INSERT INTO main.__ivm_schema VALUES(?1,?2,?3,?4,2)",
+            "INSERT INTO main.__ivm_schema VALUES(?1,?2,?3,?4,?5)",
             rusqlite::params![
                 id,
                 declaration,
@@ -186,7 +194,8 @@ impl Table {
                     .iter()
                     .map(|i| i.to_string())
                     .collect::<Vec<_>>()
-                    .join(",")
+                    .join(","),
+                format
             ],
         )?;
         Ok((
@@ -212,7 +221,18 @@ impl Table {
             if !self.generic {
                 self.query = Some(bind(&self.db, &sql)?);
             } else {
-                self.plan = Some(crate::relational::bind(&self.db, &sql)?);
+                let plan = crate::relational::bind(&self.db, &sql)?;
+                let format: i64 = self.db.query_row(
+                    "SELECT format_version FROM main.__ivm_schema WHERE id=?1",
+                    [self.id],
+                    |r| r.get(0),
+                )?;
+                if format < 3 && recursive(&plan) {
+                    return Err(error(
+                        "recursive views from storage format 2 must be dropped and re-created",
+                    ));
+                }
+                self.plan = Some(plan);
             }
             self.sql = sql;
         }

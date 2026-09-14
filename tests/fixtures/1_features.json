@@ -186,6 +186,34 @@
     {
       "name": "nested_distinct",
       "query": "SELECT k,COUNT(*) AS n FROM (SELECT DISTINCT k,v FROM a) GROUP BY k"
+    },
+    {
+      "name": "closure_binary",
+      "query": "WITH RECURSIVE edge(src,dst) AS(SELECT k,abs(w)%5 FROM b WHERE k IS NOT NULL AND w IS NOT NULL),path(src,dst) AS(SELECT src,dst FROM edge UNION SELECT p.src,e.dst FROM path p JOIN edge e ON p.dst=e.src) SELECT src,dst FROM path"
+    },
+    {
+      "name": "parity_recursion",
+      "query": "WITH RECURSIVE edge(src,dst) AS(SELECT k,abs(w)%5 FROM b WHERE k IS NOT NULL AND w IS NOT NULL),parity(node,odd) AS(SELECT k,0 FROM a WHERE k IS NOT NULL UNION SELECT e.dst,1-p.odd FROM parity p JOIN edge e ON p.node=e.src) SELECT node,odd FROM parity"
+    },
+    {
+      "name": "filtered_step",
+      "query": "WITH RECURSIVE edge(src,dst) AS(SELECT k,abs(w)%5 FROM b WHERE k IS NOT NULL AND w IS NOT NULL),reach(node) AS(SELECT k FROM a UNION SELECT DISTINCT e.dst FROM reach r JOIN edge e ON r.node=e.src JOIN c ON c.k=e.dst WHERE c.z>0) SELECT node FROM reach"
+    },
+    {
+      "name": "min_distance",
+      "query": "WITH RECURSIVE edge(src,dst) AS(SELECT k,abs(w)%5 FROM b WHERE k IS NOT NULL AND w IS NOT NULL),walk(node,dist) AS(SELECT k,0 FROM a WHERE k IS NOT NULL UNION SELECT e.dst,w.dist+1 FROM walk w JOIN edge e ON w.node=e.src WHERE w.dist<4) SELECT node,MIN(dist) AS dist FROM walk GROUP BY node"
+    },
+    {
+      "name": "antijoin_after_recursion",
+      "query": "WITH RECURSIVE edge(src,dst) AS(SELECT k,abs(w)%5 FROM b WHERE k IS NOT NULL AND w IS NOT NULL),reach(node) AS(SELECT k FROM a WHERE k IS NOT NULL UNION SELECT e.dst FROM reach r JOIN edge e ON r.node=e.src) SELECT node FROM reach WHERE NOT EXISTS(SELECT 1 FROM c WHERE c.k=reach.node)"
+    },
+    {
+      "name": "nested_fixpoints",
+      "query": "WITH RECURSIVE edge(src,dst) AS(SELECT k,abs(w)%5 FROM b WHERE k IS NOT NULL AND w IS NOT NULL),closed(src,dst) AS(SELECT src,dst FROM edge UNION SELECT cl.src,e.dst FROM closed cl JOIN edge e ON cl.dst=e.src),reach(node) AS(SELECT k FROM a WHERE k IS NOT NULL UNION SELECT cl.dst FROM reach r JOIN closed cl ON r.node=cl.src) SELECT node FROM reach"
+    },
+    {
+      "name": "two_step_rules",
+      "query": "WITH RECURSIVE edge(src,dst) AS(SELECT k,abs(w)%5 FROM b WHERE k IS NOT NULL AND w IS NOT NULL),both(node) AS(SELECT k FROM a WHERE k IS NOT NULL UNION SELECT k FROM c WHERE k IS NOT NULL UNION SELECT e.dst FROM both b,edge e WHERE b.node=e.src UNION SELECT e.src FROM both b JOIN edge e ON b.node=e.dst) SELECT node FROM both"
     }
   ],
   "mutations": [

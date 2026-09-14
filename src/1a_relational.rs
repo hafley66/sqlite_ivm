@@ -1,7 +1,7 @@
 //! Incremental relational operators backed by transactional SQLite arrangements.
 use crate::{
     query::{error, quote},
-    relational::{Kind, Plan},
+    relational::{Kind, Occurrence, Plan, Rule},
 };
 use rusqlite::{params_from_iter, types::Value, Connection, Result};
 use std::collections::BTreeMap;
@@ -98,7 +98,7 @@ fn evaluate(
         row,
     )
 }
-fn change(db: &Connection, t: &str, k: &str, row: &Row, d: i64) -> Result<()> {
+fn change(db: &Connection, t: &str, k: &str, row: &Row, d: i64) -> Result<(i64, i64)> {
     let r = identity(db, row)?;
     let old: Option<i64> = db
         .query_row(&format!("SELECT __n FROM {t} WHERE __r=?1"), [&r], |r| {
@@ -127,7 +127,86 @@ fn change(db: &Connection, t: &str, k: &str, row: &Row, d: i64) -> Result<()> {
             params_from_iter(params),
         )?;
     }
-    Ok(())
+    Ok((old.unwrap_or(0), new))
+}
+fn max_rowid(db: &Connection, t: &str) -> Result<i64> {
+    db.prepare_cached(&format!("SELECT coalesce(max(rowid),0) FROM {t}"))?
+        .query_row([], |r| r.get(0))
+}
+enum Role<'a> {
+    Table(String),
+    Params(&'a Row),
+    Range(String, i64, i64),
+}
+/// Every occurrence becomes a flattenable subquery renaming its columns into
+/// the rule's shared `c{i}` namespace; `?` numbering continues from `params`.
+fn rule_from(rule: &Rule, roles: &[Role<'_>], params: &mut Vec<Value>) -> String {
+    let mut offset = 0;
+    let mut sources = vec![];
+    for (n, ((_, width), role)) in rule.occurrences.iter().zip(roles).enumerate() {
+        let renamed = |prefix: &str| {
+            (0..*width)
+                .map(|i| format!("{prefix}c{i} AS c{}", offset + i))
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        sources.push(match role {
+            Role::Table(t) => format!("(SELECT {} FROM {t}) q{n}", renamed("")),
+            Role::Params(row) => {
+                let values = row
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| {
+                        params.push(v.clone());
+                        format!("?{} AS c{}", params.len(), offset + i)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                format!("(SELECT {values}) q{n}")
+            }
+            Role::Range(t, lo, hi) => {
+                params.push(Value::Integer(*lo));
+                params.push(Value::Integer(*hi));
+                format!(
+                    "(SELECT {} FROM {t} WHERE rowid>?{} AND rowid<=?{}) q{n}",
+                    renamed(""),
+                    params.len() - 1,
+                    params.len()
+                )
+            }
+        });
+        offset += width;
+    }
+    format!("FROM {}", sources.join(","))
+}
+fn roles<'a>(
+    name: &str,
+    id: usize,
+    side: usize,
+    rule: &Rule,
+    bound: Option<&'a Row>,
+    member: Role<'a>,
+) -> Vec<Role<'a>> {
+    rule.occurrences
+        .iter()
+        .map(|(o, _)| match (o, bound) {
+            (Occurrence::Input(s), Some(row)) if *s == side => Role::Params(row),
+            (Occurrence::Input(s), _) => Role::Table(table(name, id, *s)),
+            (Occurrence::Member, _) => match &member {
+                Role::Table(t) => Role::Table(t.clone()),
+                Role::Range(t, lo, hi) => Role::Range(t.clone(), *lo, *hi),
+                Role::Params(row) => Role::Params(row),
+            },
+        })
+        .collect()
+}
+fn rule_where(rule: &Rule, extra: Option<&str>) -> String {
+    match (&rule.predicate, extra) {
+        (None, None) => String::new(),
+        (Some(p), None) => format!(" WHERE {p}"),
+        (None, Some(e)) => format!(" WHERE {e}"),
+        (Some(p), Some(e)) => format!(" WHERE {p} AND {e}"),
+    }
 }
 use rusqlite::OptionalExtension;
 trait CachedExecute {
@@ -212,19 +291,34 @@ impl Plan {
                     }
                 }
             }
-            if matches!(node.kind, Kind::Reach) {
-                let t = format!("{name}_op{id}_2");
-                db.execute_batch(&format!("CREATE TABLE main.{}(__k TEXT NOT NULL,__r TEXT NOT NULL UNIQUE,__n INTEGER NOT NULL,c0)",quote(&t)))?;
-                objects.push(("table", t));
-                for (side, column) in [(0, 0), (1, 0), (1, 1), (2, 0)] {
-                    let index = format!("__ivm_{name}_reach{id}_{side}_{column}");
+            if let Kind::Fixpoint { rules } = &node.kind {
+                let member = node.inputs.len();
+                for side in [member, member + 1] {
+                    let t = format!("{name}_op{id}_{side}");
                     db.execute_batch(&format!(
-                        "CREATE INDEX main.{} ON {}(c{column} COLLATE {})",
+                        "CREATE TABLE main.{}(__k TEXT NOT NULL UNIQUE,{},__n INTEGER NOT NULL DEFAULT 0)",
+                        quote(&t),
+                        columns(node.fields.len())
+                    ))?;
+                    objects.push(("table", t));
+                }
+                let mut created = vec![];
+                for (occurrence, expression) in rules.iter().flat_map(|r| &r.indexes) {
+                    let side = match occurrence {
+                        Occurrence::Input(side) => *side,
+                        Occurrence::Member => member,
+                    };
+                    if created.contains(&(side, expression)) {
+                        continue;
+                    }
+                    let index = format!("__ivm_{name}_fix{id}_{}", created.len());
+                    db.execute_batch(&format!(
+                        "CREATE INDEX main.{} ON {}({expression})",
                         quote(&index),
-                        quote(&format!("{name}_op{id}_{side}")),
-                        node.fields[0].collation
+                        quote(&format!("{name}_op{id}_{side}"))
                     ))?;
                     objects.push(("index", index));
+                    created.push((side, expression));
                 }
             }
         }
@@ -618,10 +712,13 @@ impl Plan {
                 change(db, &t, &k, row, d)?;
                 differences(db, before, snapshot()?)
             }
-            Kind::Reach => self.reach(db, name, id, side, row, d),
+            Kind::Fixpoint { rules } => self.fixpoint(db, name, id, side, row, d, rules),
         }
     }
-    fn reach(
+    /// Delete-and-rederive over one member set. Insertion and rederivation run
+    /// semi-naive rounds whose delta is a rowid range of the member table.
+    #[allow(clippy::too_many_arguments)]
+    fn fixpoint(
         &self,
         db: &Connection,
         name: &str,
@@ -629,87 +726,208 @@ impl Plan {
         side: usize,
         row: &Row,
         d: i64,
+        rules: &[Rule],
     ) -> Result<Vec<Delta>> {
-        let roots = table(name, id, 0);
-        let edges = table(name, id, 1);
-        let reached = table(name, id, 2);
-        let collation = &self.nodes[id].fields[0].collation;
-        change(db, &table(name, id, side), &key(db, &row[..1])?, row, d)?;
-        let existing = |v: &Value| -> Result<Option<Value>> {
-            db.query_row(
-                &format!("SELECT c0 FROM {reached} WHERE c0 COLLATE {collation} IS ?1 LIMIT 1"),
-                [v],
-                |r| r.get(0),
-            )
-            .optional()
-        };
-        let contains = |v: &Value| -> Result<bool> { Ok(existing(v)?.is_some()) };
-        if side == 1 && (row[0] == Value::Null || !contains(&row[0])?) {
+        let node = &self.nodes[id];
+        let (old, new) = change(db, &table(name, id, side), &key(db, row)?, row, d)?;
+        if (old > 0) == (new > 0) {
             return Ok(vec![]);
         }
-        let start = row[if side == 0 { 0 } else { 1 }].clone();
-        let successors = |v: &Value| -> Result<Vec<Value>> {
-            if *v == Value::Null {
-                return Ok(vec![]);
-            }
-            Ok(rows(
-                db,
-                &format!("SELECT DISTINCT c1 FROM {edges} WHERE c0 COLLATE {collation}=?1"),
-                &[v.clone()],
-            )?
-            .into_iter()
-            .map(|r| r[0].clone())
-            .collect())
+        let width = node.fields.len();
+        let cols = columns(width);
+        let all = table(name, id, node.inputs.len());
+        let work = table(name, id, node.inputs.len() + 1);
+        let derive = |target: &str, rule: &Rule, roles: &[Role<'_>], only_present: bool| -> Result<usize> {
+            let mut params = vec![];
+            let from = rule_from(rule, roles, &mut params);
+            let sql = if only_present {
+                format!(
+                    "INSERT OR IGNORE INTO {target}(__k,{cols}) SELECT __k,{cols} FROM (SELECT {} AS __k,{} {from}{}) WHERE __k IN (SELECT __k FROM {all})",
+                    rule.key,
+                    rule.head.iter().enumerate().map(|(i, h)| format!("{h} AS c{i}")).collect::<Vec<_>>().join(","),
+                    rule_where(rule, None)
+                )
+            } else {
+                format!(
+                    "INSERT OR IGNORE INTO {target}(__k,{cols}) SELECT {},{} {from}{}",
+                    rule.key,
+                    rule.head.join(","),
+                    rule_where(rule, None)
+                )
+            };
+            db.execute_cached(&sql, params_from_iter(params))
         };
-        let mut before = BTreeMap::<String, Value>::new();
-        let mut seeds = vec![];
-        if d < 0 {
-            let mut todo = vec![start];
-            while let Some(v) = todo.pop() {
-                let Some(v) = existing(&v)? else {
-                    continue;
-                };
-                let k = key(db, &[v.clone()])?;
-                if before.contains_key(&k) {
-                    continue;
+        let rounds = |mut lo: i64| -> Result<()> {
+            loop {
+                let hi = max_rowid(db, &all)?;
+                if hi == lo {
+                    return Ok(());
                 }
-                before.insert(k, v.clone());
-                todo.extend(successors(&v)?);
-            }
-            for (k, v) in &before {
-                change(db, &reached, k, &vec![v.clone()], -1)?;
-            }
-            for v in before.values() {
-                let rooted:bool=db.query_row(&format!("SELECT EXISTS(SELECT 1 FROM {roots} WHERE c0 COLLATE {collation} IS ?1) OR EXISTS(SELECT 1 FROM {edges} e JOIN {reached} r ON e.c0 COLLATE {collation}=r.c0 WHERE e.c1 COLLATE {collation} IS ?1)"),[v],|r|r.get(0))?;
-                if rooted {
-                    seeds.push(v.clone());
+                for rule in rules.iter().filter(|r| r.member().is_some()) {
+                    derive(&all, rule, &roles(name, id, side, rule, None, Role::Range(all.clone(), lo, hi)), false)?;
                 }
+                lo = hi;
             }
-        } else {
-            seeds.push(start);
+        };
+        let read = |sql: &str, params: &[Value], sign: i64| -> Result<Vec<Delta>> {
+            Ok(rows(db, sql, params)?
+                .into_iter()
+                .map(|r| (r, sign))
+                .collect())
+        };
+        if std::env::var_os("SQLITE_IVM_COUNTING").is_some() {
+            return self.fixpoint_counting(db, name, id, side, row, new > 0, rules, &all, &work);
         }
-        let mut after = BTreeMap::<String, Value>::new();
-        while let Some(v) = seeds.pop() {
-            if contains(&v)? {
-                continue;
+        if new > 0 {
+            let lo = max_rowid(db, &all)?;
+            for rule in rules.iter().filter(|r| r.mentions(side)) {
+                derive(&all, rule, &roles(name, id, side, rule, Some(row), Role::Table(all.clone())), false)?;
             }
-            let k = key(db, &[v.clone()])?;
-            change(db, &reached, &k, &vec![v.clone()], 1)?;
-            after.insert(k, v.clone());
-            seeds.extend(successors(&v)?);
+            rounds(lo)?;
+            return read(
+                &format!("SELECT {cols} FROM {all} WHERE rowid>?1"),
+                &[Value::Integer(lo)],
+                1,
+            );
         }
-        let mut result = vec![];
-        for (k, v) in &before {
-            if !after.contains_key(k) {
-                result.push((vec![v.clone()], -1));
+        db.execute_cached(&format!("DELETE FROM {work}"), [])?;
+        for rule in rules.iter().filter(|r| r.mentions(side)) {
+            derive(&work, rule, &roles(name, id, side, rule, Some(row), Role::Table(all.clone())), true)?;
+        }
+        let mut lo = 0;
+        loop {
+            let hi = max_rowid(db, &work)?;
+            if hi == lo {
+                break;
             }
-        }
-        for (k, v) in after {
-            if !before.contains_key(&k) {
-                result.push((vec![v], 1));
+            db.execute_cached(
+                &format!("DELETE FROM {all} WHERE __k IN (SELECT __k FROM {work} WHERE rowid>?1 AND rowid<=?2)"),
+                rusqlite::params![lo, hi],
+            )?;
+            for rule in rules.iter().filter(|r| r.member().is_some()) {
+                derive(&work, rule, &roles(name, id, side, rule, None, Role::Range(work.clone(), lo, hi)), true)?;
             }
+            lo = hi;
         }
-        Ok(result)
+        let mut params = vec![];
+        let mut derivable = vec![];
+        for rule in rules {
+            let from = rule_from(rule, &roles(name, id, side, rule, None, Role::Table(all.clone())), &mut params);
+            let matched = rule
+                .head
+                .iter()
+                .zip(&node.fields)
+                .enumerate()
+                .map(|(i, (h, f))| format!("(({h}) COLLATE {}) IS w.c{i}", f.collation))
+                .collect::<Vec<_>>()
+                .join(" AND ");
+            derivable.push(format!(
+                "EXISTS(SELECT 1 {from}{})",
+                rule_where(rule, Some(&matched))
+            ));
+        }
+        let restored = max_rowid(db, &all)?;
+        let selected = (0..width)
+            .map(|i| format!("w.c{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        db.execute_cached(
+            &format!(
+                "INSERT OR IGNORE INTO {all}(__k,{cols}) SELECT w.__k,{selected} FROM {work} w WHERE {}",
+                derivable.join(" OR ")
+            ),
+            params_from_iter(params),
+        )?;
+        rounds(restored)?;
+        let removed = read(
+            &format!("SELECT {selected} FROM {work} w WHERE NOT EXISTS(SELECT 1 FROM {all} a WHERE a.__k=w.__k)"),
+            &[],
+            -1,
+        )?;
+        db.execute_cached(&format!("DELETE FROM {work}"), [])?;
+        Ok(removed)
+    }
+    /// EXPERIMENT (throwaway): support counting without rederivation.
+    #[allow(clippy::too_many_arguments)]
+    fn fixpoint_counting(
+        &self,
+        db: &Connection,
+        name: &str,
+        id: usize,
+        side: usize,
+        row: &Row,
+        appeared: bool,
+        rules: &[Rule],
+        all: &str,
+        work: &str,
+    ) -> Result<Vec<Delta>> {
+        let width = self.nodes[id].fields.len();
+        let cols = columns(width);
+        let counted = |rule: &Rule, roles: &[Role<'_>], params: &mut Vec<Value>| {
+            let from = rule_from(rule, roles, params);
+            format!(
+                "SELECT __k,{cols},count(*) AS __d FROM (SELECT {} AS __k,{} {from}{}) GROUP BY __k",
+                rule.key,
+                rule.head.iter().enumerate().map(|(i, h)| format!("{h} AS c{i}")).collect::<Vec<_>>().join(","),
+                rule_where(rule, None)
+            )
+        };
+        let add = |rule: &Rule, roles: &[Role<'_>]| -> Result<()> {
+            let mut params = vec![];
+            let select = counted(rule, roles, &mut params);
+            db.execute_cached(
+                &format!("INSERT INTO {all}(__k,{cols},__n) SELECT * FROM ({select}) WHERE true ON CONFLICT(__k) DO UPDATE SET __n=__n+excluded.__n"),
+                params_from_iter(params),
+            )?;
+            Ok(())
+        };
+        let subtract = |rule: &Rule, roles: &[Role<'_>]| -> Result<()> {
+            let mut params = vec![];
+            let select = counted(rule, roles, &mut params);
+            db.execute_cached(
+                &format!("UPDATE {all} SET __n=__n-d.__d FROM ({select}) d WHERE {all}.__k=d.__k"),
+                params_from_iter(params),
+            )?;
+            Ok(())
+        };
+        if appeared {
+            let mut lo = max_rowid(db, all)?;
+            let start = lo;
+            for rule in rules.iter().filter(|r| r.mentions(side)) {
+                add(rule, &roles(name, id, side, rule, Some(row), Role::Table(all.to_string())))?;
+            }
+            loop {
+                let hi = max_rowid(db, all)?;
+                if hi == lo {
+                    break;
+                }
+                for rule in rules.iter().filter(|r| r.member().is_some()) {
+                    add(rule, &roles(name, id, side, rule, None, Role::Range(all.to_string(), lo, hi)))?;
+                }
+                lo = hi;
+            }
+            return Ok(rows(db, &format!("SELECT {cols} FROM {all} WHERE rowid>?1"), &[Value::Integer(start)])?.into_iter().map(|r| (r, 1)).collect());
+        }
+        db.execute_cached(&format!("DELETE FROM {work}"), [])?;
+        for rule in rules.iter().filter(|r| r.mentions(side)) {
+            subtract(rule, &roles(name, id, side, rule, Some(row), Role::Table(all.to_string())))?;
+        }
+        let mut lo = 0;
+        loop {
+            db.execute_cached(&format!("INSERT INTO {work}(__k,{cols}) SELECT __k,{cols} FROM {all} WHERE __n<=0"), [])?;
+            db.execute_cached(&format!("DELETE FROM {all} WHERE __n<=0"), [])?;
+            let hi = max_rowid(db, work)?;
+            if hi == lo {
+                break;
+            }
+            for rule in rules.iter().filter(|r| r.member().is_some()) {
+                subtract(rule, &roles(name, id, side, rule, None, Role::Range(work.to_string(), lo, hi)))?;
+            }
+            lo = hi;
+        }
+        let removed = rows(db, &format!("SELECT {cols} FROM {work}"), &[])?.into_iter().map(|r| (r, -1)).collect();
+        db.execute_cached(&format!("DELETE FROM {work}"), [])?;
+        Ok(removed)
     }
 }
 

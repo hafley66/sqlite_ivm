@@ -252,3 +252,196 @@ fn materialized_output_affinity_matches_ordinary_view_consumers() -> Result<()> 
     }
     Ok(())
 }
+
+fn recursion_database(schema: &str) -> Result<Connection> {
+    let db = Connection::open_in_memory()?;
+    register(&db)?;
+    db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON")?;
+    db.execute_batch(schema)?;
+    Ok(db)
+}
+const GRAPH: &str = "CREATE TABLE roots(k INTEGER);CREATE TABLE edges(a INTEGER,b INTEGER);CREATE TABLE allowed(k INTEGER);CREATE TABLE blocked(k INTEGER)";
+const GRAPH_MUTATIONS: [&str; 14] = [
+    "INSERT INTO roots VALUES(1),(1),(9),(NULL)",
+    "INSERT INTO edges VALUES(1,2),(2,3),(3,1),(3,4),(4,5),(5,4),(7,8),(NULL,6),(6,NULL)",
+    "INSERT INTO allowed VALUES(1),(2),(3),(4),(5),(8);INSERT INTO blocked VALUES(3),(5)",
+    "DELETE FROM edges WHERE a=2 AND b=3",
+    "INSERT INTO edges VALUES(2,3)",
+    "DELETE FROM roots WHERE k=1",
+    "BEGIN;DELETE FROM edges WHERE a=3;INSERT INTO roots VALUES(7)",
+    "ROLLBACK",
+    "INSERT INTO roots VALUES(1);INSERT INTO edges VALUES(9,1)",
+    "DELETE FROM edges WHERE a=3 AND b=1",
+    "UPDATE edges SET b=1 WHERE a=5",
+    "DELETE FROM allowed WHERE k=4;DELETE FROM blocked",
+    "DELETE FROM edges",
+    "DELETE FROM roots",
+];
+fn verify_recursion(query: &str) -> Result<()> {
+    let db = recursion_database(GRAPH)?;
+    db.execute_batch(&format!(
+        "CREATE VIRTUAL TABLE result USING sqlite_ivm('{}')",
+        query.replace('\'', "''")
+    ))?;
+    assert_eq!(rows(&db, "SELECT * FROM result")?, rows(&db, query)?, "empty");
+    for sql in GRAPH_MUTATIONS {
+        db.execute_batch(sql)?;
+        assert_eq!(rows(&db, "SELECT * FROM result")?, rows(&db, query)?, "{sql}");
+    }
+    db.execute_batch("ALTER TABLE result RENAME TO renamed;INSERT INTO roots VALUES(4);INSERT INTO edges VALUES(4,5),(5,4)")?;
+    assert_eq!(rows(&db, "SELECT * FROM renamed")?, rows(&db, query)?, "renamed");
+    db.execute_batch("DROP TABLE renamed")?;
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM sqlite_schema WHERE name LIKE '%result%' OR name LIKE '%renamed%'",[],|r| r.get::<_, i64>(0))?,
+        0
+    );
+    Ok(())
+}
+
+#[test]
+fn row1_binary_closure_with_cycles() -> Result<()> {
+    verify_recursion("WITH RECURSIVE path(src,dst) AS(SELECT a,b FROM edges UNION SELECT p.src,e.b FROM path p JOIN edges e ON p.dst=e.a) SELECT src,dst FROM path")
+}
+
+#[test]
+fn row2_parity_over_roots() -> Result<()> {
+    verify_recursion("WITH RECURSIVE parity(node,odd) AS(SELECT k,0 FROM roots UNION SELECT e.b,1-p.odd FROM parity p JOIN edges e ON p.node=e.a) SELECT node,odd FROM parity")
+}
+
+#[test]
+fn row3_filtered_step_with_two_joins_and_distinct() -> Result<()> {
+    verify_recursion("WITH RECURSIVE r(n) AS(SELECT k FROM roots UNION SELECT DISTINCT second.b FROM r JOIN edges first ON r.n=first.a JOIN edges second ON first.b=second.a JOIN allowed al ON al.k=second.b WHERE second.b<>r.n) SELECT n FROM r")?;
+    verify_recursion("WITH RECURSIVE r(n) AS(SELECT k FROM roots UNION SELECT e.b FROM edges e,r WHERE r.n=e.a AND e.b IS NOT NULL) SELECT n FROM r")
+}
+
+#[test]
+fn row4_min_distance_aggregate_after_bounded_recursion() -> Result<()> {
+    verify_recursion("WITH RECURSIVE walk(node,dist) AS(SELECT k,0 FROM roots UNION SELECT e.b,w.dist+1 FROM walk w JOIN edges e ON w.node=e.a WHERE w.dist<3) SELECT node,MIN(dist) AS dist,COUNT(*) AS paths FROM walk GROUP BY node")
+}
+
+#[test]
+fn row5_antijoin_and_exists_after_recursion() -> Result<()> {
+    verify_recursion("WITH RECURSIVE r(n) AS(SELECT k FROM roots UNION SELECT e.b FROM r JOIN edges e ON r.n=e.a) SELECT n FROM r WHERE NOT EXISTS(SELECT 1 FROM blocked WHERE blocked.k=r.n)")?;
+    verify_recursion("WITH RECURSIVE r(n) AS(SELECT k FROM roots UNION SELECT e.b FROM r JOIN edges e ON r.n=e.a) SELECT DISTINCT n FROM r WHERE EXISTS(SELECT 1 FROM allowed WHERE allowed.k=r.n)")
+}
+
+#[test]
+fn row6_sequential_fixpoints_and_two_step_rules() -> Result<()> {
+    verify_recursion("WITH RECURSIVE closed(src,dst) AS(SELECT a,b FROM edges UNION SELECT cl.src,e.b FROM closed cl JOIN edges e ON cl.dst=e.a),r(n) AS(SELECT k FROM roots UNION SELECT cl.dst FROM r JOIN closed cl ON r.n=cl.src) SELECT n FROM r")?;
+    verify_recursion("WITH RECURSIVE r(n) AS(SELECT k FROM roots UNION SELECT k FROM allowed WHERE k>4 UNION SELECT e.b FROM r JOIN edges e ON r.n=e.a UNION SELECT e.a FROM r JOIN edges e ON r.n=e.b) SELECT n FROM r")
+}
+
+#[test]
+fn rows7_and_8_named_rejections_leave_no_state() -> Result<()> {
+    let db = recursion_database(GRAPH)?;
+    for (query, message) in [
+        ("WITH RECURSIVE r(n) AS(SELECT k FROM roots UNION SELECT max(e.b) FROM r JOIN edges e ON r.n=e.a) SELECT n FROM r", "recursive step may not aggregate or negate its own relation"),
+        ("WITH RECURSIVE r(n) AS(SELECT k FROM roots UNION SELECT e.b FROM r JOIN edges e ON r.n=e.a WHERE NOT EXISTS(SELECT 1 FROM r r2 WHERE r2.n=e.b)) SELECT n FROM r", "recursive step may not aggregate or negate its own relation"),
+        ("WITH RECURSIVE r(n) AS(SELECT k FROM roots UNION SELECT e.b FROM edges e WHERE e.a IN (SELECT n FROM r)) SELECT n FROM r", "recursive step may not aggregate or negate its own relation"),
+        ("WITH RECURSIVE r(n) AS(SELECT k FROM roots UNION ALL SELECT e.b FROM r JOIN edges e ON r.n=e.a WHERE e.b<5) SELECT n FROM r", "recursive UNION ALL unsupported"),
+    ] {
+        let error = db
+            .execute_batch(&format!("CREATE VIRTUAL TABLE bad USING sqlite_ivm('{query}')"))
+            .unwrap_err()
+            .to_string();
+        assert_eq!(error, message, "{query}");
+        assert_eq!(
+            db.query_row("SELECT count(*) FROM sqlite_schema WHERE name LIKE 'bad%' OR name LIKE '__ivm_bad%'",[],|r| r.get::<_, i64>(0))?,
+            0
+        );
+    }
+    Ok(())
+}
+
+static STATEMENTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+unsafe extern "C" fn count_statement(
+    event: std::ffi::c_uint,
+    _: *mut std::ffi::c_void,
+    _: *mut std::ffi::c_void,
+    _: *mut std::ffi::c_void,
+) -> std::ffi::c_int {
+    if event == rusqlite::ffi::SQLITE_TRACE_STMT {
+        STATEMENTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    0
+}
+fn trace(db: &Connection, mask: std::ffi::c_uint) {
+    unsafe {
+        rusqlite::ffi::sqlite3_trace_v2(
+            db.handle(),
+            mask,
+            if mask == 0 { None } else { Some(count_statement) },
+            std::ptr::null_mut(),
+        );
+    }
+}
+fn closure_statements(chain: i64) -> Result<(usize, i64)> {
+    let db = recursion_database("CREATE TABLE edges(a INTEGER,b INTEGER)")?;
+    let query = "WITH RECURSIVE path(src,dst) AS(SELECT a,b FROM edges UNION SELECT p.src,e.b FROM path p JOIN edges e ON p.dst=e.a) SELECT src,dst FROM path";
+    db.execute_batch(&format!("WITH RECURSIVE n(i) AS(SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<{chain}) INSERT INTO edges SELECT i,i+1 FROM n WHERE i<{chain}"))?;
+    db.execute_batch(&format!("CREATE VIRTUAL TABLE closure USING sqlite_ivm('{query}')"))?;
+    let before: i64 = db.query_row("SELECT count(*) FROM closure", [], |r| r.get(0))?;
+    trace(&db, rusqlite::ffi::SQLITE_TRACE_STMT);
+    STATEMENTS.store(0, std::sync::atomic::Ordering::Relaxed);
+    db.execute(
+        "INSERT INTO edges VALUES(?1,?2)",
+        rusqlite::params![chain, chain + 1],
+    )?;
+    let statements = STATEMENTS.load(std::sync::atomic::Ordering::Relaxed);
+    trace(&db, 0);
+    let after: i64 = db.query_row("SELECT count(*) FROM closure", [], |r| r.get(0))?;
+    assert_eq!(after - before, chain, "new closure rows for one appended edge");
+    assert_eq!(rows(&db, "SELECT * FROM closure")?, rows(&db, query)?);
+    Ok((statements, chain))
+}
+
+// COUNT test for the semi-naive law: one appended edge on an N-node chain derives
+// N new closure rows; statements grow with those rows, never with the closure size.
+#[test]
+fn recursion_statement_count_is_linear_in_new_closure_rows() -> Result<()> {
+    let (small, small_rows) = closure_statements(250)?;
+    let (large, large_rows) = closure_statements(1000)?;
+    let ratio = large as f64 / small as f64;
+    let expected = large_rows as f64 / small_rows as f64;
+    assert!(
+        ratio < expected * 1.5,
+        "statements {small} -> {large} (x{ratio:.2}) for rows {small_rows} -> {large_rows} (x{expected:.2}); quadratic would be x{:.1}",
+        expected * expected
+    );
+    assert!(
+        large < 8 * large_rows as usize + 64,
+        "{large} statements for {large_rows} new rows"
+    );
+    Ok(())
+}
+
+// EXPERIMENT (throwaway): DRed vs support counting on fixture rows 1 and 2.
+#[test]
+fn measure_recursion_strategies() -> Result<()> {
+    let fixture: serde_json::Value =
+        serde_json::from_str(include_str!("fixtures/1_features.json")).unwrap();
+    for wanted in ["closure_binary", "parity_recursion", "row1_cycles", "row2_cycles"] {
+        let (schema, query, mutations): (String, String, Vec<String>) = match wanted {
+            "row1_cycles" => (GRAPH.into(), "WITH RECURSIVE path(src,dst) AS(SELECT a,b FROM edges UNION SELECT p.src,e.b FROM path p JOIN edges e ON p.dst=e.a) SELECT src,dst FROM path".into(), GRAPH_MUTATIONS.iter().map(|s| s.to_string()).collect()),
+            "row2_cycles" => (GRAPH.into(), "WITH RECURSIVE parity(node,odd) AS(SELECT k,0 FROM roots UNION SELECT e.b,1-p.odd FROM parity p JOIN edges e ON p.node=e.a) SELECT node,odd FROM parity".into(), GRAPH_MUTATIONS.iter().map(|s| s.to_string()).collect()),
+            _ => {
+                let case = fixture["cases"].as_array().unwrap().iter().find(|c| c["name"] == wanted).unwrap();
+                (fixture["schema"].as_str().unwrap().into(), case["query"].as_str().unwrap().into(), fixture["mutations"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect())
+            }
+        };
+        let db = recursion_database(&schema)?;
+        db.execute_batch(&format!("CREATE VIRTUAL TABLE result USING sqlite_ivm('{}')", query.replace('\'', "''")))?;
+        let start = std::time::Instant::now();
+        let mut mismatches = 0;
+        let mut first = None;
+        for (step, sql) in mutations.iter().enumerate() {
+            db.execute_batch(sql)?;
+            if rows(&db, "SELECT * FROM result")? != rows(&db, &query)? {
+                mismatches += 1;
+                first.get_or_insert(step);
+            }
+        }
+        println!("MEASURE mode={} case={wanted} states={} mismatches={mismatches} first={first:?} wall_ms={:.1}", if std::env::var_os("SQLITE_IVM_COUNTING").is_some() { "counting" } else { "dred" }, mutations.len() + 1, start.elapsed().as_secs_f64() * 1000.0);
+    }
+    Ok(())
+}

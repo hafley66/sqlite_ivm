@@ -1,11 +1,36 @@
 //! Independent typed DD graphs for the SQL-facing feature acceptance catalog.
-use differential_dataflow::VecCollection;
+use differential_dataflow::{operators::Iterate, VecCollection};
 use std::collections::BTreeSet;
 pub type R = (i64, Option<i64>, Option<i64>, String);
 pub type Row = Vec<String>;
 type D<'s> = VecCollection<'s, u64, R>;
 type O<'s> = VecCollection<'s, u64, Row>;
 type P<'s> = VecCollection<'s, u64, (Option<R>, Option<R>)>;
+type E<'s> = VecCollection<'s, u64, (i64, i64)>;
+type K<'s> = VecCollection<'s, u64, i64>;
+fn closure<'s>(edges: E<'s>) -> E<'s> {
+    let base = edges.clone();
+    let step = edges.clone();
+    edges.iterate(move |scope, inner| {
+        inner
+            .map(|(s, t)| (t, s))
+            .join(step.enter(scope))
+            .map(|(_, (s, t))| (s, t))
+            .concat(base.enter(scope))
+            .distinct()
+    })
+}
+fn reach<'s>(seeds: K<'s>, edges: E<'s>) -> K<'s> {
+    let again = seeds.clone();
+    seeds.iterate(move |scope, inner| {
+        inner
+            .map(|k| (k, ()))
+            .join(edges.enter(scope))
+            .map(|(_, (_, t))| t)
+            .concat(again.enter(scope))
+            .distinct()
+    })
+}
 pub fn number(v: Option<i64>) -> String {
     v.map(|v| format!("n{v}")).unwrap_or("null".into())
 }
@@ -485,6 +510,95 @@ pub fn graph<'s>(
                 })
             } else {
                 result
+            }
+        }
+        "closure_binary"
+        | "parity_recursion"
+        | "filtered_step"
+        | "min_distance"
+        | "antijoin_after_recursion"
+        | "nested_fixpoints"
+        | "two_step_rules" => {
+            let edges = b
+                .filter(|r| r.1.is_some() && r.2.is_some())
+                .map(|r| (r.1.unwrap(), r.2.unwrap().abs() % 5));
+            let roots = a.clone().filter(|r| r.1.is_some()).map(|r| r.1.unwrap());
+            let keys_of_c = c.clone().filter(|r| r.1.is_some()).map(|r| r.1.unwrap());
+            match family {
+                "closure_binary" => closure(edges).map(|(s, t)| vec![n(s), n(t)]),
+                "parity_recursion" => {
+                    let seeds = roots.map(|k| (k, 0i64));
+                    let again = seeds.clone();
+                    seeds
+                        .iterate(move |scope, inner| {
+                            inner
+                                .join(edges.enter(scope))
+                                .map(|(_, (odd, t))| (t, 1 - odd))
+                                .concat(again.enter(scope))
+                                .distinct()
+                        })
+                        .map(|(k, odd)| vec![n(k), n(odd)])
+                }
+                "filtered_step" => {
+                    let allowed = c
+                        .filter(|r| r.1.is_some() && r.2.is_some_and(|z| z > 0))
+                        .map(|r| r.1.unwrap())
+                        .distinct();
+                    let seeds = a.map(|r| r.1);
+                    let again = seeds.clone();
+                    seeds
+                        .iterate(move |scope, inner| {
+                            inner
+                                .flat_map(|k| k)
+                                .map(|k| (k, ()))
+                                .join(edges.enter(scope))
+                                .map(|(_, (_, t))| (t, ()))
+                                .semijoin(allowed.enter(scope))
+                                .map(|(t, _)| Some(t))
+                                .concat(again.enter(scope))
+                                .distinct()
+                        })
+                        .map(|k| vec![number(k)])
+                }
+                "min_distance" => {
+                    let seeds = roots.map(|k| (k, 0i64));
+                    let again = seeds.clone();
+                    seeds
+                        .iterate(move |scope, inner| {
+                            inner
+                                .filter(|(_, d)| *d < 4)
+                                .join(edges.enter(scope))
+                                .map(|(_, (d, t))| (t, d + 1))
+                                .concat(again.enter(scope))
+                                .distinct()
+                        })
+                        .reduce(|_, input, out| out.push((*input[0].0, 1)))
+                        .map(|(k, d)| vec![n(k), n(d)])
+                }
+                "antijoin_after_recursion" => reach(roots, edges)
+                    .map(|k| (k, ()))
+                    .antijoin(keys_of_c.distinct())
+                    .map(|(k, _)| vec![n(k)]),
+                "nested_fixpoints" => reach(roots, closure(edges)).map(|k| vec![n(k)]),
+                "two_step_rules" => {
+                    let seeds = roots.concat(keys_of_c).distinct();
+                    let again = seeds.clone();
+                    let forward = edges.clone();
+                    let backward = edges.map(|(s, t)| (t, s));
+                    seeds
+                        .iterate(move |scope, inner| {
+                            let keyed = inner.map(|k| (k, ()));
+                            keyed
+                                .clone()
+                                .join(forward.enter(scope))
+                                .map(|(_, (_, t))| t)
+                                .concat(keyed.join(backward.enter(scope)).map(|(_, (_, s))| s))
+                                .concat(again.enter(scope))
+                                .distinct()
+                        })
+                        .map(|k| vec![n(k)])
+                }
+                _ => unreachable!(),
             }
         }
         _ => panic!("missing typed DD feature graph: {family}"),

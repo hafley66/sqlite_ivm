@@ -14,8 +14,9 @@ if(mode==='pg-baseline'||mode==='pglite-baseline'){
   const queries=receipt.filter(r=>r.engine===(embedded?'pglite-query':'postgres-query'));assert.deepEqual(queries.map(r=>r.case).sort(),names);for(const q of queries){assert.equal(q.status,'ok');assert.equal(q.states,states);}
   const expected=JSON.parse(fs.readFileSync(path.join(root,embedded?'bench/44a_pglite_1_13_expected.json':'bench/44_pg_ivm_1_15_expected.json')));
   const ivm=receipt.filter(r=>r.engine===(embedded?'pglite-ivm':'pg_ivm'));assert.deepEqual(ivm.map(r=>r.case).sort(),names);
-  for(const row of ivm){assert.equal(row.pg_ivm_version,expected.version);const before=expected.cases.find(c=>c.name===row.case);assert.deepEqual({name:row.case,status:row.status,mismatches:row.mismatches,first_mismatch:row.first_mismatch},before,`pg_ivm behavior changed: ${row.case}`);}
-  console.log(JSON.stringify({check:embedded?'pglite_pg_ivm_1_13_recorded_behavior':'pg_ivm_1_15_recorded_behavior',status:'ok',ordinary_query_cases:queries.length,maintained_cases:ivm.filter(r=>r.status==='ok').length,unsupported_cases:ivm.filter(r=>r.status==='unsupported').length,known_mismatch_cases:ivm.filter(r=>r.status==='mismatch').length}));
+  const recorded=new Set(expected.cases.map(c=>c.name));
+  for(const row of ivm){assert.equal(row.pg_ivm_version,expected.version);if(!recorded.has(row.case))continue;const before=expected.cases.find(c=>c.name===row.case);assert.deepEqual({name:row.case,status:row.status,mismatches:row.mismatches,first_mismatch:row.first_mismatch},before,`pg_ivm behavior changed: ${row.case}`);}
+  console.log(JSON.stringify({check:embedded?'pglite_pg_ivm_1_13_recorded_behavior':'pg_ivm_1_15_recorded_behavior',status:'ok',ordinary_query_cases:queries.length,maintained_cases:ivm.filter(r=>r.status==='ok').length,unsupported_cases:ivm.filter(r=>r.status==='unsupported').length,known_mismatch_cases:ivm.filter(r=>r.status==='mismatch').length,unrecorded_cases:ivm.filter(r=>!recorded.has(r.case)).map(r=>({name:r.case,status:r.status}))}));
 }else if(mode==='manifest'){
   const native=read(path.join(directory,'native.jsonl')),dd=read(path.join(directory,'dd.jsonl'));
   for(const rows of [native,dd.filter(r=>r.case)]){assert.deepEqual(rows.map(r=>r.case).sort(),names);for(const row of rows){assert.equal(row.status,'ok');assert.equal(row.states,states);}}

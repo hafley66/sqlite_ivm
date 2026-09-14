@@ -88,11 +88,41 @@ result(window_topk,[Id,N]) :- findall((RN-I)-[I,RN],(table(a,A),A=[I,_,_,_],rank
 result(group_window,[K,S,N]) :- findall((SK-KK)-[X,T],(key(X),values(X,Vs),sql_sum(Vs,T),desckey(T,SK),nullkey(X,first,KK)),Pairs),ordered(Pairs,Rows),nth1(N,Rows,[K,S]),N=<2.
 result(outer_aggregate,[K,N,S]) :- key(K),findall([Id,W],pair(left,eq,a,b,[_,K,_,_],[Id,_,W,_]),Pairs),findall(Id,(member([Id,_],Pairs),nonnull(Id)),Ids),length(Ids,N),findall(W,member([_,W],Pairs),Vs),sql_sum(Vs,S).
 result(nested_distinct,[K,N]) :- key(K),values(K,Vs),sort(Vs,U),length(U,N).
+% Recursive families: tabled least fixpoints over keyed source facts; tables are
+% abolished before every state so a retracted fact never survives in a table.
+:- table path/2, parity/2, reach_filtered/1, walk/2, reach_plain/1, closed/2, reach_nested/1, both/1.
+edge(S,D) :- table(b,[_,K,W,_]),nonnull(K),nonnull(W),S=K,D is abs(W) mod 5.
+root(K) :- table(a,[_,K,_,_]),nonnull(K).
+path(S,D) :- edge(S,D).
+path(S,D) :- path(S,M),edge(M,D).
+result(closure_binary,[S,D]) :- path(S,D).
+parity(N,0) :- root(N).
+parity(D,P) :- parity(N,Q),edge(N,D),P is 1-Q.
+result(parity_recursion,[N,P]) :- parity(N,P).
+reach_filtered(N) :- table(a,[_,N,_,_]).
+reach_filtered(D) :- reach_filtered(N),nonnull(N),edge(N,D),table(c,[_,K,Z]),nonnull(K),K=:=D,pos(Z).
+result(filtered_step,[N]) :- reach_filtered(N).
+walk(N,0) :- root(N).
+walk(D,X) :- walk(N,Y),Y<4,edge(N,D),X is Y+1.
+result(min_distance,[N,M]) :- findall(N1,walk(N1,_),Ns),sort(Ns,U),member(N,U),findall(X,walk(N,X),Xs),min_list(Xs,M).
+reach_plain(N) :- root(N).
+reach_plain(D) :- reach_plain(N),edge(N,D).
+result(antijoin_after_recursion,[N]) :- reach_plain(N),\+ (table(c,[_,K,_]),nonnull(K),K=:=N).
+closed(S,D) :- edge(S,D).
+closed(S,D) :- closed(S,M),edge(M,D).
+reach_nested(N) :- root(N).
+reach_nested(D) :- reach_nested(N),closed(N,D).
+result(nested_fixpoints,[N]) :- reach_nested(N).
+both(N) :- root(N).
+both(N) :- table(c,[_,N,_]),nonnull(N).
+both(D) :- both(N),edge(N,D).
+both(S) :- both(N),edge(S,N).
+result(two_step_rules,[N]) :- both(N).
 
 normalize(V,N) :- (number(V),V=:=round(V)->N is round(V);N=V).
 canonical(Rows,Sorted) :- maplist(maplist(normalize),Rows,N),msort(N,Sorted).
 sync(T,Rows) :- forall((row(T,Id,Old),\+memberchk(Old,Rows)),retract(row(T,Id,Old))),forall((member(R,Rows),R=[Id|_],\+row(T,Id,R)),assertz(row(T,Id,R))).
-verify(F,State) :- forall(member(T,[a,b,c]),(get_dict(T,State.inputs,Rows),sync(T,Rows))),
+verify(F,State) :- forall(member(T,[a,b,c]),(get_dict(T,State.inputs,Rows),sync(T,Rows))),abolish_all_tables,
  findall(R,result(F,R),Actual),canonical(Actual,A),canonical(State.expected,E),
  (A==E->true;throw(error(result_mismatch(F,State.step,A,E),_))),
  forall(member(T,[a,b,c]),(findall(R,table(T,R),Got),get_dict(T,State.inputs,Want),canonical(Got,G),canonical(Want,W),(G==W->true;throw(error(input_mismatch(T),_))))).
