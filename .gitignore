@@ -1,6 +1,5 @@
-/target/
-/bench/target/
-/bench/shared/node_modules
-/bench/shared/.work/
-/bench/results/
-/dist/
+target/
+bench/target/
+bench/shared/node_modules/
+bench/results/
+dist/
