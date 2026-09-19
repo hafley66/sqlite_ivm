@@ -1404,10 +1404,20 @@ pub fn hooks(db: &Connection, name: &str, plan: &Plan) -> Result<Vec<(&'static s
             };
             let mut body=String::from("SELECT CASE WHEN (SELECT recursive_triggers FROM pragma_recursive_triggers)!=1 THEN RAISE(ABORT,'sqlite_ivm requires recursive_triggers=ON') END;");
             for (image, adding) in images {
-                body.push_str(&format!("INSERT INTO {}(__ivm_source,__ivm_adding,__ivm_row) VALUES({source},{adding},json_array({}));",quote(name),s.columns.iter().map(|c|{
-                let value=format!("{image}.{}",quote(c));
-                format!("json_array(typeof({value}),CASE typeof({value}) WHEN 'blob' THEN hex({value}) WHEN 'real' THEN CASE WHEN {value}>1.7976931348623157e308 THEN '9e999' WHEN {value}< -1.7976931348623157e308 THEN '-9e999' ELSE printf('%!.17g',{value}) END ELSE {value} END)")
-            }).collect::<Vec<_>>().join(",")));
+                body.push_str(&format!(
+                    "INSERT INTO {}(__ivm_source,__ivm_adding,{}) VALUES({source},{},{});",
+                    quote(name),
+                    (0..s.columns.len())
+                        .map(|i| format!("__ivm_v{i}"))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    adding,
+                    s.columns
+                        .iter()
+                        .map(|c| format!("{image}.{}", quote(c)))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ));
             }
             // Arrangements contain the old row independently of the source SQL
             // table. AFTER avoids retracting writes rejected by OR IGNORE.

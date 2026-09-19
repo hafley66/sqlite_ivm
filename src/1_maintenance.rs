@@ -390,13 +390,24 @@ pub fn create_hooks(
                 if (event == "INSERT" && !adding) || (event == "DELETE" && adding) {
                     continue;
                 }
-                let values = used
+                let columns: Vec<_> = used
                     .iter()
                     .filter(|c| c.source == source)
-                    .map(|c| format!("{image}.{}", quote(&c.name)))
-                    .collect::<Vec<_>>()
-                    .join(",");
-                body.push_str(&format!("INSERT INTO {}(__ivm_source,__ivm_adding,__ivm_row) VALUES({source},{},json_array({values}));",quote(name),i32::from(adding)));
+                    .collect::<Vec<_>>();
+                body.push_str(&format!(
+                    "INSERT INTO {}(__ivm_source,__ivm_adding,{}) VALUES({source},{},{});",
+                    quote(name),
+                    (0..columns.len())
+                        .map(|i| format!("__ivm_v{i}"))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    i32::from(adding),
+                    columns
+                        .iter()
+                        .map(|c| format!("{image}.{}", quote(&c.name)))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ));
             }
             db.execute_batch(&format!(
                 "CREATE TRIGGER main.{} AFTER {event} ON {} BEGIN {body} END;",
