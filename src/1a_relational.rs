@@ -382,17 +382,52 @@ impl Plan {
             )?;
             db.execute(&format!("DELETE FROM {out}"), [])?;
         }
+        let mut reads = vec![0usize; self.nodes.len()];
+        reads[self.output] += 1;
+        for node in &self.nodes {
+            match &node.kind {
+                Kind::Input(_) => {}
+                Kind::Map { .. } => reads[node.inputs[0]] += 1,
+                Kind::Set(op) if *op == "all" => reads[node.inputs[0]] += 1,
+                _ => {
+                    for side in 0..node.inputs.len() {
+                        reads[node.inputs[side]] += 1;
+                    }
+                }
+            }
+        }
         for id in 0..self.nodes.len() {
             let node = &self.nodes[id];
-            if !matches!(&node.kind, Kind::Set(op) if *op == "all") {
+            let direct = match &node.kind {
+                Kind::Map { .. } => false,
+                Kind::Set(op) if *op == "all" => false,
+                _ => true,
+            };
+            if direct {
                 for side in 0..node.inputs.len() {
                     self.fill(db, name, id, side)?;
+                    self.exhaust(db, &mut reads, node.inputs[side])?;
                 }
             }
             self.materialize(db, name, id)?;
+            if !direct {
+                self.exhaust(db, &mut reads, node.inputs[0])?;
+            }
             if id == self.output {
                 self.write_state(db, name, id)?;
+                self.exhaust(db, &mut reads, id)?;
             }
+        }
+        Ok(())
+    }
+    fn exhaust(&self, db: &Connection, reads: &mut [usize], child: usize) -> Result<()> {
+        reads[child] -= 1;
+        if reads[child] == 0 {
+            let node = &self.nodes[child];
+            db.execute(
+                &format!("DELETE FROM {}", out_table(child, node.fields.len())),
+                [],
+            )?;
         }
         Ok(())
     }
