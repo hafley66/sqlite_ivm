@@ -243,6 +243,21 @@ fn weighted(db: &Connection, sql: &str, k: &str) -> Result<Vec<Delta>> {
         })
         .collect()
 }
+const BULK_ROUND_BUDGET: usize = 100_000;
+const BULK_GROUP_BUDGET: usize = 100_000;
+const BULK_MULTIPLICITY_BUDGET: i64 = 1_000_000;
+fn out_table(id: usize, width: usize) -> String {
+    format!("temp.__ivm_out_{width}_{id}")
+}
+fn json_key(parts: Vec<String>) -> String {
+    format!("json_array({})", parts.join(","))
+}
+fn folded(value: &str) -> String {
+    format!("CASE typeof({value}) WHEN 'blob' THEN json_object('blob',hex({value})) WHEN 'real' THEN CASE WHEN {value}=CAST({value} AS INTEGER) AND typeof(CAST({value} AS INTEGER))='integer' THEN CAST({value} AS INTEGER) ELSE json_object('real',sqlite_ivm_real_hex({value})) END ELSE {value} END")
+}
+fn plain(value: &str) -> String {
+    format!("CASE typeof({value}) WHEN 'blob' THEN json_object('blob',hex({value})) WHEN 'real' THEN json_object('real',sqlite_ivm_real_hex({value})) ELSE {value} END")
+}
 impl Plan {
     pub fn create_state(&self, db: &Connection, name: &str) -> Result<Vec<(&'static str, String)>> {
         let mut objects = vec![];
@@ -325,55 +340,453 @@ impl Plan {
         Ok(objects)
     }
     pub fn populate(&self, db: &Connection, name: &str) -> Result<()> {
-        // Global aggregates have an output even before the first source row.
-        // Seed downstream first, then propagate upstream empty outputs.
-        for (id, node) in self.nodes.iter().enumerate().rev() {
-            if let Kind::Group {
-                keys,
-                expressions,
-                limit: None,
-                window: false,
-                having,
-                ..
-            } = &node.kind
-            {
-                if keys.is_empty() {
-                    for row in rows(
-                        db,
-                        &format!(
-                            "SELECT {} FROM {} WHERE __k='[]'{}",
-                            expressions.join(","),
-                            table(name, id, 0),
-                            having
-                                .as_ref()
-                                .map(|h| format!(" HAVING {h}"))
-                                .unwrap_or_default()
-                        ),
-                        &[],
-                    )? {
-                        self.emit(db, name, id, row, 1)?;
+        for source in &self.sources {
+            let bad = source
+                .columns
+                .iter()
+                .zip(&source.affinities)
+                .filter_map(|(column, affinity)| {
+                    let c = quote(column);
+                    match affinity.as_str() {
+                        "TEXT" => Some(format!("typeof({c}) IN ('blob','integer','real')")),
+                        "INTEGER" => Some(format!("typeof({c}) IN ('blob','text','real')")),
+                        "REAL" | "NUMERIC" => Some(format!("typeof({c}) IN ('blob','text')")),
+                        _ => None,
                     }
+                })
+                .collect::<Vec<_>>();
+            if bad.is_empty() {
+                continue;
+            }
+            let invalid: bool = db.query_row(
+                &format!(
+                    "SELECT EXISTS(SELECT 1 FROM main.{} WHERE {})",
+                    quote(&source.name),
+                    bad.join(" OR ")
+                ),
+                [],
+                |r| r.get(0),
+            )?;
+            if invalid {
+                return Err(error("source value does not conform to declared affinity"));
+            }
+        }
+        for (id, node) in self.nodes.iter().enumerate() {
+            let out = out_table(id, node.fields.len());
+            db.execute(
+                &format!(
+                    "CREATE TABLE IF NOT EXISTS {out}({},__m)",
+                    columns(node.fields.len())
+                ),
+                [],
+            )?;
+            db.execute(&format!("DELETE FROM {out}"), [])?;
+        }
+        for id in 0..self.nodes.len() {
+            let node = &self.nodes[id];
+            if !matches!(&node.kind, Kind::Set(op) if *op == "all") {
+                for side in 0..node.inputs.len() {
+                    self.fill(db, name, id, side)?;
                 }
             }
-        }
-        for (source, s) in self.sources.iter().enumerate() {
-            // Source readback is materialized before updates reuse this connection.
-            for row in rows(
-                db,
-                &format!(
-                    "SELECT {} FROM main.{}",
-                    s.columns
-                        .iter()
-                        .map(|c| quote(c))
-                        .collect::<Vec<_>>()
-                        .join(","),
-                    quote(&s.name)
-                ),
-                &[],
-            )? {
-                self.input(db, name, source, row, 1)?;
+            self.materialize(db, name, id)?;
+            if id == self.output {
+                self.write_state(db, name, id)?;
             }
         }
+        Ok(())
+    }
+    fn fill(&self, db: &Connection, name: &str, id: usize, side: usize) -> Result<()> {
+        let node = &self.nodes[id];
+        let child = node.inputs[side];
+        let child_node = &self.nodes[child];
+        let width = child_node.fields.len();
+        let out = out_table(child, width);
+        let t = table(name, id, side);
+        let r = json_key((0..width).map(|i| plain(&format!("c{i}"))).collect());
+        let k = match &node.kind {
+            Kind::Set(_) => json_key(
+                (0..node.fields.len())
+                    .map(|i| {
+                        folded(&crate::relational::key_expression(
+                            &format!("c{i}"),
+                            &node.fields[i].collation,
+                        ))
+                    })
+                    .collect(),
+            ),
+            Kind::Join { left, right, .. } => {
+                let positions = if side == 0 { left } else { right };
+                json_key(
+                    positions
+                        .iter()
+                        .map(|i| {
+                            folded(&crate::relational::key_expression(
+                                &format!("c{i}"),
+                                &child_node.fields[*i].collation,
+                            ))
+                        })
+                        .collect(),
+                )
+            }
+            Kind::Group { keys, .. } => json_key(keys.iter().map(|e| folded(e)).collect()),
+            Kind::Fixpoint { .. } => {
+                json_key((0..width).map(|i| folded(&format!("c{i}"))).collect())
+            }
+            _ => return Ok(()),
+        };
+        db.execute(
+            &format!(
+                "INSERT INTO {t}(__k,__r,__n,{}) SELECT {k},{r},__m,c0{} FROM {out} WHERE 1 ON CONFLICT(__r) DO UPDATE SET __n=__n+excluded.__n",
+                columns(width),
+                (1..width).map(|i| format!(",c{i}")).collect::<String>()
+            ),
+            [],
+        )?;
+        let bad: bool = db.query_row(
+            &format!("SELECT EXISTS(SELECT 1 FROM {t} WHERE typeof(__n)!='integer' OR __n<0)"),
+            [],
+            |r| r.get(0),
+        )?;
+        if bad {
+            return Err(error("arrangement multiplicity overflow"));
+        }
+        Ok(())
+    }
+    fn materialize(&self, db: &Connection, name: &str, id: usize) -> Result<()> {
+        let node = &self.nodes[id];
+        let out = out_table(id, node.fields.len());
+        let cols = columns(node.fields.len());
+        match &node.kind {
+            Kind::Input(source) => {
+                let s = &self.sources[*source];
+                db.execute(
+                    &format!(
+                        "INSERT INTO {out}({cols},__m) SELECT {},1 FROM main.{}",
+                        s.columns
+                            .iter()
+                            .map(|c| quote(c))
+                            .collect::<Vec<_>>()
+                            .join(","),
+                        quote(&s.name)
+                    ),
+                    [],
+                )?;
+            }
+            Kind::Map {
+                expressions,
+                predicate,
+            } => {
+                let child = out_table(node.inputs[0], self.nodes[node.inputs[0]].fields.len());
+                db.execute(
+                    &format!(
+                        "INSERT INTO {out}({cols},__m) SELECT {},__m FROM {child}{}",
+                        expressions.join(","),
+                        predicate
+                            .as_ref()
+                            .map(|p| format!(" WHERE {p}"))
+                            .unwrap_or_default()
+                    ),
+                    [],
+                )?;
+            }
+            Kind::Set(op) => {
+                let width = node.fields.len();
+                let reps = |t: &str| {
+                    format!(
+                        "SELECT a.c0{},1 FROM {t} a WHERE a.rowid=(SELECT MIN(rowid) FROM {t} b WHERE b.__k=a.__k)",
+                        (1..width).map(|i| format!(",a.c{i}")).collect::<String>()
+                    )
+                };
+                let t0 = table(name, id, 0);
+                let sql = match (*op, node.inputs.len()) {
+                    ("all", _) => {
+                        let child =
+                            out_table(node.inputs[0], self.nodes[node.inputs[0]].fields.len());
+                        format!("INSERT INTO {out}({cols},__m) SELECT {cols},__m FROM {child}")
+                    }
+                    ("distinct", _) | (_, 1) => {
+                        format!("INSERT INTO {out}({cols},__m) {}", reps(&t0))
+                    }
+                    ("union", _) => format!(
+                        "INSERT INTO {out}({cols},__m) {} UNION ALL SELECT a.c0{},1 FROM {} a WHERE a.rowid=(SELECT MIN(rowid) FROM {} b WHERE b.__k=a.__k) AND a.__k NOT IN(SELECT __k FROM {})",
+                        reps(&t0),
+                        (1..width).map(|i| format!(",a.c{i}")).collect::<String>(),
+                        table(name, id, 1),
+                        table(name, id, 1),
+                        t0
+                    ),
+                    ("except", _) => format!(
+                        "INSERT INTO {out}({cols},__m) {} AND a.__k NOT IN(SELECT __k FROM {})",
+                        reps(&t0),
+                        table(name, id, 1)
+                    ),
+                    _ => format!(
+                        "INSERT INTO {out}({cols},__m) {} AND a.__k IN(SELECT __k FROM {})",
+                        reps(&t0),
+                        table(name, id, 1)
+                    ),
+                };
+                db.execute(&sql, [])?;
+            }
+            Kind::Join {
+                left: _,
+                right: _,
+                mode,
+                predicate,
+            } => {
+                let left_n = self.nodes[node.inputs[0]].fields.len();
+                let right_n = self.nodes[node.inputs[1]].fields.len();
+                let t0 = table(name, id, 0);
+                let t1 = table(name, id, 1);
+                let no_null = |k: &str| {
+                    format!("NOT EXISTS(SELECT 1 FROM json_each({k}) WHERE json_type(value)='null')")
+                };
+                let left_cols = |q: &str| {
+                    (0..left_n)
+                        .map(|i| format!("{q}.c{i} AS c{i}"))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                };
+                let right_cols = |q: &str| {
+                    (0..right_n)
+                        .map(|i| format!("{q}.c{i} AS c{}", left_n + i))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                };
+                let null_cols = |from: usize, n: usize| {
+                    (from..from + n)
+                        .map(|i| format!("NULL AS c{i}"))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                };
+                let left_pair = |outer: &str, inner: &str| {
+                    let mut parts: Vec<String> = (0..left_n)
+                        .map(|i| format!("{outer}.c{i} AS c{i}"))
+                        .collect();
+                    parts.extend((0..right_n).map(|j| format!("{inner}.c{j} AS c{}", left_n + j)));
+                    parts.join(",")
+                };
+                let right_pair = |outer: &str, inner: &str| {
+                    let mut parts: Vec<String> = (0..left_n)
+                        .map(|i| format!("{inner}.c{i} AS c{i}"))
+                        .collect();
+                    parts.extend((0..right_n).map(|j| format!("{outer}.c{j} AS c{}", left_n + j)));
+                    parts.join(",")
+                };
+                let restriction = |key: &str| {
+                    format!(
+                        "{}{}{}",
+                        no_null(key),
+                        if predicate.is_some() { " AND " } else { "" },
+                        predicate.as_deref().unwrap_or("")
+                    )
+                };
+                let combined = format!(
+                    "SELECT {},{},l.__n*r.__n AS __m FROM {t0} l JOIN {t1} r ON l.__k=r.__k AND {}",
+                    left_cols("l"),
+                    right_cols("r"),
+                    no_null("l.__k")
+                );
+                let inner = match predicate {
+                    Some(p) => format!("SELECT * FROM ({combined}) WHERE {p}"),
+                    None => combined,
+                };
+                let unmatched_left = format!(
+                    "SELECT {},{},l.__n AS __m FROM {t0} l WHERE NOT EXISTS(SELECT 1 FROM (SELECT {} FROM {t1} r WHERE r.__k=l.__k) m WHERE {})",
+                    left_cols("l"),
+                    null_cols(left_n, right_n),
+                    left_pair("l", "r"),
+                    restriction("l.__k")
+                );
+                let unmatched_right = format!(
+                    "SELECT {},{},r.__n AS __m FROM {t1} r WHERE NOT EXISTS(SELECT 1 FROM (SELECT {} FROM {t0} l WHERE l.__k=r.__k) m WHERE {})",
+                    null_cols(0, left_n),
+                    right_cols("r"),
+                    right_pair("r", "l"),
+                    restriction("r.__k")
+                );
+                let body = match *mode {
+                    "inner" => inner,
+                    "left" => format!("{inner} UNION ALL {unmatched_left}"),
+                    "right" => format!("{inner} UNION ALL {unmatched_right}"),
+                    "full" => format!("{inner} UNION ALL {unmatched_left} UNION ALL {unmatched_right}"),
+                    "semi" => format!(
+                        "SELECT {},l.__n AS __m FROM {t0} l WHERE {} AND EXISTS(SELECT 1 FROM (SELECT {} FROM {t1} r WHERE r.__k=l.__k) m WHERE {})",
+                        left_cols("l"),
+                        no_null("l.__k"),
+                        left_pair("l", "r"),
+                        restriction("l.__k")
+                    ),
+                    _ => format!(
+                        "SELECT {},l.__n AS __m FROM {t0} l WHERE NOT EXISTS(SELECT 1 FROM (SELECT {} FROM {t1} r WHERE r.__k=l.__k) m WHERE {})",
+                        left_cols("l"),
+                        left_pair("l", "r"),
+                        restriction("l.__k")
+                    ),
+                };
+                db.execute(
+                    &format!("INSERT INTO {out}({cols},__m) SELECT * FROM ({body})"),
+                    [],
+                )?;
+                let bad: bool = db.query_row(
+                    &format!(
+                        "SELECT EXISTS(SELECT 1 FROM {out} WHERE typeof(__m)!='integer' OR __m<0)"
+                    ),
+                    [],
+                    |r| r.get(0),
+                )?;
+                if bad {
+                    return Err(error("join multiplicity overflow"));
+                }
+            }
+            Kind::Group {
+                keys,
+                expressions,
+                order,
+                limit,
+                offset,
+                having,
+                window,
+            } => {
+                let t = table(name, id, 0);
+                let replaced = expressions
+                    .iter()
+                    .map(|e| e.replace("__window__", &format!("ORDER BY {}", order.join(","))))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                if *window || limit.is_some() {
+                    let groups: i64 =
+                        db.query_row(&format!("SELECT count(DISTINCT __k) FROM {t}"), [], |r| {
+                            r.get(0)
+                        })?;
+                    if groups as usize > BULK_GROUP_BUDGET {
+                        return Err(error("bulk group budget exceeded"));
+                    }
+                    let width = self.nodes[node.inputs[0]].fields.len();
+                    let cols_in = columns(width);
+                    let candidates = format!(
+                        "SELECT {cols_in},__n FROM {t} WHERE __k=?1{}{}",
+                        if order.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" ORDER BY {}", order.join(","))
+                        },
+                        limit
+                            .filter(|n| *n >= 0)
+                            .map(|n| n.saturating_add(*offset))
+                            .map(|n| format!(" LIMIT {n}"))
+                            .unwrap_or_default()
+                    );
+                    let single = format!(
+                        "WITH RECURSIVE candidates({cols_in},__n) AS ({candidates}), expanded({cols_in},__copies) AS (SELECT {cols_in},__n FROM candidates UNION ALL SELECT {cols_in},__copies-1 FROM expanded WHERE __copies>1) SELECT {replaced} FROM expanded{}{}",
+                        if !*window && !order.is_empty() {
+                            format!(" ORDER BY {}", order.join(","))
+                        } else {
+                            String::new()
+                        },
+                        limit
+                            .map(|n| format!(" LIMIT {n} OFFSET {offset}"))
+                            .unwrap_or_default()
+                    );
+                    let mut statement = db.prepare(&format!(
+                        "INSERT INTO {out}({cols},__m) SELECT q.*,1 FROM ({single}) q"
+                    ))?;
+                    let mut key_statement = db.prepare(&format!("SELECT DISTINCT __k FROM {t}"))?;
+                    let mut key_rows = key_statement.query([])?;
+                    while let Some(key) = key_rows.next()? {
+                        let key: String = key.get(0)?;
+                        statement.execute([&key])?;
+                    }
+                } else {
+                    let mut sql =
+                        format!("INSERT INTO {out}({cols},__m) SELECT {replaced},1 FROM {t}");
+                    if !keys.is_empty() {
+                        sql.push_str(" GROUP BY __k");
+                    }
+                    if let Some(h) = having {
+                        sql.push_str(&format!(" HAVING {h}"));
+                    }
+                    db.execute(&sql, [])?;
+                }
+            }
+            Kind::Fixpoint { rules } => {
+                let member = node.inputs.len();
+                let all = table(name, id, member);
+                let mut rounds = 0usize;
+                let mut lo = max_rowid(db, &all)?;
+                for rule in rules {
+                    self.derive(db, name, id, rule, &all, None)?;
+                }
+                loop {
+                    if rounds >= BULK_ROUND_BUDGET {
+                        return Err(error("fixpoint closure round budget exceeded"));
+                    }
+                    rounds += 1;
+                    let hi = max_rowid(db, &all)?;
+                    if hi == lo {
+                        break;
+                    }
+                    let mut written = 0usize;
+                    for rule in rules.iter().filter(|r| r.member().is_some()) {
+                        written += self.derive(db, name, id, rule, &all, Some((lo, hi)))?;
+                    }
+                    if written == 0 {
+                        break;
+                    }
+                    lo = hi;
+                }
+                db.execute(
+                    &format!("INSERT INTO {out}({cols},__m) SELECT {cols},1 FROM {all}"),
+                    [],
+                )?;
+            }
+        }
+        Ok(())
+    }
+    fn derive(
+        &self,
+        db: &Connection,
+        name: &str,
+        id: usize,
+        rule: &Rule,
+        target: &str,
+        delta: Option<(i64, i64)>,
+    ) -> Result<usize> {
+        let cols = columns(self.nodes[id].fields.len());
+        let mut params = vec![];
+        let member = delta
+            .map(|(lo, hi)| Role::Range(target.to_string(), lo, hi))
+            .unwrap_or_else(|| Role::Table(target.to_string()));
+        let from = rule_from(rule, &roles(name, id, 0, rule, None, member), &mut params);
+        db.execute_cached(
+            &format!(
+                "INSERT OR IGNORE INTO {target}(__k,{cols}) SELECT {},{} {from}{}",
+                rule.key,
+                rule.head.join(","),
+                rule_where(rule, None)
+            ),
+            params_from_iter(params),
+        )
+    }
+    fn write_state(&self, db: &Connection, name: &str, id: usize) -> Result<()> {
+        let width = self.nodes[id].fields.len();
+        let out = out_table(id, width);
+        let state = format!("main.{}", quote(&format!("{name}_state")));
+        let peak: i64 =
+            db.query_row(&format!("SELECT coalesce(max(__m),0) FROM {out}"), [], |r| r.get(0))?;
+        if peak > BULK_MULTIPLICITY_BUDGET {
+            return Err(error("result multiplicity expansion exceeds budget"));
+        }
+        let k = json_key((0..width).map(|i| plain(&format!("o.c{i}"))).collect());
+        db.execute(
+            &format!(
+                "WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<(SELECT coalesce((SELECT max(__m) FROM {out}),0))) INSERT INTO {state}(__key,{}) SELECT {k},o.c0{} FROM {out} o,seq WHERE seq.n<=o.__m",
+                columns(width),
+                (1..width).map(|i| format!(",o.c{i}")).collect::<String>()
+            ),
+            [],
+        )?;
         Ok(())
     }
     pub fn input(
