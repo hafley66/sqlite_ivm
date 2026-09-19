@@ -1,5 +1,5 @@
 use crate::query::{bind, error, quote, Column, Filter, FilterValue, Query};
-use rusqlite::{Connection, Result};
+use rusqlite::{types::Value, Connection, Result};
 
 fn column_sql(column: &Column, image: Option<(usize, &str)>) -> String {
     let prefix = match image {
@@ -91,9 +91,9 @@ fn contributions(query: &Query, image: Option<(usize, &str)>) -> String {
         predicate = format!("({predicate}) AND {}", filter_sql(filter, image));
     }
     if tables.is_empty() {
-        return format!("SELECT {group}, 1, ({value}) WHERE {predicate}");
+        return format!("SELECT {group} AS g, 1 AS n, ({value}) AS s WHERE {predicate}");
     }
-    format!("SELECT {group}, COUNT(*), SUM({value}) FROM {tables} WHERE {predicate} GROUP BY 1")
+    format!("SELECT {group} AS g, COUNT(*) AS n, SUM({value}) AS s FROM {tables} WHERE {predicate} GROUP BY 1")
 }
 
 // Executed within xUpdate, where SQLite permits writes to protected shadows.
@@ -103,7 +103,7 @@ pub fn maintain(
     query: &Query,
     source: usize,
     adding: bool,
-    payload: &str,
+    image: Vec<Value>,
 ) -> Result<()> {
     let _span = tracing::debug_span!(
         "maintain",
@@ -113,28 +113,23 @@ pub fn maintain(
     )
     .entered();
     let store = quote(&format!("{name}_state"));
-    let delta = quote(&format!("{name}_delta"));
-    let columns = used_columns(query)
+    let image_select = used_columns(query)
         .into_iter()
         .filter(|c| c.source == source)
         .enumerate()
-        .map(|(i, c)| format!("json_extract(?1,'$[{i}]') AS {}", quote(&c.name)))
+        .map(|(i, c)| format!("?{} AS {}", i + 1, quote(&c.name)))
         .collect::<Vec<_>>()
         .join(",");
-    db.execute(&format!("DELETE FROM main.{delta}"), [])?;
-    db.execute(
-        &format!(
-            "WITH __ivm_image AS (SELECT {columns}) INSERT INTO main.{delta} {}",
-            contributions(query, Some((source, "image")))
-        ),
-        [payload],
-    )?;
+    let contrib = contributions(query, Some((source, "image")));
+    let image_sql = |body: &str| {
+        format!("(WITH __ivm_image AS (SELECT {image_select}) {body})")
+    };
     let invalid: bool = db.query_row(
         &format!(
-            "SELECT EXISTS(SELECT 1 FROM main.{delta}
-        WHERE typeof(g)!='integer' OR typeof(n)!='integer' OR typeof(s)!='integer')"
+            "SELECT EXISTS(SELECT 1 FROM {} WHERE typeof(g)!='integer' OR typeof(n)!='integer' OR typeof(s)!='integer')",
+            image_sql(&contrib)
         ),
-        [],
+        rusqlite::params_from_iter(image.iter()),
         |r| r.get(0),
     )?;
     if invalid {
@@ -143,10 +138,11 @@ pub fn maintain(
     if adding {
         let overflow: bool = db.query_row(
             &format!(
-                "SELECT EXISTS(SELECT 1 FROM main.{store} a JOIN main.{delta} d ON a.g=d.g
-            WHERE typeof(a.n+d.n)!='integer' OR typeof(a.s+d.s)!='integer')"
+                "SELECT EXISTS(SELECT 1 FROM main.{store} a JOIN {} d ON a.g=d.g
+            WHERE typeof(a.n+d.n)!='integer' OR typeof(a.s+d.s)!='integer')",
+                image_sql(&contrib)
             ),
-            [],
+            rusqlite::params_from_iter(image.iter()),
             |r| r.get(0),
         )?;
         if overflow {
@@ -154,18 +150,19 @@ pub fn maintain(
         }
         db.execute(
             &format!(
-                "INSERT INTO main.{store}(g,n,s) SELECT g,n,s FROM main.{delta} WHERE 1
-            ON CONFLICT(g) DO UPDATE SET n={store}.n+excluded.n,s={store}.s+excluded.s"
+                "INSERT INTO main.{store}(g,n,s) SELECT * FROM (WITH __ivm_image AS (SELECT {image_select}) {contrib}) WHERE 1
+            ON CONFLICT(g) DO UPDATE SET n={store}.n+excluded.n,s={store}.s+excluded.s",
             ),
-            [],
+            rusqlite::params_from_iter(image.iter()),
         )?;
     } else {
         let missing: bool = db.query_row(
             &format!(
-                "SELECT EXISTS(SELECT 1 FROM main.{delta} d LEFT JOIN main.{store} a ON a.g=d.g
-            WHERE a.g IS NULL OR a.n<d.n)"
+                "SELECT EXISTS(SELECT 1 FROM {} d LEFT JOIN main.{store} a ON a.g=d.g
+            WHERE a.g IS NULL OR a.n<d.n)",
+                image_sql(&contrib)
             ),
-            [],
+            rusqlite::params_from_iter(image.iter()),
             |r| r.get(0),
         )?;
         if missing {
@@ -173,10 +170,11 @@ pub fn maintain(
         }
         let overflow: bool = db.query_row(
             &format!(
-                "SELECT EXISTS(SELECT 1 FROM main.{store} a JOIN main.{delta} d ON a.g=d.g
-            WHERE a.n>d.n AND typeof(a.s-d.s)!='integer')"
+                "SELECT EXISTS(SELECT 1 FROM main.{store} a JOIN {} d ON a.g=d.g
+            WHERE a.n>d.n AND typeof(a.s-d.s)!='integer')",
+                image_sql(&contrib)
             ),
-            [],
+            rusqlite::params_from_iter(image.iter()),
             |r| r.get(0),
         )?;
         if overflow {
@@ -184,21 +182,25 @@ pub fn maintain(
         }
         db.execute(
             &format!(
-                "DELETE FROM main.{store} WHERE g IN (SELECT g FROM main.{delta})
-            AND n=(SELECT n FROM main.{delta} WHERE g={store}.g)"
+                "DELETE FROM main.{store} WHERE g IN (SELECT g FROM {})
+            AND n=(SELECT n FROM {} WHERE g={store}.g)",
+                image_sql(&contrib),
+                image_sql(&contrib)
             ),
-            [],
+            rusqlite::params_from_iter(image.iter()),
         )?;
         db.execute(
             &format!(
-                "UPDATE main.{store} SET n=n-(SELECT n FROM main.{delta} WHERE g={store}.g),
-            s=s-(SELECT s FROM main.{delta} WHERE g={store}.g)
-            WHERE g IN (SELECT g FROM main.{delta})"
+                "UPDATE main.{store} SET n=n-(SELECT n FROM {} WHERE g={store}.g),
+            s=s-(SELECT s FROM {} WHERE g={store}.g)
+            WHERE g IN (SELECT g FROM {})",
+                image_sql(&contrib),
+                image_sql(&contrib),
+                image_sql(&contrib)
             ),
-            [],
+            rusqlite::params_from_iter(image.iter()),
         )?;
     }
-    db.execute(&format!("DELETE FROM main.{delta}"), [])?;
     Ok(())
 }
 

@@ -150,7 +150,7 @@ impl Table {
         }
         let name = text(name)?;
         let conn = unsafe { Connection::from_handle(db.handle())? };
-        conn.set_prepared_statement_cache_capacity(16384);
+        conn.set_prepared_statement_cache_capacity(8192);
         let stored: bool = conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM main.sqlite_schema WHERE name='__ivm_schema')",
             [],
@@ -516,25 +516,20 @@ impl<'vtab> UpdateVTab<'vtab> for Table {
             .iter()
             .filter(|c| c.source == source)
             .count();
-        let mut payload = String::from("[");
+        let mut image = Vec::with_capacity(width);
         for i in 0..width {
-            if i > 0 {
-                payload.push(',');
-            }
-            let value: rusqlite::types::Value = args.get(count + 4 + i)?;
-            match value {
-                rusqlite::types::Value::Integer(v) => payload.push_str(&v.to_string()),
+            match args.get::<rusqlite::types::Value>(count + 4 + i)? {
+                rusqlite::types::Value::Integer(v) => image.push(rusqlite::types::Value::Integer(v)),
                 _ => return Err(error("maintenance rows require integers")),
             }
         }
-        payload.push(']');
         maintenance::maintain(
             &self.db,
             &self.name()?,
             query,
             source,
             adding == 1,
-            &payload,
+            image,
         )?;
         Ok(0)
     }
