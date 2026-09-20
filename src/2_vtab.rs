@@ -208,18 +208,22 @@ impl Table {
                     }
                 }
             }
+            let mut table = Self {
+                base: ffi::sqlite3_vtab::default(),
+                db: conn,
+                id,
+                sql: String::new(),
+                roles,
+                generic,
+                query: None,
+                plan: None,
+            };
+            // Bind now so the scratch tables exist before any trigger program
+            // runs; a failure here surfaces again at the first write.
+            let _ = table.refresh();
             return Ok((
                 Cow::Owned(CString::new(declaration).map_err(|e| error(e.to_string()))?),
-                Self {
-                    base: ffi::sqlite3_vtab::default(),
-                    db: conn,
-                    id,
-                    sql: String::new(),
-                    roles,
-                    generic,
-                    query: None,
-                    plan: None,
-                },
+                table,
             ));
         }
         let narrow=bind(&conn,&sql).and_then(|query|{
@@ -241,6 +245,7 @@ impl Table {
             Err(_) => {
                 let plan = crate::relational::bind(&conn, &sql)?;
                 crate::relational_maintenance::install(&conn, name, &sql, &plan)?;
+                plan.prepare_scratch(&conn)?;
                 (None, Some(plan))
             }
         };
@@ -316,6 +321,7 @@ impl Table {
                         "recursive views from storage format 2 must be dropped and re-created",
                     ));
                 }
+                plan.prepare_scratch(&self.db)?;
                 self.plan = Some(plan);
             }
             self.sql = sql;
