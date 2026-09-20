@@ -26,3 +26,5 @@ Instrumented run is 44s and 1.4M JSON lines; measurement only, never CI.
 |---|---|
 | system libsqlite3 | 2.94 2.72 2.89 |
 | `--features bundled`, libsqlite3-sys opt-level 3 | 1.99 2.00 1.90 |
+| bundled default (54ca259) | 2.06 2.08 1.91 |
+| set-at-a-time fixpoint, seed prepared once (1e804e6) | 1.80 1.77 1.81 |
