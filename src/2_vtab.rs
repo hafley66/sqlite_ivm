@@ -33,6 +33,8 @@ struct Table {
     db: Connection, // Non-owning handle, valid for this virtual-table connection.
     id: i64,        // Explicit INTEGER PRIMARY KEY survives VACUUM; names are never cached.
     sql: String,
+    /// Source DDL generation `sql` was read at; `refresh` reads the catalog again only after a rewrite.
+    generation: u64,
     roles: Vec<c_int>,
     generic: bool,
     query: Option<Query>,
@@ -215,6 +217,7 @@ impl Table {
                 db: conn,
                 id,
                 sql: String::new(),
+                generation: u64::MAX, // Never the live value, so the refresh below reads.
                 roles,
                 generic,
                 query: None,
@@ -297,6 +300,7 @@ impl Table {
                 db: conn,
                 id,
                 sql,
+                generation: crate::source_ddl::generation(),
                 roles,
                 generic,
                 query,
@@ -306,6 +310,10 @@ impl Table {
         ))
     }
     fn refresh(&mut self) -> Result<()> {
+        let generation = crate::source_ddl::generation();
+        if generation == self.generation {
+            return Ok(());
+        }
         let sql: String = self
             .db
             .prepare_cached("SELECT query_sql FROM main.__ivm_views WHERE id=?1")?
@@ -331,6 +339,8 @@ impl Table {
             }
             self.sql = sql;
         }
+        // Stamped after the bind: a failed connect-time bind must run again.
+        self.generation = generation;
         Ok(())
     }
     fn rename_to(&self, new: &str) -> Result<()> {

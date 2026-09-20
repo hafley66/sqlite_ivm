@@ -44,6 +44,3 @@ name = "5_feature_case"
 path = "examples/5_feature_case.rs"
 required-features = ["bench"]
 
-[[example]]
-name = "6_costs"
-path = "examples/6_costs.rs"

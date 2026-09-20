@@ -41,7 +41,16 @@ fn source(db: &Connection, name: &str) -> Result<String> {
     }
     db.query_row("SELECT name FROM main.sqlite_schema WHERE name=?1 COLLATE NOCASE AND type='table' AND sql NOT LIKE 'CREATE VIRTUAL TABLE%'",[name],|r|r.get(0)).map_err(|_|error("ordinary main source table required"))
 }
+/// Bumped after every query_sql rewrite. A live table on the same connection
+/// sees the rewrite only through this; another process reconnects through xConnect.
+static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn generation() -> u64 {
+    GENERATION.load(std::sync::atomic::Ordering::Acquire)
+}
+
 fn rename(db: &Connection, old: &str, new: &str, column: Option<&str>) -> Result<()> {
+    GENERATION.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     let old = source(db, old)?;
     if new.to_ascii_lowercase().starts_with("__ivm_") || new.is_empty() {
         return Err(error("invalid destination name"));
