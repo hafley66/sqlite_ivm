@@ -2,7 +2,7 @@
 created: 2026-09-19
 updated: 2026-09-20
 type: bug
-status: open
+status: closed
 priority: high
 labels: [extension]
 collision: [tests/**]
