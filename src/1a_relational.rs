@@ -152,15 +152,12 @@ fn key_id(db: &Connection, dict: &str, row: &[Value]) -> Result<i64> {
 fn change(db: &Connection, t: &str, k: Value, row: &Row, d: i64) -> Result<(i64, i64)> {
     let composite = identity(db, row)?;
     let r = row_hash(composite.as_bytes());
-    // __r is a hash, so equality on it only narrows. __c carries the composite
-    // out of every index while keeping the decision one string compare.
-    let same = "__r=?1 AND __c=?2";
+    // __r is a hash, so equality on it only narrows. The composite is rebuilt
+    // from the row's own columns on the one hit, so no copy of it is stored.
+    let same = format!("__r=?1 AND {}=?2", identity_sql(row.len()));
     let old: Option<i64> = db
-        .query_row(
-            &format!("SELECT __n FROM {t} WHERE {same}"),
-            rusqlite::params![r, &composite],
-            |r| r.get(0),
-        )
+        .prepare_cached(&format!("SELECT __n FROM {t} WHERE {same}"))?
+        .query_row(rusqlite::params![r, &composite], |r| r.get(0))
         .optional()?;
     let new = old
         .unwrap_or(0)
@@ -180,12 +177,7 @@ fn change(db: &Connection, t: &str, k: Value, row: &Row, d: i64) -> Result<(i64,
             rusqlite::params![r, &composite, new],
         )?;
     } else {
-        let mut params = vec![
-            k,
-            Value::Integer(r),
-            Value::Text(composite.clone()),
-            Value::Integer(new),
-        ];
+        let mut params = vec![k, Value::Integer(r), Value::Integer(new)];
         params.extend(row.clone());
         db.execute_cached(
             &format!("INSERT INTO {t} VALUES({})", parameters(params.len())),
@@ -357,7 +349,7 @@ impl Plan {
             for (side, input) in node.inputs.iter().enumerate() {
                 let t = format!("{name}_op{id}_{side}");
                 let n = self.nodes[*input].fields.len();
-                db.execute_batch(&format!("CREATE TABLE main.{}(__k INTEGER NOT NULL,__r INTEGER NOT NULL,__c TEXT NOT NULL,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k); CREATE INDEX main.{} ON {}(__r)",quote(&t),columns(n),quote(&format!("__ivm_{name}_op{id}_{side}_key")),quote(&t),quote(&format!("__ivm_{name}_op{id}_{side}_row")),quote(&t)))?;
+                db.execute_batch(&format!("CREATE TABLE main.{}(__k INTEGER NOT NULL,__r INTEGER NOT NULL,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k); CREATE INDEX main.{} ON {}(__r)",quote(&t),columns(n),quote(&format!("__ivm_{name}_op{id}_{side}_key")),quote(&t),quote(&format!("__ivm_{name}_op{id}_{side}_row")),quote(&t)))?;
                 objects.push(("table", t));
                 objects.push(("index", format!("__ivm_{name}_op{id}_{side}_key")));
                 objects.push(("index", format!("__ivm_{name}_op{id}_{side}_row")));
@@ -557,7 +549,7 @@ impl Plan {
         // are equal in every column, so the grouped select keeps the same row.
         db.execute(
             &format!(
-                "INSERT INTO {t}(__k,__r,__c,__n,{cols}) SELECT {k},sqlite_ivm_hash(__ivm_r),__ivm_r,__ivm_n,{cols} FROM (SELECT {r} AS __ivm_r,sum(__m) AS __ivm_n,{cols} FROM {out} GROUP BY {r})",
+                "INSERT INTO {t}(__k,__r,__n,{cols}) SELECT {k},sqlite_ivm_hash(__ivm_r),__ivm_n,{cols} FROM (SELECT {r} AS __ivm_r,sum(__m) AS __ivm_n,{cols} FROM {out} GROUP BY {r})",
                 cols = columns(width)
             ),
             [],
