@@ -50,6 +50,22 @@ pub enum Kind {
         rules: Vec<Rule>,
     },
 }
+impl Kind {
+    /// The label a `node` span carries, one per variant plus the set operator.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Kind::Input(_) => "input",
+            Kind::Map { .. } => "map",
+            Kind::Join { .. } => "join",
+            Kind::Set("all") => "union_all",
+            Kind::Set(_) => "set",
+            Kind::Group { window: true, .. } => "window",
+            Kind::Group { limit: Some(_), .. } => "group_limit",
+            Kind::Group { .. } => "group",
+            Kind::Fixpoint { .. } => "fixpoint",
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq)]
 pub enum Occurrence {
     Input(usize),

@@ -919,6 +919,7 @@ impl Plan {
     /// are topological because `push` appends after its inputs.
     pub fn drain(&self, db: &Connection, name: &str, batch: &[(usize, Row, i64)]) -> Result<()> {
         let _span = tracing::debug_span!("drain", view = name, rows = batch.len()).entered();
+        let seed = tracing::debug_span!("node", kind = "seed", id = self.nodes.len()).entered();
         for (id, node) in self.nodes.iter().enumerate() {
             db.execute_batch(&format!("DELETE FROM {}", out_table(id, node.fields.len())))?;
         }
@@ -937,6 +938,7 @@ impl Plan {
                 }
             }
         }
+        drop(seed);
         let dict = keys_table(name);
         for id in 0..self.nodes.len() {
             let node = &self.nodes[id];
@@ -955,6 +957,7 @@ impl Plan {
             if !touched_inputs.iter().any(|t| *t) {
                 continue;
             }
+            let _node = tracing::debug_span!("node", kind = node.kind.label(), id).entered();
             match &node.kind {
                 Kind::Input(_) => {}
                 Kind::Map { .. } => self.materialize(db, name, id, false)?,
@@ -1030,9 +1033,11 @@ impl Plan {
                 }
             }
             if id == self.output {
+                let _apply = tracing::debug_span!("node", kind = "apply_state", id).entered();
                 self.apply_state(db, name, id)?;
             }
         }
+        let _sweep = tracing::debug_span!("node", kind = "sweep", id = self.nodes.len()).entered();
         for (id, node) in self.nodes.iter().enumerate() {
             db.execute_batch(&format!("DELETE FROM {}", out_table(id, node.fields.len())))?;
         }

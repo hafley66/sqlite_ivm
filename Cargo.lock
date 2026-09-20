@@ -270,9 +270,7 @@ dependencies = [
 
 [[package]]
 name = "hafley-observe"
-version = "0.1.2"
-source = "sparse+http://localhost:8000/api/v1/crates/"
-checksum = "bf01a9e011153a0138fc4be8359c9dce3924e78f463eb9f96f1f262da96968aa"
+version = "0.1.1"
 dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
@@ -283,6 +281,7 @@ dependencies = [
  "tracing-chrome",
  "tracing-opentelemetry",
  "tracing-subscriber",
+ "tracing-tunnel",
 ]
 
 [[package]]
