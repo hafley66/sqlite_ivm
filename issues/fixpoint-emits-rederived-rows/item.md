@@ -48,8 +48,8 @@ equality encodings is correct design and is not the cause.
 
 ## Acceptance Criteria
 
-- [ ] `probes/2026-09-19-fixpoint-retraction/repro.sql` runs clean
+- [x] `probes/2026-09-19-fixpoint-retraction/repro.sql` runs clean
 - [ ] `nocase.py` and `reals.py` report OK for every shape
-- [ ] the invariant is written at the top of `src/1a_relational.rs`
-- [ ] the oracle is restated: recursive and DISTINCT outputs match up to `__k`
+- [x] the invariant is written at the top of `src/1a_relational.rs`
+- [x] the oracle is restated: recursive and DISTINCT outputs match up to `__k`
       equality, with representatives normalized before comparison

@@ -1,4 +1,5 @@
-//! Incremental relational operators backed by transactional SQLite arrangements.
+//! Every operator emits the row stored in its arrangement.
+//! Equality keys select membership, while stored row values select emitted identity.
 use crate::{
     query::{error, quote},
     relational::{Kind, Occurrence, Plan, Rule},
@@ -575,7 +576,9 @@ impl Plan {
                 let t0 = table(name, id, 0);
                 let t1 = table(name, id, 1);
                 let no_null = |k: &str| {
-                    format!("NOT EXISTS(SELECT 1 FROM json_each({k}) WHERE json_type(value)='null')")
+                    format!(
+                        "NOT EXISTS(SELECT 1 FROM json_each({k}) WHERE json_type(value)='null')"
+                    )
                 };
                 let left_cols = |q: &str| {
                     (0..left_n)
@@ -811,8 +814,11 @@ impl Plan {
         let width = self.nodes[id].fields.len();
         let out = out_table(id, width);
         let state = format!("main.{}", quote(&format!("{name}_state")));
-        let peak: i64 =
-            db.query_row(&format!("SELECT coalesce(max(__m),0) FROM {out}"), [], |r| r.get(0))?;
+        let peak: i64 = db.query_row(
+            &format!("SELECT coalesce(max(__m),0) FROM {out}"),
+            [],
+            |r| r.get(0),
+        )?;
         if peak > BULK_MULTIPLICITY_BUDGET {
             return Err(error("result multiplicity expansion exceeds budget"));
         }
@@ -1136,8 +1142,7 @@ impl Plan {
                         let cols = columns(width);
                         // At most k distinct positive-support rows can contribute
                         // to the first k bag rows. The ordered index bounds reads.
-                        let wanted =
-                            limit.filter(|n| *n >= 0).map(|n| n.saturating_add(*offset));
+                        let wanted = limit.filter(|n| *n >= 0).map(|n| n.saturating_add(*offset));
                         let copies = wanted
                             .filter(|_| !*window)
                             .map(|n| format!("min(__n,{n}) AS __n"))
@@ -1237,7 +1242,12 @@ impl Plan {
             db.execute_cached(&sql, params_from_iter(params))
         };
         let rounds = |mut lo: i64| -> Result<()> {
+            let mut rounds = 0usize;
             loop {
+                if rounds >= BULK_ROUND_BUDGET {
+                    return Err(error("fixpoint closure round budget exceeded"));
+                }
+                rounds += 1;
                 let hi = max_rowid(db, &all)?;
                 if hi == lo {
                     return Ok(());
@@ -1289,12 +1299,31 @@ impl Plan {
             )?;
         }
         let mut lo = 0;
+        let mut delete_rounds = 0usize;
+        let mut deleted = BTreeMap::<String, Row>::new();
         loop {
+            if delete_rounds >= BULK_ROUND_BUDGET {
+                return Err(error("fixpoint closure round budget exceeded"));
+            }
+            delete_rounds += 1;
             let hi = max_rowid(db, &work)?;
             if hi == lo {
                 break;
             }
             let round = round_span("delete");
+            rows(
+                db,
+                &format!("SELECT __k,{cols} FROM {all} WHERE __k IN (SELECT __k FROM {work} WHERE rowid>?1 AND rowid<=?2)"),
+                &[Value::Integer(lo), Value::Integer(hi)],
+            )?
+            .into_iter()
+            .try_for_each(|mut stored| {
+                let Value::Text(k) = stored.remove(0) else {
+                    return Err(error("invalid fixpoint member key"));
+                };
+                deleted.entry(k).or_insert(stored);
+                Ok(())
+            })?;
             db.execute_cached(
                 &format!("DELETE FROM {all} WHERE __k IN (SELECT __k FROM {work} WHERE rowid>?1 AND rowid<=?2)"),
                 rusqlite::params![lo, hi],
@@ -1340,22 +1369,38 @@ impl Plan {
             ));
         }
         let restored = max_rowid(db, &all)?;
-        let selected = (0..width)
-            .map(|i| format!("w.c{i}"))
-            .collect::<Vec<_>>()
-            .join(",");
         db.execute_cached(
             &format!(
-                "INSERT OR IGNORE INTO {all}(__k,{cols}) SELECT w.__k,{selected} FROM {work} w WHERE {}",
+                "INSERT OR IGNORE INTO {all}(__k,{cols}) SELECT w.__k,{} FROM {work} w WHERE {}",
+                (0..width)
+                    .map(|i| format!("w.c{i}"))
+                    .collect::<Vec<_>>()
+                    .join(","),
                 derivable.join(" OR ")
             ),
             params_from_iter(params),
         )?;
         rounds(restored)?;
-        let removed = read(
-            &format!("SELECT {selected} FROM {work} w WHERE NOT EXISTS(SELECT 1 FROM {all} a WHERE a.__k=w.__k)"),
-            &[],
-            -1,
+        let removed = deleted.into_iter().try_fold(
+            Vec::new(),
+            |mut deltas, (k, stored)| -> Result<Vec<Delta>> {
+                let current = rows(
+                    db,
+                    &format!("SELECT {cols} FROM {all} WHERE __k=?1"),
+                    &[Value::Text(k)],
+                )?
+                .into_iter()
+                .next();
+                match current {
+                    None => deltas.push((stored, -1)),
+                    Some(current) if identity(db, &stored)? != identity(db, &current)? => {
+                        deltas.push((stored, -1));
+                        deltas.push((current, 1));
+                    }
+                    Some(_) => {}
+                }
+                Ok(deltas)
+            },
         )?;
         db.execute_cached(&format!("DELETE FROM {work}"), [])?;
         Ok(removed)
