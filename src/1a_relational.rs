@@ -533,7 +533,7 @@ impl Plan {
         match &node.kind {
             Kind::Input(source) => {
                 let s = &self.sources[*source];
-                db.execute(
+                db.execute_cached(
                     &format!(
                         "INSERT INTO {out}({cols},__m) SELECT {},1 FROM main.{}",
                         s.columns
@@ -551,7 +551,7 @@ impl Plan {
                 predicate,
             } => {
                 let child = out_table(node.inputs[0], self.nodes[node.inputs[0]].fields.len());
-                db.execute(
+                db.execute_cached(
                     &format!(
                         "INSERT INTO {out}({cols},__m) SELECT {},__m FROM {child}{}",
                         expressions.join(","),
@@ -605,7 +605,7 @@ impl Plan {
                         t1.clone()
                     ),
                 };
-                db.execute(&sql, [])?;
+                db.execute_cached(&sql, [])?;
             }
             Kind::Join {
                 left: _,
@@ -706,17 +706,15 @@ impl Plan {
                         restriction("l.__k")
                     ),
                 };
-                db.execute(
+                db.execute_cached(
                     &format!("INSERT INTO {out}({cols},__m) SELECT * FROM ({body})"),
                     [],
                 )?;
-                let bad: bool = db.query_row(
-                    &format!(
+                let bad: bool = db
+                    .prepare_cached(&format!(
                         "SELECT EXISTS(SELECT 1 FROM {out} WHERE typeof(__m)!='integer' OR __m<0)"
-                    ),
-                    [],
-                    |r| r.get(0),
-                )?;
+                    ))?
+                    .query_row([], |r| r.get(0))?;
                 if bad {
                     return Err(error("join multiplicity overflow"));
                 }
@@ -738,9 +736,8 @@ impl Plan {
                     .join(",");
                 if *window || limit.is_some() {
                     let groups: i64 =
-                        db.query_row(&format!("SELECT count(DISTINCT __k) FROM {t}"), [], |r| {
-                            r.get(0)
-                        })?;
+                        db.prepare_cached(&format!("SELECT count(DISTINCT __k) FROM {t}"))?
+                            .query_row([], |r| r.get(0))?;
                     if groups as usize > BULK_GROUP_BUDGET {
                         return Err(error("bulk group budget exceeded"));
                     }
@@ -773,10 +770,10 @@ impl Plan {
                             .map(|n| format!(" LIMIT {n} OFFSET {offset}"))
                             .unwrap_or_default()
                     );
-                    let mut statement = db.prepare(&format!(
+                    let mut statement = db.prepare_cached(&format!(
                         "INSERT INTO {out}({cols},__m) SELECT q.*,1 FROM ({single}) q"
                     ))?;
-                    let mut key_statement = db.prepare(&format!("SELECT DISTINCT __k FROM {t}"))?;
+                    let mut key_statement = db.prepare_cached(&format!("SELECT DISTINCT __k FROM {t}"))?;
                     let mut key_rows = key_statement.query([])?;
                     while let Some(key) = key_rows.next()? {
                         statement.execute([key.get::<_, i64>(0)?])?;
@@ -790,7 +787,7 @@ impl Plan {
                     if let Some(h) = having {
                         sql.push_str(&format!(" HAVING {h}"));
                     }
-                    db.execute(&sql, [])?;
+                    db.execute_cached(&sql, [])?;
                 }
             }
             Kind::Fixpoint { rules } => {
@@ -921,7 +918,7 @@ impl Plan {
         let _span = tracing::debug_span!("drain", view = name, rows = batch.len()).entered();
         let seed = tracing::debug_span!("node", kind = "seed", id = self.nodes.len()).entered();
         for (id, node) in self.nodes.iter().enumerate() {
-            db.execute_batch(&format!("DELETE FROM {}", out_table(id, node.fields.len())))?;
+            db.execute_cached(&format!("DELETE FROM {}", out_table(id, node.fields.len())), [])?;
         }
         for (source, row, d) in batch {
             if *d == 0 {
@@ -987,11 +984,10 @@ impl Plan {
                     }
                     // Before: the node's output over the touched keys, parked.
                     let before = format!("temp.__ivm_before_{width}_{id}");
-                    db.execute_batch(&format!("DELETE FROM {before}"))?;
+                    db.execute_cached(&format!("DELETE FROM {before}"), [])?;
                     self.materialize(db, name, id, true)?;
-                    db.execute_batch(&format!(
-                        "INSERT INTO {before} SELECT * FROM {out}; DELETE FROM {out}"
-                    ))?;
+                    db.execute_cached(&format!("INSERT INTO {before} SELECT * FROM {out}"), [])?;
+                    db.execute_cached(&format!("DELETE FROM {out}"), [])?;
                     // Apply every input delta to its side's arrangement.
                     for (side, touched) in touched_inputs.iter().enumerate() {
                         if *touched {
@@ -1001,14 +997,16 @@ impl Plan {
                     // After, then out = after minus before as a bag.
                     self.materialize(db, name, id, true)?;
                     let identity = json_key((0..width).map(|i| plain(&format!("c{i}"))).collect());
-                    db.execute_batch(&format!(
-                        "INSERT INTO {out} SELECT {cols},-__m FROM {before};
-                         DELETE FROM {before};
-                         INSERT INTO {before} SELECT {cols},sum(__m) FROM {out} GROUP BY {identity} HAVING sum(__m)!=0;
-                         DELETE FROM {out};
-                         INSERT INTO {out} SELECT * FROM {before};
-                         DELETE FROM {before}"
-                    ))?;
+                    for sql in [
+                        format!("INSERT INTO {out} SELECT {cols},-__m FROM {before}"),
+                        format!("DELETE FROM {before}"),
+                        format!("INSERT INTO {before} SELECT {cols},sum(__m) FROM {out} GROUP BY {identity} HAVING sum(__m)!=0"),
+                        format!("DELETE FROM {out}"),
+                        format!("INSERT INTO {out} SELECT * FROM {before}"),
+                        format!("DELETE FROM {before}"),
+                    ] {
+                        db.execute_cached(&sql, [])?;
+                    }
                 }
                 Kind::Fixpoint { rules } => {
                     for side in 0..node.inputs.len() {
@@ -1039,7 +1037,7 @@ impl Plan {
         }
         let _sweep = tracing::debug_span!("node", kind = "sweep", id = self.nodes.len()).entered();
         for (id, node) in self.nodes.iter().enumerate() {
-            db.execute_batch(&format!("DELETE FROM {}", out_table(id, node.fields.len())))?;
+            db.execute_cached(&format!("DELETE FROM {}", out_table(id, node.fields.len())), [])?;
         }
         Ok(())
     }

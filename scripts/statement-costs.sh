@@ -15,18 +15,18 @@ end=$(date +%s.%N)
 grep -a '^{"timestamp"' "$log" >"$log.tmp" && mv "$log.tmp" "$log"
 
 echo "== $label: $(echo "$end - $start" | bc) s wall including cargo, $(wc -l <"$log") events"
-# sqlite3_stmt_status is cumulative per handle and the trace callback cannot
-# reset it; the delta against the previous event of the same handle is the cost.
+# sqlite3_stmt_status is cumulative per handle and the callback cannot reset it;
+# a handle is one (view connection, sql) pair, so the lag over run is the cost.
 duckdb -c "
 CREATE TABLE events AS
 SELECT
-       coalesce(span.kind, 'outside_drain') AS kind,
+       coalesce(span.kind, 'outside_drain') AS kind, spans[1].view AS view,
        fields.sql AS sql, fields.nanos AS nanos, fields.vm_step AS total, fields.run AS run
 FROM read_json('$log', format='newline_delimited', union_by_name=true)
 WHERE fields.message = 'statement finished';
 CREATE TABLE costs AS
-SELECT *, CASE WHEN total >= prior THEN total - prior ELSE total END AS vm_step
-FROM (SELECT *, coalesce(lag(total) OVER (PARTITION BY sql ORDER BY run), 0) AS prior FROM events);
+SELECT *, CASE WHEN run = 1 THEN total ELSE total - prior END AS vm_step
+FROM (SELECT *, coalesce(lag(total) OVER (PARTITION BY view, sql ORDER BY run), 0) AS prior FROM events);
 SELECT kind, count(*) AS statements, sum(vm_step) AS vm_step, round(sum(nanos)/1e6, 1) AS ms
 FROM costs GROUP BY 1 ORDER BY ms DESC;
 SELECT kind, count(*) AS runs, round(avg(vm_step)) AS vm_step_per_run,
