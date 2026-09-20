@@ -1,0 +1,43 @@
+direction: right
+
+sql: SQL the caller wrote {
+  style.fill: "#1d3557"
+  style.font-color: "#ffffff"
+  ddl: CREATE VIRTUAL TABLE v USING sqlite_ivm(...)
+  sel: SELECT * FROM v WHERE k IN (4,9,11)
+}
+
+schema: schema clock {
+  style.fill: "#e8f0fe"
+  create: xCreate  declare_vtab, mint shadow tables
+  connect: xConnect  reattach, shadows already exist
+  disconnect: xDisconnect  free the handle, data survives
+  destroy: xDestroy  free the handle and drop the data
+}
+
+prepare: prepare clock {
+  style.fill: "#fff4e0"
+  best: xBestIndex  claims constraints, sets idxNum and argvIndex
+}
+
+read: row clock {
+  style.fill: "#e9f7ef"
+  open: xOpen  allocate one cursor
+  filter: xFilter  receives argv for claimed constraints
+  next: xNext  advance, xEof guards the loop
+  column: xColumn  one call per column SQLite asks for
+  close: xClose  free the cursor
+}
+
+sql.ddl -> schema.create: "immediate, exactly 1x ever" {style.stroke-dash: 3; style.stroke: "#1d3557"}
+schema.create -> schema.connect: "1x per later connection to the same file" {style.stroke-dash: 5}
+schema.connect -> schema.disconnect: "1x per connection close"
+schema.disconnect -> schema.destroy: "only DROP TABLE reaches here" {style.stroke-dash: 5; style.stroke: "#c0392b"}
+
+sql.sel -> prepare.best: "immediate, N>=1x per compile, never per row" {style.stroke-dash: 3; style.stroke: "#b8860b"}
+prepare.best -> read.open: "plan handed down" {style.bold: true}
+read.open -> read.filter: "1x per cursor restart"
+read.filter -> read.next: "M rows, sequential" {style.stroke-width: 6}
+read.next -> read.column: "M x requested columns" {style.stroke-width: 6}
+read.column -> read.next: "resume until xEof is true"
+read.next -> read.close: "at exhaustion"

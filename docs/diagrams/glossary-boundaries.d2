@@ -1,0 +1,43 @@
+direction: right
+
+c: "SQLite C core (amalgamation, public domain)" {
+  style.fill: "#1d3557"
+  style.font-color: "#ffffff"
+  mod: "sqlite3_module: the 23 xMethod slots"
+  decl: "sqlite3_declare_vtab: schema string, never executed"
+  vin: "sqlite3_vtab_in: opt into whole IN lists"
+  cfg: "sqlite3_vtab_config: INNOCUOUS, DIRECTONLY"
+  fn: "sqlite3_create_function: the scalar FFI door"
+}
+
+fts: "FTS5 (ships inside the same amalgamation, no privileged API)" {
+  style.fill: "#e8f0fe"
+  shadows: "_config _content _data _docsize _idx"
+  hash: "Fts5Hash: the pending-terms buffer"
+}
+
+rs: "rusqlite 0.40.2 (safe Rust bindings, crates.io)" {
+  style.fill: "#fff4e0"
+  vtab: "VTab, CreateVTab, UpdateVTab, VTabCursor traits"
+  ins: "Inserts, Updates: typed argv wrappers"
+  scalar: "create_scalar_function"
+}
+
+ours: "sqlite_ivm (this repo, all bespoke)" {
+  style.fill: "#e9f7ef"
+  mrow: "maintenance row: __ivm_source, __ivm_adding, __ivm_row"
+  cat: "__ivm_views, __ivm_sources, __ivm_columns, __ivm_objects"
+  plan: "Query, Plan, contributions SQL"
+  trig: "the generated guard and AFTER triggers"
+}
+
+c.mod -> rs.vtab: "wrapped 1:1, no semantics added" {style.stroke-dash: 5}
+c.decl -> ours.mrow: "HIDDEN columns are declared here" {style.bold: true; style.stroke: "#2d6a4f"}
+rs.vtab -> ours.plan: "implemented at src/2_vtab.rs:314"
+rs.ins -> ours.mrow: "argv arrives at src/2_vtab.rs:386" {style.bold: true}
+c.fn -> rs.scalar: "wrapped" {style.stroke-dash: 5}
+rs.scalar -> ours.cat: "sqlite_ivm_create at src/3_extension.rs:47"
+ours.trig -> ours.mrow: "the trigger body writes one, src/1_maintenance.rs:399" {style.stroke: "#c0392b"}
+c.mod -> fts.hash: "same slots, FTS5 buffers behind xUpdate" {style.stroke-dash: 2; style.stroke: "#b8860b"}
+fts.hash -> ours.plan: "the precedent to copy, not a dependency" {style.stroke-dash: 2; style.stroke: "#b8860b"}
+c.vin -> rs.vtab: "surfaced as is_in_constraint / set_in_constraint, needs modern_sqlite" {style.stroke-dash: 5}

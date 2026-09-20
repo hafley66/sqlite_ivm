@@ -1,0 +1,16 @@
+[package]
+name = "lab_20260919_1"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Own workspace root. A lab never joins the entry point workspace.
+[workspace]
+
+[dependencies]
+rusqlite = { version = "=0.40.2", features = ["functions", "vtab"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[dev-dependencies]
+serde_json = "1"

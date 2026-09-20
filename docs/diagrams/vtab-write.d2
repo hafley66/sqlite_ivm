@@ -1,0 +1,33 @@
+direction: right
+
+sql: SQL the caller wrote {
+  style.fill: "#1d3557"
+  style.font-color: "#ffffff"
+  ins: INSERT INTO source_table VALUES (...)
+  trg: "AFTER trigger: INSERT INTO v(__ivm_source,__ivm_adding,__ivm_row)"
+  cmt: COMMIT
+}
+
+write: row clock {
+  style.fill: "#fdeaea"
+  update: xUpdate  1x per mutated row, no bulk variant exists
+  buffer: pending buffer  bounded, flushes early when full
+}
+
+txn: transaction clock {
+  style.fill: "#f3e8fd"
+  begin: xBegin  never nests, 1x per transaction
+  sync: xSync  the only failable flush point
+  commit: xCommit  return code is discarded by SQLite
+  rollback: xRollback  drop the buffer, no flush
+}
+
+sql.ins -> sql.trg: "fires FOR EACH ROW, N rows means N firings" {style.stroke-dash: 3; style.stroke: "#c0392b"; style.stroke-width: 6}
+sql.trg -> write.update: "immediate, 1x per trigger firing" {style.stroke-dash: 3; style.stroke: "#c0392b"}
+txn.begin -> write.update: "opens the window, then any number of updates" {style.stroke-dash: 5}
+write.update -> write.buffer: "append only, no SQL, no disk" {style.bold: true}
+write.buffer -> write.update: "back-pressure: flush early past the byte cap" {style.stroke-dash: 2}
+sql.cmt -> txn.sync: "immediate" {style.stroke-dash: 3; style.stroke: "#7d3c98"}
+write.buffer -> txn.sync: "eventual, buffer drains exactly 1x" {style.stroke-dash: 2; style.stroke: "#7d3c98"; style.stroke-width: 6}
+txn.sync -> txn.commit: "1x, nothing failable may live here" {style.bold: true}
+txn.begin -> txn.rollback: "the other exit, exclusive of commit" {style.stroke-dash: 5}
