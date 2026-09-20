@@ -1,6 +1,6 @@
 ---
 created: 2026-09-19
-updated: 2026-09-19
+updated: 2026-09-20
 type: task
 status: open
 priority: normal
@@ -36,9 +36,9 @@ Changeset, not patchset: a patchset strips old non-PK values, and retraction nee
 
 ## Acceptance Criteria
 
-- [ ] yes or no on each of the four questions, with the probe that answered it
-- [ ] if yes, the smallest program that attaches a session and drains a changeset
-- [ ] ISO lab, no path dep on the entry point
+- [x] yes or no on each of the four questions, with the probe that answered it
+- [x] if yes, the smallest program that attaches a session and drains a changeset
+- [x] ISO lab, no path dep on the entry point
 
 ## Test Plan
 

@@ -1,6 +1,6 @@
 ---
 created: 2026-09-19
-updated: 2026-09-19
+updated: 2026-09-20
 type: bug
 status: open
 priority: high
@@ -43,10 +43,10 @@ assert the view answers.
 
 ## Acceptance Criteria
 
-- [ ] a test loads the built dylib through `sqlite3_extension_init`
-- [ ] it fails if the init symbol is renamed
-- [ ] it picks the right extension per platform (dylib / so / dll)
-- [ ] it skips with a clear message rather than failing when the artifact is unbuilt
+- [x] a test loads the built dylib through `sqlite3_extension_init`
+- [x] it fails if the init symbol is renamed
+- [x] it picks the right extension per platform (dylib / so / dll)
+- [x] it skips with a clear message rather than failing when the artifact is unbuilt
 
 ## Test Plan
 
