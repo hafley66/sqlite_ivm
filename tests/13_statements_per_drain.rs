@@ -11,7 +11,8 @@ const SMALL_ROWS: i64 = 8;
 const SIZE_RATIO: i64 = 16;
 
 /// One view per node kind the drain distinguishes.
-const VIEWS: [(&str, &str); 7] = [
+const VIEWS: [(&str, &str); 8] = [
+    ("window_view", "SELECT id, ROW_NUMBER() OVER (PARTITION BY v ORDER BY id) AS rn FROM a"),
     ("reach_view", "WITH RECURSIVE p(x,y) AS (SELECT id,v FROM a UNION SELECT p.x,a.v FROM p JOIN a ON a.id=p.y) SELECT x,y FROM p"),
     ("map_view", "SELECT v+1 AS w FROM a"),
     ("group_view", "SELECT v, count(*) AS n FROM a GROUP BY v"),
@@ -24,8 +25,9 @@ const VIEWS: [(&str, &str); 7] = [
 fn transaction(db: &Connection, rows: i64) -> Result<()> {
     db.execute_batch("BEGIN")?;
     let mut insert = db.prepare("INSERT INTO a(id,v) VALUES(?1,?2)")?;
+    // Every row its own group, so a per-group statement grows with the batch too.
     for id in 0..rows {
-        insert.execute((id, id % 4))?;
+        insert.execute((id, id))?;
     }
     drop(insert);
     db.execute_batch("COMMIT")

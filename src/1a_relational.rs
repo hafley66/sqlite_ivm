@@ -649,7 +649,29 @@ impl Plan {
                     .map(|e| e.replace("__window__", &format!("ORDER BY {}", order.join(","))))
                     .collect::<Vec<_>>()
                     .join(",");
-                if *window || limit.is_some() {
+                if *window {
+                    // Every partition in one statement: the window runs over the
+                    // expanded bag partitioned by key, instead of once per key.
+                    let width = self.nodes[node.inputs[0]].fields.len();
+                    let cols_in = columns(width);
+                    let groups: i64 = db
+                        .prepare_cached(&format!("SELECT count(DISTINCT __k) FROM {t}"))?
+                        .query_row([], |r| r.get(0))?;
+                    if groups as usize > BULK_GROUP_BUDGET {
+                        return Err(error("bulk group budget exceeded"));
+                    }
+                    let partitioned = expressions
+                        .iter()
+                        .map(|e| e.replacen(" OVER(", " OVER(PARTITION BY __k ", 1))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    db.execute_cached(
+                        &format!(
+                            "WITH RECURSIVE candidates(__k,{cols_in},__n) AS (SELECT __k,{cols_in},__n FROM {t}),                              expanded(__k,{cols_in},__copies) AS (SELECT __k,{cols_in},__n FROM candidates UNION ALL SELECT __k,{cols_in},__copies-1 FROM expanded WHERE __copies>1)                              INSERT INTO {out}({cols},__m) SELECT q.*,1 FROM (SELECT {partitioned} FROM expanded) q"
+                        ),
+                        [],
+                    )?;
+                } else if limit.is_some() {
                     let width = self.nodes[node.inputs[0]].fields.len();
                     let cols_in = columns(width);
                     let wanted = limit.filter(|n| *n >= 0).map(|n| n.saturating_add(*offset));
