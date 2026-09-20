@@ -322,6 +322,40 @@ fn folded(value: &str) -> String {
 }
 /// The composite an arrangement row rebuilds from its own stored columns.
 /// `fill` writes it and `change` compares against it, so the two must agree.
+/// Member rows dedup on the composite. `__k` is its hash and carries the
+/// index, so the anti-join seeks on the hash and confirms on the composite.
+fn member_insert(
+    target: &str,
+    width: usize,
+    key: &str,
+    head: &str,
+    from: &str,
+    filter: &str,
+    present: Option<&str>,
+) -> String {
+    let seen = |t: &str| {
+        format!("EXISTS(SELECT 1 FROM {t} m WHERE m.__k=sqlite_ivm_hash(s.__c) AND m.__c=s.__c)")
+    };
+    format!(
+        "INSERT INTO {target}(__k,__c,{cols}) SELECT sqlite_ivm_hash(s.__c),s.__c,{qualified} FROM (SELECT {key} AS __c,{head} {from}{filter} GROUP BY {key}) s WHERE NOT {}{}",
+        seen(target),
+        present
+            .map(|t| format!(" AND {}", seen(t)))
+            .unwrap_or_default(),
+        cols = columns(width),
+        qualified = (0..width)
+            .map(|i| format!("s.c{i}"))
+            .collect::<Vec<_>>()
+            .join(","),
+    )
+}
+fn aliased(head: &[String]) -> String {
+    head.iter()
+        .enumerate()
+        .map(|(i, h)| format!("{h} AS c{i}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
 pub fn identity_sql(width: usize) -> String {
     json_key((0..width).map(|i| plain(&format!("c{i}"))).collect())
 }
@@ -388,11 +422,14 @@ impl Plan {
                 for side in [member, member + 1] {
                     let t = format!("{name}_op{id}_{side}");
                     db.execute_batch(&format!(
-                        "CREATE TABLE main.{}(__k TEXT NOT NULL UNIQUE,{})",
+                        "CREATE TABLE main.{}(__k INTEGER NOT NULL,__c TEXT NOT NULL,{}); CREATE INDEX main.{} ON {}(__k)",
                         quote(&t),
-                        columns(node.fields.len())
+                        columns(node.fields.len()),
+                        quote(&format!("__ivm_{name}_op{id}_{side}_member")),
+                        quote(&t)
                     ))?;
                     objects.push(("table", t));
+                    objects.push(("index", format!("__ivm_{name}_op{id}_{side}_member")));
                 }
                 let mut created = vec![];
                 for (occurrence, expression) in rules.iter().flat_map(|r| &r.indexes) {
@@ -877,18 +914,21 @@ impl Plan {
         target: &str,
         delta: Option<(i64, i64)>,
     ) -> Result<usize> {
-        let cols = columns(self.nodes[id].fields.len());
+        let width = self.nodes[id].fields.len();
         let mut params = vec![];
         let member = delta
             .map(|(lo, hi)| Role::Range(target.to_string(), lo, hi))
             .unwrap_or_else(|| Role::Table(target.to_string()));
         let from = rule_from(rule, &roles(name, id, 0, rule, None, member), &mut params);
         db.execute_cached(
-            &format!(
-                "INSERT OR IGNORE INTO {target}(__k,{cols}) SELECT {},{} {from}{}",
-                rule.key,
-                rule.head.join(","),
-                rule_where(rule, None)
+            &member_insert(
+                target,
+                width,
+                &rule.key,
+                &aliased(&rule.head),
+                &from,
+                &rule_where(rule, None),
+                None,
             ),
             params_from_iter(params),
         )
@@ -1319,21 +1359,15 @@ impl Plan {
          -> Result<usize> {
             let mut params = vec![];
             let from = rule_from(rule, roles, &mut params);
-            let sql = if only_present {
-                format!(
-                    "INSERT OR IGNORE INTO {target}(__k,{cols}) SELECT __k,{cols} FROM (SELECT {} AS __k,{} {from}{}) WHERE __k IN (SELECT __k FROM {all})",
-                    rule.key,
-                    rule.head.iter().enumerate().map(|(i, h)| format!("{h} AS c{i}")).collect::<Vec<_>>().join(","),
-                    rule_where(rule, None)
-                )
-            } else {
-                format!(
-                    "INSERT OR IGNORE INTO {target}(__k,{cols}) SELECT {},{} {from}{}",
-                    rule.key,
-                    rule.head.join(","),
-                    rule_where(rule, None)
-                )
-            };
+            let sql = member_insert(
+                target,
+                width,
+                &rule.key,
+                &aliased(&rule.head),
+                &from,
+                &rule_where(rule, None),
+                only_present.then_some(all.as_str()),
+            );
             db.execute_cached(&sql, params_from_iter(params))
         };
         let rounds = |mut lo: i64| -> Result<()> {
@@ -1408,7 +1442,7 @@ impl Plan {
             let round = round_span("delete");
             rows(
                 db,
-                &format!("SELECT __k,{cols} FROM {all} WHERE __k IN (SELECT __k FROM {work} WHERE rowid>?1 AND rowid<=?2)"),
+                &format!("SELECT a.__c,{} FROM {all} a WHERE EXISTS(SELECT 1 FROM {work} w WHERE w.rowid>?1 AND w.rowid<=?2 AND w.__k=a.__k AND w.__c=a.__c)", (0..width).map(|i| format!("a.c{i}")).collect::<Vec<_>>().join(",")),
                 &[Value::Integer(lo), Value::Integer(hi)],
             )?
             .into_iter()
@@ -1420,7 +1454,7 @@ impl Plan {
                 Ok(())
             })?;
             db.execute_cached(
-                &format!("DELETE FROM {all} WHERE __k IN (SELECT __k FROM {work} WHERE rowid>?1 AND rowid<=?2)"),
+                &format!("DELETE FROM {all} WHERE rowid IN (SELECT a.rowid FROM {all} a WHERE EXISTS(SELECT 1 FROM {work} w WHERE w.rowid>?1 AND w.rowid<=?2 AND w.__k=a.__k AND w.__c=a.__c))"),
                 rusqlite::params![lo, hi],
             )?;
             let mut written = 0;
@@ -1466,7 +1500,7 @@ impl Plan {
         let restored = max_rowid(db, &all)?;
         db.execute_cached(
             &format!(
-                "INSERT OR IGNORE INTO {all}(__k,{cols}) SELECT w.__k,{} FROM {work} w WHERE {}",
+                "INSERT INTO {all}(__k,__c,{cols}) SELECT w.__k,w.__c,{} FROM {work} w WHERE ({}) AND NOT EXISTS(SELECT 1 FROM {all} m WHERE m.__k=w.__k AND m.__c=w.__c)",
                 (0..width)
                     .map(|i| format!("w.c{i}"))
                     .collect::<Vec<_>>()
@@ -1481,8 +1515,8 @@ impl Plan {
             |mut deltas, (k, stored)| -> Result<Vec<Delta>> {
                 let current = rows(
                     db,
-                    &format!("SELECT {cols} FROM {all} WHERE __k=?1"),
-                    &[Value::Text(k)],
+                    &format!("SELECT {cols} FROM {all} WHERE __k=?1 AND __c=?2"),
+                    &[Value::Integer(row_hash(k.as_bytes())), Value::Text(k)],
                 )?
                 .into_iter()
                 .next();
