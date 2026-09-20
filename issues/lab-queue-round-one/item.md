@@ -2,9 +2,9 @@
 created: 2026-09-19
 updated: 2026-09-19
 type: epic
-owner: hafley66
 status: open
 priority: normal
+owner: hafley66
 ---
 
 # Labs 3 through 9, blocked on the attribution profile
@@ -49,3 +49,21 @@ savepoints (flush on savepoint and release, discard on rollback-to).
 `rusqlite` 0.40.2 surfaces `IndexInfo::is_in_constraint` and `set_in_constraint`
 (`src/vtab/mod.rs:602-612`) with `InValues` as a `FallibleIterator`. Both sit behind
 the `modern_sqlite` feature, which this crate does not enable today.
+
+## Acceptance Criteria
+
+- [ ] @lab-attribution-profile has ranked labs 3 through 9 by measured upside
+- [ ] every lab below the cut line is closed as obsolete with the measurement cited
+- [ ] every lab above the cut line has its own issue with a test plan in the `oh` format
+- [ ] @lab-session-probe has answered its four gates, so lab 8 is either scheduled or dead
+- [ ] the invalidation edges below are re-checked against the profile, not assumed
+
+## Test Plan
+
+An epic has no tests of its own. Each child lab carries a `## Test Plan` section in
+the `oh` format, and this epic is done when every scheduled child is.
+
+The one thing this epic asserts: **no lab below is started before
+@lab-attribution-profile closes.** Starting one early means its result is measured
+against a rig and a profile that may not exist yet, which is how a lane produces a
+number nobody can reproduce.
