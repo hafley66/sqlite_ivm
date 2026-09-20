@@ -700,18 +700,21 @@ impl Plan {
                     }
                     let width = self.nodes[node.inputs[0]].fields.len();
                     let cols_in = columns(width);
+                    let wanted = limit.filter(|n| *n >= 0).map(|n| n.saturating_add(*offset));
+                    // The recursive term walks __copies to 1, so an unclamped __n unrolls every
+                    // copy before LIMIT applies. A window reads every copy, so only LIMIT clamps.
+                    let copies = wanted
+                        .filter(|_| !*window)
+                        .map(|n| format!("min(__n,{n})"))
+                        .unwrap_or_else(|| "__n".to_string());
                     let candidates = format!(
-                        "SELECT {cols_in},__n FROM {t} WHERE __k=?1{}{}",
+                        "SELECT {cols_in},{copies} FROM {t} WHERE __k=?1{}{}",
                         if order.is_empty() {
                             String::new()
                         } else {
                             format!(" ORDER BY {}", order.join(","))
                         },
-                        limit
-                            .filter(|n| *n >= 0)
-                            .map(|n| n.saturating_add(*offset))
-                            .map(|n| format!(" LIMIT {n}"))
-                            .unwrap_or_default()
+                        wanted.map(|n| format!(" LIMIT {n}")).unwrap_or_default()
                     );
                     let single = format!(
                         "WITH RECURSIVE candidates({cols_in},__n) AS ({candidates}), expanded({cols_in},__copies) AS (SELECT {cols_in},__n FROM candidates UNION ALL SELECT {cols_in},__copies-1 FROM expanded WHERE __copies>1) SELECT {replaced} FROM expanded{}{}",
@@ -1133,18 +1136,20 @@ impl Plan {
                         let cols = columns(width);
                         // At most k distinct positive-support rows can contribute
                         // to the first k bag rows. The ordered index bounds reads.
+                        let wanted =
+                            limit.filter(|n| *n >= 0).map(|n| n.saturating_add(*offset));
+                        let copies = wanted
+                            .filter(|_| !*window)
+                            .map(|n| format!("min(__n,{n}) AS __n"))
+                            .unwrap_or_else(|| "__n".to_string());
                         let candidates = format!(
-                            "SELECT {cols},__n FROM {t} WHERE __k=?1{}{}",
+                            "SELECT {cols},{copies} FROM {t} WHERE __k=?1{}{}",
                             if !order.is_empty() {
                                 format!(" ORDER BY {}", order.join(","))
                             } else {
                                 String::new()
                             },
-                            limit
-                                .filter(|n| *n >= 0)
-                                .map(|n| n.saturating_add(*offset))
-                                .map(|n| format!(" LIMIT {n}"))
-                                .unwrap_or_default()
+                            wanted.map(|n| format!(" LIMIT {n}")).unwrap_or_default()
                         );
                         format!("WITH RECURSIVE candidates AS ({candidates}), expanded({cols},__copies) AS (SELECT {cols},__n FROM candidates UNION ALL SELECT {cols},__copies-1 FROM expanded WHERE __copies>1) SELECT {expressions} FROM expanded{}{}",
                             if !*window&&!order.is_empty(){format!(" ORDER BY {}",order.join(","))}else{String::new()},limit.map(|n|format!(" LIMIT {n} OFFSET {offset}")).unwrap_or_default())
