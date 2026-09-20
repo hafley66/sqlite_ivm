@@ -18,6 +18,8 @@ crate-type = ["cdylib", "rlib"]
 default = []
 extension = ["rusqlite/loadable_extension"]
 bench = ["rusqlite/load_extension"]
+# Measurement only: SQLite's own page cache instead of the system dylib's purgeable one.
+bundled = ["rusqlite/bundled"]
 
 [dependencies]
 hafley-observe = { path = "../../../../hafley-rs/.boop-worktrees/main/crates/hafley-observe" }
@@ -44,3 +46,6 @@ name = "5_feature_case"
 path = "examples/5_feature_case.rs"
 required-features = ["bench"]
 
+
+[profile.dev.package.libsqlite3-sys]
+opt-level = 3
