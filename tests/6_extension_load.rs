@@ -1,15 +1,23 @@
-#![cfg(all(feature = "bench", not(feature = "extension")))]
-// Tests 0 through 5 call register(&db) and never reach sqlite3_extension_init;
-// this file dlopens the shipped artifact so a renamed or dropped init symbol
-// fails here instead of in the field.
-// No memory budget: a dlopen'd library resolves its own allocator symbols, so
+// No file-level gate: under a bare `cargo test` the three tests exist and run,
+// skipping with a named reason when in-process loading is unavailable. That
+// availability is structural on this platform, not a preference: the system
+// libsqlite3 exports no sqlite3_load_extension symbols (link error:
+// _sqlite3_enable_load_extension, _sqlite3_load_extension), refuses
+// sqlite3_auto_extension with SQLITE_MISUSE even for a no-op entry point, and
+// ships a CLI with .load removed; and defaulting `rusqlite/load_extension`
+// breaks the `extension` build itself (E0425: sqlite3_enable_load_extension is
+// absent from the loadable-extension bindings, rusqlite inner_connection.rs).
+// The tier that can load in-process is bench plus rusqlite/bundled, which
+// scripts/1_crud.sh drives through the shared helper. A loadable-extension
+// rlib never opens connections in a test process, so no test here can run
+// under `--features extension`; with bench off the skip keeps that build safe.
+// No memory budget: a loaded extension resolves its own allocator symbols, so
 // a process counting allocator would report a number that means nothing.
 
-use rusqlite::{Connection, LoadExtensionGuard, Result};
+use rusqlite::{Connection, Result};
 use std::path::PathBuf;
 
-/// scripts/0_build.sh writes the artifact here; IVM_NATIVE_EXTENSION overrides it,
-/// matching tests/support/0_database.rs.
+/// scripts/0_build.sh writes the artifact here; IVM_NATIVE_EXTENSION overrides it.
 fn artifact() -> PathBuf {
     if let Ok(path) = std::env::var("IVM_NATIVE_EXTENSION") {
         return PathBuf::from(path);
@@ -26,8 +34,8 @@ fn artifact() -> PathBuf {
         .join(name)
 }
 
-/// None means the artifact is not built; each case reports that and skips
-/// rather than reporting a false failure for a bare `cargo test`.
+/// None means the case is skipped, with a named reason; the artifact-absent
+/// skip is what keeps a bare `cargo test` honest before scripts/0_build.sh.
 fn open_loaded() -> Result<Option<Connection>> {
     let path = artifact();
     if !path.exists() {
@@ -37,17 +45,27 @@ fn open_loaded() -> Result<Option<Connection>> {
         );
         return Ok(None);
     }
-    let db = Connection::open_in_memory()?;
-    // sqlite_ivm_create refuses connections without these; set once for every case.
-    db.execute_batch("PRAGMA recursive_triggers=ON; PRAGMA trusted_schema=ON")?;
-    unsafe {
-        let _guard = LoadExtensionGuard::new(&db)?;
-        // The entry point is named explicitly: the artifact contract is
-        // sqlite3_extension_init, and a rename must fail the load instead of
-        // falling back to the filename-derived symbol.
-        db.load_extension(&path, Some("sqlite3_extension_init"))?;
+    #[cfg(not(feature = "bench"))]
+    {
+        let _ = &path;
+        eprintln!(
+            "6_extension_load: skipping, in-process extension loading needs the bench tier; \
+             run: cargo test --locked --features bench --features rusqlite/bundled \
+             --test 6_extension_load"
+        );
+        return Ok(None);
     }
-    Ok(Some(db))
+    #[cfg(feature = "bench")]
+    {
+        // The named entry point makes a rename a hard failure instead of a
+        // fallback to the filename-derived symbol.
+        let db = Connection::open_in_memory()?;
+        unsafe {
+            db.load_extension_enable()?;
+            db.load_extension(&path, Some("sqlite3_extension_init"))?;
+        }
+        Ok(Some(db))
+    }
 }
 
 #[test]
@@ -64,7 +82,8 @@ fn loaded_extension_registers_the_create_function() -> Result<()> {
         return Ok(());
     };
     db.execute_batch(
-        "CREATE TABLE items (id INTEGER PRIMARY KEY, group_id INTEGER NOT NULL, amount INTEGER NOT NULL)",
+        "PRAGMA recursive_triggers=ON; PRAGMA trusted_schema=ON;
+        CREATE TABLE items (id INTEGER PRIMARY KEY, group_id INTEGER NOT NULL, amount INTEGER NOT NULL)",
     )?;
     let installed: String = db.query_row(
         "SELECT sqlite_ivm_create(?1, ?2)",
@@ -85,7 +104,8 @@ fn loaded_extension_maintains_a_view_end_to_end() -> Result<()> {
         return Ok(());
     };
     db.execute_batch(
-        "CREATE TABLE items (id INTEGER PRIMARY KEY, group_id INTEGER NOT NULL, amount INTEGER NOT NULL)",
+        "PRAGMA recursive_triggers=ON; PRAGMA trusted_schema=ON;
+        CREATE TABLE items (id INTEGER PRIMARY KEY, group_id INTEGER NOT NULL, amount INTEGER NOT NULL);",
     )?;
     db.query_row(
         "SELECT sqlite_ivm_create(?1, ?2)",
@@ -103,7 +123,8 @@ fn loaded_extension_maintains_a_view_end_to_end() -> Result<()> {
     assert_eq!(view, (1, 7));
     db.execute_batch("INSERT INTO items VALUES (2, 4, 3)")?;
     let view: (i64, i64) = db.query_row("SELECT n, s FROM probe_view WHERE g = 4", [], |r| {
-        Ok((r.get(0)?, r.get(1)?))
+        Ok((r.get(0)?, r.get(1)?)
+        )
     })?;
     assert_eq!(view, (2, 10));
     Ok(())
