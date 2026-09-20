@@ -46,3 +46,28 @@ microseconds for one `group` source row through the whole fold. One intern is
 about 1 percent of the row it would replace a TEXT key on, so the budget for
 the remaining steps is wide. This prices the bulk SQL intern; the incremental
 Rust `intern()` pays a second prepared statement on a dictionary miss.
+
+## step2-group: `__k` INTEGER on the Group kind only
+
+Only `group` should move. It moved in both directions: 13.1 percent smaller on
+disk, 1.6 percent slower on the clock.
+
+| shape | seconds | db bytes | rows/s | vs baseline time | vs baseline bytes |
+|---|---|---|---|---|---|
+| group | 0.333 | 761 856 | 12 025 | 0.98x | 0.87x |
+| distinct | 0.188 | 1 249 280 | 21 307 | 1.00x | 1.01x |
+| join | 0.168 | 1 343 488 | 23 769 | 0.99x | 1.01x |
+| intern | 0.003 | 430 080 | 1 319 697 | new | new |
+| fixpoint | 2.262 | 26 386 432 | 1 768 | 1.01x | 1.00x |
+
+The time regression is outside the run band: three step2 runs spanned
+0.333..0.339 and three baseline runs spanned 0.325..0.329, so the two sets do
+not overlap.
+
+Cause, and why it is the expected shape rather than a defect: the Group
+arrangement still carries `__r TEXT NOT NULL UNIQUE`, which is the fatter of
+its two indexes. This step narrowed the `__k` index and added one dictionary
+seek per maintained row, and removed nothing. The 13.1 percent on disk is the
+`__k` index and the `__k` column shrinking to 8 bytes; the 1.6 percent on the
+clock is that one added seek. The time win is priced against `__r`, which is
+step 4, so this number is only readable as a pair with that one.

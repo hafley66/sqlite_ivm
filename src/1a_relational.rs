@@ -123,7 +123,11 @@ fn evaluate(
         row,
     )
 }
-fn change(db: &Connection, t: &str, k: &str, row: &Row, d: i64) -> Result<(i64, i64)> {
+fn key_id(db: &Connection, dict: &str, row: &[Value]) -> Result<i64> {
+    let text = key(db, row)?;
+    intern(db, dict, &text)
+}
+fn change(db: &Connection, t: &str, k: Value, row: &Row, d: i64) -> Result<(i64, i64)> {
     let r = identity(db, row)?;
     let old: Option<i64> = db
         .query_row(&format!("SELECT __n FROM {t} WHERE __r=?1"), [&r], |r| {
@@ -145,7 +149,7 @@ fn change(db: &Connection, t: &str, k: &str, row: &Row, d: i64) -> Result<(i64, 
             rusqlite::params![new, r],
         )?;
     } else {
-        let mut params = vec![Value::Text(k.into()), Value::Text(r), Value::Integer(new)];
+        let mut params = vec![k, Value::Text(r), Value::Integer(new)];
         params.extend(row.clone());
         db.execute_cached(
             &format!("INSERT INTO {t} VALUES({})", parameters(params.len())),
@@ -271,6 +275,14 @@ fn weighted(db: &Connection, sql: &str, k: &str) -> Result<Vec<Delta>> {
 const BULK_ROUND_BUDGET: usize = 100_000;
 const BULK_GROUP_BUDGET: usize = 100_000;
 const BULK_MULTIPLICITY_BUDGET: i64 = 1_000_000;
+/// Interned kinds store the dictionary id; the rest still store the composite
+/// text and move over in a later step of @json-text-keys-in-indexes.
+fn key_column_type(kind: &Kind) -> &'static str {
+    match kind {
+        Kind::Group { .. } => "INTEGER",
+        _ => "TEXT",
+    }
+}
 fn out_table(id: usize, width: usize) -> String {
     format!("temp.__ivm_out_{width}_{id}")
 }
@@ -312,7 +324,8 @@ impl Plan {
             for (side, input) in node.inputs.iter().enumerate() {
                 let t = format!("{name}_op{id}_{side}");
                 let n = self.nodes[*input].fields.len();
-                db.execute_batch(&format!("CREATE TABLE main.{}(__k TEXT NOT NULL,__r TEXT NOT NULL UNIQUE,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k)",quote(&t),columns(n),quote(&format!("__ivm_{name}_op{id}_{side}_key")),quote(&t)))?;
+                let key_type = key_column_type(&node.kind);
+                db.execute_batch(&format!("CREATE TABLE main.{}(__k {key_type} NOT NULL,__r TEXT NOT NULL UNIQUE,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k)",quote(&t),columns(n),quote(&format!("__ivm_{name}_op{id}_{side}_key")),quote(&t)))?;
                 objects.push(("table", t));
                 objects.push(("index", format!("__ivm_{name}_op{id}_{side}_key")));
                 if let Kind::Group {
@@ -500,6 +513,16 @@ impl Plan {
                 json_key((0..width).map(|i| folded(&format!("c{i}"))).collect())
             }
             _ => return Ok(()),
+        };
+        let k = if key_column_type(&node.kind) == "INTEGER" {
+            let dict = keys_table(name);
+            db.execute(
+                &format!("INSERT OR IGNORE INTO {dict}(__v) SELECT {k} FROM {out}"),
+                [],
+            )?;
+            format!("(SELECT __i FROM {dict} WHERE __v={k})")
+        } else {
+            k
         };
         db.execute(
             &format!(
@@ -766,8 +789,7 @@ impl Plan {
                     let mut key_statement = db.prepare(&format!("SELECT DISTINCT __k FROM {t}"))?;
                     let mut key_rows = key_statement.query([])?;
                     while let Some(key) = key_rows.next()? {
-                        let key: String = key.get(0)?;
-                        statement.execute([&key])?;
+                        statement.execute([key.get::<_, i64>(0)?])?;
                     }
                 } else {
                     let mut sql =
@@ -999,7 +1021,7 @@ impl Plan {
                     .collect())
                 };
                 let before = snapshot()?;
-                change(db, &table(name, id, side), &k, row, d)?;
+                change(db, &table(name, id, side), Value::Text(k.clone()), row, d)?;
                 differences(db, before, snapshot()?)
             }
             Kind::Join {
@@ -1039,7 +1061,7 @@ impl Plan {
                             &k,
                         )?
                     };
-                    change(db, &table(name, id, side), &k, row, d)?;
+                    change(db, &table(name, id, side), Value::Text(k.clone()), row, d)?;
                     let mut result = vec![];
                     for (other, n) in matches {
                         let mut output = if side == 0 {
@@ -1135,7 +1157,7 @@ impl Plan {
                     Ok(result)
                 };
                 let before = snapshot()?;
-                change(db, &table(name, id, side), &k, row, d)?;
+                change(db, &table(name, id, side), Value::Text(k.clone()), row, d)?;
                 differences(db, before, snapshot()?)
             }
             Kind::Group {
@@ -1148,15 +1170,16 @@ impl Plan {
                 window,
             } => {
                 let t = table(name, id, 0);
+                let dict = keys_table(name);
                 let k = if keys.is_empty() {
-                    "[]".into()
+                    intern(db, &dict, "[]")?
                 } else {
-                    key(db, &evaluate(db, row, keys, None)?.remove(0))?
+                    key_id(db, &dict, &evaluate(db, row, keys, None)?.remove(0))?
                 };
                 let snapshot = || -> Result<Vec<Delta>> {
                     let present: bool = db.query_row(
                         &format!("SELECT EXISTS(SELECT 1 FROM {t} WHERE __k=?1)"),
-                        [&k],
+                        [k],
                         |r| r.get(0),
                     )?;
                     if !present && (!keys.is_empty() || *window || limit.is_some()) {
@@ -1198,13 +1221,13 @@ impl Plan {
                                 .unwrap_or_default()
                         )
                     };
-                    Ok(rows(db, &sql, &[Value::Text(k.clone())])?
+                    Ok(rows(db, &sql, &[Value::Integer(k)])?
                         .into_iter()
                         .map(|r| (r, 1))
                         .collect())
                 };
                 let before = snapshot()?;
-                change(db, &t, &k, row, d)?;
+                change(db, &t, Value::Integer(k), row, d)?;
                 differences(db, before, snapshot()?)
             }
             Kind::Fixpoint { rules } => self.fixpoint(db, name, id, side, row, d, rules),
@@ -1239,7 +1262,7 @@ impl Plan {
             tracing::debug_span!("round", phase, index, rows = tracing::field::Empty).entered()
         };
         let node = &self.nodes[id];
-        let (old, new) = change(db, &table(name, id, side), &key(db, row)?, row, d)?;
+        let (old, new) = change(db, &table(name, id, side), Value::Text(key(db, row)?), row, d)?;
         if (old > 0) == (new > 0) {
             return Ok(vec![]);
         }

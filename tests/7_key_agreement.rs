@@ -7,6 +7,9 @@
 //! - `key_sql()` feeds recursive `all` and `work` tables in
 //!   `src/0b_relational.rs:177`.
 //!
+//! What the encoders produce is now interned, so `__k` holds a dictionary id
+//! and the composite this file compares comes back out of the dictionary.
+//!
 //! JSON-subtype group keys are confirmed as divergent. Expression group keys
 //! are admitted by `src/0b_relational.rs:1339`; bulk `fill` preserves the JSON
 //! subtype while incremental Group maintenance receives a plain text value at
@@ -147,8 +150,21 @@ fn sql_keys(db: &Connection, source: &str, collation: &str) -> Result<Vec<String
     Ok(rows)
 }
 
-fn rust_keys(db: &Connection, arrangement: &str) -> Result<Vec<String>> {
-    let mut statement = db.prepare(&format!("SELECT __k FROM {arrangement} ORDER BY c0"))?;
+fn dictionary_name(db: &Connection, view: &str) -> Result<String> {
+    db.query_row(
+        "SELECT object_name FROM __ivm_objects WHERE view_name=?1 AND object_type='table' AND EXISTS (SELECT 1 FROM pragma_table_info(object_name) WHERE name='__v') LIMIT 1",
+        [view],
+        |row| row.get(0),
+    )
+}
+
+/// `__k` is a dictionary id on interned operator kinds, so the composite the
+/// oracle compares against comes back through the dictionary, not the column.
+fn rust_keys(db: &Connection, view: &str, arrangement: &str) -> Result<Vec<String>> {
+    let dictionary = dictionary_name(db, view)?;
+    let mut statement = db.prepare(&format!(
+        "SELECT d.__v FROM {arrangement} a JOIN \"{dictionary}\" d ON d.__i=a.__k ORDER BY a.c0"
+    ))?;
     let rows = statement
         .query_map([], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<String>>>()?;
@@ -190,7 +206,7 @@ fn rust_key_after_expression_agrees_with_sql_key_sql() -> Result<()> {
 
         create_view(&db, &bulk, &query)?;
         let arrangement = arrangement_name(&db, &incremental)?;
-        let rust = rust_keys(&db, &arrangement)?;
+        let rust = rust_keys(&db, &incremental, &arrangement)?;
         let sql = sql_keys(&db, &source, collation)?;
         assert_eq!(rust.len(), CORPUS_SIZE, "{collation}: arrangement rows");
         assert_eq!(sql.len(), CORPUS_SIZE, "{collation}: oracle rows");
