@@ -1,0 +1,11 @@
+.load ./target/release/libsqlite_ivm
+PRAGMA recursive_triggers=ON;
+PRAGMA trusted_schema=ON;
+CREATE TABLE t(a TEXT COLLATE NOCASE, b TEXT COLLATE NOCASE);
+INSERT INTO t VALUES('a','b'),('c','B');
+CREATE VIRTUAL TABLE v USING sqlite_ivm('WITH RECURSIVE p(x,y) AS (SELECT a,b FROM t UNION SELECT p.x,t.b FROM p JOIN t ON t.a=p.y) SELECT x,y FROM p');
+INSERT INTO t VALUES('A','c');
+DELETE FROM t WHERE a='a' COLLATE BINARY AND b='b' COLLATE BINARY;
+DELETE FROM t WHERE a='A' COLLATE BINARY AND b='c' COLLATE BINARY;
+SELECT 'view', * FROM v;
+SELECT 'fresh', x, y FROM (WITH RECURSIVE p(x,y) AS (SELECT a,b FROM t UNION SELECT p.x,t.b FROM p JOIN t ON t.a=p.y) SELECT x,y FROM p);
