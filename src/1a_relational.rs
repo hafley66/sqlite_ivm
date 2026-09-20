@@ -127,10 +127,10 @@ fn key_id(db: &Connection, dict: &str, row: &[Value]) -> Result<i64> {
     let text = key(db, row)?;
     intern(db, dict, &text)
 }
-fn change(db: &Connection, dict: &str, t: &str, k: Value, row: &Row, d: i64) -> Result<(i64, i64)> {
-    let r = intern(db, dict, &identity(db, row)?)?;
+fn change(db: &Connection, t: &str, k: Value, row: &Row, d: i64) -> Result<(i64, i64)> {
+    let r = identity(db, row)?;
     let old: Option<i64> = db
-        .query_row(&format!("SELECT __n FROM {t} WHERE __r=?1"), [r], |r| {
+        .query_row(&format!("SELECT __n FROM {t} WHERE __r=?1"), [&r], |r| {
             r.get(0)
         })
         .optional()?;
@@ -142,14 +142,14 @@ fn change(db: &Connection, dict: &str, t: &str, k: Value, row: &Row, d: i64) -> 
         return Err(error("negative arrangement multiplicity"));
     }
     if new == 0 {
-        db.execute_cached(&format!("DELETE FROM {t} WHERE __r=?1"), [r])?;
+        db.execute_cached(&format!("DELETE FROM {t} WHERE __r=?1"), [&r])?;
     } else if old.is_some() {
         db.execute_cached(
             &format!("UPDATE {t} SET __n=?1 WHERE __r=?2"),
             rusqlite::params![new, r],
         )?;
     } else {
-        let mut params = vec![k, Value::Integer(r), Value::Integer(new)];
+        let mut params = vec![k, Value::Text(r), Value::Integer(new)];
         params.extend(row.clone());
         db.execute_cached(
             &format!("INSERT INTO {t} VALUES({})", parameters(params.len())),
@@ -316,7 +316,7 @@ impl Plan {
             for (side, input) in node.inputs.iter().enumerate() {
                 let t = format!("{name}_op{id}_{side}");
                 let n = self.nodes[*input].fields.len();
-                db.execute_batch(&format!("CREATE TABLE main.{}(__k INTEGER NOT NULL,__r INTEGER NOT NULL UNIQUE,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k)",quote(&t),columns(n),quote(&format!("__ivm_{name}_op{id}_{side}_key")),quote(&t)))?;
+                db.execute_batch(&format!("CREATE TABLE main.{}(__k INTEGER NOT NULL,__r TEXT NOT NULL UNIQUE,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k)",quote(&t),columns(n),quote(&format!("__ivm_{name}_op{id}_{side}_key")),quote(&t)))?;
                 objects.push(("table", t));
                 objects.push(("index", format!("__ivm_{name}_op{id}_{side}_key")));
                 if let Kind::Group {
@@ -506,14 +506,11 @@ impl Plan {
             _ => return Ok(()),
         };
         let dict = keys_table(name);
-        for composite in [&k, &r] {
-            db.execute(
-                &format!("INSERT OR IGNORE INTO {dict}(__v) SELECT {composite} FROM {out}"),
-                [],
-            )?;
-        }
+        db.execute(
+            &format!("INSERT OR IGNORE INTO {dict}(__v) SELECT {k} FROM {out}"),
+            [],
+        )?;
         let k = format!("(SELECT __i FROM {dict} WHERE __v={k})");
-        let r = format!("(SELECT __i FROM {dict} WHERE __v={r})");
         db.execute(
             &format!(
                 "INSERT INTO {t}(__k,__r,__n,{}) SELECT {k},{r},__m,c0{} FROM {out} WHERE 1 ON CONFLICT(__r) DO UPDATE SET __n=__n+excluded.__n",
@@ -974,8 +971,11 @@ impl Plan {
                     .enumerate()
                     .map(|(i, f)| crate::relational::key_expression(&format!("c{i}"), &f.collation))
                     .collect::<Vec<_>>();
-                let dict = keys_table(name);
-                let k = key_id(db, &dict, &evaluate(db, row, &normalized, None)?.remove(0))?;
+                let k = key_id(
+                    db,
+                    &keys_table(name),
+                    &evaluate(db, row, &normalized, None)?.remove(0),
+                )?;
                 let count = |side| -> Result<i64> {
                     db.query_row(
                         &format!(
@@ -1013,7 +1013,7 @@ impl Plan {
                     .collect())
                 };
                 let before = snapshot()?;
-                change(db, &dict, &table(name, id, side), Value::Integer(k), row, d)?;
+                change(db, &table(name, id, side), Value::Integer(k), row, d)?;
                 differences(db, before, snapshot()?)
             }
             Kind::Join {
@@ -1038,8 +1038,7 @@ impl Plan {
                     evaluate(db, row, &expressions, None)?.remove(0)
                 };
                 let null = values.contains(&Value::Null);
-                let dict = keys_table(name);
-                let k = key_id(db, &dict, &values)?;
+                let k = key_id(db, &keys_table(name), &values)?;
                 let left_n = self.nodes[node.inputs[0]].fields.len();
                 let right_n = self.nodes[node.inputs[1]].fields.len();
                 if *mode == "inner" {
@@ -1054,7 +1053,7 @@ impl Plan {
                             k,
                         )?
                     };
-                    change(db, &dict, &table(name, id, side), Value::Integer(k), row, d)?;
+                    change(db, &table(name, id, side), Value::Integer(k), row, d)?;
                     let mut result = vec![];
                     for (other, n) in matches {
                         let mut output = if side == 0 {
@@ -1150,7 +1149,7 @@ impl Plan {
                     Ok(result)
                 };
                 let before = snapshot()?;
-                change(db, &dict, &table(name, id, side), Value::Integer(k), row, d)?;
+                change(db, &table(name, id, side), Value::Integer(k), row, d)?;
                 differences(db, before, snapshot()?)
             }
             Kind::Group {
@@ -1220,7 +1219,7 @@ impl Plan {
                         .collect())
                 };
                 let before = snapshot()?;
-                change(db, &dict, &t, Value::Integer(k), row, d)?;
+                change(db, &t, Value::Integer(k), row, d)?;
                 differences(db, before, snapshot()?)
             }
             Kind::Fixpoint { rules } => self.fixpoint(db, name, id, side, row, d, rules),
@@ -1258,7 +1257,6 @@ impl Plan {
         let dict = keys_table(name);
         let (old, new) = change(
             db,
-            &dict,
             &table(name, id, side),
             Value::Integer(key_id(db, &dict, row)?),
             row,
