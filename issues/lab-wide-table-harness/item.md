@@ -1,6 +1,6 @@
 ---
 created: 2026-09-19
-updated: 2026-09-19
+updated: 2026-09-20
 type: task
 status: open
 priority: high
@@ -40,11 +40,11 @@ logger the bottleneck. Every lab pins `HAFLEY_LOG` explicitly.
 
 ## Acceptance Criteria
 
-- [ ] generator produces N x M x J tables from a fixed seed, reproducible
-- [ ] M covers 10 and 20
-- [ ] spans named stably so `CountRecorder` can key on them
-- [ ] `HAFLEY_LOG` pinned, never inherited
-- [ ] ISO: own workspace, deps pinned from the entry point, no path dep on it
+- [x] generator produces N x M x J tables from a fixed seed, reproducible
+- [x] M covers 10 and 20
+- [x] spans named stably so `CountRecorder` can key on them
+- [x] `HAFLEY_LOG` pinned, never inherited
+- [x] ISO: own workspace, deps pinned from the entry point, no path dep on it
 
 ## Test Plan
 

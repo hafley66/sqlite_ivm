@@ -1,6 +1,6 @@
 ---
 created: 2026-09-19
-updated: 2026-09-19
+updated: 2026-09-20
 type: task
 status: open
 priority: high
@@ -38,10 +38,10 @@ and the work belongs elsewhere.
 
 ## Acceptance Criteria
 
-- [ ] percent of wall time for each of the nine steps at M=20
-- [ ] subscriber on vs off delta, same fold, same seed
-- [ ] a ranking of labs 3 through 9 by measured upside, not guessed
-- [ ] runs on the lab 0 rig unmodified
+- [x] percent of wall time for each of the nine steps at M=20
+- [x] subscriber on vs off delta, same fold, same seed
+- [x] a ranking of labs 3 through 9 by measured upside, not guessed
+- [x] runs on the lab 0 rig unmodified
 
 ## Test Plan
 
