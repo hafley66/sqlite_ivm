@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile, readdir, rm } from "node:fs/promises";
 import { arch, hostname, platform, release, totalmem } from "node:os";
 import { dirname, join } from "node:path";
 import { semanticCircuits, makeSemanticFixture } from "./36_semantic_catalog.mjs";
-import { circuits, makeCircuitFixture } from "./30_circuit_workload.mjs";
+import { circuits, makeCircuitFixture, valueDomains } from "./30_circuit_workload.mjs";
 const activeProcessGroups=new Set();
 for(const signal of ["SIGINT","SIGTERM"]){process.on(signal,()=>{for(const pid of activeProcessGroups){try{process.kill(-pid,"SIGKILL");}catch{}}process.exit(128+(signal==="SIGINT"?2:15));});}
 import { makeCrossoverFixture } from "./9_crossover_workload.mjs";
@@ -14,9 +14,9 @@ const circuitCatalog={...circuits,...semanticCircuits};
 // serialization remain outside the measured child update/materialization interval.
 let cachedFixtureKey, cachedFixture;
 const writtenFixtures=new Set();
-function circuitFixture(circuit,rows,batch,fanout){
-  const key=`${circuit}:${rows}:${batch}:${fanout}`;
-  if(key!==cachedFixtureKey){cachedFixture=Object.hasOwn(semanticCircuits,circuit)?makeSemanticFixture(circuit,rows,batch,fanout):makeCircuitFixture(circuit,rows,batch,fanout);cachedFixtureKey=key;}
+function circuitFixture(circuit,rows,batch,fanout,domain){
+  const key=`${circuit}:${rows}:${batch}:${fanout}:${domain}`;
+  if(key!==cachedFixtureKey){cachedFixture=Object.hasOwn(semanticCircuits,circuit)?makeSemanticFixture(circuit,rows,batch,fanout,domain):makeCircuitFixture(circuit,rows,batch,fanout,domain);cachedFixtureKey=key;}
   return cachedFixture;
 }
 
@@ -26,7 +26,7 @@ function argument(name, fallback) {
 }
 
 function caseKey(testCase) {
-  return `${testCase.circuit ?? "aggregate"}:${testCase.rows}:${testCase.batch_size}:${testCase.fanout}`;
+  return `${testCase.circuit ?? "aggregate"}:${testCase.rows}:${testCase.batch_size}:${testCase.fanout}:${testCase.value_domain ?? 'integers'}`;
 }
 
 function buildCases(profile, budget) {
@@ -41,7 +41,7 @@ if(selected.length){
   if(selected.some(cell=>!cells.some(c=>`${c.rows}:${c.batch_size}:${c.fanout}`===cell)))throw new Error("circuit-cells must select existing grid cells");
   cells=cells.filter(c=>selected.includes(`${c.rows}:${c.batch_size}:${c.fanout}`));
 }
-    return families.flatMap(circuit=>cells.map(c=>({...c,circuit,stage:circuit})));
+    return families.flatMap(circuit=>cells.flatMap(c=>Object.keys(valueDomains).map(value_domain=>({...c,circuit,stage:circuit,value_domain}))));
   }
   if (profile === "semantic") return [{ stage: "semantic", rows: 400, batch_size: 10, fanout: 10 }];
   if (profile === "smoke") {
@@ -226,6 +226,7 @@ async function runProcess(testCase, maintenance, runKind, repetition) {
     rows: testCase.rows,
     batch_size: testCase.batch_size,
     fanout: testCase.fanout,
+    value_domain: testCase.value_domain ?? 'integers',
   };
   const freePercent = memoryFreePercent();
   if (freePercent !== null && freePercent < 15) resourceBlocked = true;
@@ -240,7 +241,7 @@ async function runProcess(testCase, maintenance, runKind, repetition) {
   const processStarted = process.hrtime.bigint();
   const childRoot = join(runRoot, `${budget}-${maintenance}-${caseKey(testCase)}-${runKind}-${repetition}`);
   await mkdir(childRoot, { recursive: true });
-  const fixture = testCase.circuit ? circuitFixture(testCase.circuit,testCase.rows,testCase.batch_size,testCase.fanout) : makeCrossoverFixture(testCase.rows, testCase.batch_size, testCase.fanout, profile === "semantic");
+  const fixture = testCase.circuit ? circuitFixture(testCase.circuit,testCase.rows,testCase.batch_size,testCase.fanout,testCase.value_domain) : makeCrossoverFixture(testCase.rows, testCase.batch_size, testCase.fanout, profile === "semantic");
   let args = [
     "11_crossover_native.mjs",
     "--maintenance", maintenance,

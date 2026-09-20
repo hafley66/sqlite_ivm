@@ -28,9 +28,9 @@ export function semanticOracle(family,{a,b}) {
     default: throw new Error(`unknown semantic circuit ${family}`);
   }
 }
-export function makeSemanticFixture(family,rows=24,batch=3,fanout=4){
+export function makeSemanticFixture(family,rows=24,batch=3,fanout=4,domain='integers'){
   const specification=semanticCircuits[family];if(!specification)throw new Error('unknown semantic circuit');
-  const fixture=makeCircuitFixture('pipeline',rows,batch,fanout);
+  const fixture=makeCircuitFixture('pipeline',rows,batch,fanout,domain==='mixed_int_real'?'integers':domain);
   fixture.circuit=family;fixture.query=specification.query;fixture.columns=specification.columns;
   for(const state of fixture.states){const result=sortRows(semanticOracle(family,state.inputs));state.expected={rows:result,checksum:digest(outputText(result))};}
   return fixture;
