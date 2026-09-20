@@ -1,0 +1,22 @@
+[package]
+name = "lab_20260920_1"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Own workspace root. A lab never joins the entry point workspace.
+[workspace]
+
+[dependencies]
+rusqlite = { version = "=0.40.2", features = ["functions", "vtab"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+# Pinned to the exact version the entry point's Cargo.lock resolves
+# (hafley-observe 0.1.0, served by the hafley registry).
+hafley-observe = { version = "=0.1.0", registry = "hafley" }
+# Lab 1 reads the lab 0 rig unmodified; the rig is the instrument this lane
+# ships to every later lab. The entry point itself is never a dependency.
+rig = { package = "lab_20260920_0", path = "../20260920.0.the-gang-builds-a-wider-table" }
+
+[dev-dependencies]
+serde_json = "1"
