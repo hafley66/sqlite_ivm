@@ -263,8 +263,8 @@ fn differences(db: &Connection, before: Vec<Delta>, after: Vec<Delta>) -> Result
     }
     Ok(values.into_values().filter(|(_, n)| *n != 0).collect())
 }
-fn weighted(db: &Connection, sql: &str, k: &str) -> Result<Vec<Delta>> {
-    rows(db, sql, &[Value::Text(k.into())])?
+fn weighted(db: &Connection, sql: &str, k: i64) -> Result<Vec<Delta>> {
+    rows(db, sql, &[Value::Integer(k)])?
         .into_iter()
         .map(|mut r| match r.pop() {
             Some(Value::Integer(n)) => Ok((r, n)),
@@ -275,14 +275,6 @@ fn weighted(db: &Connection, sql: &str, k: &str) -> Result<Vec<Delta>> {
 const BULK_ROUND_BUDGET: usize = 100_000;
 const BULK_GROUP_BUDGET: usize = 100_000;
 const BULK_MULTIPLICITY_BUDGET: i64 = 1_000_000;
-/// Interned kinds store the dictionary id; the rest still store the composite
-/// text and move over in a later step of @json-text-keys-in-indexes.
-fn key_column_type(kind: &Kind) -> &'static str {
-    match kind {
-        Kind::Group { .. } => "INTEGER",
-        _ => "TEXT",
-    }
-}
 fn out_table(id: usize, width: usize) -> String {
     format!("temp.__ivm_out_{width}_{id}")
 }
@@ -324,8 +316,7 @@ impl Plan {
             for (side, input) in node.inputs.iter().enumerate() {
                 let t = format!("{name}_op{id}_{side}");
                 let n = self.nodes[*input].fields.len();
-                let key_type = key_column_type(&node.kind);
-                db.execute_batch(&format!("CREATE TABLE main.{}(__k {key_type} NOT NULL,__r TEXT NOT NULL UNIQUE,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k)",quote(&t),columns(n),quote(&format!("__ivm_{name}_op{id}_{side}_key")),quote(&t)))?;
+                db.execute_batch(&format!("CREATE TABLE main.{}(__k INTEGER NOT NULL,__r TEXT NOT NULL UNIQUE,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k)",quote(&t),columns(n),quote(&format!("__ivm_{name}_op{id}_{side}_key")),quote(&t)))?;
                 objects.push(("table", t));
                 objects.push(("index", format!("__ivm_{name}_op{id}_{side}_key")));
                 if let Kind::Group {
@@ -514,16 +505,12 @@ impl Plan {
             }
             _ => return Ok(()),
         };
-        let k = if key_column_type(&node.kind) == "INTEGER" {
-            let dict = keys_table(name);
-            db.execute(
-                &format!("INSERT OR IGNORE INTO {dict}(__v) SELECT {k} FROM {out}"),
-                [],
-            )?;
-            format!("(SELECT __i FROM {dict} WHERE __v={k})")
-        } else {
-            k
-        };
+        let dict = keys_table(name);
+        db.execute(
+            &format!("INSERT OR IGNORE INTO {dict}(__v) SELECT {k} FROM {out}"),
+            [],
+        )?;
+        let k = format!("(SELECT __i FROM {dict} WHERE __v={k})");
         db.execute(
             &format!(
                 "INSERT INTO {t}(__k,__r,__n,{}) SELECT {k},{r},__m,c0{} FROM {out} WHERE 1 ON CONFLICT(__r) DO UPDATE SET __n=__n+excluded.__n",
@@ -628,10 +615,11 @@ impl Plan {
                 let right_n = self.nodes[node.inputs[1]].fields.len();
                 let t0 = table(name, id, 0);
                 let t1 = table(name, id, 1);
+                // A join key equal on both sides still cannot match when a
+                // component is NULL, and the components live in the dictionary.
+                let dict = keys_table(name);
                 let no_null = |k: &str| {
-                    format!(
-                        "NOT EXISTS(SELECT 1 FROM json_each({k}) WHERE json_type(value)='null')"
-                    )
+                    format!("NOT EXISTS(SELECT 1 FROM json_each((SELECT __v FROM {dict} WHERE __i={k})) WHERE json_type(value)='null')")
                 };
                 let left_cols = |q: &str| {
                     (0..left_n)
@@ -983,14 +971,18 @@ impl Plan {
                     .enumerate()
                     .map(|(i, f)| crate::relational::key_expression(&format!("c{i}"), &f.collation))
                     .collect::<Vec<_>>();
-                let k = key(db, &evaluate(db, row, &normalized, None)?.remove(0))?;
+                let k = key_id(
+                    db,
+                    &keys_table(name),
+                    &evaluate(db, row, &normalized, None)?.remove(0),
+                )?;
                 let count = |side| -> Result<i64> {
                     db.query_row(
                         &format!(
                             "SELECT coalesce(sum(__n),0) FROM {} WHERE __k=?1",
                             table(name, id, side)
                         ),
-                        [&k],
+                        [k],
                         |r| r.get(0),
                     )
                 };
@@ -1014,14 +1006,14 @@ impl Plan {
                             columns(row.len()),
                             table(name, id, side)
                         ),
-                        &[Value::Text(k.clone())],
+                        &[Value::Integer(k)],
                     )?
                     .into_iter()
                     .map(|r| (r, 1))
                     .collect())
                 };
                 let before = snapshot()?;
-                change(db, &table(name, id, side), Value::Text(k.clone()), row, d)?;
+                change(db, &table(name, id, side), Value::Integer(k), row, d)?;
                 differences(db, before, snapshot()?)
             }
             Kind::Join {
@@ -1046,7 +1038,7 @@ impl Plan {
                     evaluate(db, row, &expressions, None)?.remove(0)
                 };
                 let null = values.contains(&Value::Null);
-                let k = key(db, &values)?;
+                let k = key_id(db, &keys_table(name), &values)?;
                 let left_n = self.nodes[node.inputs[0]].fields.len();
                 let right_n = self.nodes[node.inputs[1]].fields.len();
                 if *mode == "inner" {
@@ -1058,10 +1050,10 @@ impl Plan {
                         weighted(
                             db,
                             &format!("SELECT {},__n FROM {other} WHERE __k=?1", columns(n)),
-                            &k,
+                            k,
                         )?
                     };
-                    change(db, &table(name, id, side), Value::Text(k.clone()), row, d)?;
+                    change(db, &table(name, id, side), Value::Integer(k), row, d)?;
                     let mut result = vec![];
                     for (other, n) in matches {
                         let mut output = if side == 0 {
@@ -1095,7 +1087,7 @@ impl Plan {
                             columns(left_n),
                             table(name, id, 0)
                         ),
-                        &k,
+                        k,
                     )?;
                     let r = weighted(
                         db,
@@ -1104,7 +1096,7 @@ impl Plan {
                             columns(right_n),
                             table(name, id, 1)
                         ),
-                        &k,
+                        k,
                     )?;
                     let mut result = vec![];
                     let mut right_matched = vec![false; r.len()];
@@ -1157,7 +1149,7 @@ impl Plan {
                     Ok(result)
                 };
                 let before = snapshot()?;
-                change(db, &table(name, id, side), Value::Text(k.clone()), row, d)?;
+                change(db, &table(name, id, side), Value::Integer(k), row, d)?;
                 differences(db, before, snapshot()?)
             }
             Kind::Group {
@@ -1262,7 +1254,14 @@ impl Plan {
             tracing::debug_span!("round", phase, index, rows = tracing::field::Empty).entered()
         };
         let node = &self.nodes[id];
-        let (old, new) = change(db, &table(name, id, side), Value::Text(key(db, row)?), row, d)?;
+        let dict = keys_table(name);
+        let (old, new) = change(
+            db,
+            &table(name, id, side),
+            Value::Integer(key_id(db, &dict, row)?),
+            row,
+            d,
+        )?;
         if (old > 0) == (new > 0) {
             return Ok(vec![]);
         }

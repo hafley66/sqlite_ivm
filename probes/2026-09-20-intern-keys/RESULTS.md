@@ -71,3 +71,31 @@ seek per maintained row, and removed nothing. The 13.1 percent on disk is the
 `__k` index and the `__k` column shrinking to 8 bytes; the 1.6 percent on the
 clock is that one added seek. The time win is priced against `__r`, which is
 step 4, so this number is only readable as a pair with that one.
+
+## step3-all-kinds: `__k` INTEGER on Set, Join and the Fixpoint inputs
+
+Six runs, not three: the run band widened enough that three would not separate
+the shapes. Medians below.
+
+| shape | seconds | db bytes | rows/s | vs baseline time | vs baseline bytes |
+|---|---|---|---|---|---|
+| group | 0.333 | 761 856 | 12 017 | 0.98x | 0.87x |
+| distinct | 0.211 | 1 335 296 | 19 183 | 0.89x | 1.08x |
+| join | 0.178 | 1 216 512 | 22 490 | 0.94x | 0.91x |
+| intern | 0.003 | 430 080 | 1 287 830 | new | new |
+| fixpoint | 2.495 | 26 554 368 | 1 548 | 0.91x | 1.01x |
+
+Every shape is slower and `distinct` is now fatter on disk than the TEXT
+baseline. The cause is the same one step 2 named, and `distinct` shows it
+clearest: its `__k` is the whole row, so the dictionary stores a second copy
+of exactly what `__r TEXT NOT NULL UNIQUE` already stores, and neither copy
+has gone away yet. `join` and `group` shrink because their `__k` is a proper
+subset of the row, so the id is smaller than the composite it replaced.
+
+Both remaining numbers are owed to step 4. If removing `__r` does not pay back
+the dictionary, the card's premise is wrong and the answer is to revert, not to
+keep going.
+
+A correctness note that is not about speed: bulk join maintenance tested for a
+NULL join component with `json_each(__k)`. An id is not parseable JSON, so that
+predicate now reads the composite back out of the dictionary.
