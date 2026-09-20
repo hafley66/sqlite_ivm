@@ -13,6 +13,10 @@ collision: [src/1_maintenance.rs, src/1a_relational.rs]
 
 # Statement cache thrashing: the maintenance path re-prepares every row
 
+**Half shipped in #15**: the seven sites in `src/1_maintenance.rs` use `prepare_cached`,
+229.3 ms to 59.6 ms on the canonical corner. The 19 sites in `src/1a_relational.rs`
+remain, and are now unblocked: the fixpoint lane that owned that file landed in #16.
+
 ## Description
 
 The attribution profile measured the fold two ways and the gap is the whole story.
