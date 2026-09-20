@@ -61,19 +61,12 @@ pub fn keys_table(name: &str) -> String {
 /// Interning is idempotent and monotone: one composite takes one id for the
 /// life of the view, so two equal composites can never reach two ids.
 pub fn intern(db: &Connection, dict: &str, value: &str) -> Result<i64> {
-    let select = format!("SELECT __i FROM {dict} WHERE __v=?1");
-    if let Some(id) = db
-        .prepare_cached(&select)?
-        .query_row([value], |r| r.get(0))
-        .optional()?
-    {
-        return Ok(id);
-    }
-    db.execute_cached(
-        &format!("INSERT OR IGNORE INTO {dict}(__v) VALUES(?1)"),
-        [value],
-    )?;
-    db.prepare_cached(&select)?.query_row([value], |r| r.get(0))
+    // One seek on hit and on miss: the conflict arm updates nothing and still
+    // returns the existing id.
+    db.prepare_cached(&format!(
+        "INSERT INTO {dict}(__v) VALUES(?1) ON CONFLICT(__v) DO UPDATE SET __v=__v RETURNING __i"
+    ))?
+    .query_row([value], |r| r.get(0))
 }
 pub fn resolve(db: &Connection, dict: &str, id: i64) -> Result<String> {
     db.prepare_cached(&format!("SELECT __v FROM {dict} WHERE __i=?1"))?
@@ -1012,14 +1005,11 @@ impl Plan {
                     &evaluate(db, row, &normalized, None)?.remove(0),
                 )?;
                 let count = |side| -> Result<i64> {
-                    db.query_row(
-                        &format!(
-                            "SELECT coalesce(sum(__n),0) FROM {} WHERE __k=?1",
-                            table(name, id, side)
-                        ),
-                        [k],
-                        |r| r.get(0),
-                    )
+                    db.prepare_cached(&format!(
+                        "SELECT coalesce(sum(__n),0) FROM {} WHERE __k=?1",
+                        table(name, id, side)
+                    ))?
+                    .query_row([k], |r| r.get(0))
                 };
                 let present = |l: i64, r: i64| match *op {
                     "distinct" => l > 0,
@@ -1204,11 +1194,9 @@ impl Plan {
                     key_id(db, &dict, &evaluate(db, row, keys, None)?.remove(0))?
                 };
                 let snapshot = || -> Result<Vec<Delta>> {
-                    let present: bool = db.query_row(
-                        &format!("SELECT EXISTS(SELECT 1 FROM {t} WHERE __k=?1)"),
-                        [k],
-                        |r| r.get(0),
-                    )?;
+                    let present: bool = db
+                        .prepare_cached(&format!("SELECT EXISTS(SELECT 1 FROM {t} WHERE __k=?1)"))?
+                        .query_row([k], |r| r.get(0))?;
                     if !present && (!keys.is_empty() || *window || limit.is_some()) {
                         return Ok(vec![]);
                     }
