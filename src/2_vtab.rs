@@ -76,19 +76,15 @@ fn migrate(conn: &Connection, name: &str, generic: bool, format: i64) -> Result<
         [name],
         |r| r.get(0),
     )?;
-    let fresh;
-    let generic_hooks;
-    if generic {
+    let (fresh, generic_hooks) = if generic {
         let plan = crate::relational::bind(conn, &sql)?;
         if format == 2 && recursive(&plan) {
             return Ok(None);
         }
-        fresh = declaration(None, Some(&plan));
-        generic_hooks = true;
+        (declaration(None, Some(&plan)), true)
     } else {
         let query = bind(conn, &sql)?;
-        fresh = declaration(Some(&query), None);
-        generic_hooks = false;
+        (declaration(Some(&query), None), false)
     };
     let triggers: Vec<String> = conn
         .prepare("SELECT object_name FROM main.__ivm_objects WHERE view_name=?1 AND object_type='trigger'")?

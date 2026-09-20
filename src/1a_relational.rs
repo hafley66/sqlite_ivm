@@ -990,11 +990,10 @@ impl Plan {
                         "INSERT INTO {before} SELECT * FROM {out}; DELETE FROM {out}"
                     ))?;
                     // Apply every input delta to its side's arrangement.
-                    for side in 0..node.inputs.len() {
-                        if !touched_inputs[side] {
-                            continue;
+                    for (side, touched) in touched_inputs.iter().enumerate() {
+                        if *touched {
+                            self.upsert(db, name, id, side)?;
                         }
-                        self.upsert(db, name, id, side)?;
                     }
                     // After, then out = after minus before as a bag.
                     self.materialize(db, name, id, true)?;
@@ -1098,7 +1097,7 @@ impl Plan {
             [],
         )?;
         if removed as i64 != wanted {
-            return Err(error(&format!(
+            return Err(error(format!(
                 "missing result multiplicity: {wanted} retractions, {removed} rows present"
             )));
         }
