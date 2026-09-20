@@ -4,7 +4,7 @@
 
 use rusqlite::{types::Value, Connection, OptionalExtension, Result};
 use sqlite_ivm::relational::{key_expression, key_sql};
-use sqlite_ivm::relational_maintenance::{intern, resolve};
+use sqlite_ivm::relational_maintenance::{identity_sql, intern, resolve, row_hash};
 
 #[path = "support/0_database.rs"]
 mod database;
@@ -168,5 +168,117 @@ fn dropping_the_view_drops_its_dictionary() -> Result<()> {
         )
         .optional()?;
     assert_eq!(survivor, None, "the dictionary is view-scoped storage");
+    Ok(())
+}
+
+/// Every arrangement table for a view, with the width of its `c{i}` columns.
+fn arrangements(db: &Connection, view: &str) -> Result<Vec<(String, usize)>> {
+    let names = db
+        .prepare("SELECT object_name FROM __ivm_objects WHERE view_name=?1 AND object_type='table' AND EXISTS (SELECT 1 FROM pragma_table_info(object_name) WHERE name='__r')")?
+        .query_map([view], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>>>()?;
+    names
+        .into_iter()
+        .map(|name| {
+            let width: i64 = db.query_row(
+                "SELECT count(*) FROM pragma_table_info(?1) WHERE name LIKE 'c%'",
+                [&name],
+                |row| row.get(0),
+            )?;
+            Ok((name, width as usize))
+        })
+        .collect()
+}
+
+/// `__r` stopped being UNIQUE when it became a hash, so one row per composite
+/// is an invariant of the maintenance code and needs its own rail.
+fn assert_one_row_per_composite(db: &Connection, view: &str, at: &str) -> Result<()> {
+    for (table, width) in arrangements(db, view)? {
+        let composite = identity_sql(width);
+        let (rows, distinct): (i64, i64) = db.query_row(
+            &format!("SELECT count(*),count(DISTINCT {composite}) FROM \"{table}\""),
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(rows, distinct, "{at}: {table} holds a duplicate composite");
+    }
+    Ok(())
+}
+
+#[test]
+fn hashing_the_identity_keeps_one_arrangement_row_per_composite() -> Result<()> {
+    let db = Connection::open_in_memory()?;
+    register(&db)?;
+    db.execute_batch(
+        "PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON;
+         CREATE TABLE hash_source(id INTEGER PRIMARY KEY,value);
+         CREATE VIRTUAL TABLE hash_view USING sqlite_ivm(
+           'SELECT DISTINCT value FROM hash_source')",
+    )?;
+    for (index, (name, value)) in corpus().into_iter().enumerate() {
+        assert!(
+            index < CORPUS_SIZE,
+            "CORPUS_SIZE protects the bounded insert loop"
+        );
+        db.execute(
+            "INSERT INTO hash_source(id,value) VALUES(?1,?2)",
+            rusqlite::params![index as i64, value.clone()],
+        )?;
+        assert_one_row_per_composite(&db, "hash_view", name)?;
+        db.execute(
+            "INSERT INTO hash_source(id,value) VALUES(?1,?2)",
+            rusqlite::params![(index + CORPUS_SIZE) as i64, value],
+        )?;
+        assert_one_row_per_composite(&db, "hash_view", name)?;
+    }
+    Ok(())
+}
+
+/// The group key folds integer 1 into real 1.0 on purpose, and SQLite's own
+/// UNIQUE would call two NULLs distinct. The identity behind `__r` does
+/// neither, so one `__k` carries two rows and two NULLs carry one.
+#[test]
+fn the_identity_splits_where_the_key_folds_and_joins_where_unique_would_split() -> Result<()> {
+    let db = Connection::open_in_memory()?;
+    register(&db)?;
+    db.execute_batch(
+        "PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON;
+         CREATE TABLE folded_source(id INTEGER PRIMARY KEY,value);
+         CREATE VIRTUAL TABLE folded_view USING sqlite_ivm(
+           'SELECT DISTINCT value FROM folded_source');
+         INSERT INTO folded_source(id,value) VALUES(1,1),(2,1.0),(3,NULL),(4,NULL)",
+    )?;
+    let (table, width) = arrangements(&db, "folded_view")?.remove(0);
+    let composite = identity_sql(width);
+
+    let folded: i64 = db.query_row(
+        &format!("SELECT count(*) FROM \"{table}\" WHERE __k=(SELECT __k FROM \"{table}\" WHERE typeof(c0)='integer')"),
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(folded, 2, "integer 1 and real 1.0 share one __k");
+
+    let nulls: (i64, i64) = db.query_row(
+        &format!("SELECT count(*),coalesce(sum(__n),0) FROM \"{table}\" WHERE c0 IS NULL"),
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    assert_eq!(nulls, (1, 2), "two NULL rows are one identity at multiplicity 2");
+
+    let distinct: i64 = db.query_row(
+        &format!("SELECT count(DISTINCT {composite}) FROM \"{table}\""),
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(distinct, 3, "integer 1, real 1.0 and NULL are three identities");
+    assert_one_row_per_composite(&db, "folded_view", "folded corpus")?;
+    Ok(())
+}
+
+#[test]
+fn the_row_hash_is_the_published_fnv1a_64_vector() -> Result<()> {
+    assert_eq!(row_hash(b""), 0xcbf2_9ce4_8422_2325_u64 as i64);
+    assert_eq!(row_hash(b"a"), 0xaf63_dc4c_8601_ec8c_u64 as i64);
+    assert_eq!(row_hash(b"foobar"), 0x85944171f73967e8_u64 as i64);
     Ok(())
 }

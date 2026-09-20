@@ -99,3 +99,54 @@ keep going.
 A correctness note that is not about speed: bulk join maintenance tested for a
 NULL join component with `json_each(__k)`. An id is not parseable JSON, so that
 predicate now reads the composite back out of the dictionary.
+
+## step4-dictionary: `__r` interned, reverted
+
+Recorded here because the tree no longer carries it. Six runs, medians, against
+step 3: group 0.352 s and 851 968 bytes against 0.333 s and 761 856; join
+0.196 s and 1 306 624 bytes against 0.178 s and 1 216 512. Worse on both axes,
+every shape slower than the TEXT baseline.
+
+Interning pays when a composite repeats and costs when it does not.
+
+| column | distinct composites per 4000 rows |
+|---|---|
+| `__k` on Group | 97, one per group |
+| `__k` on Join | 97, one per join key |
+| `__r`, the row identity | 4000, unique by construction |
+
+`__r` is one identity per row by definition, so its dictionary has exactly as
+many rows as the arrangement. The composite used to sit in two b-tree entries,
+the column and its UNIQUE index; interning moves those two into the dictionary
+and adds two more for the id. Four where there were two, for a key that can
+never be shared. Reverted in `88f0b0b`.
+
+## step4-hash: `__r` is an FNV-1a 64 of the composite, tiebreak recomputes it
+
+`__r INTEGER NOT NULL` with a plain index, no UNIQUE. Every lookup filters on
+the hash then confirms byte-exactly against the composite rebuilt from the
+stored `c{i}` columns. Six runs, medians.
+
+| shape | seconds | db bytes | rows/s | vs baseline time | vs baseline bytes |
+|---|---|---|---|---|---|
+| group | 0.411 | 520 192 | 9 691 | 0.80x | 0.59x |
+| distinct | 0.256 | 1 167 360 | 15 630 | 0.73x | 0.94x |
+| join | 0.250 | 966 656 | 15 966 | 0.67x | 0.72x |
+| intern | 0.003 | 434 176 | 1 222 120 | new | new |
+| fixpoint | 2.600 | 26 247 168 | 1 538 | 0.88x | 1.00x |
+
+The space claim lands: `group` is 41 percent smaller than the TEXT baseline and
+`join` is 28 percent smaller, which is JSON text leaving two indexes per
+arrangement. No index anywhere now holds a variable-length key.
+
+The clock went the other way, further than any earlier step. The cause is the
+tiebreak, not the hash. `change()` issues three statements per maintained row
+and each one rebuilds `json_array(CASE typeof(c0) ... )` across every column of
+the candidate row before comparing. That is an N-column expression with a
+`typeof` branch and a `sqlite_ivm_real_hex` call per column, evaluated where the
+old code compared one stored string.
+
+The fix is to stop recomputing what the row could store: keep the composite as
+an unindexed `TEXT` column and leave only the hash in the index. That is one
+string compare per lookup instead of an N-column rebuild, and the index stays
+integer. Measured next as step 4b.

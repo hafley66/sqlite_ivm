@@ -52,6 +52,7 @@ pub fn register(db: &Connection) -> Result<()> {
     }
     crate::vtab::register(db)?;
     crate::source_ddl::register(db)?;
+    crate::relational_maintenance::register_functions(db)?;
     db.create_scalar_function(
         c"sqlite_ivm_create",
         2,

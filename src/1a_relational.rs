@@ -33,6 +33,28 @@ fn rows(db: &Connection, sql: &str, params: &[Value]) -> Result<Vec<Row>> {
         .collect();
     result
 }
+const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+/// FNV-1a 64 over the identity bytes. A stored hash must survive a toolchain
+/// upgrade, and std's DefaultHasher promises no algorithm stability.
+pub fn row_hash(bytes: &[u8]) -> i64 {
+    bytes
+        .iter()
+        .fold(FNV_OFFSET, |hash, byte| {
+            (hash ^ *byte as u64).wrapping_mul(FNV_PRIME)
+        }) as i64
+}
+/// Maintenance cannot run without a Plan and a Plan only comes from `bind`,
+/// so registering there reaches every connection that can issue this SQL.
+pub fn register_functions(db: &Connection) -> Result<()> {
+    db.create_scalar_function(
+        c"sqlite_ivm_hash",
+        1,
+        rusqlite::functions::FunctionFlags::SQLITE_UTF8
+            | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| Ok(row_hash(ctx.get_raw(0).as_str()?.as_bytes())),
+    )
+}
 pub fn keys_table(name: &str) -> String {
     format!("main.{}", quote(&format!("{name}_keys")))
 }
@@ -128,11 +150,17 @@ fn key_id(db: &Connection, dict: &str, row: &[Value]) -> Result<i64> {
     intern(db, dict, &text)
 }
 fn change(db: &Connection, t: &str, k: Value, row: &Row, d: i64) -> Result<(i64, i64)> {
-    let r = identity(db, row)?;
+    let composite = identity(db, row)?;
+    let r = row_hash(composite.as_bytes());
+    // __r is a hash, so equality on it only narrows; the stored columns rebuilt
+    // into the composite are what decides the row.
+    let same = format!("__r=?1 AND {}=?2", identity_sql(row.len()));
     let old: Option<i64> = db
-        .query_row(&format!("SELECT __n FROM {t} WHERE __r=?1"), [&r], |r| {
-            r.get(0)
-        })
+        .query_row(
+            &format!("SELECT __n FROM {t} WHERE {same}"),
+            rusqlite::params![r, &composite],
+            |r| r.get(0),
+        )
         .optional()?;
     let new = old
         .unwrap_or(0)
@@ -142,14 +170,17 @@ fn change(db: &Connection, t: &str, k: Value, row: &Row, d: i64) -> Result<(i64,
         return Err(error("negative arrangement multiplicity"));
     }
     if new == 0 {
-        db.execute_cached(&format!("DELETE FROM {t} WHERE __r=?1"), [&r])?;
+        db.execute_cached(
+            &format!("DELETE FROM {t} WHERE {same}"),
+            rusqlite::params![r, &composite],
+        )?;
     } else if old.is_some() {
         db.execute_cached(
-            &format!("UPDATE {t} SET __n=?1 WHERE __r=?2"),
-            rusqlite::params![new, r],
+            &format!("UPDATE {t} SET __n=?3 WHERE {same}"),
+            rusqlite::params![r, &composite, new],
         )?;
     } else {
-        let mut params = vec![k, Value::Text(r), Value::Integer(new)];
+        let mut params = vec![k, Value::Integer(r), Value::Integer(new)];
         params.extend(row.clone());
         db.execute_cached(
             &format!("INSERT INTO {t} VALUES({})", parameters(params.len())),
@@ -284,6 +315,11 @@ fn json_key(parts: Vec<String>) -> String {
 fn folded(value: &str) -> String {
     format!("CASE typeof({value}) WHEN 'blob' THEN json_object('blob',hex({value})) WHEN 'real' THEN CASE WHEN {value}=CAST({value} AS INTEGER) AND typeof(CAST({value} AS INTEGER))='integer' THEN CAST({value} AS INTEGER) ELSE json_object('real',sqlite_ivm_real_hex({value})) END ELSE {value} END")
 }
+/// The composite an arrangement row rebuilds from its own stored columns.
+/// `fill` writes it and `change` compares against it, so the two must agree.
+pub fn identity_sql(width: usize) -> String {
+    json_key((0..width).map(|i| plain(&format!("c{i}"))).collect())
+}
 fn plain(value: &str) -> String {
     format!("CASE typeof({value}) WHEN 'blob' THEN json_object('blob',hex({value})) WHEN 'real' THEN json_object('real',sqlite_ivm_real_hex({value})) ELSE {value} END")
 }
@@ -316,9 +352,10 @@ impl Plan {
             for (side, input) in node.inputs.iter().enumerate() {
                 let t = format!("{name}_op{id}_{side}");
                 let n = self.nodes[*input].fields.len();
-                db.execute_batch(&format!("CREATE TABLE main.{}(__k INTEGER NOT NULL,__r TEXT NOT NULL UNIQUE,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k)",quote(&t),columns(n),quote(&format!("__ivm_{name}_op{id}_{side}_key")),quote(&t)))?;
+                db.execute_batch(&format!("CREATE TABLE main.{}(__k INTEGER NOT NULL,__r INTEGER NOT NULL,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k); CREATE INDEX main.{} ON {}(__r)",quote(&t),columns(n),quote(&format!("__ivm_{name}_op{id}_{side}_key")),quote(&t),quote(&format!("__ivm_{name}_op{id}_{side}_row")),quote(&t)))?;
                 objects.push(("table", t));
                 objects.push(("index", format!("__ivm_{name}_op{id}_{side}_key")));
+                objects.push(("index", format!("__ivm_{name}_op{id}_{side}_row")));
                 if let Kind::Group {
                     order,
                     limit: Some(_),
@@ -511,11 +548,12 @@ impl Plan {
             [],
         )?;
         let k = format!("(SELECT __i FROM {dict} WHERE __v={k})");
+        // No UNIQUE target is left to upsert against. Rows sharing a composite
+        // are equal in every column, so the grouped select keeps the same row.
         db.execute(
             &format!(
-                "INSERT INTO {t}(__k,__r,__n,{}) SELECT {k},{r},__m,c0{} FROM {out} WHERE 1 ON CONFLICT(__r) DO UPDATE SET __n=__n+excluded.__n",
-                columns(width),
-                (1..width).map(|i| format!(",c{i}")).collect::<String>()
+                "INSERT INTO {t}(__k,__r,__n,{cols}) SELECT {k},sqlite_ivm_hash(__ivm_r),__ivm_n,{cols} FROM (SELECT {r} AS __ivm_r,sum(__m) AS __ivm_n,{cols} FROM {out} GROUP BY {r})",
+                cols = columns(width)
             ),
             [],
         )?;
