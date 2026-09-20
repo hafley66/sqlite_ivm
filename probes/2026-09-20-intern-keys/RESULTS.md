@@ -99,3 +99,43 @@ keep going.
 A correctness note that is not about speed: bulk join maintenance tested for a
 NULL join component with `json_each(__k)`. An id is not parseable JSON, so that
 predicate now reads the composite back out of the dictionary.
+
+## step4-identity: `__r` INTEGER, the step that was owed the payback
+
+Six runs, medians. It did not pay. Read this against step 3, not the baseline,
+because `__r` is the only thing that changed between them.
+
+| shape | seconds | vs step 3 | db bytes | vs step 3 | vs baseline time | vs baseline bytes |
+|---|---|---|---|---|---|---|
+| group | 0.352 | worse | 851 968 | worse | 0.93x | 0.97x |
+| distinct | 0.213 | flat | 1 126 400 | better | 0.88x | 0.91x |
+| join | 0.196 | worse | 1 306 624 | worse | 0.85x | 0.98x |
+| fixpoint | 2.380 | better | 26 152 960 | better | 0.96x | 0.99x |
+
+`group` is the clean read: step 3 was 0.333 s and 761 856 bytes, step 4 is
+0.352 s and 851 968 bytes. Interning `__r` cost 19 ms and 90 KB per 4000 rows
+and bought nothing back. Not one shape beat the TEXT baseline on the clock.
+
+### Why this was structural, not an implementation slip
+
+Interning pays when a composite repeats, and costs when it does not.
+
+| column | distinct composites per 4000 rows | dictionary rows added |
+|---|---|---|
+| `__k` on Group | 97, one per group | 97 |
+| `__k` on Join | 97, one per join key | 97 |
+| `__r`, the row identity | 4000, unique by construction | 4000 |
+
+`__r` is one identity per row by definition, so its dictionary has exactly as
+many rows as the arrangement. Before this step the composite lived in two
+b-tree entries: the `__r` column and its UNIQUE index. After it, the composite
+still lives in two entries, in the dictionary table and the dictionary's UNIQUE
+index, and the id adds two more in the arrangement and its UNIQUE index. Four
+entries where there were two, for a key that can never be shared.
+
+The same argument reaches the fixpoint member table, whose `__k TEXT NOT NULL
+UNIQUE` is also the whole row and also unique per row. Step 5 is predicted to
+lose for the same reason and for the same arithmetic.
+
+The card's acceptance asks for `__k` and `__r` INTEGER on every arrangement.
+The measurement says the first half is right and the second half is not.
