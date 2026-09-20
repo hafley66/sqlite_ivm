@@ -2,10 +2,15 @@
 created: 2026-09-20
 updated: 2026-09-20
 type: bug
-status: open
+status: fixed
 priority: high
 epic: ivm-correctness-and-storage
 labels: [correctness, reproduced]
+closed: 2026-09-20
+closed_by: fable
+commits:
+- hash: 85dc492
+  summary: subtype strip and project_group_input
 ---
 
 # A JSON-subtype group key splits one group into two rows
@@ -52,3 +57,9 @@ every scalar class; the divergence is in what reaches them.
 - [ ] `tests/7_key_agreement.rs:272` asserts one row with `n = 2`, and its name
       stops saying "diverges"
 - [ ] a `docs/failure-modes.md` row: incident, cause, fail-pre-fix test, rail
+
+## Resolution
+
+### 2026-09-20T19:30:31Z · @fable
+
+||'' strips the JSON subtype in every SQL key encoder; planner project_group_input puts a Map before every non-window Group

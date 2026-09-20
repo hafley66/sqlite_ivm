@@ -2,13 +2,18 @@
 created: 2026-09-20
 updated: 2026-09-20
 type: task
-status: open
+status: done
 priority: normal
 related: ['@json-text-keys-in-indexes', '@lab-wide-table-harness']
 labels: [lab]
 lane: lab-rig
 size: L
 collision: [bench/**]
+closed: 2026-09-20
+closed_by: fable
+commits:
+- hash: 62785f2
+  summary: merge review/amplification
 ---
 
 # Lab 10: the gang counts the copies
@@ -207,3 +212,9 @@ is single-writer; the rig runs one adapter at a time.
 - `bench/results/amplification-*/run.json`, `circuits.jsonl`, `charts/inventory.tsv`
 - `bench/56_amplification.md`
 - one `boop beep` line per engine landed, with its `probe_copies_intermediate` for `aggregate_churn 400:10:10`
+
+## Resolution
+
+### 2026-09-20T19:30:31Z · @fable
+
+probes/2026-09-20-row-amplification RESULTS.md, 82 is 83

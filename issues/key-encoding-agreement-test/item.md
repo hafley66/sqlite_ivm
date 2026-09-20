@@ -1,8 +1,8 @@
 ---
 created: 2026-09-19
-updated: 2026-09-19
+updated: 2026-09-20
 type: task
-status: closed
+status: done
 priority: high
 epic: ivm-correctness-and-storage
 labels: [correctness]
@@ -46,3 +46,9 @@ depends on whether the planner admits expression group keys.
       `key_sql()`, and `identity()` round-trips
 - [ ] the JSON-subtype group key case is confirmed or rejected
 - [ ] which encoder keys which table is written down
+
+## Comments
+
+### 2026-09-20T19:30:45Z · @fable
+
+85dc492: tests/7_key_agreement.rs flipped from divergence to agreement; rust_keys joins back to the source; the JSON subtype was the disagreement, stripped with ||'' in all three SQL encoders

@@ -2,7 +2,7 @@
 created: 2026-09-19
 updated: 2026-09-20
 type: task
-status: closed
+status: done
 priority: high
 epic: lab-queue-round-one
 blocked_by: ['@lab-wide-table-harness']
@@ -79,3 +79,9 @@ output; the numbers go in the lab's verdict, not in an assertion.
 **The result that kills this arc:** if SQL-side steps are a small share and Rust-side
 re-scanning dominates, labs 3 through 9 are noise. That outcome is a success for this
 lab, not a failure.
+
+## Comments
+
+### 2026-09-20T19:30:45Z · @fable
+
+examples/6_costs.rs (99389f2) prints cost per node kind per drain and the top statements with plans, over hafley_observe::CountRecorder::event_sums (hafley-rs #86). Run: cargo run -q --example 6_costs. Finding: group_limit upsert UPDATE at 1a_relational.rs:1045 is 46k vm_step per run, three SCAN over the delta with json_array(CASE typeof) rebuilt per row; apply_state 25k. Load is 6 views, fixture is 20.
