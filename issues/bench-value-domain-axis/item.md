@@ -2,7 +2,7 @@
 created: 2026-09-19
 updated: 2026-09-19
 type: improvement
-status: open
+status: closed
 priority: normal
 epic: ivm-correctness-and-storage
 labels: [test]
