@@ -28,3 +28,10 @@ Instrumented run is 44s and 1.4M JSON lines; measurement only, never CI.
 | `--features bundled`, libsqlite3-sys opt-level 3 | 1.99 2.00 1.90 |
 | bundled default (54ca259) | 2.06 2.08 1.91 |
 | set-at-a-time fixpoint, seed prepared once (1e804e6) | 1.80 1.77 1.81 |
+
+## circuits, `target/release/examples/4_sqlite_case` with the shootout fixture, sum of 13 states
+
+| step | commit | chain ms | self_join ms |
+|---|---|---|---|
+| before upsert rewrite | 19de62f | 219.8 217.5 216.6 (shootout) | 157.8 157.1 155.0 (shootout) |
+| upsert over a summed delta table | 04d22a3 | 27.9 28.3 28.0 | 41.9 |
