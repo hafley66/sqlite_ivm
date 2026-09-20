@@ -6,7 +6,7 @@ if [[ -e "$ivm_output" ]]; then printf 'artifact directory already exists: %s\n'
 mkdir -p "$ivm_output"
 ivm_output=$(cd "$ivm_output" && pwd)
 cargo build --locked --release --features bench --example 5_feature_case --manifest-path "$ivm_dir/Cargo.toml"
-cargo build --locked --release --features extension --manifest-path "$ivm_dir/Cargo.toml"
+cargo build --locked --release --no-default-features --features extension --manifest-path "$ivm_dir/Cargo.toml"
 cargo build --locked --release --bin feature_dd --manifest-path "$ivm_dir/bench/Cargo.toml"
 case "$(uname -s)" in Darwin) ivm_library=libsqlite_ivm.dylib;; Linux) ivm_library=libsqlite_ivm.so;; *) exit 2;; esac
 "$ivm_dir/target/release/examples/5_feature_case" "$ivm_dir/tests/fixtures/1_features.json" "$ivm_dir/target/release/$ivm_library" "$ivm_output/cases" | tee "$ivm_output/native.jsonl"

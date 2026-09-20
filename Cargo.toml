@@ -14,12 +14,12 @@ path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-# Ordinary cargo test links SQLite; native extension builds opt into the host ABI.
-default = []
+# SQLite's own page cache, not the system dylib's purgeable one (plans/costs/README.md).
+# Extension builds pass --no-default-features: the host supplies SQLite.
+default = ["bundled"]
+bundled = ["rusqlite/bundled"]
 extension = ["rusqlite/loadable_extension"]
 bench = ["rusqlite/load_extension"]
-# Measurement only: SQLite's own page cache instead of the system dylib's purgeable one.
-bundled = ["rusqlite/bundled"]
 
 [dependencies]
 hafley-observe = { path = "../../../../hafley-rs/.boop-worktrees/main/crates/hafley-observe" }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ivm_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
-cargo build --locked --release --features extension --manifest-path "$ivm_dir/Cargo.toml"
+cargo build --locked --release --no-default-features --features extension --manifest-path "$ivm_dir/Cargo.toml"
 ivm_version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$ivm_dir/Cargo.toml" | head -n 1)
 case "$(uname -s)" in Darwin) ivm_library=libsqlite_ivm.dylib;; Linux) ivm_library=libsqlite_ivm.so;; *) printf 'Unsupported archive platform\n' >&2;exit 2;; esac
 ivm_archive="sqlite-ivm-$ivm_version-$(uname -s)-$(uname -m)"
