@@ -46,8 +46,11 @@ fn observe() {
 pub fn register(db: &Connection) -> Result<()> {
     observe();
     // Counters are read per statement: 8_group_limit runs 2.1s without them, 10.7s with.
-    // Same gate as the chrome timeline, so an unasked-for run pays nothing.
-    if hafley_observe::trace_path().is_some() {
+    // Installed only when a subscriber would keep the events, so an unasked-for
+    // run pays nothing. `HAFLEY_LOG=sqlite=debug` or `HAFLEY_TRACE` opens it.
+    if hafley_observe::trace_path().is_some()
+        || tracing::enabled!(target: hafley_observe::sqlite::SQLITE_TARGET, tracing::Level::DEBUG)
+    {
         hafley_observe::sqlite::instrument(db);
     }
     crate::vtab::register(db)?;
