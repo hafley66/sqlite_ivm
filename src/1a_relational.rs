@@ -735,12 +735,6 @@ impl Plan {
                     .collect::<Vec<_>>()
                     .join(",");
                 if *window || limit.is_some() {
-                    let groups: i64 =
-                        db.prepare_cached(&format!("SELECT count(DISTINCT __k) FROM {t}"))?
-                            .query_row([], |r| r.get(0))?;
-                    if groups as usize > BULK_GROUP_BUDGET {
-                        return Err(error("bulk group budget exceeded"));
-                    }
                     let width = self.nodes[node.inputs[0]].fields.len();
                     let cols_in = columns(width);
                     let wanted = limit.filter(|n| *n >= 0).map(|n| n.saturating_add(*offset));
@@ -775,7 +769,12 @@ impl Plan {
                     ))?;
                     let mut key_statement = db.prepare_cached(&format!("SELECT DISTINCT __k FROM {t}"))?;
                     let mut key_rows = key_statement.query([])?;
+                    let mut groups = 0usize;
                     while let Some(key) = key_rows.next()? {
+                        groups += 1;
+                        if groups > BULK_GROUP_BUDGET {
+                            return Err(error("bulk group budget exceeded"));
+                        }
                         statement.execute([key.get::<_, i64>(0)?])?;
                     }
                 } else {
@@ -917,9 +916,6 @@ impl Plan {
     pub fn drain(&self, db: &Connection, name: &str, batch: &[(usize, Row, i64)]) -> Result<()> {
         let _span = tracing::debug_span!("drain", view = name, rows = batch.len()).entered();
         let seed = tracing::debug_span!("node", kind = "seed", id = self.nodes.len()).entered();
-        for (id, node) in self.nodes.iter().enumerate() {
-            db.execute_cached(&format!("DELETE FROM {}", out_table(id, node.fields.len())), [])?;
-        }
         for (source, row, d) in batch {
             if *d == 0 {
                 continue;
@@ -969,7 +965,7 @@ impl Plan {
                 }
                 Kind::Set(_) | Kind::Join { .. } | Kind::Group { .. } => {
                     // Touched keys: every key of every input delta row, interned.
-                    db.execute_batch("DELETE FROM temp.__ivm_touched")?;
+                    db.execute_cached("DELETE FROM temp.__ivm_touched", [])?;
                     for side in 0..node.inputs.len() {
                         let child = out_table(node.inputs[side], self.nodes[node.inputs[side]].fields.len());
                         let key = self.key_sql(id, side).ok_or_else(|| error("arrangement node without a key"))?;
@@ -984,7 +980,6 @@ impl Plan {
                     }
                     // Before: the node's output over the touched keys, parked.
                     let before = format!("temp.__ivm_before_{width}_{id}");
-                    db.execute_cached(&format!("DELETE FROM {before}"), [])?;
                     self.materialize(db, name, id, true)?;
                     db.execute_cached(&format!("INSERT INTO {before} SELECT * FROM {out}"), [])?;
                     db.execute_cached(&format!("DELETE FROM {out}"), [])?;
@@ -1035,6 +1030,8 @@ impl Plan {
                 self.apply_state(db, name, id)?;
             }
         }
+        // Sweep is the only clear: seed trusts it, and a failed drain aborts the
+        // enclosing statement, which unwinds the temp writes with it.
         let _sweep = tracing::debug_span!("node", kind = "sweep", id = self.nodes.len()).entered();
         for (id, node) in self.nodes.iter().enumerate() {
             db.execute_cached(&format!("DELETE FROM {}", out_table(id, node.fields.len())), [])?;
