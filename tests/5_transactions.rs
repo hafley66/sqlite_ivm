@@ -86,9 +86,9 @@ fn wal_snapshots_writer_contention_and_failed_maintenance_are_atomic() -> Result
         rows(&writer, "SELECT * FROM result")?,
         rows(&writer, query)?
     );
-    // A no-op source update runs the normal maintenance path and repairs the
-    // deliberately corrupted aggregate state.
-    writer.execute_batch("UPDATE a SET v=v")?;
+    // A source change that touches the corrupted group retracts the stored
+    // result row by key and writes the recomputed one.
+    writer.execute_batch("UPDATE a SET v=12;UPDATE a SET v=11")?;
     assert_eq!(
         rows(&writer, "SELECT * FROM result")?,
         rows(&writer, query)?

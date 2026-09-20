@@ -14,10 +14,14 @@ use std::{
 // SQLite callbacks in the ABI descriptor. No C source or replacement binding.
 pub fn register(db: &Connection) -> Result<()> {
     const MODULE: Module<Table> = unsafe {
-        let mut raw: ffi::sqlite3_module = std::mem::transmute(Module::<Table>::update_module());
+        let mut raw: ffi::sqlite3_module =
+            std::mem::transmute(Module::<Table>::update_module_with_tx());
         raw.iVersion = 3;
         raw.xRename = Some(rename);
         raw.xShadowName = Some(shadow_name);
+        raw.xSavepoint = Some(savepoint);
+        raw.xRelease = Some(release);
+        raw.xRollbackTo = Some(rollback_to);
         std::mem::transmute(raw)
     };
     db.create_module(c"sqlite_ivm", &MODULE, None::<()>)
@@ -33,6 +37,8 @@ struct Table {
     generic: bool,
     query: Option<Query>,
     plan: Option<crate::relational::Plan>,
+    /// Source rows staged since the last drain. Present once the plan is bound.
+    collector: Option<sqlite_bulk_trigger::Collector>,
 }
 
 fn recursive(plan: &crate::relational::Plan) -> bool {
@@ -217,6 +223,7 @@ impl Table {
                 generic,
                 query: None,
                 plan: None,
+                collector: None,
             };
             // Bind now so the scratch tables exist before any trigger program
             // runs; a failure here surfaces again at the first write.
@@ -297,6 +304,7 @@ impl Table {
                 roles,
                 generic,
                 query,
+                collector: plan.as_ref().map(|plan| plan.collector(name)),
                 plan,
             },
         ))
@@ -322,6 +330,7 @@ impl Table {
                     ));
                 }
                 plan.prepare_scratch(&self.db)?;
+                self.collector = Some(plan.collector(&self.name()?));
                 self.plan = Some(plan);
             }
             self.sql = sql;
@@ -397,6 +406,94 @@ impl Table {
         Ok(())
     }
 }
+impl Table {
+    /// Hands every staged source row to the plan in one batch.
+    fn drain(&mut self) -> Result<()> {
+        let Some(collector) = self.collector.as_mut() else {
+            return Ok(());
+        };
+        if collector.staged().is_empty() && collector.spilled_rows() == 0 {
+            return Ok(());
+        }
+        let batch = collector.drain(&self.db)?;
+        let plan = self.plan.as_ref().ok_or_else(|| error("plan missing after bind"))?;
+        let batch = batch
+            .into_iter()
+            .map(|change| {
+                let source: usize = change
+                    .table
+                    .parse()
+                    .map_err(|_| error("invalid source ordinal"))?;
+                let sign = match change.sign {
+                    sqlite_bulk_trigger::Sign::Insert => 1,
+                    sqlite_bulk_trigger::Sign::Delete => -1,
+                };
+                Ok((source, change.values, sign))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        plan.drain(&self.db, &self.name()?, &batch)
+    }
+}
+impl<'vtab> TransactionVTab<'vtab> for Table {
+    fn begin(&mut self) -> Result<()> {
+        if let Some(collector) = self.collector.as_mut() {
+            collector.begin();
+        }
+        Ok(())
+    }
+    fn sync(&mut self) -> Result<()> {
+        self.drain()
+    }
+    fn commit(&mut self) -> Result<()> {
+        if let Some(collector) = self.collector.as_mut() {
+            collector.commit();
+        }
+        Ok(())
+    }
+    fn rollback(&mut self) -> Result<()> {
+        if let Some(collector) = self.collector.as_mut() {
+            collector.rollback();
+        }
+        Ok(())
+    }
+}
+fn dispatch(raw: *mut ffi::sqlite3_vtab, body: impl FnOnce(&mut Table)) -> c_int {
+    // Never unwind into C.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let table = unsafe { &mut *raw.cast::<Table>() };
+        body(table)
+    }));
+    match result {
+        Ok(()) => ffi::SQLITE_OK,
+        Err(_) => unsafe {
+            rusqlite::to_sqlite_error(
+                &error("panic in virtual-table savepoint callback"),
+                &mut (*raw).zErrMsg,
+            )
+        },
+    }
+}
+unsafe extern "C" fn savepoint(raw: *mut ffi::sqlite3_vtab, index: c_int) -> c_int {
+    dispatch(raw, |table| {
+        if let Some(collector) = table.collector.as_mut() {
+            collector.savepoint(index);
+        }
+    })
+}
+unsafe extern "C" fn release(raw: *mut ffi::sqlite3_vtab, index: c_int) -> c_int {
+    dispatch(raw, |table| {
+        if let Some(collector) = table.collector.as_mut() {
+            collector.release(index);
+        }
+    })
+}
+unsafe extern "C" fn rollback_to(raw: *mut ffi::sqlite3_vtab, index: c_int) -> c_int {
+    dispatch(raw, |table| {
+        if let Some(collector) = table.collector.as_mut() {
+            collector.rollback_to(index);
+        }
+    })
+}
 unsafe impl<'vtab> VTab<'vtab> for Table {
     type Aux = ();
     type Cursor = Cursor;
@@ -435,6 +532,8 @@ unsafe impl<'vtab> VTab<'vtab> for Table {
         Ok(true)
     }
     fn open(&'vtab mut self) -> Result<Cursor> {
+        // Read-your-writes: a read inside the transaction drains first.
+        self.drain()?;
         Ok(Cursor {
             base: ffi::sqlite3_vtab_cursor::default(),
             db: unsafe { self.db.handle() },
@@ -505,12 +604,19 @@ impl<'vtab> UpdateVTab<'vtab> for Table {
             let row: Vec<rusqlite::types::Value> = (0..src.columns.len())
                 .map(|i| args.get(count + 4 + i))
                 .collect::<Result<Vec<_>>>()?;
-            plan.input(
+            plan.validate(source, &row)?;
+            let sign = if adding == 1 {
+                sqlite_bulk_trigger::Sign::Insert
+            } else {
+                sqlite_bulk_trigger::Sign::Delete
+            };
+            let collector = self
+                .collector
+                .as_mut()
+                .ok_or_else(|| error("collector missing after bind"))?;
+            collector.update(
                 &self.db,
-                &self.name()?,
-                source,
-                row,
-                if adding == 1 { 1 } else { -1 },
+                sqlite_bulk_trigger::RowChange::new(source.to_string(), sign, row),
             )?;
             return Ok(0);
         }

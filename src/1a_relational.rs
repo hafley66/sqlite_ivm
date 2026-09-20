@@ -875,21 +875,10 @@ impl Plan {
         )?;
         Ok(())
     }
-    pub fn input(
-        &self,
-        db: &Connection,
-        name: &str,
-        source: usize,
-        row: Row,
-        d: i64,
-    ) -> Result<()> {
-        let _span = tracing::debug_span!(
-            "maintain",
-            view = name,
-            source = self.sources[source].name.as_str(),
-            sign = d.signum()
-        )
-        .entered();
+    /// Rejects a source row whose values do not fit its declared affinities.
+    /// Runs at the trigger, before staging, so the statement fails, not the
+    /// commit.
+    pub fn validate(&self, source: usize, row: &[Value]) -> Result<()> {
         for (value, affinity) in row.iter().zip(&self.sources[source].affinities) {
             let valid = match value {
                 Value::Null => true,
@@ -902,7 +891,13 @@ impl Plan {
                 return Err(error("source value does not conform to declared affinity"));
             }
         }
-        self.drain(db, name, &[(source, row, d)])
+        Ok(())
+    }
+    /// The collector that stages this view's source rows between a trigger
+    /// firing and the drain. Its shadow table is one of the view's objects.
+    pub fn collector(&self, name: &str) -> sqlite_bulk_trigger::Collector {
+        let width = self.sources.iter().map(|s| s.columns.len()).max().unwrap_or(0);
+        sqlite_bulk_trigger::Collector::new(format!("{name}_staged"), width)
     }
     /// The temp scratch every drain writes: one out table and one before table
     /// per node, plus the touched-key set. Runs at bind time, outside any
@@ -1367,6 +1362,9 @@ pub fn install(db: &Connection, name: &str, sql: &str, plan: &Plan) -> Result<()
         ));
     }
     let mut objects = plan.create_state(db, name)?;
+    let collector = plan.collector(name);
+    collector.create_shadow(db)?;
+    objects.push(("table", collector.shadow_table()));
     objects.extend(hooks(db, name, plan)?);
     let columns = plan
         .sources
