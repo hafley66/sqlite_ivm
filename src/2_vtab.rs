@@ -80,7 +80,7 @@ fn migrate(conn: &Connection, name: &str, generic: bool, format: i64) -> Result<
     )?;
     let (fresh, generic_hooks) = if generic {
         let plan = crate::relational::bind(conn, &sql)?;
-        if format == 2 && recursive(&plan) {
+        if format < 5 && recursive(&plan) {
             return Ok(None);
         }
         (declaration(None, Some(&plan)), true)
@@ -104,7 +104,7 @@ fn migrate(conn: &Connection, name: &str, generic: bool, format: i64) -> Result<
     }
     conn.execute("UPDATE main.__ivm_objects SET definition=(SELECT sql FROM main.sqlite_schema WHERE type=object_type AND name=object_name) WHERE view_name=?1",[name])?;
     conn.execute(
-        "UPDATE main.__ivm_schema SET declaration=?1, format_version=4 WHERE id=(SELECT id FROM main.__ivm_views WHERE name=?2)",
+        "UPDATE main.__ivm_schema SET declaration=?1, format_version=5 WHERE id=(SELECT id FROM main.__ivm_views WHERE name=?2)",
         rusqlite::params![fresh, name],
     )?;
     Ok(Some(fresh))
@@ -166,7 +166,7 @@ impl Table {
                 return Err(error("sqlite_ivm storage format 1 requires the matching older extension; automatic migration is unavailable"));
             }
             let incompatible: bool = conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM main.__ivm_schema WHERE format_version NOT IN (2,3,4))",
+                "SELECT EXISTS(SELECT 1 FROM main.__ivm_schema WHERE format_version NOT IN (2,3,4,5))",
                 [],
                 |r| r.get(0),
             )?;
@@ -193,7 +193,7 @@ impl Table {
                 })
                 .collect::<Result<Vec<_>>>()?;
             let mut declaration = declaration;
-            if format < 4 {
+            if format < 5 {
                 match migrate(&conn, name, generic, format) {
                     Ok(Some(fresh)) => declaration = fresh,
                     Ok(None) => {}
@@ -276,9 +276,9 @@ impl Table {
             (1..=plan.as_ref().unwrap().names.len() as c_int).collect()
         };
         conn.execute_batch("CREATE TABLE IF NOT EXISTS main.__ivm_schema(id INTEGER PRIMARY KEY,declaration TEXT NOT NULL,generic INTEGER NOT NULL,roles TEXT NOT NULL,format_version INTEGER NOT NULL)")?;
-        // Format 4 carries source rows in hidden __ivm_v columns; hooks are
-        // positional and the json payload column is gone.
-        let format = 4;
+        // Format 5: fixpoint member tables carry AUTOINCREMENT rowids, so a
+        // drain can mark new members by rowid after deletes.
+        let format = 5;
         conn.execute(
             "INSERT INTO main.__ivm_schema VALUES(?1,?2,?3,?4,?5)",
             rusqlite::params![
@@ -328,9 +328,9 @@ impl Table {
                     [self.id],
                     |r| r.get(0),
                 )?;
-                if format < 3 && recursive(&plan) {
+                if format < 5 && recursive(&plan) {
                     return Err(error(
-                        "recursive views from storage format 2 must be dropped and re-created",
+                        "recursive views from storage formats before 5 must be dropped and re-created",
                     ));
                 }
                 plan.prepare_scratch(&self.db)?;
