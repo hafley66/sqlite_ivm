@@ -121,85 +121,73 @@ pub fn maintain(
         .collect::<Vec<_>>()
         .join(",");
     let contrib = contributions(query, Some((source, "image")));
-    let image_sql = |body: &str| {
-        format!("(WITH __ivm_image AS (SELECT {image_select}) {body})")
-    };
-    let invalid: bool = db.query_row(
-        &format!(
+    let image_sql = |body: &str| format!("(WITH __ivm_image AS (SELECT {image_select}) {body})");
+    let invalid: bool = db
+        .prepare_cached(&format!(
             "SELECT EXISTS(SELECT 1 FROM {} WHERE typeof(g)!='integer' OR typeof(n)!='integer' OR typeof(s)!='integer')",
             image_sql(&contrib)
-        ),
-        rusqlite::params_from_iter(image.iter()),
-        |r| r.get(0),
-    )?;
+        ))?
+        .query_row(
+            rusqlite::params_from_iter(image.iter()),
+            |r| r.get(0),
+        )?;
     if invalid {
         return Err(error("non-integer contribution or overflow"));
     }
     if adding {
-        let overflow: bool = db.query_row(
-            &format!(
+        let overflow: bool = db
+            .prepare_cached(&format!(
                 "SELECT EXISTS(SELECT 1 FROM main.{store} a JOIN {} d ON a.g=d.g
             WHERE typeof(a.n+d.n)!='integer' OR typeof(a.s+d.s)!='integer')",
                 image_sql(&contrib)
-            ),
-            rusqlite::params_from_iter(image.iter()),
-            |r| r.get(0),
-        )?;
+            ))?
+            .query_row(rusqlite::params_from_iter(image.iter()), |r| r.get(0))?;
         if overflow {
             return Err(error("aggregate overflow"));
         }
-        db.execute(
-            &format!(
+        db
+            .prepare_cached(&format!(
                 "INSERT INTO main.{store}(g,n,s) SELECT * FROM (WITH __ivm_image AS (SELECT {image_select}) {contrib}) WHERE 1
             ON CONFLICT(g) DO UPDATE SET n={store}.n+excluded.n,s={store}.s+excluded.s",
-            ),
-            rusqlite::params_from_iter(image.iter()),
-        )?;
+            ))?
+            .execute(rusqlite::params_from_iter(image.iter()))?;
     } else {
-        let missing: bool = db.query_row(
-            &format!(
+        let missing: bool = db
+            .prepare_cached(&format!(
                 "SELECT EXISTS(SELECT 1 FROM {} d LEFT JOIN main.{store} a ON a.g=d.g
             WHERE a.g IS NULL OR a.n<d.n)",
                 image_sql(&contrib)
-            ),
-            rusqlite::params_from_iter(image.iter()),
-            |r| r.get(0),
-        )?;
+            ))?
+            .query_row(rusqlite::params_from_iter(image.iter()), |r| r.get(0))?;
         if missing {
             return Err(error("missing contribution"));
         }
-        let overflow: bool = db.query_row(
-            &format!(
+        let overflow: bool = db
+            .prepare_cached(&format!(
                 "SELECT EXISTS(SELECT 1 FROM main.{store} a JOIN {} d ON a.g=d.g
             WHERE a.n>d.n AND typeof(a.s-d.s)!='integer')",
                 image_sql(&contrib)
-            ),
-            rusqlite::params_from_iter(image.iter()),
-            |r| r.get(0),
-        )?;
+            ))?
+            .query_row(rusqlite::params_from_iter(image.iter()), |r| r.get(0))?;
         if overflow {
             return Err(error("aggregate overflow"));
         }
-        db.execute(
-            &format!(
-                "DELETE FROM main.{store} WHERE g IN (SELECT g FROM {})
+        db.prepare_cached(&format!(
+            "DELETE FROM main.{store} WHERE g IN (SELECT g FROM {})
             AND n=(SELECT n FROM {} WHERE g={store}.g)",
-                image_sql(&contrib),
-                image_sql(&contrib)
-            ),
-            rusqlite::params_from_iter(image.iter()),
-        )?;
-        db.execute(
-            &format!(
-                "UPDATE main.{store} SET n=n-(SELECT n FROM {} WHERE g={store}.g),
+            image_sql(&contrib),
+            image_sql(&contrib)
+        ))?
+        .execute(rusqlite::params_from_iter(image.iter()))?;
+        db.prepare_cached(&format!(
+            "UPDATE main.{store} SET n=n-(SELECT n FROM {} WHERE g={store}.g),
             s=s-(SELECT s FROM {} WHERE g={store}.g)
             WHERE g IN (SELECT g FROM {})",
-                image_sql(&contrib),
-                image_sql(&contrib),
-                image_sql(&contrib)
-            ),
-            rusqlite::params_from_iter(image.iter()),
-        )?;
+            image_sql(&contrib),
+            image_sql(&contrib),
+            image_sql(&contrib)
+        ))?
+        .execute(rusqlite::params_from_iter(image.iter()))?;
     }
     Ok(())
 }

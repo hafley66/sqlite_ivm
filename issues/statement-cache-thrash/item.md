@@ -64,7 +64,7 @@ Other agents may hold the machine. The claim is a prepare count, not a duration:
 
 ## Acceptance Criteria
 
-- [ ] every statement on the `maintain` path goes through `prepare_cached`
+- [x] every statement on the `maintain` path goes through `prepare_cached`
 - [ ] the same for the 19 sites in `src/1a_relational.rs` that do not already
 - [ ] a `CountRecorder` assertion pins prepares per maintained row and it drops
 - [ ] the cache is bounded, and the bound is stated with what it protects
