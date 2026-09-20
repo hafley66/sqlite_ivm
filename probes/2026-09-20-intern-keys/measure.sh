@@ -63,6 +63,13 @@ probe_run join \
   "SELECT sqlite_ivm_create('joined','SELECT src.k AS k, src.v AS v, dim.label AS label FROM src JOIN dim ON dim.k = src.k');" \
   "INSERT INTO src(id,k,j,v) SELECT i,'group-key-'||(i%97),'other-'||(i%53),i FROM ($probe_series);"
 
+# Interning priced on its own: every composite is distinct, so this is the
+# worst case of one dictionary row and one UNIQUE index entry per key.
+probe_run intern \
+  "CREATE TABLE src(id INTEGER PRIMARY KEY,k TEXT NOT NULL,j TEXT NOT NULL,v INTEGER NOT NULL);" \
+  "SELECT sqlite_ivm_create('totals','SELECT k, COUNT(*) AS n FROM src GROUP BY k');" \
+  "INSERT OR IGNORE INTO totals_keys(__v) SELECT json_array('group-key-'||i,'other-'||(i%53),i) FROM ($probe_series);"
+
 # The member table is the third key shape: UNIQUE __k, no __r. Edges stay sparse
 # so the closure is linear in inserted rows rather than quadratic.
 probe_run fixpoint \

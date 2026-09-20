@@ -33,6 +33,30 @@ fn rows(db: &Connection, sql: &str, params: &[Value]) -> Result<Vec<Row>> {
         .collect();
     result
 }
+pub fn keys_table(name: &str) -> String {
+    format!("main.{}", quote(&format!("{name}_keys")))
+}
+/// Interning is idempotent and monotone: one composite takes one id for the
+/// life of the view, so two equal composites can never reach two ids.
+pub fn intern(db: &Connection, dict: &str, value: &str) -> Result<i64> {
+    let select = format!("SELECT __i FROM {dict} WHERE __v=?1");
+    if let Some(id) = db
+        .prepare_cached(&select)?
+        .query_row([value], |r| r.get(0))
+        .optional()?
+    {
+        return Ok(id);
+    }
+    db.execute_cached(
+        &format!("INSERT OR IGNORE INTO {dict}(__v) VALUES(?1)"),
+        [value],
+    )?;
+    db.prepare_cached(&select)?.query_row([value], |r| r.get(0))
+}
+pub fn resolve(db: &Connection, dict: &str, id: i64) -> Result<String> {
+    db.prepare_cached(&format!("SELECT __v FROM {dict} WHERE __i=?1"))?
+        .query_row([id], |r| r.get(0))
+}
 fn key(db: &Connection, row: &[Value]) -> Result<String> {
     let normalized = row
         .iter()
@@ -262,6 +286,12 @@ fn plain(value: &str) -> String {
 impl Plan {
     pub fn create_state(&self, db: &Connection, name: &str) -> Result<Vec<(&'static str, String)>> {
         let mut objects = vec![];
+        let dictionary = format!("{name}_keys");
+        db.execute_batch(&format!(
+            "CREATE TABLE main.{}(__i INTEGER PRIMARY KEY,__v TEXT NOT NULL UNIQUE)",
+            quote(&dictionary)
+        ))?;
+        objects.push(("table", dictionary));
         let state = format!("{name}_state");
         db.execute_batch(&format!(
             "CREATE TABLE main.{}(__key TEXT NOT NULL,{}); CREATE INDEX main.{} ON {}(__key)",
