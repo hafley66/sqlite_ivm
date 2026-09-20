@@ -2,7 +2,7 @@
 created: 2026-09-20
 updated: 2026-09-20
 type: task
-status: open
+status: obsolete
 priority: high
 epic: lab-queue-round-one
 lane: lab-engine
@@ -10,6 +10,8 @@ lane_seq: 10
 labels: [lab]
 size: M
 collision: [src/1_maintenance.rs, src/2_vtab.rs]
+closed: 2026-09-20
+disposition_reason: superseded
 ---
 
 # Lab 4: the gang stops talking in json
@@ -88,3 +90,13 @@ taken under load is worse than none. The count assertion carries the claim.
 
 **Regression bar:** the existing battery green and unchanged. A test edited to
 accommodate the new shape is a finding to report, not a thing to do quietly.
+
+## Decisions
+
+### 2026-09-20T05:28:07Z · @claude-12
+
+Already shipped. origin/main has no json_array or json_extract on the maintenance path, and src/2_vtab.rs:59 declares __ivm_v{i} HIDDEN per source column. PR #1 landed it as storage format 4.
+
+This issue was written off line numbers in docs/2026-09-19-modern-sqlite.md rather than against current src/. The attribution profile priced this lab at zero upside and found the code already gone.
+
+Rail: a lab that proposes a change must cite the line in current main, not a doc.

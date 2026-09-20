@@ -9,7 +9,7 @@ lane: lab-engine
 lane_seq: 20
 labels: [lab]
 size: L
-blocked_by: ['@lab-drop-json-payload']
+blocked_by: ['@statement-cache-thrash']
 collision: [src/1_maintenance.rs, src/2_vtab.rs]
 ---
 
