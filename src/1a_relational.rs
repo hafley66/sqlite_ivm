@@ -15,17 +15,25 @@ fn columns(n: usize) -> String {
 fn table(name: &str, id: usize, side: usize) -> String {
     format!("main.{}", quote(&format!("{name}_op{id}_{side}")))
 }
+/// Upsert scratch: one side's delta summed per identity, the identity and its
+/// hash computed once per row instead of once per comparison.
+fn delta_table(id: usize, side: usize, width: usize) -> String {
+    format!("temp.__ivm_delta_{width}_{id}_{side}")
+}
+fn delta_index(id: usize, side: usize, width: usize) -> String {
+    format!("temp.__ivm_delta_{width}_{id}_{side}_r")
+}
 /// Fixpoint scratch: one side's rows that entered its arrangement this batch.
-fn arrived_table(id: usize, side: usize) -> String {
-    format!("temp.__ivm_arrived_{id}_{side}")
+fn arrived_table(id: usize, side: usize, width: usize) -> String {
+    format!("temp.__ivm_arrived_{width}_{id}_{side}")
 }
 /// Fixpoint scratch: one side's rows that left its arrangement this batch.
-fn left_table(id: usize, side: usize) -> String {
-    format!("temp.__ivm_left_{id}_{side}")
+fn left_table(id: usize, side: usize, width: usize) -> String {
+    format!("temp.__ivm_left_{width}_{id}_{side}")
 }
 /// Fixpoint scratch: members removed by the delete pass, keyed as stored.
-fn deleted_table(id: usize) -> String {
-    format!("temp.__ivm_deleted_{id}")
+fn deleted_table(id: usize, width: usize) -> String {
+    format!("temp.__ivm_deleted_{width}_{id}")
 }
 fn parameters(n: usize) -> String {
     (1..=n)
@@ -844,18 +852,31 @@ impl Plan {
                 out_table(id, width),
                 cols = columns(width)
             ))?;
+            if matches!(node.kind, Kind::Set(_) | Kind::Join { .. } | Kind::Group { .. } | Kind::Fixpoint { .. }) {
+                for side in 0..node.inputs.len() {
+                    let side_width = self.nodes[node.inputs[side]].fields.len();
+                    db.execute_batch(&format!(
+                        "CREATE TABLE IF NOT EXISTS {}(__r INTEGER NOT NULL,__v TEXT NOT NULL,__n INTEGER NOT NULL,{}); CREATE INDEX IF NOT EXISTS {}_r ON {}(__r)",
+                        delta_table(id, side, side_width),
+                        columns(side_width),
+                        delta_index(id, side, side_width),
+                        delta_table(id, side, side_width).trim_start_matches("temp.")
+                    ))?;
+                }
+            }
             if let Kind::Fixpoint { .. } = node.kind {
                 for side in 0..node.inputs.len() {
-                    let side_cols = columns(self.nodes[node.inputs[side]].fields.len());
+                    let side_width = self.nodes[node.inputs[side]].fields.len();
+                    let side_cols = columns(side_width);
                     db.execute_batch(&format!(
                         "CREATE TABLE IF NOT EXISTS {}({side_cols}); CREATE TABLE IF NOT EXISTS {}({side_cols})",
-                        arrived_table(id, side),
-                        left_table(id, side)
+                        arrived_table(id, side, side_width),
+                        left_table(id, side, side_width)
                     ))?;
                 }
                 db.execute_batch(&format!(
                     "CREATE TABLE IF NOT EXISTS {}(__k TEXT PRIMARY KEY,{})",
-                    deleted_table(id),
+                    deleted_table(id, width),
                     columns(width)
                 ))?;
             }
@@ -1000,21 +1021,26 @@ impl Plan {
         let identity_of = |alias: &str| json_key((0..child_width).map(|i| plain(&format!("{alias}.c{i}"))).collect());
         let key = self.key_sql(id, side).ok_or_else(|| error("arrangement node without a key"))?;
         let dict = keys_table(name);
-        let delta_identity = identity_of("o");
+        let delta = delta_table(id, side, child_width);
         let arrangement_identity = identity_of(&t);
+        db.execute_cached(&format!("DELETE FROM {delta}"), [])?;
         db.execute_cached(
             &format!(
-                "UPDATE {t} SET __n=__n+(SELECT sum(o.__m) FROM {child} o WHERE sqlite_ivm_hash({delta_identity})={t}.__r AND {delta_identity}={arrangement_identity}) \
-                 WHERE __r IN (SELECT sqlite_ivm_hash({delta_identity}) FROM {child} o) \
-                   AND EXISTS(SELECT 1 FROM {child} o WHERE sqlite_ivm_hash({delta_identity})={t}.__r AND {delta_identity}={arrangement_identity})"
+                "INSERT INTO {delta}(__r,__v,__n,{cols}) SELECT sqlite_ivm_hash(__ivm_v),__ivm_v,__ivm_n,{cols} \
+                 FROM (SELECT {identity} AS __ivm_v,sum(__m) AS __ivm_n,{cols} FROM {child} GROUP BY {identity}) WHERE __ivm_n!=0"
             ),
             [],
         )?;
         db.execute_cached(
             &format!(
-                "INSERT INTO {t}(__k,__r,__n,{cols}) SELECT (SELECT __i FROM {dict} WHERE __v={key}),sqlite_ivm_hash(__ivm_r),__ivm_n,{cols} \
-                 FROM (SELECT {identity} AS __ivm_r,sum(__m) AS __ivm_n,{cols} FROM {child} GROUP BY {identity}) \
-                 WHERE __ivm_n!=0 AND NOT EXISTS(SELECT 1 FROM {t} a WHERE a.__r=sqlite_ivm_hash(__ivm_r) AND {}=__ivm_r)",
+                "UPDATE {t} SET __n={t}.__n+d.__n FROM {delta} d WHERE d.__r={t}.__r AND d.__v={arrangement_identity}"
+            ),
+            [],
+        )?;
+        db.execute_cached(
+            &format!(
+                "INSERT INTO {t}(__k,__r,__n,{cols}) SELECT (SELECT __i FROM {dict} WHERE __v={key}),d.__r,d.__n,{cols} FROM {delta} d \
+                 WHERE NOT EXISTS(SELECT 1 FROM {t} a WHERE a.__r=d.__r AND {}=d.__v)",
                 identity_of("a")
             ),
             [],
@@ -1077,8 +1103,8 @@ impl Plan {
         let width = self.nodes[node.inputs[side]].fields.len();
         let child = out_table(node.inputs[side], width);
         let t = table(name, id, side);
-        let arrived = arrived_table(id, side);
-        let left = left_table(id, side);
+        let arrived = arrived_table(id, side, width);
+        let left = left_table(id, side, width);
         let cols = columns(width);
         let identity_of = |alias: &str| json_key((0..width).map(|i| plain(&format!("{alias}.c{i}"))).collect());
         let delta_identity = identity_of("o");
@@ -1137,9 +1163,10 @@ impl Plan {
         let out = out_table(id, width);
         let all = table(name, id, node.inputs.len());
         let work = table(name, id, node.inputs.len() + 1);
-        let arrived = arrived_table(id, side);
-        let left = left_table(id, side);
-        let deleted = deleted_table(id);
+        let side_width = self.nodes[node.inputs[side]].fields.len();
+        let arrived = arrived_table(id, side, side_width);
+        let left = left_table(id, side, side_width);
+        let deleted = deleted_table(id, width);
         let derive = |target: &str,
                       rule: &Rule,
                       roles: &[Role],
