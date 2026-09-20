@@ -213,7 +213,7 @@
     },
     {
       "name": "two_step_rules",
-      "query": "WITH RECURSIVE edge(src,dst) AS(SELECT k,abs(w)%5 FROM b WHERE k IS NOT NULL AND w IS NOT NULL),both(node) AS(SELECT k FROM a WHERE k IS NOT NULL UNION SELECT k FROM c WHERE k IS NOT NULL UNION SELECT e.dst FROM both b,edge e WHERE b.node=e.src UNION SELECT e.src FROM both b JOIN edge e ON b.node=e.dst) SELECT node FROM both"
+      "query": "WITH RECURSIVE edge(src,dst) AS(SELECT k,abs(w)%5 FROM b WHERE k IS NOT NULL AND w IS NOT NULL),both_ends(node) AS(SELECT k FROM a WHERE k IS NOT NULL UNION SELECT k FROM c WHERE k IS NOT NULL UNION SELECT e.dst FROM both_ends b,edge e WHERE b.node=e.src UNION SELECT e.src FROM both_ends b JOIN edge e ON b.node=e.dst) SELECT node FROM both_ends"
     }
   ],
   "mutations": [
