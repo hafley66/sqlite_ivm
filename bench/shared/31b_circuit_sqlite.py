@@ -6,6 +6,7 @@ import os
 import sqlite3
 import sys
 import time
+from functools import cmp_to_key
 from importlib import import_module
 
 sqlite_inventory = import_module('30a_state_inventory').sqlite_inventory
@@ -15,12 +16,26 @@ def emit(**record):
     print(json.dumps(record), flush=True)
 
 
-def canonical(rows, prefix):
-    return ''.join(prefix + '\t' + '\t'.join(str(n) for n in row) + '\n' for row in sorted(rows))
+def canonical(rows, prefix, domain):
+    ordered = sorted(rows) if domain == 'integers' else rows
+    return ''.join(prefix + '\t' + '\t'.join(str(n) for n in row) + '\n' for row in ordered)
 
 
 def digest(text):
     return hashlib.sha256(text.encode()).hexdigest()
+
+
+def normalized(rows, domain):
+    values = [list(row) for row in rows] if domain != 'mixed_int_real' else [[f'{cell:.1f}' if isinstance(cell, float) and cell.is_integer() else cell for cell in row] for row in rows]
+    if domain == 'integers':
+        return sorted(values)
+    def compare(left, right):
+        for a, b in zip(left, right):
+            order = (a > b) - (a < b) if isinstance(a, (int, float)) and isinstance(b, (int, float)) else (str(a) > str(b)) - (str(a) < str(b))
+            if order:
+                return order
+        return 0
+    return sorted(values, key=cmp_to_key(compare))
 
 
 def main():
@@ -30,13 +45,14 @@ def main():
     p.add_argument('--extension', default='')
     args = p.parse_args()
     fixture = json.load(open(args.fixture))
+    domain = fixture.get('value_domain', 'integers')
     db = sqlite3.connect(args.db, isolation_level=None)
     start = time.perf_counter()
     db.execute('PRAGMA journal_mode=WAL')
     db.execute('PRAGMA synchronous=FULL')
     db.execute('PRAGMA recursive_triggers=ON')
     for table in ('a', 'b', 'c'):
-        db.execute(f'CREATE TABLE {table}(id INTEGER PRIMARY KEY,k INTEGER NOT NULL,v INTEGER NOT NULL)')
+        db.execute(f"CREATE TABLE {table}(id INTEGER PRIMARY KEY,k {fixture.get('table_schema', {'k_sql': 'INTEGER NOT NULL'})['k_sql']},v {fixture.get('table_schema', {'v_sql': 'INTEGER NOT NULL'})['v_sql']})")
         db.execute(f'CREATE INDEX {table}_k ON {table}(k)')
         db.execute(f'CREATE INDEX {table}_v ON {table}(v)')
     query = fixture['query']
@@ -74,15 +90,15 @@ def main():
         db.executescript('BEGIN;\n' + state['mutation_sql'] + '\nCOMMIT;')
         update_ms = (time.perf_counter()-start)*1000
         start = time.perf_counter()
-        output = sorted([list(row) for row in db.execute(query)])
+        output = normalized(db.execute(query), domain)
         query_ms = (time.perf_counter()-start)*1000
-        inputs = {t: sorted([list(row) for row in db.execute(f'SELECT id,k,v FROM {t}')]) for t in ('a','b','c')}
-        assert inputs == {t: sorted(rows) for t, rows in state['inputs'].items()}, state['name'] + ': inputs'
+        inputs = {t: normalized(db.execute(f'SELECT id,k,v FROM {t}'), domain) for t in ('a','b','c')}
+        assert inputs == {t: normalized(rows, domain) for t, rows in state['inputs'].items()}, state['name'] + ': inputs'
         assert output == state['expected']['rows'], state['name'] + ': output'
-        oracle = sorted([list(row) for row in db.execute(fixture['query'])])
+        oracle = normalized(db.execute(fixture['query']), domain)
         assert output == oracle, state['name'] + ': SQL recompute'
-        input_hash = digest(''.join(canonical(inputs[t], t.upper()) for t in ('a','b','c')))
-        checksum = digest(canonical(output, 'S'))
+        input_hash = digest(''.join(canonical(inputs[t], t.upper(), domain) for t in ('a','b','c')))
+        checksum = digest(canonical(output, 'S', domain))
         assert input_hash == state['input_hash'] and checksum == state['expected']['checksum']
         total += update_ms + query_ms
         if args.extension and log_limit > 0:
@@ -97,7 +113,7 @@ def main():
             log_limit -= 1
         emit(event='mutation', status='ok', state=state['name'], exact_input_output_validated=True,
              input_hash=input_hash, checksum=checksum, affected_rows=len(state['writes']), output_rows=len(output),
-             output_bytes=len(canonical(output,'S').encode()), update_transaction_ms=update_ms,
+             output_bytes=len(canonical(output,'S',domain).encode()), update_transaction_ms=update_ms,
              query_compute_ms=query_ms, update_plus_query_ms=update_ms+query_ms,
              state_inventory=sqlite_inventory(db, args.db, 'circuit_view' if args.extension else None))
     emit(event='case-total', status='ok', update_plus_query_ms=total, final_input_hash=input_hash,
