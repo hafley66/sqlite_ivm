@@ -51,7 +51,7 @@ pin() { grep -E "^$1 = " "$root/Cargo.toml" | head -1; }
   printf '## Invariants assumed of the input tables\n\n- \n\n'
   printf '## Measurement\n\nCommand that prints the number. No number lives here until it ran.\n\n'
   printf '## Invalidates\n\nWhich other labs die if this one comes back positive or negative.\n\n'
-  printf '## Verdict\n\nUnrun.\n'
+  printf '## Verdict\n\nUnrun. Replace this whole section when the lab runs; do not append below it.\n'
 } > "$dir/HYPOTHESIS.md"
 
 printf 'fn main() {\n    todo!("%s")\n}\n' "$title" > "$dir/src/main.rs"

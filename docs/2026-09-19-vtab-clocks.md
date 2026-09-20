@@ -252,6 +252,15 @@ The generated trigger that produces these is at `src/1_maintenance.rs:399`.
 
 ## What is nailed to which clock today
 
+> **Stale as of 2026-09-20.** This section describes storage format 3, whose
+> JSON payload was removed by PR #1. Current main declares one hidden column
+> per source column (`src/2_vtab.rs:59`) and no `json_extract` runs on the
+> maintenance path. The measured replacement is in
+> `labs/20260920.1.the-gang-finds-out-where-the-time-went/HYPOTHESIS.md`:
+> nine steps, of which `step/validity`, `step/overflow`, and `step/upsert`
+> carry 91.2 percent between them. The section below is kept because the
+> clock argument still holds; only the step list changed.
+
 Per single source-table row change, at M used columns:
 
 | step | site | clock | cost at M=20 |
