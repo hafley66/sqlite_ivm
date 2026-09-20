@@ -40,6 +40,71 @@ fn recursive(plan: &crate::relational::Plan) -> bool {
         .iter()
         .any(|n| matches!(n.kind, crate::relational::Kind::Fixpoint { .. }))
 }
+fn declaration(query: Option<&Query>, plan: Option<&crate::relational::Plan>) -> String {
+    let arity = if let Some(plan) = plan {
+        plan.sources.iter().map(|s| s.columns.len()).max().unwrap_or(0)
+    } else {
+        let query = query.unwrap();
+        (0..query.tables.len())
+            .map(|source| {
+                maintenance::used_columns(query)
+                    .iter()
+                    .filter(|c| c.source == source)
+                    .count()
+            })
+            .max()
+            .unwrap_or(0)
+    };
+    let hidden = (0..arity)
+        .map(|i| format!("__ivm_v{i} HIDDEN"))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("CREATE TABLE x({},{},{})",
+    if let Some(query)=query {query.outputs.iter().map(|(name,_)|format!("{} INTEGER",quote(name))).collect::<Vec<_>>().join(",")}else{let plan=plan.unwrap();plan.names.iter().zip(&plan.nodes[plan.output].fields).map(|(name,f)|format!("{} {} COLLATE {}",quote(name),f.affinity,f.collation)).collect::<Vec<_>>().join(",")},
+    "__ivm_source INTEGER HIDDEN,__ivm_adding INTEGER HIDDEN",
+    hidden)
+}
+fn migrate(conn: &Connection, name: &str, generic: bool, format: i64) -> Result<Option<String>> {
+    let sql: String = conn.query_row(
+        "SELECT query_sql FROM main.__ivm_views WHERE name=?1",
+        [name],
+        |r| r.get(0),
+    )?;
+    let fresh;
+    let generic_hooks;
+    if generic {
+        let plan = crate::relational::bind(conn, &sql)?;
+        if format == 2 && recursive(&plan) {
+            return Ok(None);
+        }
+        fresh = declaration(None, Some(&plan));
+        generic_hooks = true;
+    } else {
+        let query = bind(conn, &sql)?;
+        fresh = declaration(Some(&query), None);
+        generic_hooks = false;
+    };
+    let triggers: Vec<String> = conn
+        .prepare("SELECT object_name FROM main.__ivm_objects WHERE view_name=?1 AND object_type='trigger'")?
+        .query_map([name], |r| r.get(0))?
+        .collect::<Result<Vec<_>>>()?;
+    for trigger in triggers {
+        conn.execute_batch(&format!("DROP TRIGGER main.{}", quote(&trigger)))?;
+    }
+    if generic_hooks {
+        let plan = crate::relational::bind(conn, &sql)?;
+        crate::relational_maintenance::hooks(conn, name, &plan)?;
+    } else {
+        let query = bind(conn, &sql)?;
+        maintenance::create_hooks(conn, name, &query, false)?;
+    }
+    conn.execute("UPDATE main.__ivm_objects SET definition=(SELECT sql FROM main.sqlite_schema WHERE type=object_type AND name=object_name) WHERE view_name=?1",[name])?;
+    conn.execute(
+        "UPDATE main.__ivm_schema SET declaration=?1, format_version=4 WHERE id=(SELECT id FROM main.__ivm_views WHERE name=?2)",
+        rusqlite::params![fresh, name],
+    )?;
+    Ok(Some(fresh))
+}
 fn text(bytes: &[u8]) -> Result<&str> {
     std::str::from_utf8(bytes).map_err(|e| error(e.to_string()))
 }
@@ -85,7 +150,7 @@ impl Table {
         }
         let name = text(name)?;
         let conn = unsafe { Connection::from_handle(db.handle())? };
-        conn.set_prepared_statement_cache_capacity(128);
+        conn.set_prepared_statement_cache_capacity(8192);
         let stored: bool = conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM main.sqlite_schema WHERE name='__ivm_schema')",
             [],
@@ -97,7 +162,7 @@ impl Table {
                 return Err(error("sqlite_ivm storage format 1 requires the matching older extension; automatic migration is unavailable"));
             }
             let incompatible: bool = conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM main.__ivm_schema WHERE format_version NOT IN (2,3))",
+                "SELECT EXISTS(SELECT 1 FROM main.__ivm_schema WHERE format_version NOT IN (2,3,4))",
                 [],
                 |r| r.get(0),
             )?;
@@ -115,7 +180,7 @@ impl Table {
             )?
         };
         if !create {
-            let (id,declaration,generic,roles):(i64,String,bool,String)=conn.query_row("SELECT v.id,s.declaration,s.generic,s.roles FROM main.__ivm_views v JOIN main.__ivm_schema s ON s.id=v.id WHERE v.name=?1",[name],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
+            let (id,declaration,generic,roles,format):(i64,String,bool,String,i64)=conn.query_row("SELECT v.id,s.declaration,s.generic,s.roles,s.format_version FROM main.__ivm_views v JOIN main.__ivm_schema s ON s.id=v.id WHERE v.name=?1",[name],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
             let roles = roles
                 .split(',')
                 .map(|s| {
@@ -123,6 +188,26 @@ impl Table {
                         .map_err(|_| error("invalid stored schema"))
                 })
                 .collect::<Result<Vec<_>>>()?;
+            let mut declaration = declaration;
+            if format < 4 {
+                match migrate(&conn, name, generic, format) {
+                    Ok(Some(fresh)) => declaration = fresh,
+                    Ok(None) => {}
+                    Err(e) => {
+                        let readonly = matches!(
+                            &e,
+                            rusqlite::Error::SqliteFailure(f, _)
+                                if f.code == rusqlite::ErrorCode::ReadOnly
+                        );
+                        if readonly {
+                            return Err(error(
+                                "storage format migration requires a writable database",
+                            ));
+                        }
+                        return Err(e);
+                    }
+                }
+            }
             return Ok((
                 Cow::Owned(CString::new(declaration).map_err(|e| error(e.to_string()))?),
                 Self {
@@ -164,8 +249,7 @@ impl Table {
             [name],
             |r| r.get(0),
         )?;
-        let declaration=format!("CREATE TABLE x({},__ivm_source INTEGER HIDDEN,__ivm_adding INTEGER HIDDEN,__ivm_row TEXT HIDDEN)",
-        if let Some(query)=&query {query.outputs.iter().map(|(name,_)|format!("{} INTEGER",quote(name))).collect::<Vec<_>>().join(",")}else{let plan=plan.as_ref().unwrap();plan.names.iter().zip(&plan.nodes[plan.output].fields).map(|(name,f)|format!("{} {} COLLATE {}",quote(name),f.affinity,f.collation)).collect::<Vec<_>>().join(",")});
+        let declaration = declaration(query.as_ref(), plan.as_ref());
         let generic = plan.is_some();
         let roles: Vec<c_int> = if let Some(query) = &query {
             query
@@ -181,13 +265,9 @@ impl Table {
             (1..=plan.as_ref().unwrap().names.len() as c_int).collect()
         };
         conn.execute_batch("CREATE TABLE IF NOT EXISTS main.__ivm_schema(id INTEGER PRIMARY KEY,declaration TEXT NOT NULL,generic INTEGER NOT NULL,roles TEXT NOT NULL,format_version INTEGER NOT NULL)")?;
-        // Format 3 is the fixpoint member layout; plans without recursion keep
-        // format 2 so the 0.2.x extension still maintains them.
-        let format = if plan.as_ref().is_some_and(recursive) {
-            3
-        } else {
-            2
-        };
+        // Format 4 carries source rows in hidden __ivm_v columns; hooks are
+        // positional and the json payload column is gone.
+        let format = 4;
         conn.execute(
             "INSERT INTO main.__ivm_schema VALUES(?1,?2,?3,?4,?5)",
             rusqlite::params![
@@ -386,13 +466,28 @@ impl<'vtab> UpdateVTab<'vtab> for Table {
     fn insert(&mut self, args: &Inserts<'_>) -> Result<i64> {
         self.refresh()?;
         let count = self.roles.len();
-        if args.len() != count + 5 || args.iter().take(count + 2).any(|v| v != ValueRef::Null) {
+        let arity = if let Some(plan) = &self.plan {
+            plan.sources.iter().map(|s| s.columns.len()).max().unwrap_or(0)
+        } else {
+            let query = self.query.as_ref().unwrap();
+            (0..query.tables.len())
+                .map(|source| {
+                    maintenance::used_columns(query)
+                        .iter()
+                        .filter(|c| c.source == source)
+                        .count()
+                })
+                .max()
+                .unwrap_or(0)
+        };
+        if args.len() != count + 4 + arity
+            || args.iter().take(count + 2).any(|v| v != ValueRef::Null)
+        {
             return Err(error("managed results are read-only"));
         }
         let source = usize::try_from(args.get::<i64>(count + 2)?)
             .map_err(|_| error("invalid source ordinal"))?;
         let adding: i64 = args.get(count + 3)?;
-        let payload: String = args.get(count + 4)?;
         if !(0..=1).contains(&adding) {
             return Err(error("invalid maintenance command"));
         }
@@ -401,10 +496,9 @@ impl<'vtab> UpdateVTab<'vtab> for Table {
                 .sources
                 .get(source)
                 .ok_or_else(|| error("invalid source ordinal"))?;
-            let row=self.db.prepare_cached("SELECT CASE WHEN type='array' THEN CASE json_extract(value,'$[0]') WHEN 'blob' THEN unhex(json_extract(value,'$[1]')) WHEN 'real' THEN CAST(json_extract(value,'$[1]') AS REAL) ELSE json_extract(value,'$[1]') END ELSE value END FROM json_each(?1) ORDER BY key")?.query_map([&payload],|r|r.get::<_,rusqlite::types::Value>(0))?.collect::<Result<Vec<_>>>()?;
-            if row.len() != src.columns.len() {
-                return Err(error("invalid maintenance row"));
-            }
+            let row: Vec<rusqlite::types::Value> = (0..src.columns.len())
+                .map(|i| args.get(count + 4 + i))
+                .collect::<Result<Vec<_>>>()?;
             plan.input(
                 &self.db,
                 &self.name()?,
@@ -418,26 +512,16 @@ impl<'vtab> UpdateVTab<'vtab> for Table {
         if source >= query.tables.len() {
             return Err(error("invalid source ordinal"));
         }
-        let used = maintenance::used_columns(query);
-        let columns = used
-            .into_iter()
+        let width = maintenance::used_columns(query)
+            .iter()
             .filter(|c| c.source == source)
-            .collect::<Vec<_>>();
-        let valid: bool = self.db.query_row(
-            "SELECT json_valid(?1) AND json_type(?1)='array' AND json_array_length(?1)=?2",
-            rusqlite::params![payload, columns.len() as i64],
-            |r| r.get(0),
-        )?;
-        if !valid {
-            return Err(error("invalid maintenance row"));
-        }
-        let integers: bool = self.db.query_row(
-            "SELECT NOT EXISTS(SELECT 1 FROM json_each(?1) WHERE type!='integer')",
-            [&payload],
-            |r| r.get(0),
-        )?;
-        if !integers {
-            return Err(error("maintenance rows require integers"));
+            .count();
+        let mut image = Vec::with_capacity(width);
+        for i in 0..width {
+            match args.get::<rusqlite::types::Value>(count + 4 + i)? {
+                rusqlite::types::Value::Integer(v) => image.push(rusqlite::types::Value::Integer(v)),
+                _ => return Err(error("maintenance rows require integers")),
+            }
         }
         maintenance::maintain(
             &self.db,
@@ -445,7 +529,7 @@ impl<'vtab> UpdateVTab<'vtab> for Table {
             query,
             source,
             adding == 1,
-            &payload,
+            image,
         )?;
         Ok(0)
     }
