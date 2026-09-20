@@ -160,10 +160,12 @@ fn dictionary_name(db: &Connection, view: &str) -> Result<String> {
 
 /// `__k` is a dictionary id on interned operator kinds, so the composite the
 /// oracle compares against comes back through the dictionary, not the column.
-fn rust_keys(db: &Connection, view: &str, arrangement: &str) -> Result<Vec<String>> {
+/// The arrangement holds one row per distinct value, so each source row finds
+/// its arrangement row by exact value and type.
+fn rust_keys(db: &Connection, view: &str, arrangement: &str, source: &str) -> Result<Vec<String>> {
     let dictionary = dictionary_name(db, view)?;
     let mut statement = db.prepare(&format!(
-        "SELECT d.__v FROM {arrangement} a JOIN \"{dictionary}\" d ON d.__i=a.__k ORDER BY a.c0"
+        "SELECT d.__v FROM {source} s JOIN {arrangement} a ON typeof(a.c0)=typeof(s.value) AND a.c0 IS s.value JOIN \"{dictionary}\" d ON d.__i=a.__k ORDER BY s.id"
     ))?;
     let rows = statement
         .query_map([], |row| row.get::<_, String>(0))?
@@ -206,7 +208,7 @@ fn rust_key_after_expression_agrees_with_sql_key_sql() -> Result<()> {
 
         create_view(&db, &bulk, &query)?;
         let arrangement = arrangement_name(&db, &incremental)?;
-        let rust = rust_keys(&db, &incremental, &arrangement)?;
+        let rust = rust_keys(&db, &incremental, &arrangement, &source)?;
         let sql = sql_keys(&db, &source, collation)?;
         assert_eq!(rust.len(), CORPUS_SIZE, "{collation}: arrangement rows");
         assert_eq!(sql.len(), CORPUS_SIZE, "{collation}: oracle rows");
@@ -285,7 +287,7 @@ fn identity_round_trips_the_corpus() -> Result<()> {
 }
 
 #[test]
-fn json_subtype_group_key_diverges_between_bulk_and_incremental_paths() -> Result<()> {
+fn json_subtype_group_key_agrees_between_bulk_and_incremental_paths() -> Result<()> {
     let db = Connection::open_in_memory()?;
     register(&db)?;
     db.execute_batch(
@@ -310,10 +312,7 @@ fn json_subtype_group_key_diverges_between_bulk_and_incremental_paths() -> Resul
     );
     assert_eq!(
         rendered_rows(&db, "SELECT * FROM json_bulk")?,
-        vec![
-            r#"Text("[\"a\"]") | Integer(1)"#.to_string(),
-            r#"Text("[\"a\"]") | Integer(1)"#.to_string(),
-        ]
+        vec![r#"Text("[\"a\"]") | Integer(2)"#.to_string()]
     );
     Ok(())
 }

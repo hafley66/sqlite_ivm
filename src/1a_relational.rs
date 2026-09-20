@@ -303,7 +303,7 @@ fn json_key(parts: Vec<String>) -> String {
     format!("json_array({})", parts.join(","))
 }
 fn folded(value: &str) -> String {
-    format!("CASE typeof({value}) WHEN 'blob' THEN json_object('blob',hex({value})) WHEN 'real' THEN CASE WHEN {value}=CAST({value} AS INTEGER) AND typeof(CAST({value} AS INTEGER))='integer' THEN CAST({value} AS INTEGER) ELSE json_object('real',sqlite_ivm_real_hex({value})) END ELSE {value} END")
+    format!("CASE typeof({value}) WHEN 'blob' THEN json_object('blob',hex({value})) WHEN 'real' THEN CASE WHEN {value}=CAST({value} AS INTEGER) AND typeof(CAST({value} AS INTEGER))='integer' THEN CAST({value} AS INTEGER) ELSE json_object('real',sqlite_ivm_real_hex({value})) END WHEN 'text' THEN {value}||'' ELSE {value} END")
 }
 /// The composite an arrangement row rebuilds from its own stored columns.
 /// `fill` writes it and `change` compares against it, so the two must agree.
@@ -311,7 +311,7 @@ pub fn identity_sql(width: usize) -> String {
     json_key((0..width).map(|i| plain(&format!("c{i}"))).collect())
 }
 fn plain(value: &str) -> String {
-    format!("CASE typeof({value}) WHEN 'blob' THEN json_object('blob',hex({value})) WHEN 'real' THEN json_object('real',sqlite_ivm_real_hex({value})) ELSE {value} END")
+    format!("CASE typeof({value}) WHEN 'blob' THEN json_object('blob',hex({value})) WHEN 'real' THEN json_object('real',sqlite_ivm_real_hex({value})) WHEN 'text' THEN {value}||'' ELSE {value} END")
 }
 impl Plan {
     pub fn create_state(&self, db: &Connection, name: &str) -> Result<Vec<(&'static str, String)>> {

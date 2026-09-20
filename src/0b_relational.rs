@@ -179,7 +179,7 @@ pub fn key_sql(parts: &[(String, String)]) -> String {
         .iter()
         .map(|(value, collation)| {
             let x = format!("({})", key_expression(value, collation));
-            format!("CASE typeof({x}) WHEN 'blob' THEN json_object('blob',hex({x})) WHEN 'real' THEN CASE WHEN {x}=CAST({x} AS INTEGER) THEN CAST({x} AS INTEGER) ELSE json_object('real',printf('%!.17g',{x})) END ELSE {x} END")
+            format!("CASE typeof({x}) WHEN 'blob' THEN json_object('blob',hex({x})) WHEN 'real' THEN CASE WHEN {x}=CAST({x} AS INTEGER) THEN CAST({x} AS INTEGER) ELSE json_object('real',printf('%!.17g',{x})) END WHEN 'text' THEN {x}||'' ELSE {x} END")
         })
         .collect::<Vec<_>>();
     format!("json_array({})", normalized.join(","))
@@ -620,6 +620,7 @@ struct Compiler<'a> {
 }
 impl Compiler<'_> {
     fn push(&mut self, kind: Kind, inputs: Vec<usize>, fields: Vec<Field>) -> usize {
+        let (kind, inputs) = self.project_group_input(kind, inputs);
         let id = self.plan.nodes.len();
         self.plan.nodes.push(Node {
             kind,
@@ -627,6 +628,68 @@ impl Compiler<'_> {
             fields,
         });
         id
+    }
+    /// A group arrangement stores every column of its input row, so a group
+    /// over a join would keep the whole join product. A Map in front keeps
+    /// only the columns the group reads, renumbered from c0.
+    fn project_group_input(&mut self, kind: Kind, inputs: Vec<usize>) -> (Kind, Vec<usize>) {
+        let Kind::Group {
+            keys,
+            expressions,
+            order,
+            limit,
+            offset,
+            having,
+            window,
+        } = kind
+        else {
+            return (kind, inputs);
+        };
+        let input = inputs[0];
+        let width = self.plan.nodes[input].fields.len();
+        let mut used = std::collections::BTreeSet::new();
+        for sql in keys.iter().chain(&expressions).chain(&order).chain(&having) {
+            used.extend(column_references(sql));
+        }
+        let kind = |keys, expressions, order, having| Kind::Group {
+            keys,
+            expressions,
+            order,
+            limit,
+            offset,
+            having,
+            window,
+        };
+        if window || used.len() >= width || used.iter().any(|c| *c >= width) {
+            return (kind(keys, expressions, order, having), inputs);
+        }
+        let mut kept = used.into_iter().collect::<Vec<_>>();
+        if kept.is_empty() {
+            // count(*) over no key still needs one stored column per row.
+            kept.push(0);
+        }
+        let renumber = |sql: &String| {
+            renumber_columns(sql, |c| kept.iter().position(|k| *k == c).unwrap_or(c))
+        };
+        let projected = kind(
+            keys.iter().map(renumber).collect(),
+            expressions.iter().map(renumber).collect(),
+            order.iter().map(renumber).collect(),
+            having.as_ref().map(renumber),
+        );
+        let fields = kept
+            .iter()
+            .map(|c| self.plan.nodes[input].fields[*c].clone())
+            .collect();
+        let map = self.push(
+            Kind::Map {
+                expressions: kept.iter().map(|c| format!("c{c}")).collect(),
+                predicate: None,
+            },
+            vec![input],
+            fields,
+        );
+        (projected, vec![map])
     }
     fn table(&mut self, t: &SelectTable<'_>) -> Result<usize> {
         if let SelectTable::Sub(from, None) = t {
@@ -2025,4 +2088,70 @@ pub fn bind(db: &Connection, sql: &str) -> Result<Plan> {
     };
     compiler.plan.output = compiler.select(select)?;
     Ok(compiler.plan)
+}
+
+/// Walks an internal SQL fragment and visits every bare `c<digits>` column
+/// reference outside quoted strings and identifiers.
+fn visit_columns(sql: &str, mut visit: impl FnMut(&str, usize)) {
+    let bytes = sql.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'\'' || b == b'"' || b == b'`' || b == b'[' {
+            let close = if b == b'[' { b']' } else { b };
+            let start = i;
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == close {
+                    if close != b']' && bytes.get(i + 1) == Some(&close) {
+                        i += 2;
+                        continue;
+                    }
+                    break;
+                }
+                i += 1;
+            }
+            i += 1;
+            visit(&sql[start..i.min(bytes.len())], usize::MAX);
+            continue;
+        }
+        let word = b.is_ascii_alphanumeric() || b == b'_';
+        let boundary = i == 0 || !(bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_');
+        if word {
+            let start = i;
+            while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                i += 1;
+            }
+            let token = &sql[start..i];
+            let column = boundary
+                .then(|| token.strip_prefix('c'))
+                .flatten()
+                .filter(|d| !d.is_empty() && d.bytes().all(|x| x.is_ascii_digit()))
+                .and_then(|d| d.parse().ok());
+            visit(token, column.unwrap_or(usize::MAX));
+            continue;
+        }
+        visit(&sql[i..i + 1], usize::MAX);
+        i += 1;
+    }
+}
+fn column_references(sql: &str) -> Vec<usize> {
+    let mut out = vec![];
+    visit_columns(sql, |_, c| {
+        if c != usize::MAX {
+            out.push(c)
+        }
+    });
+    out
+}
+fn renumber_columns(sql: &str, map: impl Fn(usize) -> usize) -> String {
+    let mut out = String::with_capacity(sql.len());
+    visit_columns(sql, |token, c| {
+        if c == usize::MAX {
+            out.push_str(token)
+        } else {
+            out.push_str(&format!("c{}", map(c)))
+        }
+    });
+    out
 }
