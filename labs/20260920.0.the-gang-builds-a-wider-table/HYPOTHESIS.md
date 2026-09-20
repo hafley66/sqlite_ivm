@@ -49,7 +49,7 @@ failure would invalidate every queued lab.
 - The generator honors every axis; the recorder sees every span; the log
   filter is pinned by the rig itself.
 
-Instrument provenance, build versus buy:
+Instrument sourcing, build versus buy:
 
 | candidate | counts | wall timings | filter pin | status |
 | --- | --- | --- | --- | --- |

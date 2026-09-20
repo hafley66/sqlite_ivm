@@ -142,7 +142,7 @@ fn filter_is_pinned_never_inherited() {
 }
 
 // Budget ceilings fail with a diagnostic that names the constant protecting
-// them, so a runaway axis is a named refusal, not a mystery OOM.
+// them, so a runaway axis is a named budget breach, not a mystery OOM.
 #[test]
 fn axis_budgets_name_their_ceiling() {
     let too_few_tables = rig::generate(&Axes {
