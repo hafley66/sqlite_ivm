@@ -33,6 +33,52 @@ fn rows(db: &Connection, sql: &str, params: &[Value]) -> Result<Vec<Row>> {
         .collect();
     result
 }
+const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+/// FNV-1a 64 over the identity bytes. A stored hash must survive a toolchain
+/// upgrade, and std's DefaultHasher promises no algorithm stability.
+pub fn row_hash(bytes: &[u8]) -> i64 {
+    bytes
+        .iter()
+        .fold(FNV_OFFSET, |hash, byte| {
+            (hash ^ *byte as u64).wrapping_mul(FNV_PRIME)
+        }) as i64
+}
+/// Maintenance cannot run without a Plan and a Plan only comes from `bind`,
+/// so registering there reaches every connection that can issue this SQL.
+pub fn register_functions(db: &Connection) -> Result<()> {
+    db.create_scalar_function(
+        c"sqlite_ivm_hash",
+        1,
+        rusqlite::functions::FunctionFlags::SQLITE_UTF8
+            | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| Ok(row_hash(ctx.get_raw(0).as_str()?.as_bytes())),
+    )
+}
+pub fn keys_table(name: &str) -> String {
+    format!("main.{}", quote(&format!("{name}_keys")))
+}
+/// Interning is idempotent and monotone: one composite takes one id for the
+/// life of the view, so two equal composites can never reach two ids.
+pub fn intern(db: &Connection, dict: &str, value: &str) -> Result<i64> {
+    let select = format!("SELECT __i FROM {dict} WHERE __v=?1");
+    if let Some(id) = db
+        .prepare_cached(&select)?
+        .query_row([value], |r| r.get(0))
+        .optional()?
+    {
+        return Ok(id);
+    }
+    db.execute_cached(
+        &format!("INSERT OR IGNORE INTO {dict}(__v) VALUES(?1)"),
+        [value],
+    )?;
+    db.prepare_cached(&select)?.query_row([value], |r| r.get(0))
+}
+pub fn resolve(db: &Connection, dict: &str, id: i64) -> Result<String> {
+    db.prepare_cached(&format!("SELECT __v FROM {dict} WHERE __i=?1"))?
+        .query_row([id], |r| r.get(0))
+}
 fn key(db: &Connection, row: &[Value]) -> Result<String> {
     let normalized = row
         .iter()
@@ -99,12 +145,22 @@ fn evaluate(
         row,
     )
 }
-fn change(db: &Connection, t: &str, k: &str, row: &Row, d: i64) -> Result<(i64, i64)> {
-    let r = identity(db, row)?;
+fn key_id(db: &Connection, dict: &str, row: &[Value]) -> Result<i64> {
+    let text = key(db, row)?;
+    intern(db, dict, &text)
+}
+fn change(db: &Connection, t: &str, k: Value, row: &Row, d: i64) -> Result<(i64, i64)> {
+    let composite = identity(db, row)?;
+    let r = row_hash(composite.as_bytes());
+    // __r is a hash, so equality on it only narrows. __c carries the composite
+    // out of every index while keeping the decision one string compare.
+    let same = "__r=?1 AND __c=?2";
     let old: Option<i64> = db
-        .query_row(&format!("SELECT __n FROM {t} WHERE __r=?1"), [&r], |r| {
-            r.get(0)
-        })
+        .query_row(
+            &format!("SELECT __n FROM {t} WHERE {same}"),
+            rusqlite::params![r, &composite],
+            |r| r.get(0),
+        )
         .optional()?;
     let new = old
         .unwrap_or(0)
@@ -114,14 +170,22 @@ fn change(db: &Connection, t: &str, k: &str, row: &Row, d: i64) -> Result<(i64, 
         return Err(error("negative arrangement multiplicity"));
     }
     if new == 0 {
-        db.execute_cached(&format!("DELETE FROM {t} WHERE __r=?1"), [&r])?;
+        db.execute_cached(
+            &format!("DELETE FROM {t} WHERE {same}"),
+            rusqlite::params![r, &composite],
+        )?;
     } else if old.is_some() {
         db.execute_cached(
-            &format!("UPDATE {t} SET __n=?1 WHERE __r=?2"),
-            rusqlite::params![new, r],
+            &format!("UPDATE {t} SET __n=?3 WHERE {same}"),
+            rusqlite::params![r, &composite, new],
         )?;
     } else {
-        let mut params = vec![Value::Text(k.into()), Value::Text(r), Value::Integer(new)];
+        let mut params = vec![
+            k,
+            Value::Integer(r),
+            Value::Text(composite.clone()),
+            Value::Integer(new),
+        ];
         params.extend(row.clone());
         db.execute_cached(
             &format!("INSERT INTO {t} VALUES({})", parameters(params.len())),
@@ -235,8 +299,8 @@ fn differences(db: &Connection, before: Vec<Delta>, after: Vec<Delta>) -> Result
     }
     Ok(values.into_values().filter(|(_, n)| *n != 0).collect())
 }
-fn weighted(db: &Connection, sql: &str, k: &str) -> Result<Vec<Delta>> {
-    rows(db, sql, &[Value::Text(k.into())])?
+fn weighted(db: &Connection, sql: &str, k: i64) -> Result<Vec<Delta>> {
+    rows(db, sql, &[Value::Integer(k)])?
         .into_iter()
         .map(|mut r| match r.pop() {
             Some(Value::Integer(n)) => Ok((r, n)),
@@ -256,12 +320,23 @@ fn json_key(parts: Vec<String>) -> String {
 fn folded(value: &str) -> String {
     format!("CASE typeof({value}) WHEN 'blob' THEN json_object('blob',hex({value})) WHEN 'real' THEN CASE WHEN {value}=CAST({value} AS INTEGER) AND typeof(CAST({value} AS INTEGER))='integer' THEN CAST({value} AS INTEGER) ELSE json_object('real',sqlite_ivm_real_hex({value})) END ELSE {value} END")
 }
+/// The composite an arrangement row rebuilds from its own stored columns.
+/// `fill` writes it and `change` compares against it, so the two must agree.
+pub fn identity_sql(width: usize) -> String {
+    json_key((0..width).map(|i| plain(&format!("c{i}"))).collect())
+}
 fn plain(value: &str) -> String {
     format!("CASE typeof({value}) WHEN 'blob' THEN json_object('blob',hex({value})) WHEN 'real' THEN json_object('real',sqlite_ivm_real_hex({value})) ELSE {value} END")
 }
 impl Plan {
     pub fn create_state(&self, db: &Connection, name: &str) -> Result<Vec<(&'static str, String)>> {
         let mut objects = vec![];
+        let dictionary = format!("{name}_keys");
+        db.execute_batch(&format!(
+            "CREATE TABLE main.{}(__i INTEGER PRIMARY KEY,__v TEXT NOT NULL UNIQUE)",
+            quote(&dictionary)
+        ))?;
+        objects.push(("table", dictionary));
         let state = format!("{name}_state");
         db.execute_batch(&format!(
             "CREATE TABLE main.{}(__key TEXT NOT NULL,{}); CREATE INDEX main.{} ON {}(__key)",
@@ -282,9 +357,10 @@ impl Plan {
             for (side, input) in node.inputs.iter().enumerate() {
                 let t = format!("{name}_op{id}_{side}");
                 let n = self.nodes[*input].fields.len();
-                db.execute_batch(&format!("CREATE TABLE main.{}(__k TEXT NOT NULL,__r TEXT NOT NULL UNIQUE,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k)",quote(&t),columns(n),quote(&format!("__ivm_{name}_op{id}_{side}_key")),quote(&t)))?;
+                db.execute_batch(&format!("CREATE TABLE main.{}(__k INTEGER NOT NULL,__r INTEGER NOT NULL,__c TEXT NOT NULL,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k); CREATE INDEX main.{} ON {}(__r)",quote(&t),columns(n),quote(&format!("__ivm_{name}_op{id}_{side}_key")),quote(&t),quote(&format!("__ivm_{name}_op{id}_{side}_row")),quote(&t)))?;
                 objects.push(("table", t));
                 objects.push(("index", format!("__ivm_{name}_op{id}_{side}_key")));
+                objects.push(("index", format!("__ivm_{name}_op{id}_{side}_row")));
                 if let Kind::Group {
                     order,
                     limit: Some(_),
@@ -471,11 +547,18 @@ impl Plan {
             }
             _ => return Ok(()),
         };
+        let dict = keys_table(name);
+        db.execute(
+            &format!("INSERT OR IGNORE INTO {dict}(__v) SELECT {k} FROM {out}"),
+            [],
+        )?;
+        let k = format!("(SELECT __i FROM {dict} WHERE __v={k})");
+        // No UNIQUE target is left to upsert against. Rows sharing a composite
+        // are equal in every column, so the grouped select keeps the same row.
         db.execute(
             &format!(
-                "INSERT INTO {t}(__k,__r,__n,{}) SELECT {k},{r},__m,c0{} FROM {out} WHERE 1 ON CONFLICT(__r) DO UPDATE SET __n=__n+excluded.__n",
-                columns(width),
-                (1..width).map(|i| format!(",c{i}")).collect::<String>()
+                "INSERT INTO {t}(__k,__r,__c,__n,{cols}) SELECT {k},sqlite_ivm_hash(__ivm_r),__ivm_r,__ivm_n,{cols} FROM (SELECT {r} AS __ivm_r,sum(__m) AS __ivm_n,{cols} FROM {out} GROUP BY {r})",
+                cols = columns(width)
             ),
             [],
         )?;
@@ -575,10 +658,11 @@ impl Plan {
                 let right_n = self.nodes[node.inputs[1]].fields.len();
                 let t0 = table(name, id, 0);
                 let t1 = table(name, id, 1);
+                // A join key equal on both sides still cannot match when a
+                // component is NULL, and the components live in the dictionary.
+                let dict = keys_table(name);
                 let no_null = |k: &str| {
-                    format!(
-                        "NOT EXISTS(SELECT 1 FROM json_each({k}) WHERE json_type(value)='null')"
-                    )
+                    format!("NOT EXISTS(SELECT 1 FROM json_each((SELECT __v FROM {dict} WHERE __i={k})) WHERE json_type(value)='null')")
                 };
                 let left_cols = |q: &str| {
                     (0..left_n)
@@ -736,8 +820,7 @@ impl Plan {
                     let mut key_statement = db.prepare(&format!("SELECT DISTINCT __k FROM {t}"))?;
                     let mut key_rows = key_statement.query([])?;
                     while let Some(key) = key_rows.next()? {
-                        let key: String = key.get(0)?;
-                        statement.execute([&key])?;
+                        statement.execute([key.get::<_, i64>(0)?])?;
                     }
                 } else {
                     let mut sql =
@@ -931,14 +1014,18 @@ impl Plan {
                     .enumerate()
                     .map(|(i, f)| crate::relational::key_expression(&format!("c{i}"), &f.collation))
                     .collect::<Vec<_>>();
-                let k = key(db, &evaluate(db, row, &normalized, None)?.remove(0))?;
+                let k = key_id(
+                    db,
+                    &keys_table(name),
+                    &evaluate(db, row, &normalized, None)?.remove(0),
+                )?;
                 let count = |side| -> Result<i64> {
                     db.query_row(
                         &format!(
                             "SELECT coalesce(sum(__n),0) FROM {} WHERE __k=?1",
                             table(name, id, side)
                         ),
-                        [&k],
+                        [k],
                         |r| r.get(0),
                     )
                 };
@@ -962,14 +1049,14 @@ impl Plan {
                             columns(row.len()),
                             table(name, id, side)
                         ),
-                        &[Value::Text(k.clone())],
+                        &[Value::Integer(k)],
                     )?
                     .into_iter()
                     .map(|r| (r, 1))
                     .collect())
                 };
                 let before = snapshot()?;
-                change(db, &table(name, id, side), &k, row, d)?;
+                change(db, &table(name, id, side), Value::Integer(k), row, d)?;
                 differences(db, before, snapshot()?)
             }
             Kind::Join {
@@ -994,7 +1081,7 @@ impl Plan {
                     evaluate(db, row, &expressions, None)?.remove(0)
                 };
                 let null = values.contains(&Value::Null);
-                let k = key(db, &values)?;
+                let k = key_id(db, &keys_table(name), &values)?;
                 let left_n = self.nodes[node.inputs[0]].fields.len();
                 let right_n = self.nodes[node.inputs[1]].fields.len();
                 if *mode == "inner" {
@@ -1006,10 +1093,10 @@ impl Plan {
                         weighted(
                             db,
                             &format!("SELECT {},__n FROM {other} WHERE __k=?1", columns(n)),
-                            &k,
+                            k,
                         )?
                     };
-                    change(db, &table(name, id, side), &k, row, d)?;
+                    change(db, &table(name, id, side), Value::Integer(k), row, d)?;
                     let mut result = vec![];
                     for (other, n) in matches {
                         let mut output = if side == 0 {
@@ -1043,7 +1130,7 @@ impl Plan {
                             columns(left_n),
                             table(name, id, 0)
                         ),
-                        &k,
+                        k,
                     )?;
                     let r = weighted(
                         db,
@@ -1052,7 +1139,7 @@ impl Plan {
                             columns(right_n),
                             table(name, id, 1)
                         ),
-                        &k,
+                        k,
                     )?;
                     let mut result = vec![];
                     let mut right_matched = vec![false; r.len()];
@@ -1105,7 +1192,7 @@ impl Plan {
                     Ok(result)
                 };
                 let before = snapshot()?;
-                change(db, &table(name, id, side), &k, row, d)?;
+                change(db, &table(name, id, side), Value::Integer(k), row, d)?;
                 differences(db, before, snapshot()?)
             }
             Kind::Group {
@@ -1118,15 +1205,16 @@ impl Plan {
                 window,
             } => {
                 let t = table(name, id, 0);
+                let dict = keys_table(name);
                 let k = if keys.is_empty() {
-                    "[]".into()
+                    intern(db, &dict, "[]")?
                 } else {
-                    key(db, &evaluate(db, row, keys, None)?.remove(0))?
+                    key_id(db, &dict, &evaluate(db, row, keys, None)?.remove(0))?
                 };
                 let snapshot = || -> Result<Vec<Delta>> {
                     let present: bool = db.query_row(
                         &format!("SELECT EXISTS(SELECT 1 FROM {t} WHERE __k=?1)"),
-                        [&k],
+                        [k],
                         |r| r.get(0),
                     )?;
                     if !present && (!keys.is_empty() || *window || limit.is_some()) {
@@ -1168,13 +1256,13 @@ impl Plan {
                                 .unwrap_or_default()
                         )
                     };
-                    Ok(rows(db, &sql, &[Value::Text(k.clone())])?
+                    Ok(rows(db, &sql, &[Value::Integer(k)])?
                         .into_iter()
                         .map(|r| (r, 1))
                         .collect())
                 };
                 let before = snapshot()?;
-                change(db, &t, &k, row, d)?;
+                change(db, &t, Value::Integer(k), row, d)?;
                 differences(db, before, snapshot()?)
             }
             Kind::Fixpoint { rules } => self.fixpoint(db, name, id, side, row, d, rules),
@@ -1209,7 +1297,14 @@ impl Plan {
             tracing::debug_span!("round", phase, index, rows = tracing::field::Empty).entered()
         };
         let node = &self.nodes[id];
-        let (old, new) = change(db, &table(name, id, side), &key(db, row)?, row, d)?;
+        let dict = keys_table(name);
+        let (old, new) = change(
+            db,
+            &table(name, id, side),
+            Value::Integer(key_id(db, &dict, row)?),
+            row,
+            d,
+        )?;
         if (old > 0) == (new > 0) {
             return Ok(vec![]);
         }
