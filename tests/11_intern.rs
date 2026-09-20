@@ -195,12 +195,16 @@ fn arrangements(db: &Connection, view: &str) -> Result<Vec<(String, usize)>> {
 fn assert_one_row_per_composite(db: &Connection, view: &str, at: &str) -> Result<()> {
     for (table, width) in arrangements(db, view)? {
         let composite = identity_sql(width);
-        let (rows, distinct): (i64, i64) = db.query_row(
-            &format!("SELECT count(*),count(DISTINCT {composite}) FROM \"{table}\""),
+        let (rows, distinct, stored): (i64, i64, i64) = db.query_row(
+            &format!("SELECT count(*),count(DISTINCT __c),count(*) FILTER (WHERE __c={composite}) FROM \"{table}\""),
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )?;
         assert_eq!(rows, distinct, "{at}: {table} holds a duplicate composite");
+        assert_eq!(
+            rows, stored,
+            "{at}: {table} stored a composite its own columns do not rebuild"
+        );
     }
     Ok(())
 }

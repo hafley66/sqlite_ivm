@@ -119,7 +119,7 @@ Interning pays when a composite repeats and costs when it does not.
 many rows as the arrangement. The composite used to sit in two b-tree entries,
 the column and its UNIQUE index; interning moves those two into the dictionary
 and adds two more for the id. Four where there were two, for a key that can
-never be shared. Reverted in `88f0b0b`.
+never be shared. Reverted in `73d5c0e`.
 
 ## step4-hash: `__r` is an FNV-1a 64 of the composite, tiebreak recomputes it
 
@@ -150,3 +150,37 @@ The fix is to stop recomputing what the row could store: keep the composite as
 an unindexed `TEXT` column and leave only the hash in the index. That is one
 string compare per lookup instead of an N-column rebuild, and the index stays
 integer. Measured next as step 4b.
+
+## step4b-stored: the composite moves to an unindexed `__c` column
+
+Same hash index, and the tiebreak is now one string compare against a stored
+column instead of an N-column rebuild. Six runs, medians.
+
+| shape | seconds | db bytes | rows/s | vs baseline time | vs baseline bytes | vs step4-hash time |
+|---|---|---|---|---|---|---|
+| group | 0.338 | 671 744 | 11 852 | 0.97x | 0.77x | 1.22x faster |
+| distinct | 0.213 | 1 282 048 | 18 863 | 0.88x | 1.03x | 1.20x faster |
+| join | 0.181 | 1 126 400 | 22 037 | 0.92x | 0.84x | 1.38x faster |
+| intern | 0.003 | 434 176 | 1 312 767 | new | new | flat |
+| fixpoint | 2.404 | 26 468 352 | 1 671 | 0.95x | 1.00x | 1.08x faster |
+
+The step4-hash diagnosis was right. Moving one expression out of three
+statements per maintained row bought back 18 to 28 percent of the clock, at the
+cost of 17 to 29 percent of the space win, because the composite is stored once
+again. `group` is back within 3 percent of the TEXT baseline on the clock while
+23 percent smaller on disk, and no index holds a variable-length key.
+
+Where the three candidate shapes for `__r` land on `group`:
+
+| shape | seconds | db bytes |
+|---|---|---|
+| TEXT baseline, UNIQUE index on the composite | 0.328 | 876 544 |
+| dictionary id, reverted | 0.352 | 851 968 |
+| hash index, tiebreak recomputes | 0.411 | 520 192 |
+| hash index, tiebreak reads `__c` | 0.338 | 671 744 |
+
+`distinct` is the one shape still fatter than the baseline, by 3 percent. Its
+`__k` is the whole row, so the `__k` dictionary has one entry per distinct row
+and repeats nothing, which is the same arithmetic that killed the dictionary
+for `__r`. A Set key wants the hash shape, not the dictionary. That is a
+separate step and it is not in this card's acceptance.
