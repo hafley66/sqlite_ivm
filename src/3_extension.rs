@@ -27,12 +27,15 @@ fn observe() {
             span_events: FmtSpan::CLOSE,
             ..FormatConfig::standard(config.format, config.ansi)
         };
+        // chrome_layer is None unless the trace path variable is set, so an unasked-for
+        // run pays nothing and writes no file.
         let installed = tracing_subscriber::registry()
             .with(hafley_observe::env_filter(config.default_filter))
             .with(hafley_observe::format_layer(
                 format,
                 BoxMakeWriter::new(std::io::stderr),
             ))
+            .with(hafley_observe::chrome_layer())
             .try_init();
         if installed.is_ok() {
             hafley_observe::startup(&config);
@@ -42,6 +45,11 @@ fn observe() {
 
 pub fn register(db: &Connection) -> Result<()> {
     observe();
+    // Counters are read per statement: 8_group_limit runs 2.1s without them, 10.7s with.
+    // Same gate as the chrome timeline, so an unasked-for run pays nothing.
+    if hafley_observe::trace_path().is_some() {
+        hafley_observe::sqlite::instrument(db);
+    }
     crate::vtab::register(db)?;
     crate::source_ddl::register(db)?;
     db.create_scalar_function(
