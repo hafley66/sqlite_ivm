@@ -48,13 +48,13 @@ ordering breaks.
 
 ## Acceptance Criteria
 
-- [ ] `xUpdate` appends to a bounded buffer and runs no SQL
-- [ ] `xSync` flushes; `xCommit` does nothing failable
-- [ ] `xRollback` discards without flushing
-- [ ] savepoint and release flush, rollback-to discards
-- [ ] the byte cap is a named constant with a comment, and an early flush is tested
+- [x] `xUpdate` appends to a bounded buffer and runs no SQL
+- [x] `xSync` flushes; `xCommit` does nothing failable
+- [x] `xRollback` discards without flushing
+- [x] savepoint and release flush, rollback-to discards
+- [x] the byte cap is a named constant with a comment, and an early flush is tested
 - [ ] the existing battery is green, unchanged
-- [ ] a `CountRecorder` assertion shows maintenance statements scale with transactions, not rows
+- [x] a `CountRecorder` assertion shows maintenance statements scale with transactions, not rows
 
 ## Test Plan
 
