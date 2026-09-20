@@ -150,6 +150,156 @@ global subscriber. The default filter is `warn`, so nothing prints until
 table, sign), `fixpoint` (view, node, rows in, rounds) and `round` (phase, index,
 rows written). Fields carry names and integers, never row contents.
 
+## The engine as one reactive pipe
+
+SQLite callbacks are the only producers. One subscribe, at the bottom. Every
+operator below names the SQL statement it becomes; nothing per row runs in Rust
+once a batch exists. The "today" column in the table after the code names the
+per-row path this pipe replaces.
+
+```ts
+const sqlite$ = fromSqliteCallbacks(db)   // xBegin | xUpdate | xSavepoint | xRelease | xRollbackTo | xSync | xCommit | xRollback
+
+const view$ = sqlite$.pipe(
+
+  // transaction boundary: everything between xBegin and xSync|xRollback is one window
+  windowToggle(
+    sqlite$.pipe(filter(e => e.kind === 'xBegin')),
+    () => sqlite$.pipe(filter(e => e.kind === 'xSync' || e.kind === 'xRollback')),
+  ),
+
+  mergeMap(transaction$ => transaction$.pipe(
+
+    // collector: per-row events become one ordered batch, savepoints truncate
+    scan((staged, e) => match(e, {
+      xUpdate:     ({ table, sign, values }) => [...staged, { table, sign, values, sequence: staged.length }],
+      xSavepoint:  ({ id }) => tag(staged, { mark: [id, staged.length] }),
+      xRelease:    ({ id }) => untag(staged, id),
+      xRollbackTo: ({ id }) => staged.slice(0, markOf(staged, id) ?? 0),   // absent mark = predates first write = 0
+      default:     () => staged,
+    }), [] as RowChange[]),
+
+    // spill: over either ceiling the tail lives in <name>_delta, same sequence numbers
+    map(staged => staged.length > STAGED_ROWS || bytes(staged) > STAGED_BYTES
+      ? spillToDelta(db, staged) : staged),
+
+    // drain point: deferred = last, eager = every xRelease, read = first xFilter, manual = UDF
+    takeLast(1),                                    // mode 'deferred'
+    // the other modes are bufferWhen(() => drainSignal$) with drainSignal$ one of the four above
+
+    // one batch, one source_delta table; from here on everything is SQL over sets
+    map(batch => writeDelta(db, batch)),            // INSERT INTO source_delta SELECT ... ; rows: |batch|
+
+    // plan walk, topological; each node emits its delta given the input delta and the pre-state arrangements
+    expand(delta => nodesFedBy(delta.node)),        // fan out to every consumer node, bounded by plan depth
+    concatMap(({ node, delta }) => match(node.kind, {
+
+      Map: ({ expressions, predicate }) =>
+        of(delta).pipe(
+          filter(row => predicate ? evalSql(predicate, row) : true),   // INSERT INTO node_delta SELECT exprs FROM in_delta WHERE predicate
+          map(row => project(expressions, row)),
+        ),
+
+      Join: ({ left, right, mode }) =>
+        of(delta).pipe(
+          groupBy(row => row.side),
+          mergeMap(side$ => side$.pipe(
+            // delta(A join B) = deltaA join B_old, then update A, then A_new join deltaB
+            concatMap(deltaA => concat(
+              probeOther(db, node, deltaA),          // INSERT INTO join_delta SELECT d.*, b.*, d.__n*b.__n FROM a_delta d JOIN op_b b USING(__k)
+              upsertArrangement(db, node, deltaA),   // UPDATE t SET __n=__n+d.__n FROM delta d WHERE t.__r=d.__r AND identity(t)=identity(d);
+                                                     // INSERT ... WHERE NOT EXISTS; DELETE WHERE __n=0
+            )),
+          )),
+          // outer modes: a second statement per side for the rows whose match count crossed zero
+          filter(row => mode === 'inner' || crossedZero(row)),
+        ),
+
+      Set: ({ op }) =>
+        of(delta).pipe(
+          map(row => withKey(row, intern(db, row))),                    // dictionary id, one RETURNING seek
+          scan((counts, row) => bump(counts, row.__k, row.side, row.__n), {}),
+          map(counts => presentBefore(counts) !== presentAfter(counts, op) ? emitOne(counts) : nothing),
+        ),
+
+      Group: ({ keys, expressions, having, window, limit }) =>
+        of(delta).pipe(
+          map(row => project(keptColumns(node), row)),                   // the projection Map the planner already inserted
+          groupBy(row => row.__k),                                        // touched keys only
+          mergeMap(key$ => key$.pipe(
+            withLatestFrom(readOld(db, node, key$.key)),                  // SELECT ... FROM _state WHERE __k = key
+            concatMap(([rows, old]) => concat(
+              upsertArrangement(db, node, rows),
+              recompute(db, node, key$.key),                              // SELECT exprs FROM op_group WHERE __k=? [GROUP BY __k HAVING ...], or the window/limit CTE
+            )),
+            map(([old, fresh]) => difference(old, fresh)),               // retract old, add fresh
+          )),
+        ),
+
+      Fixpoint: ({ rules }) =>
+        of(delta).pipe(
+          concatMap(rows => rows.some(r => r.__n < 0)
+            ? deleteAndRederive(db, node, rows)                          // affected set, then rounds
+            : of(rows)),
+          expand(round => semiNaive(db, node, round), FIXPOINT_ROUNDS),   // next delta = rules(delta join arrangements) minus member; bounded, named
+          takeWhile(round => round.length > 0, true),
+          reduce((all, round) => all.concat(round), []),
+        ),
+    })),
+
+    // output: every delta that reaches the output node lands in _state
+    filter(({ node }) => node === plan.output),
+    map(({ delta }) => applyState(db, delta)),                          // DELETE __key IN retracted; INSERT added
+
+    // commit: the pager commits after xSync returns; xCommit asserts staged and *_delta are empty
+    tap(() => truncateDeltas(db)),
+  )),
+
+  // failure anywhere aborts the statement; SQLite's journal unwinds every table the batch touched
+  catchError(err => { throw sqliteError(err) }),
+)
+
+view$.subscribe()   // the one subscribe: SQLite's xSync is the boundary
+```
+
+One transaction on the marble, deferred mode. Source `orders` gets three rows
+and one savepoint is rolled back:
+
+```
+xBegin  xUpdate xUpdate xSavepoint xUpdate xRollbackTo xUpdate                 xSync            xCommit
+  |        a       b        mark       c       unwind       d                    |                 |
+staged:   [a]    [a,b]    [a,b]+mark  [a,b,c]  [a,b]      [a,b,d]                |                 |
+                                                                     drain ─────┤
+                                                                     orders_delta <- a,b,d
+                                                                     join   <- deltaA join B_old, upsert A
+                                                                     group  <- keys{a,b,d}: old, upsert, recompute, diff
+                                                                     _state <- retract, add
+                                                                     truncate *_delta
+                                                                                          assert empty
+```
+
+Where each operator lives:
+
+| rxjs | today | after the batch port |
+|---|---|---|
+| `scan` collector | none; `insert()` runs SQL per row (`src/2_vtab.rs`) | the `sqlite-bulk-trigger` collector |
+| `takeLast` and the drain modes | none | xSync, xRelease, xFilter, `sqlite_ivm_flush()` |
+| Join `concatMap(concat(probe, upsert))` | `apply()` per row (`src/1a_relational.rs`) | two statements per side per transaction |
+| Group `groupBy(__k)`, `withLatestFrom(old)`, `recompute`, `difference` | snapshot before, `change()`, snapshot after, per row | per touched key per transaction |
+| Fixpoint `expand`, bounded | `fixpoint()`, already rounds | unchanged |
+| `map(applyState)` | `emit()` per delta row | one DELETE, one INSERT |
+| the one `subscribe` | trigger into the virtual table | xSync |
+
+Statement sets per transaction of S statements over R rows on a node path of
+depth D, by drain mode:
+
+| mode | maintenance statement sets |
+|---|---|
+| per row (today) | R times D |
+| eager | S times D |
+| read | D per read that follows a write |
+| deferred | D |
+
 ## Build, test, package
 
 ```bash
