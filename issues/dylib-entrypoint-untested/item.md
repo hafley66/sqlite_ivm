@@ -2,13 +2,14 @@
 created: 2026-09-19
 updated: 2026-09-20
 type: bug
-status: closed
+status: done
 priority: high
 labels: [extension]
 collision: [tests/**]
 lane: lab-probe
 lane_seq: 20
 size: S
+closed: 2026-09-20
 ---
 
 # No test loads the shipped extension through its entry point
