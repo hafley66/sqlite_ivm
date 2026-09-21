@@ -1,8 +1,12 @@
 //! Owned relational plans lowered from sqlite3-parser. SQLite evaluates scalar expressions.
 use crate::catalog::error;
+use crate::statements::{self, Phase};
 use crate::compile_recursive::recursion_shape;
 use rusqlite::{Connection, Result};
 use sqlite3_parser::{ast::*, lexer::sql::Parser, Bump, FallibleIterator};
+
+/// Names the catalog probes and the plan queries, none of which touch a source.
+const BIND_OBJECT: &str = "catalog";
 pub(crate) fn sql<T: fmt::ToTokens>(value: &T) -> String {
     struct Sql<'a, T>(&'a T);
     impl<T: fmt::ToTokens> std::fmt::Display for Sql<'_, T> {
@@ -608,6 +612,8 @@ pub fn bind(db: &Connection, sql: &str) -> Result<Plan> {
         return Err(error("one SELECT required"));
     }
     recursion_shape(select)?;
+    // Prepare-only: reads column names and the parameter count, steps nothing,
+    // so it issues no statement to SQLite and carries no statement span.
     let statement = db.prepare(sql)?;
     if statement.parameter_count() != 0 {
         return Err(error("persistent queries cannot contain bind parameters"));
@@ -617,12 +623,14 @@ pub fn bind(db: &Connection, sql: &str) -> Result<Plan> {
         .iter()
         .map(|s| s.to_string())
         .collect::<Vec<_>>();
-    let functions = db
-        .prepare(&format!("EXPLAIN {sql}"))?
-        .query_map([], |r| {
-            Ok((r.get::<_, String>(1)?, r.get::<_, Option<String>>(5)?))
-        })?
-        .collect::<Result<Vec<_>>>()?;
+    let functions = statements::query_map(
+        db,
+        Phase::Declare,
+        BIND_OBJECT,
+        &format!("EXPLAIN {sql}"),
+        [],
+        |r| Ok((r.get::<_, String>(1)?, r.get::<_, Option<String>>(5)?)),
+    )?;
     for (opcode, function) in functions {
         if ![
             "Function", "PureFunc", "AggStep", "AggStep1", "AggValue", "AggFinal",
@@ -659,7 +667,7 @@ pub fn bind(db: &Connection, sql: &str) -> Result<Plan> {
                 return Err(error(format!("unsupported aggregate {name}")));
             }
         } else {
-            let deterministic:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM pragma_function_list WHERE name=?1 COLLATE NOCASE AND type='s' AND flags & 2048 != 0) AND NOT EXISTS(SELECT 1 FROM pragma_function_list WHERE name=?1 COLLATE NOCASE AND type='s' AND builtin=0 AND flags & 2048 = 0)",[&name],|r|r.get(0))?;
+            let deterministic:bool=statements::query(db,Phase::Declare,BIND_OBJECT,"SELECT EXISTS(SELECT 1 FROM pragma_function_list WHERE name=?1 COLLATE NOCASE AND type='s' AND flags & 2048 != 0) AND NOT EXISTS(SELECT 1 FROM pragma_function_list WHERE name=?1 COLLATE NOCASE AND type='s' AND builtin=0 AND flags & 2048 = 0)",[&name],|r|r.get(0))?;
             if !deterministic
                 || [
                     "date",

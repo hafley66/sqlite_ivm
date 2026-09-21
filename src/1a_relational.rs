@@ -2,6 +2,7 @@
 //! Equality keys select membership, while stored row values select emitted identity.
 use crate::{
     catalog::{error, quote},
+    statements::{self, Phase},
     relational::{Occurrence, Plan, Rule},
 };
 use rusqlite::{types::Value, Connection, Result};
@@ -85,18 +86,26 @@ pub fn keys_table(name: &str) -> String {
 pub fn intern(db: &Connection, dict: &str, value: &str) -> Result<i64> {
     // One seek on hit and on miss: the conflict arm updates nothing and still
     // returns the existing id.
-    db.prepare_cached(&format!(
-        "INSERT INTO {dict}(__v) VALUES(?1) ON CONFLICT(__v) DO UPDATE SET __v=__v RETURNING __i"
-    ))?
-    .query_row([value], |r| r.get(0))
+    statements::query_cached(
+        db,
+        Phase::Maintain,
+        dict,
+        &format!(
+            "INSERT INTO {dict}(__v) VALUES(?1) ON CONFLICT(__v) DO UPDATE SET __v=__v RETURNING __i"
+        ),
+        [value],
+        |r| r.get(0),
+    )
 }
 pub fn resolve(db: &Connection, dict: &str, id: i64) -> Result<String> {
-    db.prepare_cached(&format!("SELECT __v FROM {dict} WHERE __i=?1"))?
-        .query_row([id], |r| r.get(0))
-}
-pub(crate) fn max_rowid(db: &Connection, t: &str) -> Result<i64> {
-    db.prepare_cached(&format!("SELECT coalesce(max(rowid),0) FROM {t}"))?
-        .query_row([], |r| r.get(0))
+    statements::query_cached(
+        db,
+        Phase::Maintain,
+        dict,
+        &format!("SELECT __v FROM {dict} WHERE __i=?1"),
+        [id],
+        |r| r.get(0),
+    )
 }
 pub(crate) enum Role {
     Table(String),
@@ -165,14 +174,6 @@ pub(crate) fn rule_where(rule: &Rule, extra: Option<&str>) -> String {
         (Some(p), Some(e)) => format!(" WHERE {p} AND {e}"),
     }
 }
-pub(crate) trait CachedExecute {
-    fn execute_cached<P: rusqlite::Params>(&self, sql: &str, params: P) -> Result<usize>;
-}
-impl CachedExecute for Connection {
-    fn execute_cached<P: rusqlite::Params>(&self, sql: &str, params: P) -> Result<usize> {
-        self.prepare_cached(sql)?.execute(params)
-    }
-}
 pub(crate) const BULK_ROUND_BUDGET: usize = 100_000;
 pub(crate) const BULK_GROUP_BUDGET: usize = 100_000;
 pub(crate) const BULK_MULTIPLICITY_BUDGET: i64 = 1_000_000;
@@ -196,7 +197,7 @@ pub(crate) fn plain(value: &str) -> String {
 
 pub fn install(db: &Connection, name: &str, sql: &str, plan: &Plan) -> Result<()> {
     validate_name(name)?;
-    let settings:bool=db.query_row("SELECT (SELECT recursive_triggers FROM pragma_recursive_triggers)=1 AND (SELECT trusted_schema FROM pragma_trusted_schema)=1",[],|r|r.get(0))?;
+    let settings:bool=statements::query(db,Phase::Declare,name,"SELECT (SELECT recursive_triggers FROM pragma_recursive_triggers)=1 AND (SELECT trusted_schema FROM pragma_trusted_schema)=1",[],|r|r.get(0))?;
     if !settings {
         return Err(error(
             "sqlite_ivm requires recursive_triggers=ON and trusted_schema=ON",
@@ -204,7 +205,12 @@ pub fn install(db: &Connection, name: &str, sql: &str, plan: &Plan) -> Result<()
     }
     let mut objects = plan.create_state(db, name)?;
     let collector = plan.collector(name);
-    collector.create_shadow(db)?;
+    statements::guard(
+        Phase::Declare,
+        name,
+        &format!("CREATE TABLE {}", collector.shadow_table()),
+        || collector.create_shadow(db),
+    )?;
     objects.push(("table", collector.shadow_table()));
     objects.extend(hooks(db, name, plan)?);
     let columns = plan
@@ -261,11 +267,16 @@ pub fn hooks(db: &Connection, name: &str, plan: &Plan) -> Result<Vec<(&'static s
             }
             // Arrangements contain the old row independently of the source SQL
             // table. AFTER avoids retracting writes rejected by OR IGNORE.
-            db.execute_batch(&format!(
-                "CREATE TRIGGER main.{} AFTER {event} ON {} BEGIN {body} END",
-                quote(&trigger),
-                quote(&s.name)
-            ))?;
+            statements::batch(
+                db,
+                Phase::Declare,
+                name,
+                &format!(
+                    "CREATE TRIGGER main.{} AFTER {event} ON {} BEGIN {body} END",
+                    quote(&trigger),
+                    quote(&s.name)
+                ),
+            )?;
             objects.push(("trigger", trigger));
         }
     }

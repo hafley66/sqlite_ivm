@@ -12,6 +12,8 @@ pub mod compile_select;
 pub mod compile_recursive;
 #[path = "0f_columns.rs"]
 pub mod columns;
+#[path = "0g_statements.rs"]
+pub(crate) mod statements;
 #[path = "1a_relational.rs"]
 pub mod relational_maintenance;
 #[path = "1b_state.rs"]

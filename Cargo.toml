@@ -16,9 +16,12 @@ crate-type = ["cdylib", "rlib"]
 [features]
 # SQLite's own page cache, not the system dylib's purgeable one (plans/costs/README.md).
 # Extension builds pass --no-default-features: the host supplies SQLite.
-default = ["bundled"]
+default = ["bundled", "statements"]
 bundled = ["rusqlite/bundled"]
 extension = ["rusqlite/loadable_extension"]
+# One span per statement site (src/0g_statements.rs). Off, the spans compile out and
+# a run pays nothing; that build is the one the recipe times wall clock on.
+statements = []
 
 [dependencies]
 hafley-observe = { path = "../../../../hafley-rs/.boop-worktrees/main/crates/hafley-observe" }
@@ -34,6 +37,9 @@ debug = 0
 [dev-dependencies]
 serde_json = "1"
 sha2 = "0.10"
+# The statement counts read raw statement events (per-call nanos, p99) from the same
+# capture layer hafley-observe's CountRecorder wraps.
+tracing-capture = "0.1.0"
 
 
 

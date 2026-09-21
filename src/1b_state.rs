@@ -1,5 +1,6 @@
 use crate::{
     catalog::{error, quote},
+    statements::{self, Phase},
     relational::{Kind, Occurrence, Plan},
     relational_maintenance::{
         columns, folded, json_key, keys_table, out_table, plain, table, BULK_MULTIPLICITY_BUDGET,
@@ -11,9 +12,12 @@ impl Plan {
     pub fn create_state(&self, db: &Connection, name: &str) -> Result<Vec<(&'static str, String)>> {
         // A recreated view must not collide with index names a rename retained:
         // allocate a fresh suffix while the name is recorded for another view.
-        fn fresh_index(db: &Connection, base: String) -> Result<String> {
+        fn fresh_index(db: &Connection, name: &str, base: String) -> Result<String> {
             let mut index = base.clone();
-            let recorded: bool = db.query_row(
+            let recorded: bool = statements::query(
+                db,
+                Phase::Declare,
+                name,
                 "SELECT EXISTS(SELECT 1 FROM main.sqlite_schema WHERE name='__ivm_objects')",
                 [],
                 |r| r.get(0),
@@ -22,7 +26,10 @@ impl Plan {
                 return Ok(index);
             }
             let mut suffix = 0;
-            while db.query_row(
+            while statements::query(
+                db,
+                Phase::Declare,
+                name,
                 "SELECT EXISTS(SELECT 1 FROM main.__ivm_objects WHERE object_type='index' AND object_name=?1)",
                 [&index],
                 |r| r.get::<_, bool>(0),
@@ -34,23 +41,33 @@ impl Plan {
         }
         let mut objects = vec![];
         let dictionary = format!("{name}_keys");
-        db.execute_batch(&format!(
-            "CREATE TABLE main.{}(__i INTEGER PRIMARY KEY,__v TEXT NOT NULL UNIQUE)",
-            quote(&dictionary)
-        ))?;
+        statements::batch(
+            db,
+            Phase::Declare,
+            name,
+            &format!(
+                "CREATE TABLE main.{}(__i INTEGER PRIMARY KEY,__v TEXT NOT NULL UNIQUE)",
+                quote(&dictionary)
+            ),
+        )?;
         objects.push(("table", dictionary));
         let state = format!("{name}_state");
-        let result_key = fresh_index(db, format!("__ivm_{name}_result_key"))?;
-        db.execute_batch(&format!(
-            "CREATE TABLE main.{}(__key TEXT NOT NULL,{}); CREATE INDEX main.{} ON {}(__key)",
-            quote(&state),
-            (0..self.names.len())
-                .map(|i| format!("c{i}"))
-                .collect::<Vec<_>>()
-                .join(","),
-            quote(&result_key),
-            quote(&state)
-        ))?;
+        let result_key = fresh_index(db, name, format!("__ivm_{name}_result_key"))?;
+        statements::batch(
+            db,
+            Phase::Declare,
+            name,
+            &format!(
+                "CREATE TABLE main.{}(__key TEXT NOT NULL,{}); CREATE INDEX main.{} ON {}(__key)",
+                quote(&state),
+                (0..self.names.len())
+                    .map(|i| format!("c{i}"))
+                    .collect::<Vec<_>>()
+                    .join(","),
+                quote(&result_key),
+                quote(&state)
+            ),
+        )?;
         objects.push(("table", state));
         objects.push(("index", result_key));
         for (id, node) in self.nodes.iter().enumerate() {
@@ -60,9 +77,9 @@ impl Plan {
             for (side, input) in node.inputs.iter().enumerate() {
                 let t = format!("{name}_op{id}x{side}");
                 let n = self.nodes[*input].fields.len();
-                let key = fresh_index(db, format!("__ivm_{name}_op{id}_{side}_key"))?;
-                let row = fresh_index(db, format!("__ivm_{name}_op{id}_{side}_row"))?;
-                db.execute_batch(&format!("CREATE TABLE main.{}(__k INTEGER NOT NULL,__r INTEGER NOT NULL,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k); CREATE INDEX main.{} ON {}(__r)",quote(&t),columns(n),quote(&key),quote(&t),quote(&row),quote(&t)))?;
+                let key = fresh_index(db, name, format!("__ivm_{name}_op{id}_{side}_key"))?;
+                let row = fresh_index(db, name, format!("__ivm_{name}_op{id}_{side}_row"))?;
+                statements::batch(db, Phase::Declare, name, &format!("CREATE TABLE main.{}(__k INTEGER NOT NULL,__r INTEGER NOT NULL,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k); CREATE INDEX main.{} ON {}(__r)",quote(&t),columns(n),quote(&key),quote(&t),quote(&row),quote(&t)))?;
                 objects.push(("table", t));
                 objects.push(("index", key));
                 objects.push(("index", row));
@@ -73,17 +90,23 @@ impl Plan {
                 } = &node.kind
                 {
                     if !order.is_empty() {
-                        let index = fresh_index(db, format!("__ivm_{name}_op{id}_{side}_order"))?;
-                        db.execute_batch(&format!(
-                            "CREATE INDEX main.{} ON {}(__k,{})",
-                            quote(&index),
-                            quote(&format!("{name}_op{id}x{side}")),
-                            order
-                                .iter()
-                                .map(|o| o.replace(" NULLS FIRST", "").replace(" NULLS LAST", ""))
-                                .collect::<Vec<_>>()
-                                .join(",")
-                        ))?;
+                        let index =
+                            fresh_index(db, name, format!("__ivm_{name}_op{id}_{side}_order"))?;
+                        statements::batch(
+                            db,
+                            Phase::Declare,
+                            name,
+                            &format!(
+                                "CREATE INDEX main.{} ON {}(__k,{})",
+                                quote(&index),
+                                quote(&format!("{name}_op{id}x{side}")),
+                                order
+                                    .iter()
+                                    .map(|o| o.replace(" NULLS FIRST", "").replace(" NULLS LAST", ""))
+                                    .collect::<Vec<_>>()
+                                    .join(",")
+                            ),
+                        )?;
                         objects.push(("index", index));
                     }
                 }
@@ -93,11 +116,16 @@ impl Plan {
                 for side in [member, member + 1] {
                     let t = format!("{name}_op{id}x{side}");
                     // removes the newest members, so `rowid>lo` still means new.
-                    db.execute_batch(&format!(
-                        "CREATE TABLE main.{}(__id INTEGER PRIMARY KEY AUTOINCREMENT,__k TEXT NOT NULL UNIQUE,{})",
-                        quote(&t),
-                        columns(node.fields.len())
-                    ))?;
+                    statements::batch(
+                        db,
+                        Phase::Declare,
+                        name,
+                        &format!(
+                            "CREATE TABLE main.{}(__id INTEGER PRIMARY KEY AUTOINCREMENT,__k TEXT NOT NULL UNIQUE,{})",
+                            quote(&t),
+                            columns(node.fields.len())
+                        ),
+                    )?;
                     objects.push(("table", t));
                 }
                 let mut created = vec![];
@@ -109,12 +137,17 @@ impl Plan {
                     if created.contains(&(side, expression)) {
                         continue;
                     }
-                    let index = fresh_index(db, format!("__ivm_{name}_fix{id}_{}", created.len()))?;
-                    db.execute_batch(&format!(
-                        "CREATE INDEX main.{} ON {}({expression})",
-                        quote(&index),
-                        quote(&format!("{name}_op{id}x{side}"))
-                    ))?;
+                    let index = fresh_index(db, name, format!("__ivm_{name}_fix{id}_{}", created.len()))?;
+                    statements::batch(
+                        db,
+                        Phase::Declare,
+                        name,
+                        &format!(
+                            "CREATE INDEX main.{} ON {}({expression})",
+                            quote(&index),
+                            quote(&format!("{name}_op{id}x{side}"))
+                        ),
+                    )?;
                     objects.push(("index", index));
                     created.push((side, expression));
                 }
@@ -141,7 +174,10 @@ impl Plan {
             if bad.is_empty() {
                 continue;
             }
-            let invalid: bool = db.query_row(
+            let invalid: bool = statements::query(
+                db,
+                Phase::Declare,
+                name,
                 &format!(
                     "SELECT EXISTS(SELECT 1 FROM main.{} WHERE {})",
                     quote(&source.name),
@@ -156,14 +192,17 @@ impl Plan {
         }
         for (id, node) in self.nodes.iter().enumerate() {
             let out = out_table(id, node.fields.len());
-            db.execute(
+            statements::exec(
+                db,
+                Phase::Declare,
+                name,
                 &format!(
                     "CREATE TABLE IF NOT EXISTS {out}({},__m)",
                     columns(node.fields.len())
                 ),
                 [],
             )?;
-            db.execute(&format!("DELETE FROM {out}"), [])?;
+            statements::exec(db, Phase::Declare, name, &format!("DELETE FROM {out}"), [])?;
         }
         let mut reads = vec![0usize; self.nodes.len()];
         reads[self.output] += 1;
@@ -189,25 +228,28 @@ impl Plan {
             if direct {
                 for side in 0..node.inputs.len() {
                     self.fill(db, name, id, side)?;
-                    self.exhaust(db, &mut reads, node.inputs[side])?;
+                    self.exhaust(db, name, &mut reads, node.inputs[side])?;
                 }
             }
             self.materialize(db, name, id, false)?;
             if !direct {
-                self.exhaust(db, &mut reads, node.inputs[0])?;
+                self.exhaust(db, name, &mut reads, node.inputs[0])?;
             }
             if id == self.output {
                 self.write_state(db, name, id)?;
-                self.exhaust(db, &mut reads, id)?;
+                self.exhaust(db, name, &mut reads, id)?;
             }
         }
         Ok(())
     }
-    fn exhaust(&self, db: &Connection, reads: &mut [usize], child: usize) -> Result<()> {
+    fn exhaust(&self, db: &Connection, name: &str, reads: &mut [usize], child: usize) -> Result<()> {
         reads[child] -= 1;
         if reads[child] == 0 {
             let node = &self.nodes[child];
-            db.execute(
+            statements::exec(
+                db,
+                Phase::Materialize,
+                name,
                 &format!("DELETE FROM {}", out_table(child, node.fields.len())),
                 [],
             )?;
@@ -264,21 +306,30 @@ impl Plan {
             return Ok(());
         };
         let dict = keys_table(name);
-        db.execute(
+        statements::exec(
+            db,
+            Phase::Materialize,
+            name,
             &format!("INSERT OR IGNORE INTO {dict}(__v) SELECT {k} FROM {out}"),
             [],
         )?;
         let k = format!("(SELECT __i FROM {dict} WHERE __v={k})");
         // No UNIQUE target is left to upsert against. Rows sharing a composite
         // are equal in every column, so the grouped select keeps the same row.
-        db.execute(
+        statements::exec(
+            db,
+            Phase::Materialize,
+            name,
             &format!(
                 "INSERT INTO {t}(__k,__r,__n,{cols}) SELECT {k},sqlite_ivm_hash(__ivm_r),__ivm_n,{cols} FROM (SELECT {r} AS __ivm_r,sum(__m) AS __ivm_n,{cols} FROM {out} GROUP BY {r})",
                 cols = columns(width)
             ),
             [],
         )?;
-        let bad: bool = db.query_row(
+        let bad: bool = statements::query(
+            db,
+            Phase::Materialize,
+            name,
             &format!("SELECT EXISTS(SELECT 1 FROM {t} WHERE typeof(__n)!='integer' OR __n<0)"),
             [],
             |r| r.get(0),
@@ -306,7 +357,10 @@ impl Plan {
         let width = self.nodes[id].fields.len();
         let out = out_table(id, width);
         let state = format!("main.{}", quote(&format!("{name}_state")));
-        let peak: i64 = db.query_row(
+        let peak: i64 = statements::query(
+            db,
+            Phase::Materialize,
+            name,
             &format!("SELECT coalesce(max(__m),0) FROM {out}"),
             [],
             |r| r.get(0),
@@ -315,7 +369,10 @@ impl Plan {
             return Err(error("result multiplicity expansion exceeds budget"));
         }
         let k = json_key((0..width).map(|i| plain(&format!("o.c{i}"))).collect());
-        db.execute(
+        statements::exec(
+            db,
+            Phase::Materialize,
+            name,
             &format!(
                 "WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<(SELECT coalesce((SELECT max(__m) FROM {out}),0))) INSERT INTO {state}(__key,{}) SELECT {k},o.c0{} FROM {out} o,seq WHERE seq.n<=o.__m",
                 columns(width),
