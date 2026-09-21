@@ -8881,6 +8881,34 @@
   },
   {
     "repo": "sqlite_ivm@main",
+    "path": "bench/crossover/0_SOURCE.md"
+  },
+  {
+    "repo": "sqlite_ivm@main",
+    "path": "bench/crossover/19_sqlite_template_adapter.py"
+  },
+  {
+    "repo": "sqlite_ivm@main",
+    "path": "bench/crossover/22_crossover_dd.rs"
+  },
+  {
+    "repo": "sqlite_ivm@main",
+    "path": "bench/crossover/26_sqlite_plugin_adapter.py"
+  },
+  {
+    "repo": "sqlite_ivm@main",
+    "path": "bench/crossover/28_run.py"
+  },
+  {
+    "repo": "sqlite_ivm@main",
+    "path": "bench/crossover/29_profile.rs"
+  },
+  {
+    "repo": "sqlite_ivm@main",
+    "path": "bench/crossover/9_crossover_workload.mjs"
+  },
+  {
+    "repo": "sqlite_ivm@main",
     "path": "bench/src/arms/dd.rs"
   },
   {
@@ -8926,5 +8954,13 @@
   {
     "repo": "sqlite_ivm@main",
     "path": "bench/src/scale_dd.rs"
+  },
+  {
+    "repo": "sqlite_ivm@main",
+    "path": "bench/tests/6_extension_load.rs"
+  },
+  {
+    "repo": "sqlite_ivm@main",
+    "path": "scripts/13_benchmark_inventory.py"
   }
 ]
