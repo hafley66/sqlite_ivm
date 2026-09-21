@@ -1,8 +1,9 @@
 //! Owned relational plans lowered from sqlite3-parser. SQLite evaluates scalar expressions.
 use crate::catalog::error;
+use crate::columns::{column_references, renumber_columns};
 use rusqlite::{Connection, Result};
 use sqlite3_parser::{ast::*, lexer::sql::Parser, Bump, FallibleIterator};
-fn sql<T: fmt::ToTokens>(value: &T) -> String {
+pub(crate) fn sql<T: fmt::ToTokens>(value: &T) -> String {
     struct Sql<'a, T>(&'a T);
     impl<T: fmt::ToTokens> std::fmt::Display for Sql<'_, T> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -22,6 +23,25 @@ pub struct Field {
     pub position: usize,
     pub merged_star: bool,
     pub collation: String,
+}
+pub(crate) fn field(
+    qualifier: String,
+    name: String,
+    affinity: String,
+    collation: String,
+    visible: bool,
+    unqualified: bool,
+) -> Field {
+    Field {
+        qualifier,
+        name,
+        affinity,
+        visible,
+        unqualified,
+        position: 0,
+        merged_star: false,
+        collation,
+    }
 }
 #[derive(Clone, Debug)]
 pub enum Kind {
@@ -113,7 +133,7 @@ pub struct Plan {
     pub output: usize,
     pub names: Vec<String>,
 }
-fn name(n: &str) -> String {
+pub(crate) fn name(n: &str) -> String {
     if n.starts_with('"') && n.ends_with('"') {
         n[1..n.len() - 1].replace("\"\"", "\"")
     } else if n.starts_with('[') && n.ends_with(']') {
@@ -124,12 +144,12 @@ fn name(n: &str) -> String {
         n.into()
     }
 }
-fn alias(a: &Option<As<'_>>) -> Option<String> {
+pub(crate) fn alias(a: &Option<As<'_>>) -> Option<String> {
     a.as_ref().map(|a| match a {
         As::As(n) | As::Elided(n) => name(n.0),
     })
 }
-fn resolve(e: &Expr<'_>, fields: &[Field]) -> Result<usize> {
+pub(crate) fn resolve(e: &Expr<'_>, fields: &[Field]) -> Result<usize> {
     let (q, n) = match e {
         Expr::Id(n) => (None, name(n.0)),
         Expr::Name(n) => (None, name(n.0)),
@@ -151,7 +171,7 @@ fn resolve(e: &Expr<'_>, fields: &[Field]) -> Result<usize> {
     }
     Ok(found[0])
 }
-fn explicit_collation(e: &Expr<'_>) -> Option<String> {
+pub(crate) fn explicit_collation(e: &Expr<'_>) -> Option<String> {
     match e {
         Expr::Collate(_, n) => Some(name(n).to_ascii_uppercase()),
         Expr::Binary(a, _, b) => explicit_collation(a).or_else(|| explicit_collation(b)),
@@ -160,7 +180,7 @@ fn explicit_collation(e: &Expr<'_>) -> Option<String> {
         _ => None,
     }
 }
-fn implicit_collation(e: &Expr<'_>, fields: &[Field]) -> Option<String> {
+pub(crate) fn implicit_collation(e: &Expr<'_>, fields: &[Field]) -> Option<String> {
     if let Ok(i) = resolve(e, fields) {
         return Some(fields[i].collation.clone());
     }
@@ -172,7 +192,7 @@ fn implicit_collation(e: &Expr<'_>, fields: &[Field]) -> Option<String> {
         _ => None,
     }
 }
-fn collation(e: &Expr<'_>, fields: &[Field]) -> String {
+pub(crate) fn collation(e: &Expr<'_>, fields: &[Field]) -> String {
     explicit_collation(e)
         .or_else(|| implicit_collation(e, fields))
         .unwrap_or("BINARY".into())
@@ -210,7 +230,7 @@ pub fn column_reference(index: usize, affinity: &str) -> String {
 pub fn expression(e: &Expr<'_>, fields: &[Field], aggregate: bool) -> Result<String> {
     expression_aliases(e, fields, aggregate, &[])
 }
-fn expression_aliases(
+pub(crate) fn expression_aliases(
     e: &Expr<'_>,
     fields: &[Field],
     aggregate: bool,
@@ -515,7 +535,7 @@ fn index_pairs(
         _ => {}
     }
 }
-fn affinity(declared: &str) -> String {
+pub(crate) fn affinity(declared: &str) -> String {
     let declared = declared.to_ascii_uppercase();
     if declared.contains("INT") {
         "INTEGER"
@@ -536,7 +556,7 @@ fn affinity(declared: &str) -> String {
     }
     .into()
 }
-fn expression_affinity(e: &Expr<'_>, fields: &[Field]) -> String {
+pub(crate) fn expression_affinity(e: &Expr<'_>, fields: &[Field]) -> String {
     if let Ok(i) = resolve(e, fields) {
         return fields[i].affinity.clone();
     }
@@ -550,7 +570,7 @@ fn expression_affinity(e: &Expr<'_>, fields: &[Field]) -> String {
         _ => String::new(),
     }
 }
-fn has_aggregate(e: &Expr<'_>) -> bool {
+pub(crate) fn has_aggregate(e: &Expr<'_>) -> bool {
     match e {
         Expr::FunctionCall {
             name,
@@ -598,7 +618,7 @@ fn has_aggregate(e: &Expr<'_>) -> bool {
         _ => false,
     }
 }
-fn ordinal(e: &Expr<'_>, width: usize) -> Result<Option<usize>> {
+pub(crate) fn ordinal(e: &Expr<'_>, width: usize) -> Result<Option<usize>> {
     if let Expr::Literal(Literal::Numeric(n)) = e {
         if let Ok(n) = n.parse::<usize>() {
             if n == 0 || n > width {
@@ -609,33 +629,33 @@ fn ordinal(e: &Expr<'_>, width: usize) -> Result<Option<usize>> {
     }
     Ok(None)
 }
-fn integer_limit(e: &Expr<'_>) -> Result<i64> {
+pub(crate) fn integer_limit(e: &Expr<'_>) -> Result<i64> {
     e.to_string()
         .replace(' ', "")
         .parse()
         .map_err(|_| error("LIMIT/OFFSET requires an integer literal"))
 }
-fn direction(s: &SortedColumn<'_>) -> &'static str {
+pub(crate) fn direction(s: &SortedColumn<'_>) -> &'static str {
     if s.order == Some(SortOrder::Desc) {
         "DESC"
     } else {
         "ASC"
     }
 }
-fn nulls(s: &SortedColumn<'_>) -> &'static str {
+pub(crate) fn nulls(s: &SortedColumn<'_>) -> &'static str {
     match s.nulls {
         Some(NullsOrder::First) => " NULLS FIRST",
         Some(NullsOrder::Last) => " NULLS LAST",
         None => "",
     }
 }
-struct Compiler<'a> {
-    db: &'a Connection,
-    plan: Plan,
-    ctes: Vec<(String, usize)>,
+pub(crate) struct Compiler<'a> {
+    pub(crate) db: &'a Connection,
+    pub(crate) plan: Plan,
+    pub(crate) ctes: Vec<(String, usize)>,
 }
 impl Compiler<'_> {
-    fn push(&mut self, kind: Kind, inputs: Vec<usize>, fields: Vec<Field>) -> usize {
+    pub(crate) fn push(&mut self, kind: Kind, inputs: Vec<usize>, fields: Vec<Field>) -> usize {
         let (kind, inputs) = self.project_group_input(kind, inputs);
         let id = self.plan.nodes.len();
         self.plan.nodes.push(Node {
@@ -707,7 +727,7 @@ impl Compiler<'_> {
         );
         (projected, vec![map])
     }
-    fn table(&mut self, t: &SelectTable<'_>) -> Result<usize> {
+    pub(crate) fn table(&mut self, t: &SelectTable<'_>) -> Result<usize> {
         if let SelectTable::Sub(from, None) = t {
             return self.from(from, &mut vec![]);
         }
@@ -788,15 +808,15 @@ impl Compiler<'_> {
                         .columns
                         .iter()
                         .enumerate()
-                        .map(|(i, n)| Field {
-                            collation: self.plan.sources[source].collations[i].clone(),
-                            merged_star: false,
-                            position: 0,
-                            visible: true,
-                            unqualified: true,
-                            qualifier: qualifier.clone(),
-                            name: n.clone(),
-                            affinity: self.plan.sources[source].affinities[i].clone(),
+                        .map(|(i, n)| {
+                            field(
+                                qualifier.clone(),
+                                n.clone(),
+                                self.plan.sources[source].affinities[i].clone(),
+                                self.plan.sources[source].collations[i].clone(),
+                                true,
+                                true,
+                            )
                         })
                         .collect();
                     (self.push(Kind::Input(source), vec![], fields), qualifier)
@@ -832,7 +852,7 @@ impl Compiler<'_> {
             fields,
         ))
     }
-    fn joined(
+    pub(crate) fn joined(
         &mut self,
         left: usize,
         right: usize,
@@ -884,7 +904,7 @@ impl Compiler<'_> {
             fields,
         ))
     }
-    fn from<'a>(
+    pub(crate) fn from<'a>(
         &mut self,
         from: &FromClause<'a>,
         where_keys: &mut Vec<&'a Expr<'a>>,
@@ -1119,7 +1139,7 @@ impl Compiler<'_> {
             fields,
         ))
     }
-    fn core(
+    pub(crate) fn core(
         &mut self,
         s: &OneSelect<'_>,
         order: Option<&[SortedColumn<'_>]>,
@@ -1306,16 +1326,14 @@ impl Compiler<'_> {
                             .collect::<Vec<_>>();
                         values.push(format!("{function}({args}){filter} OVER({over})"));
                         let value = format!("c{}", fields.len());
-                        fields.push(Field {
-                            collation: "BINARY".into(),
-                            merged_star: false,
-                            position: 0,
-                            visible: false,
-                            unqualified: false,
-                            qualifier: String::new(),
-                            name: format!("__ivm_window{}", fields.len()),
-                            affinity: String::new(),
-                        });
+                        fields.push(field(
+                            String::new(),
+                            format!("__ivm_window{}", fields.len()),
+                            String::new(),
+                            "BINARY".into(),
+                            false,
+                            false,
+                        ));
                         id = self.push(
                             Kind::Group {
                                 keys,
@@ -1334,20 +1352,18 @@ impl Compiler<'_> {
                         expression(e, &fields, aggregate)?
                     };
                     expressions.push(value);
-                    output_fields.push(Field {
-                        collation: collation(e, &fields),
-                        merged_star: false,
-                        position: 0,
-                        visible: true,
-                        unqualified: true,
-                        qualifier: String::new(),
-                        affinity: expression_affinity(e, &fields),
-                        name: alias(a).unwrap_or_else(|| match e {
+                    output_fields.push(field(
+                        String::new(),
+                        alias(a).unwrap_or_else(|| match e {
                             Expr::Name(n) | Expr::Qualified(_, n) => name(n.0),
                             Expr::Id(n) => name(n.0),
                             _ => e.to_string(),
                         }),
-                    });
+                        expression_affinity(e, &fields),
+                        collation(e, &fields),
+                        true,
+                        true,
+                    ));
                 }
             }
         }
@@ -1400,16 +1416,14 @@ impl Compiler<'_> {
                     let value = expression_aliases(&s.expr, &fields, aggregate, &aliases)?;
                     let i = expressions.len();
                     expressions.push(value);
-                    output_fields.push(Field {
-                        collation: "BINARY".into(),
-                        merged_star: false,
-                        position: 0,
-                        visible: false,
-                        unqualified: false,
-                        qualifier: String::new(),
-                        name: format!("__ivm_order{i}"),
-                        affinity: String::new(),
-                    });
+                    output_fields.push(field(
+                        String::new(),
+                        format!("__ivm_order{i}"),
+                        String::new(),
+                        "BINARY".into(),
+                        false,
+                        false,
+                    ));
                     i
                 };
                 ordering.push(format!("c{index} {}{}", direction(s), nulls(s)));
@@ -1470,7 +1484,7 @@ impl Compiler<'_> {
         }
         Ok(id)
     }
-    fn select(&mut self, s: &Select<'_>) -> Result<usize> {
+    pub(crate) fn select(&mut self, s: &Select<'_>) -> Result<usize> {
         let mark = self.ctes.len();
         if let Some(with) = &s.with {
             for cte in with.ctes {
@@ -1575,7 +1589,7 @@ impl Compiler<'_> {
         self.ctes.truncate(mark);
         Ok(id)
     }
-    fn recursive(&mut self, cte: &CommonTableExpr<'_>) -> Result<usize> {
+    pub(crate) fn recursive(&mut self, cte: &CommonTableExpr<'_>) -> Result<usize> {
         if cte.select.order_by.is_some() || cte.select.limit.is_some() {
             return Err(error("recursive ordering and LIMIT unsupported"));
         }
@@ -1807,7 +1821,7 @@ impl Compiler<'_> {
         Ok(self.push(Kind::Fixpoint { rules }, inputs, member_fields))
     }
 }
-fn table_mentions(t: &SelectTable<'_>, member: &str) -> bool {
+pub(crate) fn table_mentions(t: &SelectTable<'_>, member: &str) -> bool {
     match t {
         SelectTable::Table(n, _, _) => {
             n.db_name.is_none() && name(n.name.0).eq_ignore_ascii_case(member)
@@ -1818,7 +1832,7 @@ fn table_mentions(t: &SelectTable<'_>, member: &str) -> bool {
     }
 }
 /// Flattens an AND chain into its equality and filter leaves.
-fn conjuncts<'a>(e: &'a Expr<'a>, out: &mut Vec<&'a Expr<'a>>) {
+pub(crate) fn conjuncts<'a>(e: &'a Expr<'a>, out: &mut Vec<&'a Expr<'a>>) {
     if let Expr::Binary(a, Operator::And, b) = e {
         conjuncts(a, out);
         conjuncts(b, out);
@@ -1826,7 +1840,7 @@ fn conjuncts<'a>(e: &'a Expr<'a>, out: &mut Vec<&'a Expr<'a>>) {
         out.push(e);
     }
 }
-fn column_pair<'a>(e: &'a Expr<'a>, fields: &[Field], split: usize) -> Option<(usize, usize)> {
+pub(crate) fn column_pair<'a>(e: &'a Expr<'a>, fields: &[Field], split: usize) -> Option<(usize, usize)> {
     let inner = |e: &'a Expr<'a>| match e {
         Expr::Parenthesized(es) if es.len() == 1 => &es[0],
         _ => e,
@@ -1846,7 +1860,7 @@ fn column_pair<'a>(e: &'a Expr<'a>, fields: &[Field], split: usize) -> Option<(u
 /// Positions of conjuncts that are an equality between one column of the
 /// already-joined left fields and one column of the incoming right table.
 /// Those conjuncts become the step's ON; the rest stay in WHERE.
-fn where_keys_for_step(keys: &[&Expr<'_>], fields: &[Field], split: usize) -> Vec<usize> {
+pub(crate) fn where_keys_for_step(keys: &[&Expr<'_>], fields: &[Field], split: usize) -> Vec<usize> {
     keys.iter()
         .enumerate()
         .filter(|(_, e)| column_pair(e, fields, split).is_some())
@@ -1860,7 +1874,7 @@ fn from_mentions(from: &FromClause<'_>, member: &str) -> bool {
             .as_ref()
             .is_some_and(|joins| joins.iter().any(|j| table_mentions(&j.table, member)))
 }
-fn part_mentions(part: &OneSelect<'_>, member: &str) -> bool {
+pub(crate) fn part_mentions(part: &OneSelect<'_>, member: &str) -> bool {
     match part {
         OneSelect::Select {
             from: Some(from), ..
@@ -1876,7 +1890,7 @@ fn select_mentions(s: &Select<'_>, member: &str) -> bool {
             .chain(s.body.compounds.iter().flatten().map(|c| &c.select))
             .any(|part| part_mentions(part, member) || part_expressions_mention(part, member))
 }
-fn part_expressions_mention(part: &OneSelect<'_>, member: &str) -> bool {
+pub(crate) fn part_expressions_mention(part: &OneSelect<'_>, member: &str) -> bool {
     let OneSelect::Select {
         columns,
         where_clause,
@@ -1926,7 +1940,7 @@ fn expr_mentions(e: &Expr<'_>, member: &str) -> bool {
 }
 /// Named errors for recursion shapes SQLite itself rejects during prepare, so
 /// the reason surfaces before SQLite's own message.
-fn recursion_shape(s: &Select<'_>) -> Result<()> {
+pub(crate) fn recursion_shape(s: &Select<'_>) -> Result<()> {
     if let Some(with) = &s.with {
         for cte in with.ctes {
             recursion_shape(cte.select)?;
@@ -1984,7 +1998,7 @@ fn recursion_shape(s: &Select<'_>) -> Result<()> {
     }
     Ok(())
 }
-fn equalities(e: &Expr<'_>, fields: &[Field], out: &mut Vec<(usize, String)>) {
+pub(crate) fn equalities(e: &Expr<'_>, fields: &[Field], out: &mut Vec<(usize, String)>) {
     match e {
         Expr::Parenthesized(es) if es.len() == 1 => equalities(&es[0], fields, out),
         Expr::Binary(a, Operator::And, b) => {
@@ -2104,70 +2118,4 @@ pub fn bind(db: &Connection, sql: &str) -> Result<Plan> {
     };
     compiler.plan.output = compiler.select(select)?;
     Ok(compiler.plan)
-}
-
-/// Walks an internal SQL fragment and visits every bare `c<digits>` column
-/// reference outside quoted strings and identifiers.
-fn visit_columns(sql: &str, mut visit: impl FnMut(&str, usize)) {
-    let bytes = sql.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        let b = bytes[i];
-        if b == b'\'' || b == b'"' || b == b'`' || b == b'[' {
-            let close = if b == b'[' { b']' } else { b };
-            let start = i;
-            i += 1;
-            while i < bytes.len() {
-                if bytes[i] == close {
-                    if close != b']' && bytes.get(i + 1) == Some(&close) {
-                        i += 2;
-                        continue;
-                    }
-                    break;
-                }
-                i += 1;
-            }
-            i += 1;
-            visit(&sql[start..i.min(bytes.len())], usize::MAX);
-            continue;
-        }
-        let word = b.is_ascii_alphanumeric() || b == b'_';
-        let boundary = i == 0 || !(bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_');
-        if word {
-            let start = i;
-            while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
-                i += 1;
-            }
-            let token = &sql[start..i];
-            let column = boundary
-                .then(|| token.strip_prefix('c'))
-                .flatten()
-                .filter(|d| !d.is_empty() && d.bytes().all(|x| x.is_ascii_digit()))
-                .and_then(|d| d.parse().ok());
-            visit(token, column.unwrap_or(usize::MAX));
-            continue;
-        }
-        visit(&sql[i..i + 1], usize::MAX);
-        i += 1;
-    }
-}
-fn column_references(sql: &str) -> Vec<usize> {
-    let mut out = vec![];
-    visit_columns(sql, |_, c| {
-        if c != usize::MAX {
-            out.push(c)
-        }
-    });
-    out
-}
-fn renumber_columns(sql: &str, map: impl Fn(usize) -> usize) -> String {
-    let mut out = String::with_capacity(sql.len());
-    visit_columns(sql, |token, c| {
-        if c == usize::MAX {
-            out.push_str(token)
-        } else {
-            out.push_str(&format!("c{}", map(c)))
-        }
-    });
-    out
 }
