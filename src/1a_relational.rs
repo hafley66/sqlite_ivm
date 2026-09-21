@@ -657,6 +657,18 @@ impl Plan {
                     .map(|e| e.replace("__window__", &format!("ORDER BY {}", order.join(","))))
                     .collect::<Vec<_>>()
                     .join(",");
+                if *window || limit.is_some() {
+                    let peak: i64 = db
+                        .prepare_cached(&format!("SELECT coalesce(max(__n),0) FROM {t}"))?
+                        .query_row([], |r| r.get(0))?;
+                    let expansion = match limit.filter(|n| *n >= 0) {
+                        Some(n) if !*window => peak.min(n.saturating_add(*offset)),
+                        _ => peak,
+                    };
+                    if expansion > BULK_MULTIPLICITY_BUDGET {
+                        return Err(error("group multiplicity expansion exceeds budget"));
+                    }
+                }
                 if *window {
                     // Every partition in one statement: the window runs over the
                     // expanded bag partitioned by key, instead of once per key.
@@ -675,7 +687,7 @@ impl Plan {
                         .join(",");
                     db.execute_cached(
                         &format!(
-                            "WITH RECURSIVE candidates(__k,{cols_in},__n) AS (SELECT __k,{cols_in},__n FROM {t}),                              expanded(__k,{cols_in},__copies) AS (SELECT __k,{cols_in},__n FROM candidates UNION ALL SELECT __k,{cols_in},__copies-1 FROM expanded WHERE __copies>1)                              INSERT INTO {out}({cols},__m) SELECT q.*,1 FROM (SELECT {partitioned} FROM expanded) q"
+                            "WITH RECURSIVE candidates(__k,{cols_in},__n) AS (SELECT __k,{cols_in},__n FROM {t}),                              copies(__copy) AS (SELECT 1 UNION ALL SELECT __copy+1 FROM copies WHERE __copy<(SELECT coalesce(max(__n),0) FROM candidates))                              INSERT INTO {out}({cols},__m) SELECT q.*,1 FROM (SELECT {partitioned} FROM candidates CROSS JOIN copies WHERE __copy<=__n) q"
                         ),
                         [],
                     )?;
@@ -699,7 +711,7 @@ impl Plan {
                         wanted.map(|n| format!(" LIMIT {n}")).unwrap_or_default()
                     );
                     let single = format!(
-                        "WITH RECURSIVE candidates({cols_in},__n) AS ({candidates}), expanded({cols_in},__copies) AS (SELECT {cols_in},__n FROM candidates UNION ALL SELECT {cols_in},__copies-1 FROM expanded WHERE __copies>1) SELECT {replaced} FROM expanded{}{}",
+                        "WITH RECURSIVE candidates({cols_in},__n) AS ({candidates}), copies(__copy) AS (SELECT 1 UNION ALL SELECT __copy+1 FROM copies WHERE __copy<(SELECT coalesce(max(__n),0) FROM candidates)) SELECT {replaced} FROM candidates CROSS JOIN copies WHERE __copy<=__n{}{}",
                         if !*window && !order.is_empty() {
                             format!(" ORDER BY {}", order.join(","))
                         } else {
