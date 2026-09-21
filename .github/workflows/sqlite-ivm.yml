@@ -1,9 +1,23 @@
 name: SQLite IVM
 on:
   push:
-    paths: ['.github/workflows/sqlite-ivm.yml']
+    paths:
+      - .github/workflows/sqlite-ivm.yml
+      - Cargo.toml
+      - Cargo.lock
+      - src/**
+      - tests/**
+      - scripts/**
+      - bench/**
   pull_request:
-    paths: ['.github/workflows/sqlite-ivm.yml']
+    paths:
+      - .github/workflows/sqlite-ivm.yml
+      - Cargo.toml
+      - Cargo.lock
+      - src/**
+      - tests/**
+      - scripts/**
+      - bench/**
   workflow_dispatch:
 permissions:
   contents: read
@@ -14,6 +28,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    # The outer bound of the timeout rail in CI; the battery itself carries the
+    # 120s ceiling in scripts/9_verify.sh.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
         with:
@@ -24,7 +41,7 @@ jobs:
       - name: Select macOS SQLite
         if: runner.os == 'macOS'
         run: |
-          HOMEBREW_NO_AUTO_UPDATE=1 brew install sqlite swi-prolog gnuplot
+          HOMEBREW_NO_AUTO_UPDATE=1 brew install sqlite swi-prolog gnuplot coreutils
           echo "SQLITE3_LIB_DIR=$(brew --prefix sqlite)/lib" >> "$GITHUB_ENV"
           echo "SQLITE3_INCLUDE_DIR=$(brew --prefix sqlite)/include" >> "$GITHUB_ENV"
           echo "SQLITE3=$(brew --prefix sqlite)/bin/sqlite3" >> "$GITHUB_ENV"
@@ -32,6 +49,9 @@ jobs:
         run: |
           cargo fetch --locked --manifest-path Cargo.toml
           cargo fetch --locked --manifest-path bench/Cargo.toml
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
       - name: Rust and native acceptance tests
         run: bash scripts/9_verify.sh
       - name: Build extension dylib and bench binary into one target dir
