@@ -406,11 +406,15 @@ impl MaterializeStatements {
                     }
                     census::exec_cached(db, Phase::Materialize, name, &g.window_insert, [])?;
                 } else if g.limit.is_some() {
-                    // One span for the per-key insert; each execution fires its
-                    // own trace event. The key loop is the bounded read below.
-                    let census_stmt = census::open(Phase::Materialize, name, &g.limit_insert, census::CACHED);
-                    let _statement = census_stmt.enter();
-                    let mut statement = db.prepare_cached(&g.limit_insert)?;
+                    // One span per key insert, so each execution carries its own
+                    // changes() count. The key read loop is bounded below.
+                    let read = census::open(
+                        Phase::Materialize,
+                        name,
+                        &g.limit_keys,
+                        census::CACHED,
+                    );
+                    let _read = read.enter();
                     let mut key_statement = db.prepare_cached(&g.limit_keys)?;
                     let mut key_rows = key_statement.query([])?;
                     let mut groups = 0usize;
@@ -419,9 +423,16 @@ impl MaterializeStatements {
                         if groups > BULK_GROUP_BUDGET {
                             return Err(error("bulk group budget exceeded"));
                         }
-                        statement.execute([key.get::<_, i64>(0)?])?;
+                        census::exec_cached(
+                            db,
+                            Phase::Materialize,
+                            name,
+                            &g.limit_insert,
+                            [key.get::<_, i64>(0)?],
+                        )?;
                     }
-                    census_stmt.rows(groups);
+                    drop(key_rows);
+                    read.rows(groups);
                 } else {
                     census::exec_cached(db, Phase::Materialize, name, &g.plain_insert, [])?;
                 }

@@ -1,6 +1,6 @@
 use crate::{
     catalog::error,
-    census::{self, Phase, CACHED},
+    census::{self, Phase},
     relational::{Kind, Plan},
     relational_maintenance::{BULK_MULTIPLICITY_BUDGET, BULK_ROUND_BUDGET, Row},
     relational_program::{
@@ -39,10 +39,8 @@ impl Plan {
             let KindStatements::Input { seed: insert } = &program.nodes[id].kind else {
                 unreachable!()
             };
-            // One span per node seed; each bound execution fires its own trace event.
-            let statement = census::open(Phase::Drain, name, insert, CACHED);
-            let _statement = statement.enter();
-            let mut insert = db.prepare_cached(insert.as_str())?;
+            // One span per bound execution, so each seed insert carries its own
+            // site, prepared flag and changes() count.
             let mut bound = 0usize;
             for (source, row, d) in batch {
                 if *source != input || *d == 0 {
@@ -52,9 +50,14 @@ impl Plan {
                     return Err(error("seed statement budget exceeded"));
                 }
                 bound += 1;
-                insert.execute(params_from_iter(row.iter().chain(std::iter::once(&Value::Integer(*d)))))?;
+                census::exec_cached(
+                    db,
+                    Phase::Drain,
+                    name,
+                    insert,
+                    params_from_iter(row.iter().chain(std::iter::once(&Value::Integer(*d)))),
+                )?;
             }
-            statement.rows(bound);
         }
         drop(seed);
         for id in 0..self.nodes.len() {
