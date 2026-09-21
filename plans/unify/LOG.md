@@ -37,3 +37,5 @@ unless the row says otherwise. Executor glm53f unless noted.
   them. Lanes run from `origin/main`; nothing depends on it. Morning: move
   the strays aside, `git pull --ff-only`.
 - dispatched refactor/bench-rust (m-eecc57e1), fix/open-bugs (m-9ba06a98).
+- 04:2x chore/archive-labs PR #23 graded (66 files, owned paths only, `0_query` green) and merged; main `fd4dadd`. Six lab issues closed.
+- fix/open-bugs commits so far: `44ecad9` 14_scale ignored, `553ca21` window LIMIT copies CTE (reviewed: ordinal `copies` cross join, budget check, one extra `max(__n)` statement per group materialize; rail 13 decides), `b5c6c37` group limit growth pin.
