@@ -3,7 +3,8 @@ use crate::{
     relational::{Kind, Plan},
     relational_maintenance::{
         BULK_DEPARTURE_ROUND_BUDGET, BULK_DEPARTURE_SET_ROUND_BUDGET,
-        BULK_MULTIPLICITY_BUDGET, BULK_ROUND_BUDGET, CachedExecute, Row,
+        BULK_DEPARTURE_SET_RESTORE_THRESHOLD, BULK_MULTIPLICITY_BUDGET, BULK_ROUND_BUDGET,
+        CachedExecute, Row,
     },
     relational_program::{
         ArrangementStatements, FixpointSide, FixpointStatements, KindStatements, Program,
@@ -274,8 +275,15 @@ impl Plan {
                 }
             }
             let restored = max_rowid(&statements.max_all)?;
-            for sql in &statements.restores {
-                db.execute_cached(sql, [])?;
+            let work_rows: i64 = db
+                .prepare_cached(&statements.work_rows)?
+                .query_row([], |r| r.get(0))?;
+            if work_rows < BULK_DEPARTURE_SET_RESTORE_THRESHOLD {
+                db.execute_cached(&statements.restore_small, [])?;
+            } else {
+                for sql in &statements.restores {
+                    db.execute_cached(sql, [])?;
+                }
             }
             rounds(restored)?;
             db.execute_cached(&statements.clear_work, [])?;

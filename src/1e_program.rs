@@ -80,6 +80,8 @@ pub(crate) struct FixpointStatements {
     pub(crate) clear_deleted: String,
     pub(crate) collect_deleted: String,
     pub(crate) drop_deleted: String,
+    pub(crate) work_rows: String,
+    pub(crate) restore_small: String,
     pub(crate) restores: Vec<String>,
     /// Per member rule, in rule order: closure derives over the whole member
     /// table bounded by a rowid range carried in `?1` and `?2`.
@@ -341,6 +343,33 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
     let a_identity = identity_of("a");
     let d_cols = (0..width).map(|i| format!("d.c{i}")).collect::<Vec<_>>().join(",");
     let a_cols = (0..width).map(|i| format!("a.c{i}")).collect::<Vec<_>>().join(",");
+    let matched = |rule: &Rule| {
+        rule.head
+            .iter()
+            .zip(&node.fields)
+            .enumerate()
+            .map(|(i, (h, f))| format!("(({h}) COLLATE {}) IS w.c{i}", f.collation))
+            .collect::<Vec<_>>()
+            .join(" AND ")
+    };
+    let plain_from = |rule: &Rule| {
+        let mut params: Vec<Value> = vec![];
+        rule_from(
+            rule,
+            &roles(name, id, 0, rule, None, Role::Table(all.clone())),
+            &mut params,
+        )
+    };
+    let restore_parts = rules
+        .iter()
+        .map(|rule| {
+            format!(
+                "EXISTS(SELECT 1 {}{})",
+                plain_from(rule),
+                rule_where(rule, Some(&matched(rule)))
+            )
+        })
+        .collect::<Vec<_>>();
     FixpointStatements {
         max_all: format!("SELECT coalesce(max(rowid),0) FROM {all}"),
         clear_work: format!("DELETE FROM {work}"),
@@ -350,6 +379,12 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
         ),
         drop_deleted: format!(
             "DELETE FROM {all} WHERE __k IN (SELECT __k FROM {work})"
+        ),
+        work_rows: format!("SELECT count(*) FROM {work}"),
+        restore_small: format!(
+            "INSERT OR IGNORE INTO {all}(__k,{cols}) SELECT w.__k,{} FROM {work} w WHERE {}",
+            (0..width).map(|i| format!("w.c{i}")).collect::<Vec<_>>().join(","),
+            restore_parts.join(" OR ")
         ),
         restores: rules
             .iter()
