@@ -1,6 +1,6 @@
 ---
 created: 2026-09-20
-updated: 2026-09-20
+updated: 2026-09-21
 type: bug
 status: open
 priority: high
@@ -47,8 +47,8 @@ seed by design, so the loss happens elsewhere in that path.
 
 ## Acceptance Criteria
 
-- [ ] `window_with_limit_reads_every_copy` passes with the `#[ignore]` removed
-- [ ] the three window shapes in that test stay green under all eight
+- [x] `window_with_limit_reads_every_copy` passes with the `#[ignore]` removed
+- [x] the three window shapes in that test stay green under all eight
       multiplicity shapes
-- [ ] a `docs/failure-modes.md` row: incident, cause, the fail-pre-fix test,
+- [x] a `docs/failure-modes.md` row: incident, cause, the fail-pre-fix test,
       the rail that keeps it from returning

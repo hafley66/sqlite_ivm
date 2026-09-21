@@ -1,6 +1,6 @@
 ---
 created: 2026-09-20
-updated: 2026-09-20
+updated: 2026-09-21
 type: task
 status: obsolete
 priority: high
@@ -100,3 +100,9 @@ Already shipped. origin/main has no json_array or json_extract on the maintenanc
 This issue was written off line numbers in docs/2026-09-19-modern-sqlite.md rather than against current src/. The attribution profile priced this lab at zero upside and found the code already gone.
 
 Rail: a lab that proposes a change must cite the line in current main, not a doc.
+
+## Comments
+
+### 2026-09-21T04:04:24Z · @fable
+
+archived: labs die on landing

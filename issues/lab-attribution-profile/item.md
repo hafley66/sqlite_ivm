@@ -1,6 +1,6 @@
 ---
 created: 2026-09-19
-updated: 2026-09-20
+updated: 2026-09-21
 type: task
 status: done
 priority: high
@@ -85,3 +85,8 @@ lab, not a failure.
 ### 2026-09-20T19:30:45Z · @fable
 
 examples/6_costs.rs (99389f2) prints cost per node kind per drain and the top statements with plans, over hafley_observe::CountRecorder::event_sums (hafley-rs #86). Run: cargo run -q --example 6_costs. Finding: group_limit upsert UPDATE at 1a_relational.rs:1045 is 46k vm_step per run, three SCAN over the delta with json_array(CASE typeof) rebuilt per row; apply_state 25k. Load is 6 views, fixture is 20.
+
+### 2026-09-21T04:04:24Z · @fable
+
+archived: labs die on landing
+

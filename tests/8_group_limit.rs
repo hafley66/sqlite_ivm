@@ -72,10 +72,7 @@ fn group_limit_matches_plain_sql_across_multiplicity_limit_and_offset() -> Resul
     Ok(())
 }
 
-/// Red on 43d695e and red after the clamp: the defect predates both. Kept in tree
-/// as the fail-pre-fix case for @window-limit-drops-multiplicity-copies.
 #[test]
-#[ignore = "@window-limit-drops-multiplicity-copies"]
 fn window_with_limit_reads_every_copy() -> Result<()> {
     let db = Connection::open_in_memory()?;
     register(&db)?;
