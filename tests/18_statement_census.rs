@@ -6,14 +6,20 @@
 // Shape follows tests/13_statements_per_drain.rs: a CountRecorder under a
 // capture layer, one fixed workload, counts read back from the events.
 //
-// The tsv on stdout is the receipt; run with --nocapture.
-#![cfg(all(not(feature = "extension"), feature = "census"))]
+// The tsv on stdout is the receipt; run with --nocapture. With
+// EVERY_STATEMENT_WALL set it times the scenarios with logging off instead,
+// and the recipe runs that in both the census and the spans-compiled-out build.
+#![cfg(not(feature = "extension"))]
 
-use hafley_observe::sqlite::SQLITE_TARGET;
 use rusqlite::{Connection, Result};
 use sqlite_ivm::extension::register;
+#[cfg(feature = "census")]
+use hafley_observe::sqlite::SQLITE_TARGET;
+#[cfg(feature = "census")]
 use std::collections::BTreeMap;
+#[cfg(feature = "census")]
 use tracing_capture::{CapturedEvent, CapturedSpan, SharedStorage};
+#[cfg(feature = "census")]
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 /// The input row count the inserts scenarios and the retraction scenario use.
@@ -21,9 +27,6 @@ const INPUT_ROWS: i64 = 100;
 /// The reach circuit's fanout and n. Fanout 1 is the smallest shape.
 const REACH_FANOUT: i64 = 1;
 const REACH_ROWS: i64 = 8;
-/// Statement time on this SQLite build is quantized to one millisecond, so a
-/// cell whose total falls below this floor reads as no effect at this scale.
-const TIME_FLOOR_US: f64 = 1000.0;
 
 /// The two circuits, verbatim from bench/src/scale.rs's SCALE_QUERIES.
 const GROUP_QUERY: &str = "SELECT k AS c0,count(*) AS c1,sum(v) AS c2 FROM a GROUP BY k";
@@ -124,6 +127,7 @@ fn run(db: &Connection, scenario: fn(&Connection) -> Result<()>) -> Result<()> {
     scenario(db)
 }
 
+#[cfg(feature = "census")]
 /// Per (phase, verb), the number of statement executions.
 fn counts(storage: &SharedStorage) -> BTreeMap<(String, String), usize> {
     let mut counts = BTreeMap::new();
@@ -145,10 +149,12 @@ fn counts(storage: &SharedStorage) -> BTreeMap<(String, String), usize> {
     counts
 }
 
+#[cfg(feature = "census")]
 fn is_statement_event(meta: &tracing::Metadata<'_>) -> bool {
     meta.target() == SQLITE_TARGET && *meta.level() == tracing::Level::DEBUG
 }
 
+#[cfg(feature = "census")]
 fn span_field(span: CapturedSpan<'_>, name: &str) -> String {
     let Some(value) = span.value(name) else {
         return String::new();
@@ -160,6 +166,7 @@ fn span_field(span: CapturedSpan<'_>, name: &str) -> String {
         .unwrap_or_else(|| format!("{value:?}"))
 }
 
+#[cfg(feature = "census")]
 fn event_int(event: &CapturedEvent<'_>, name: &str) -> i64 {
     let Some(value) = event.value(name) else {
         return 0;
@@ -176,6 +183,7 @@ fn event_int(event: &CapturedEvent<'_>, name: &str) -> i64 {
     0
 }
 
+#[cfg(feature = "census")]
 #[derive(Default)]
 struct Cell {
     calls: usize,
@@ -184,6 +192,7 @@ struct Cell {
     cached: usize,
 }
 
+#[cfg(feature = "census")]
 /// Every statement execution, grouped by phase, verb, site and object, read
 /// off the capture layer's raw events so the per-call tail survives.
 fn cells(storage: &SharedStorage) -> BTreeMap<(String, String, String, String), Cell> {
@@ -219,6 +228,7 @@ fn cells(storage: &SharedStorage) -> BTreeMap<(String, String, String, String), 
     cells
 }
 
+#[cfg(feature = "census")]
 fn p99(nanos: &[i64]) -> f64 {
     if nanos.is_empty() {
         return 0.0;
@@ -229,8 +239,14 @@ fn p99(nanos: &[i64]) -> f64 {
     sorted[index] as f64
 }
 
-/// The tsv the recipe commits: one row per (phase, verb, site, object).
-fn print_table(scenario: &str, input_rows: i64, cells: &BTreeMap<(String, String, String, String), Cell>) {
+/// The tsv the recipe commits: one row per (phase, verb, site, object), raw
+/// microseconds, sorted by the indictment column (calls per input row).
+#[cfg(feature = "census")]
+fn print_table(
+    scenario: &str,
+    input_rows: i64,
+    cells: &BTreeMap<(String, String, String, String), Cell>,
+) {
     let mut rows: Vec<_> = cells
         .iter()
         .map(|(key, cell)| {
@@ -240,37 +256,20 @@ fn print_table(scenario: &str, input_rows: i64, cells: &BTreeMap<(String, String
             } else {
                 total_ns as f64 / cell.calls as f64 / 1000.0
             };
-            let total_us = total_ns as f64 / 1000.0;
-            let total_ms = total_ns as f64 / 1_000_000.0;
             let prepared_pct = if cell.calls == 0 {
                 0.0
             } else {
                 100.0 * cell.cached as f64 / cell.calls as f64
             };
             let per_input_row = cell.calls as f64 / input_rows as f64;
-            (
-                key,
-                cell,
-                total_ns,
-                total_us,
-                total_ms,
-                mean_us,
-                prepared_pct,
-                per_input_row,
-            )
+            (key, cell, total_ns as f64 / 1000.0, mean_us, prepared_pct, per_input_row)
         })
         .collect();
-    // Sort by the indictment column: calls per input row.
-    rows.sort_by(|a, b| b.7.partial_cmp(&a.7).unwrap_or(std::cmp::Ordering::Equal));
-    for (key, cell, _total_ns, total_us, total_ms, mean_us, prepared_pct, per_input_row) in rows {
+    rows.sort_by(|a, b| b.5.partial_cmp(&a.5).unwrap_or(std::cmp::Ordering::Equal));
+    for (key, cell, total_us, mean_us, prepared_pct, per_input_row) in rows {
         let (phase, verb_name, site, object) = key;
-        let total_ms = if total_us < TIME_FLOOR_US {
-            "no effect at this scale".to_string()
-        } else {
-            format!("{total_ms:.3}")
-        };
         println!(
-            "{scenario}\t{phase}\t{verb_name}\t{site}\t{object}\t{}\t{total_ms}\t{mean_us:.1}\t{:.1}\t{}\t{prepared_pct:.1}\t{per_input_row:.2}",
+            "{scenario}\t{phase}\t{verb_name}\t{site}\t{object}\t{}\t{total_us:.1}\t{mean_us:.1}\t{:.1}\t{}\t{prepared_pct:.1}\t{per_input_row:.2}",
             cell.calls,
             p99(&cell.nanos) / 1000.0,
             cell.rows,
@@ -278,6 +277,7 @@ fn print_table(scenario: &str, input_rows: i64, cells: &BTreeMap<(String, String
     }
 }
 
+#[cfg(feature = "census")]
 /// Counts measured on this tree, per (phase, verb). A change that moves any of
 /// these numbers fails here; the numbers are the measurement, not an aim.
 fn pinned_counts(name: &str) -> Vec<(&'static str, &'static str, usize)> {
@@ -363,6 +363,7 @@ fn pinned_counts(name: &str) -> Vec<(&'static str, &'static str, usize)> {
     }
 }
 
+#[cfg(feature = "census")]
 fn pinned(name: &str, counts: &BTreeMap<(String, String), usize>) {
     let expected: BTreeMap<(String, String), usize> = pinned_counts(name)
         .into_iter()
@@ -371,8 +372,48 @@ fn pinned(name: &str, counts: &BTreeMap<(String, String), usize>) {
     assert_eq!(*counts, expected, "statement census for {name}");
 }
 
+/// The wall-time pass: logging off, three runs per scenario, the median and
+/// the spread printed. The recipe runs it in the census build and in the
+/// spans-compiled-out build, so the page names which wall came from which.
+fn wall() -> Result<()> {
+    const RUNS: usize = 3;
+    for (name, _input_rows, scenario) in scenarios() {
+        let mut samples = Vec::with_capacity(RUNS);
+        for _ in 0..RUNS {
+            let db = Connection::open_in_memory()?;
+            register(&db)?;
+            let clock = std::time::Instant::now();
+            run(&db, scenario)?;
+            samples.push(clock.elapsed().as_secs_f64() * 1000.0);
+        }
+        samples.sort_by(f64::total_cmp);
+        println!(
+            "WALL\t{name}\t{:.3}\t{:.3}\t{:.3}",
+            samples[0],
+            samples[RUNS / 2],
+            samples[RUNS - 1]
+        );
+    }
+    Ok(())
+}
+
 #[test]
 fn statement_census_matches_pinned_counts() -> Result<()> {
+    if std::env::var_os("EVERY_STATEMENT_WALL").is_some() {
+        return wall();
+    }
+    #[cfg(feature = "census")]
+    {
+        census_pass()
+    }
+    #[cfg(not(feature = "census"))]
+    {
+        Ok(())
+    }
+}
+
+#[cfg(feature = "census")]
+fn census_pass() -> Result<()> {
     for (name, input_rows, scenario) in scenarios() {
         let storage = SharedStorage::default();
         let _guard = tracing_subscriber::registry()
