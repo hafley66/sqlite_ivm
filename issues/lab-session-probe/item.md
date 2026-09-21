@@ -1,8 +1,8 @@
 ---
 created: 2026-09-19
-updated: 2026-09-20
+updated: 2026-09-21
 type: task
-status: closed
+status: done
 priority: normal
 epic: lab-queue-round-one
 labels: [lab]
@@ -80,3 +80,9 @@ fn changeset_carries_old_values_and_patchset_does_not() { ... }
 passes, lab 8 measures; if any fails, there is nothing to measure.
 
 **A failing gate is a passing lab.** The verdict is an answer, not a green suite.
+
+## Comments
+
+### 2026-09-21T04:05:05Z · @fable
+
+archived: labs die on landing

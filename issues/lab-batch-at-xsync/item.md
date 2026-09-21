@@ -1,6 +1,6 @@
 ---
 created: 2026-09-20
-updated: 2026-09-20
+updated: 2026-09-21
 type: task
 status: done
 priority: high
@@ -115,3 +115,9 @@ anyway. The `CountRecorder` assertion in row one is what catches it.
 ### 2026-09-20T19:30:31Z · @fable
 
 sqlite_bulk_trigger::Collector embedded in 2_vtab.rs; rows stage at the trigger, drain at xSync or first read; savepoint trio forwarded; mid-transaction drain then ROLLBACK TO re-stages (hafley-rs #85, dc20afa5)
+
+## Comments
+
+### 2026-09-21T04:04:24Z · @fable
+
+archived: labs die on landing

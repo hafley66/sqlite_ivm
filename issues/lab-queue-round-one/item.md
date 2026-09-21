@@ -1,10 +1,11 @@
 ---
 created: 2026-09-19
-updated: 2026-09-19
+updated: 2026-09-21
 type: epic
-status: open
+status: done
 priority: normal
 owner: hafley66
+closed: 2026-09-21
 ---
 
 # Labs 3 through 9, blocked on the attribution profile
@@ -67,3 +68,9 @@ The one thing this epic asserts: **no lab below is started before
 @lab-attribution-profile closes.** Starting one early means its result is measured
 against a rig and a profile that may not exist yet, which is how a lane produces a
 number nobody can reproduce.
+
+## Resolution
+
+### 2026-09-21T04:03:52Z · @issuectl
+
+archived: labs die on landing
