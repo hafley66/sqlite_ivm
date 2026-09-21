@@ -6,9 +6,11 @@
 //! nanoseconds. Every helper here is `#[track_caller]`, so the span's `site`
 //! names the real issuance site, never this file.
 //!
-//! With `--no-default-features` (extension builds) the spans are compiled out:
-//! `open` returns a disabled span and nothing is recorded. That build is the
-//! one the recipe times wall clock on.
+//! The default feature set (the rlib and every test target) carries these
+//! spans, so `cargo test` exercises them. `--no-default-features` is the
+//! extension build alone, and there the spans compile out: `open` returns a
+//! disabled span and nothing is recorded. That build is the one the recipe
+//! times wall clock on.
 #![cfg_attr(not(feature = "statements"), allow(dead_code))]
 
 use rusqlite::{Connection, Params, Result, Row};
@@ -46,7 +48,8 @@ pub(crate) const CACHED: &str = "cached";
 pub(crate) const FRESH: &str = "fresh";
 
 /// The first keyword of a statement, from the fixed vocabulary the engine
-/// issues. A CTE (`WITH`) and an `EXPLAIN` are queries.
+/// issues. A CTE (`WITH`) is a query; `EXPLAIN` keeps its own verb so the plan
+/// probes stay visible; a rollback says whether it targets a savepoint.
 pub(crate) fn verb_of(sql: &str) -> &'static str {
     let head = sql.trim_start();
     let word: String = head
@@ -60,11 +63,19 @@ pub(crate) fn verb_of(sql: &str) -> &'static str {
         "INSERT" => "INSERT",
         "UPDATE" => "UPDATE",
         "DELETE" => "DELETE",
-        "SELECT" | "WITH" | "EXPLAIN" => "SELECT",
+        "SELECT" | "WITH" => "SELECT",
+        "EXPLAIN" => "EXPLAIN",
         "PRAGMA" => "PRAGMA",
         "SAVEPOINT" => "SAVEPOINT",
         "RELEASE" => "RELEASE",
-        "ROLLBACK" => "ROLLBACK TO",
+        "ROLLBACK" => {
+            let rest = head[word.len()..].trim_start();
+            if rest.len() >= 2 && rest[..2].eq_ignore_ascii_case("TO") {
+                "ROLLBACK TO"
+            } else {
+                "ROLLBACK"
+            }
+        }
         _ => "OTHER",
     }
 }
@@ -86,7 +97,10 @@ impl std::fmt::Display for Site {
     }
 }
 
-/// One open statement span. `rows` is filled once the statement returns.
+/// One open statement span. `rows` is filled once the statement returns, and
+/// only when the count is known: a DML statement reports `changes()`, a query
+/// reports the rows it returned. `batch`, `guard` and `pragma` leave it
+/// unrecorded, so the table shows a blank rather than a false zero.
 pub(crate) struct Statement {
     span: tracing::Span,
 }
@@ -141,9 +155,7 @@ pub(crate) fn open(phase: Phase, object: &str, sql: &str, prepared: &'static str
 pub(crate) fn batch(db: &Connection, phase: Phase, object: &str, sql: &str) -> Result<()> {
     let statement = open(phase, object, sql, FRESH);
     let _entered = statement.enter();
-    let result = db.execute_batch(sql);
-    statement.rows(0);
-    result
+    db.execute_batch(sql)
 }
 
 #[track_caller]
@@ -236,9 +248,7 @@ pub(crate) fn guard<T, F: FnOnce() -> Result<T>>(
 ) -> Result<T> {
     let statement = open(phase, object, sql, FRESH);
     let _entered = statement.enter();
-    let value = f()?;
-    statement.rows(0);
-    Ok(value)
+    f()
 }
 
 #[track_caller]
@@ -251,7 +261,5 @@ pub(crate) fn pragma<V: rusqlite::ToSql>(
 ) -> Result<()> {
     let statement = open(phase, object, &format!("PRAGMA {name}"), FRESH);
     let _entered = statement.enter();
-    let result = db.pragma_update(None, name, value);
-    statement.rows(0);
-    result
+    db.pragma_update(None, name, value)
 }

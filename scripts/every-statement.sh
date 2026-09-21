@@ -66,7 +66,8 @@ for path in statement_paths:
                 "total_us": float(parts[6]),
                 "mean_us": float(parts[7]),
                 "p99_us": float(parts[8]),
-                "rows": int(parts[9]),
+                # Blank when the statement site does not know its row count.
+                "rows": parts[9],
                 "prepared_pct": float(parts[10]),
                 "per_input_row": float(parts[11]),
             }
@@ -97,7 +98,7 @@ for key in sorted(keys):
         scenario, phase, verb, site, obj, str(cells[0]["calls"]), total_ms,
         f"{statistics.median(c['mean_us'] for c in cells):.1f}",
         f"{statistics.median(c['p99_us'] for c in cells):.1f}",
-        str(cells[0]["rows"]),
+        cells[0]["rows"],
         f"{cells[0]['prepared_pct']:.1f}",
         f"{cells[0]['per_input_row']:.2f}",
         str(len(runs)),
