@@ -317,6 +317,31 @@ Anything landing on the departure pass has to put all three after-runs of each
 of those cells below all three numbers above it. The fanout 1 pair is where the
 cost is; fanout 10 is two orders of magnitude cheaper at the same n.
 
+### the departure step, as generated
+
+Dumped from a debug build at bind time. One departure round runs three
+statements over the rowid slice `?1..?2` of the work table; the derive is:
+
+```
+INSERT OR IGNORE INTO work(__k,c0)
+SELECT __k,c0 FROM (
+  SELECT <key of the rule head> AS __k, CAST(c2 AS INTEGER) AS c0
+  FROM (SELECT c0,c1,c2 FROM <input relation>) q0,
+       (SELECT c0 AS c3 FROM work WHERE rowid>?1 AND rowid<=?2) q1
+  WHERE CAST(c1 AS INTEGER) = CAST(c3 AS INTEGER))
+WHERE __k IN (SELECT __k FROM <member relation>)
+```
+
+The step extends the departing set by exactly one hop: the work slice is the
+recursive occurrence, joined to the input relation. Every hop is a new round,
+which is why the round count is the graph's propagation depth.
+
+Both sides of the join are cast, so no index on either column can serve the
+predicate and the round scans rather than probes. That, plus the hop count, is
+the bill. Neither is a one-statement edit: the cast is the engine's key
+comparison rule, and the hop count is only removable by computing the departing
+set as a closure in one statement.
+
 ## SVGs
 
 `0_baseline-<circuit>.svg` plots wall ms against n for each arm at fanout 1 and
