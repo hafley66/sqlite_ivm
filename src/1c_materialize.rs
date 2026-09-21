@@ -1,5 +1,5 @@
 use crate::{
-    query::{error, quote},
+    catalog::{error, quote},
     relational::{Kind, Plan, Rule},
     relational_maintenance::{
         columns, keys_table, max_rowid, out_table, roles, rule_from, rule_where, table,

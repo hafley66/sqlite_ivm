@@ -1,4 +1,4 @@
-use crate::query::{error, quote};
+use crate::catalog::{error, quote};
 use hafley_observe::{Config, FormatConfig, OutputFormat};
 use rusqlite::{functions::FunctionFlags, Connection, Result};
 use std::io::IsTerminal;

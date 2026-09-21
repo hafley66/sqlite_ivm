@@ -1,5 +1,5 @@
 use crate::{
-    query::{error, quote},
+    catalog::{error, quote},
     relational::{Kind, Occurrence, Plan},
     relational_maintenance::{
         columns, folded, json_key, keys_table, out_table, plain, table, BULK_MULTIPLICITY_BUDGET,
@@ -9,6 +9,29 @@ use rusqlite::{types::Value, Connection, Result};
 
 impl Plan {
     pub fn create_state(&self, db: &Connection, name: &str) -> Result<Vec<(&'static str, String)>> {
+        // A recreated view must not collide with index names a rename retained:
+        // allocate a fresh suffix while the name is recorded for another view.
+        fn fresh_index(db: &Connection, base: String) -> Result<String> {
+            let mut index = base.clone();
+            let recorded: bool = db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM main.sqlite_schema WHERE name='__ivm_objects')",
+                [],
+                |r| r.get(0),
+            )?;
+            if !recorded {
+                return Ok(index);
+            }
+            let mut suffix = 0;
+            while db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM main.__ivm_objects WHERE object_type='index' AND object_name=?1)",
+                [&index],
+                |r| r.get::<_, bool>(0),
+            )? {
+                suffix += 1;
+                index = format!("{base}_{suffix}");
+            }
+            Ok(index)
+        }
         let mut objects = vec![];
         let dictionary = format!("{name}_keys");
         db.execute_batch(&format!(
@@ -17,6 +40,7 @@ impl Plan {
         ))?;
         objects.push(("table", dictionary));
         let state = format!("{name}_state");
+        let result_key = fresh_index(db, format!("__ivm_{name}_result_key"))?;
         db.execute_batch(&format!(
             "CREATE TABLE main.{}(__key TEXT NOT NULL,{}); CREATE INDEX main.{} ON {}(__key)",
             quote(&state),
@@ -24,22 +48,24 @@ impl Plan {
                 .map(|i| format!("c{i}"))
                 .collect::<Vec<_>>()
                 .join(","),
-            quote(&format!("__ivm_{name}_result_key")),
+            quote(&result_key),
             quote(&state)
         ))?;
         objects.push(("table", state));
-        objects.push(("index", format!("__ivm_{name}_result_key")));
+        objects.push(("index", result_key));
         for (id, node) in self.nodes.iter().enumerate() {
             if matches!(node.kind, Kind::Input(_) | Kind::Map { .. }) {
                 continue;
             }
             for (side, input) in node.inputs.iter().enumerate() {
-                let t = format!("{name}_op{id}_{side}");
+                let t = format!("{name}_op{id}x{side}");
                 let n = self.nodes[*input].fields.len();
-                db.execute_batch(&format!("CREATE TABLE main.{}(__k INTEGER NOT NULL,__r INTEGER NOT NULL,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k); CREATE INDEX main.{} ON {}(__r)",quote(&t),columns(n),quote(&format!("__ivm_{name}_op{id}_{side}_key")),quote(&t),quote(&format!("__ivm_{name}_op{id}_{side}_row")),quote(&t)))?;
+                let key = fresh_index(db, format!("__ivm_{name}_op{id}_{side}_key"))?;
+                let row = fresh_index(db, format!("__ivm_{name}_op{id}_{side}_row"))?;
+                db.execute_batch(&format!("CREATE TABLE main.{}(__k INTEGER NOT NULL,__r INTEGER NOT NULL,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k); CREATE INDEX main.{} ON {}(__r)",quote(&t),columns(n),quote(&key),quote(&t),quote(&row),quote(&t)))?;
                 objects.push(("table", t));
-                objects.push(("index", format!("__ivm_{name}_op{id}_{side}_key")));
-                objects.push(("index", format!("__ivm_{name}_op{id}_{side}_row")));
+                objects.push(("index", key));
+                objects.push(("index", row));
                 if let Kind::Group {
                     order,
                     limit: Some(_),
@@ -47,11 +73,11 @@ impl Plan {
                 } = &node.kind
                 {
                     if !order.is_empty() {
-                        let index = format!("__ivm_{name}_op{id}_{side}_order");
+                        let index = fresh_index(db, format!("__ivm_{name}_op{id}_{side}_order"))?;
                         db.execute_batch(&format!(
                             "CREATE INDEX main.{} ON {}(__k,{})",
                             quote(&index),
-                            quote(&format!("{name}_op{id}_{side}")),
+                            quote(&format!("{name}_op{id}x{side}")),
                             order
                                 .iter()
                                 .map(|o| o.replace(" NULLS FIRST", "").replace(" NULLS LAST", ""))
@@ -65,8 +91,7 @@ impl Plan {
             if let Kind::Fixpoint { rules } = &node.kind {
                 let member = node.inputs.len();
                 for side in [member, member + 1] {
-                    let t = format!("{name}_op{id}_{side}");
-                    // AUTOINCREMENT keeps rowids monotone after the delete pass
+                    let t = format!("{name}_op{id}x{side}");
                     // removes the newest members, so `rowid>lo` still means new.
                     db.execute_batch(&format!(
                         "CREATE TABLE main.{}(__id INTEGER PRIMARY KEY AUTOINCREMENT,__k TEXT NOT NULL UNIQUE,{})",
@@ -84,11 +109,11 @@ impl Plan {
                     if created.contains(&(side, expression)) {
                         continue;
                     }
-                    let index = format!("__ivm_{name}_fix{id}_{}", created.len());
+                    let index = fresh_index(db, format!("__ivm_{name}_fix{id}_{}", created.len()))?;
                     db.execute_batch(&format!(
                         "CREATE INDEX main.{} ON {}({expression})",
                         quote(&index),
-                        quote(&format!("{name}_op{id}_{side}"))
+                        quote(&format!("{name}_op{id}x{side}"))
                     ))?;
                     objects.push(("index", index));
                     created.push((side, expression));
@@ -322,6 +347,6 @@ impl Plan {
     /// firing and the drain. Its shadow table is one of the view's objects.
     pub fn collector(&self, name: &str) -> sqlite_bulk_trigger::Collector {
         let width = self.sources.iter().map(|s| s.columns.len()).max().unwrap_or(0);
-        sqlite_bulk_trigger::Collector::new(format!("{name}_staged"), width)
+        sqlite_bulk_trigger::Collector::new(name, width)
     }
 }

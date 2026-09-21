@@ -1,7 +1,6 @@
 //! Source DDL coordinated with SQLite's own ALTER TABLE query rewriting.
 use crate::{
-    catalog,
-    query::{error, quote},
+    catalog::{self, error, quote},
 };
 use rusqlite::{functions::FunctionFlags, Connection, Result};
 use sqlite3_parser::{
@@ -93,17 +92,16 @@ fn rename(db: &Connection, old: &str, new: &str, column: Option<&str>) -> Result
                 }
                 _ => return Err(error("source DDL query rewrite failed")),
             };
-            // A renamed narrow-path column can change payload ordering. Rebind
-            // and regenerate the hooks while preserving every state/index B-tree.
-            let generic:bool=db.query_row("SELECT generic FROM main.__ivm_schema s JOIN main.__ivm_views v ON v.id=s.id WHERE v.name=?1",[v],|r|r.get(0))?;
-            let triggers=db.prepare("SELECT object_name FROM main.__ivm_objects WHERE view_name=?1 AND object_type='trigger'")?.query_map([v],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>>>()?;
-            for trigger in triggers {
-                db.execute_batch(&format!("DROP TRIGGER main.{}", quote(&trigger)))?;
-            }
+            // A renamed column can change payload ordering. Rebind and
+            // regenerate the hooks while preserving every state/index B-tree;
+            // a legacy row rebuilds its shadows first, against the rewritten SQL.
+            let generic: bool = db.query_row("SELECT s.generic FROM main.__ivm_schema s JOIN main.__ivm_views v ON v.id=s.id WHERE v.name=?1",[v],|r|r.get(0))?;
+            crate::vtab::drop_triggers(db, v)?;
+            let plan = crate::relational::bind(db, &sql)?;
             if generic {
-                crate::relational_maintenance::hooks(db, v, &crate::relational::bind(db, &sql)?)?;
+                crate::relational_maintenance::hooks(db, v, &plan)?;
             } else {
-                crate::maintenance::create_hooks(db, v, &crate::query::bind(db, &sql)?, false)?;
+                crate::vtab::convert(db, v, &plan)?;
             }
             db.execute(
                 "UPDATE main.__ivm_views SET query_sql=?1 WHERE name=?2",
