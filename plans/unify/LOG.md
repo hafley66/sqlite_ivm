@@ -48,3 +48,5 @@ unless the row says otherwise. Executor glm53f unless noted.
 - 04:5x fix/open-bugs PR #24 graded: src differs from main by the 16-line window fix only; post-revert `8_group_limit` 6.40, 6.86, 8.08 s against 6.54-6.84 before (same code, noise); `8_group_limit`, `13_statements_per_drain`, `7_key_agreement` green here; owned paths only. Merged; main `f993c14`. Closed: window-limit, group-cte, json-subtype, json-text-keys (verdict recorded), dylib.
 - dispatched refactor/pass-1-split-relational-maintenance (m-9351db0e, glm53f-omp) from `f993c14`. Two build lanes live: bench-rust, pass-1.
 - 05:1x checkpoint. bench-rust: 2775 lines in `bench/src/` (fixture, oracle, report, five arms), zero commits at 44 min; hail m-23283028 orders scoped commits now. pass-1: commit 1 of 4 (`dc63e8d`, `1b_state.rs`). No PRs open.
+- 05:3x refactor pass 1 PR #25 graded: 75/75 x3 here, clippy clean, `format!` strings byte-identical, only owned files, `1a` 259 / `1b_state` 327 / `1c_materialize` 406 / `1d_drain` 553 lines, one fn per arm. Merged; main `a35146c`.
+- dispatched refactor/pass-2-statement-program (glm53f-omp-max) from `a35146c`; brief `refactor-2.brief.md`.
