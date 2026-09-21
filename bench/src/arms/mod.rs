@@ -125,6 +125,41 @@ pub fn peak_rss_bytes() -> Option<u64> {
     let bytes = usage.ru_maxrss * 1024;
     Some(bytes as u64)
 }
+/// Cumulative disk I/O of this process, `(bytes read, bytes written)`.
+/// macOS reads `ri_diskio_bytesread`/`ri_diskio_byteswritten` from
+/// `proc_pid_rusage`; Linux reads `/proc/self/io`. `None` elsewhere.
+pub fn disk_io_bytes() -> Option<(u64, u64)> {
+    #[cfg(target_os = "macos")]
+    {
+        let mut info: libc::rusage_info_v2 = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            libc::proc_pid_rusage(
+                std::process::id() as libc::c_int,
+                libc::RUSAGE_INFO_V2,
+                &mut info as *mut libc::rusage_info_v2 as *mut libc::rusage_info_t,
+            )
+        };
+        if rc != 0 {
+            return None;
+        }
+        Some((info.ri_diskio_bytesread, info.ri_diskio_byteswritten))
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let text = std::fs::read_to_string("/proc/self/io").ok()?;
+        let field = |name: &str| -> Option<u64> {
+            text.lines()
+                .find_map(|line| line.strip_prefix(name))
+                .and_then(|value| value.trim().parse().ok())
+        };
+        Some((field("read_bytes:")?, field("write_bytes:")?))
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        None
+    }
+}
+
 pub(crate) fn cell_from_sqlite(value: rusqlite::types::Value) -> Result<Cell> {
     Ok(match value {
         rusqlite::types::Value::Integer(n) => Cell::Int(n),
