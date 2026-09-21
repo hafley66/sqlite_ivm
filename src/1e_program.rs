@@ -400,13 +400,7 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
             .iter()
             .filter(|r| r.member().is_some())
             .map(|rule| {
-                let mut params: Vec<Value> = vec![];
-                let from = rule_from(
-                    rule,
-                    &roles(name, id, 0, rule, None, Role::Table(work.clone())),
-                    &mut params,
-                );
-                derive_sql(&work, &all, &cols, rule, &from, true)
+                departure_derive_sql(name, id, &work, &all, &cols, rule)
             })
             .collect(),
         retract_gone: format!(
@@ -426,6 +420,55 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
             .map(|side| fixpoint_side(plan, name, id, side, &all, &work))
             .collect(),
     }
+}
+
+fn departure_derive_sql(
+    name: &str,
+    id: usize,
+    work: &str,
+    members: &str,
+    cols: &str,
+    rule: &Rule,
+) -> String {
+    let member_at = rule.member().expect("departure rules mention the member set");
+    let member_offset = rule.occurrences[..member_at].iter().map(|(_, width)| width).sum::<usize>();
+    let member_width = rule.occurrences[member_at].1;
+    let member_cols = (member_offset..member_offset + member_width)
+        .map(|i| format!("c{i}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut offset = 0;
+    let from = rule
+        .occurrences
+        .iter()
+        .enumerate()
+        .map(|(n, (occurrence, width))| {
+            let source = match occurrence {
+                Occurrence::Input(side) => table(name, id, *side),
+                Occurrence::Member => {
+                    offset += width;
+                    return format!("__ivm_departure q{n}");
+                }
+            };
+            let renamed = (0..*width)
+                .map(|i| format!("c{i} AS c{}", offset + i))
+                .collect::<Vec<_>>()
+                .join(",");
+            offset += width;
+            format!("(SELECT {renamed} FROM {source}) q{n}")
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let present = format!("{} IN (SELECT __k FROM {members})", rule.key);
+    format!(
+        "WITH RECURSIVE __ivm_departure(__k,{member_cols}) AS (\
+         SELECT __k,{cols} FROM {work} UNION \
+         SELECT {},{} FROM {from}{}) \
+         INSERT OR IGNORE INTO {work}(__k,{cols}) SELECT __k,{member_cols} FROM __ivm_departure",
+        rule.key,
+        rule.head.join(","),
+        rule_where(rule, Some(&present))
+    )
 }
 
 fn fixpoint_side(
