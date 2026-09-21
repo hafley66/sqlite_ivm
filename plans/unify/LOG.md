@@ -62,3 +62,4 @@ unless the row says otherwise. Executor glm53f unless noted.
 - 08:0x refactor pass 2b PR #28 graded: 17 binaries 75/75 x3, clippy clean, release `8_group_limit` wall 0.75 x3 here against main 0.93-0.95 (lane: 0.76/0.75/0.75 vs 0.93/0.95/0.94, logging off); summed debug time.busy overlapped and was not claimed. `format!` on the drain path 64 -> 1. Merged; main `02ab293`.
 - dispatched refactor/pass-3-one-engine (glm53f-omp-max): shape table first, retire the trigger engine only if every shape binds through the relational plan. Brief `refactor-3.brief.md`.
 - bench-rust: merged main and restored the dylib rail (`002a964`); PR #26 re-grade next checkpoint.
+- 08:2x checkpoint. bench-rust HEAD `002a964` (unpushed): 17 bins 75/75 here, dylib rail back with three tests, but the merge of main resurrected 33 mjs files, `bench/shared/`, and the scripts; hail m-1a398387 orders arc B re-applied. pass-3 just started. 33G free.
