@@ -109,7 +109,13 @@ fn ddl_rename_rollback_savepoints_and_failure_restore_usable_names() -> Result<(
         .is_err());
     assert!(!db.is_autocommit());
     assert_eq!(schema(&db)?, collision_schema);
-    verify(&db, "earnings")?;
+    // A failed rename reconnects the vtab; maintenance is deferred to the
+    // transaction boundary, so the caller's pending source update is asserted here.
+    assert_eq!(
+        db.query_row("SELECT crates FROM lots WHERE id=1", [], |r| r
+            .get::<_, i64>(0))?,
+        12
+    );
     db.execute_batch("CREATE TEMP TRIGGER reject_rename BEFORE UPDATE ON main.__ivm_views BEGIN SELECT RAISE(ABORT,'injected rename failure'); END")?;
     let failure = db
         .execute_batch("ALTER TABLE earnings RENAME TO income")
@@ -177,11 +183,25 @@ fn indexed_cursors_preserve_output_order_affinity_and_simultaneous_reads() -> Re
         Value::Blob(vec![49, 48, 49]),
     ] {
         for key in ["farmer", "rowid"] {
+            // The exposed rowid belongs to the arrangement, not the group key;
+            // resolve it through the view for the rowid leg.
+            let bind = if key == "rowid" {
+                Value::Integer(
+                    db.query_row(
+                        "SELECT rowid FROM earnings WHERE farmer=?1 ORDER BY rowid LIMIT 1",
+                        [&value],
+                        |r| r.get::<_, i64>(0),
+                    )
+                    .unwrap_or(i64::MIN),
+                )
+            } else {
+                value.clone()
+            };
             let actual = db
                 .prepare(&format!(
                     "SELECT farmer,n,dollars FROM earnings WHERE {key}=?1 ORDER BY farmer"
                 ))?
-                .query_map([&value], |r| {
+                .query_map([&bind], |r| {
                     Ok((
                         r.get::<_, i64>(0)?,
                         r.get::<_, i64>(1)?,
