@@ -342,6 +342,24 @@ the bill. Neither is a one-statement edit: the cast is the engine's key
 comparison rule, and the hop count is only removable by computing the departing
 set as a closure in one statement.
 
+## departure set-at-a-time
+
+Change 1 closes each recursive departure rule in a recursive CTE over the
+whole current work set. The bounded outer loop remains for dependencies between
+different recursive rules. It uses the existing member, work and deleted
+tables, so the storage format is unchanged.
+
+`RUST_LOG=sqlite_ivm=debug`, reach fanout 1 n 40000, one scale repetition:
+
+| measure | before | after change 1 |
+|---|---:|---:|
+| delete round spans | 52236 | 159 |
+| derive round spans | 161 | 161 |
+| wall ms | 30118.1 | 31406.0 |
+
+The round count moved independently of the scan cost. Change 1 still carries
+the casted recursive join predicate measured below.
+
 ## SVGs
 
 `0_baseline-<circuit>.svg` plots wall ms against n for each arm at fanout 1 and
