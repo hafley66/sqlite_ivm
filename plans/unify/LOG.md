@@ -86,3 +86,4 @@ unless the row says otherwise. Executor glm53f unless noted.
 - 14:0x checkpoint. perf lane first engine edit in the tree (`1d_drain.rs`, `1e_program.rs`, 13+/11-): the fixpoint `restore` statement becomes a list, the ephemeral-table cliff fix in progress; uncommitted. Only lane live. 33G free.
 - 14:2x checkpoint. perf lane same two files dirty for 40 min, measuring; hailed to commit wip. 34G free.
 - 14:4x checkpoint. perf lane in one long turn since 12:00 (two hails held). `1d_drain.rs` edit reverted, only `1e_program.rs` dirty: it tried the restore change, measured, and backed it out, as the rule says. 4.1 h alive, arc 2 unlanded. 33G free.
+- 15:0x checkpoint. perf lane hypothesis (its comment in `1e_program.rs`): the fixpoint rederivability test was one `WHERE EXISTS(..) OR EXISTS(..)` per work row, which SQLite cannot flatten, so each subquery re-runs per row; rewritten as `UNION ALL` branches, one statement, counts unchanged. Measuring. 33G free.
