@@ -124,5 +124,7 @@ cell equals the fixture oracle checksum for all 13 states.
 
 ### R5 root suite unchanged
 
-`cargo test` at repo root: all suites ok — 74 passed, 1 ignored (pre-existing),
-0 failed. The arc adds no tests and touches no `tests/**` paths.
+`cargo test` at repo root: all suites ok — 75 passed, 1 ignored (pre-existing),
+0 failed, matching origin/main (the count includes the restored
+`6_extension_load` rail after merging main; the arc itself touches no
+`tests/**` paths).
