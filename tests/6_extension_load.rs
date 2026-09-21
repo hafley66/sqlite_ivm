@@ -17,8 +17,14 @@
 use rusqlite::{Connection, Result};
 use std::path::PathBuf;
 
-/// scripts/0_build.sh writes the artifact here; IVM_NATIVE_EXTENSION overrides it.
+/// Lookup mirrors the bench binary: `IVM_EXTENSION` overrides, then the cargo
+/// target dir the binary builds into (`target/debug`, `target/release` next to
+/// the exe); scripts/0_build.sh's `CARGO_MANIFEST_DIR/target/debug` remains the
+/// last resort.
 fn artifact() -> PathBuf {
+    if let Ok(path) = std::env::var("IVM_EXTENSION") {
+        return PathBuf::from(path);
+    }
     if let Ok(path) = std::env::var("IVM_NATIVE_EXTENSION") {
         return PathBuf::from(path);
     }
@@ -29,9 +35,17 @@ fn artifact() -> PathBuf {
     } else {
         "sqlite_ivm.dll"
     };
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("target/debug")
-        .join(name)
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    for dir in [
+        manifest.join("target/debug"),
+        manifest.join("target/release"),
+    ] {
+        let candidate = dir.join(&name);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+    manifest.join("target/debug").join(name)
 }
 
 /// None means the case is skipped, with a named reason; the artifact-absent

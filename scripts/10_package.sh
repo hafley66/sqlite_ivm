@@ -17,8 +17,7 @@ ivm_source="sqlite-ivm-$ivm_version-source"
 mkdir -p "$ivm_stage/$ivm_source/.github/workflows"
 tar -cf "$ivm_stage/source.tar" -C "$ivm_dir/.." \
   --exclude='sqlite_ivm/target' --exclude='sqlite_ivm/bench/target' \
-  --exclude='sqlite_ivm/bench/shared/node_modules' \
-  --exclude='sqlite_ivm/bench/results' --exclude='sqlite_ivm/dist' sqlite_ivm
+  --exclude='sqlite_ivm/dist' sqlite_ivm
 tar -xf "$ivm_stage/source.tar" -C "$ivm_stage/$ivm_source"
 cp -f "$ivm_dir/../.github/workflows/sqlite-ivm.yml" "$ivm_stage/$ivm_source/.github/workflows/"
 tar -czf "$ivm_dir/dist/$ivm_source.tar.gz" -C "$ivm_stage" "$ivm_source"
