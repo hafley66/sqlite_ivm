@@ -1,16 +1,18 @@
 use crate::{
     catalog::{error, quote},
+    census::{self, Phase},
     relational::{Kind, Plan, Rule},
     relational_maintenance::{
-        columns, keys_table, max_rowid, out_table, roles, rule_from, rule_where, table,
-        BULK_GROUP_BUDGET, BULK_MULTIPLICITY_BUDGET, BULK_ROUND_BUDGET, CachedExecute, Role,
+        columns, keys_table, out_table, roles, rule_from, rule_where, table,
+        BULK_GROUP_BUDGET, BULK_MULTIPLICITY_BUDGET, BULK_ROUND_BUDGET, Role,
     },
 };
 use rusqlite::{params_from_iter, types::Value, Connection, Result};
 
 impl Plan {
     pub(crate) fn materialize(&self, db: &Connection, name: &str, id: usize, restricted: bool) -> Result<()> {
-        self.materialize_statements(db, name, id, restricted).execute(db)
+        self.materialize_statements(db, name, id, restricted)
+            .execute(db, name)
     }
     /// Every SQL string materializing this node issues, built once and reused by
     /// both the populate path and the per-view drain program.
@@ -367,23 +369,26 @@ pub(crate) struct FixpointMaterializeStatements {
 }
 
 impl MaterializeStatements {
-    pub(crate) fn execute(&self, db: &Connection) -> Result<()> {
+    pub(crate) fn execute(&self, db: &Connection, name: &str) -> Result<()> {
         match self {
             MaterializeStatements::Input { insert }
             | MaterializeStatements::Map { insert }
             | MaterializeStatements::Set { insert } => {
-                db.execute_cached(insert, [])?;
+                census::exec_cached(db, Phase::Materialize, name, insert, [])?;
             }
             MaterializeStatements::Join { insert, bad } => {
-                db.execute_cached(insert, [])?;
-                let bad: bool = db.prepare_cached(bad)?.query_row([], |r| r.get(0))?;
+                census::exec_cached(db, Phase::Materialize, name, insert, [])?;
+                let bad: bool =
+                    census::query_cached(db, Phase::Materialize, name, bad, [], |r| r.get(0))?;
                 if bad {
                     return Err(error("join multiplicity overflow"));
                 }
             }
             MaterializeStatements::Group(g) => {
                 if g.window || g.limit.is_some() {
-                    let peak: i64 = db.prepare_cached(&g.peak)?.query_row([], |r| r.get(0))?;
+                    let peak: i64 = census::query_cached(db, Phase::Materialize, name, &g.peak, [], |r| {
+                        r.get(0)
+                    })?;
                     let expansion = match g.limit.filter(|n| *n >= 0) {
                         Some(n) if !g.window => peak.min(n.saturating_add(g.offset)),
                         _ => peak,
@@ -393,12 +398,18 @@ impl MaterializeStatements {
                     }
                 }
                 if g.window {
-                    let groups: i64 = db.prepare_cached(&g.groups)?.query_row([], |r| r.get(0))?;
+                    let groups: i64 = census::query_cached(db, Phase::Materialize, name, &g.groups, [], |r| {
+                        r.get(0)
+                    })?;
                     if groups as usize > BULK_GROUP_BUDGET {
                         return Err(error("bulk group budget exceeded"));
                     }
-                    db.execute_cached(&g.window_insert, [])?;
+                    census::exec_cached(db, Phase::Materialize, name, &g.window_insert, [])?;
                 } else if g.limit.is_some() {
+                    // One span for the per-key insert; each execution fires its
+                    // own trace event. The key loop is the bounded read below.
+                    let census_stmt = census::open(Phase::Materialize, name, &g.limit_insert, census::CACHED);
+                    let _statement = census_stmt.enter();
                     let mut statement = db.prepare_cached(&g.limit_insert)?;
                     let mut key_statement = db.prepare_cached(&g.limit_keys)?;
                     let mut key_rows = key_statement.query([])?;
@@ -410,28 +421,39 @@ impl MaterializeStatements {
                         }
                         statement.execute([key.get::<_, i64>(0)?])?;
                     }
+                    census_stmt.rows(groups);
                 } else {
-                    db.execute_cached(&g.plain_insert, [])?;
+                    census::exec_cached(db, Phase::Materialize, name, &g.plain_insert, [])?;
                 }
             }
             MaterializeStatements::Fixpoint(f) => {
                 let mut rounds = 0usize;
-                let mut lo = max_rowid(db, &f.all)?;
+                let max_rowid = format!("SELECT coalesce(max(rowid),0) FROM {}", f.all);
+                let mut lo =
+                    census::query_cached(db, Phase::Materialize, name, &max_rowid, [], |r| {
+                        r.get(0)
+                    })?;
                 for sql in &f.anchor {
-                    db.execute_cached(sql, [])?;
+                    census::exec_cached(db, Phase::Materialize, name, sql, [])?;
                 }
                 loop {
                     if rounds >= BULK_ROUND_BUDGET {
                         return Err(error("fixpoint closure round budget exceeded"));
                     }
                     rounds += 1;
-                    let hi = max_rowid(db, &f.all)?;
+                    let hi =
+                        census::query_cached(db, Phase::Materialize, name, &max_rowid, [], |r| {
+                            r.get(0)
+                        })?;
                     if hi == lo {
                         break;
                     }
                     let mut written = 0usize;
                     for sql in &f.rounds {
-                        written += db.execute_cached(
+                        written += census::exec_cached(
+                            db,
+                            Phase::Materialize,
+                            name,
                             sql,
                             params_from_iter([Value::Integer(lo), Value::Integer(hi)]),
                         )?;
@@ -441,7 +463,7 @@ impl MaterializeStatements {
                     }
                     lo = hi;
                 }
-                db.execute(&f.copy, [])?;
+                census::exec(db, Phase::Materialize, name, &f.copy, [])?;
             }
         }
         Ok(())

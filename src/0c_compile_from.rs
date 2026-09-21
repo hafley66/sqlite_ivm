@@ -1,4 +1,5 @@
 use crate::catalog::error;
+use crate::census::{self, Phase};
 use crate::compile_recursive::where_keys_for_step;
 use crate::relational::{
     affinity, alias, explicit_collation, expression, field, implicit_collation, name, resolve,
@@ -33,18 +34,18 @@ impl Compiler<'_> {
                 {
                     (*id, qualifier)
                 } else {
-                    let actual:String=self.db.query_row("SELECT name FROM pragma_table_list WHERE schema='main' AND type='table' AND name=?1 COLLATE NOCASE",[&table],|r|r.get(0))?;
+                    let actual:String=census::query(self.db,Phase::Declare,&table,"SELECT name FROM pragma_table_list WHERE schema='main' AND type='table' AND name=?1 COLLATE NOCASE",[&table],|r|r.get(0))?;
                     if actual.starts_with("__ivm_") || actual.starts_with("sqlite_") {
                         return Err(error("internal source table"));
                     }
-                    if self.db.query_row("SELECT EXISTS(SELECT 1 FROM temp.sqlite_schema WHERE name=?1 COLLATE NOCASE)",[&actual],|r|r.get::<_,bool>(0))?{return Err(error("temporary source shadow"));}
+                    if census::query(self.db,Phase::Declare,&actual,"SELECT EXISTS(SELECT 1 FROM temp.sqlite_schema WHERE name=?1 COLLATE NOCASE)",[&actual],|r|r.get::<_,bool>(0))?{return Err(error("temporary source shadow"));}
                     let source = if let Some(i) =
                         self.plan.sources.iter().position(|s| s.name == actual)
                     {
                         i
                     } else {
-                        let columns=self.db.prepare("SELECT name FROM pragma_table_xinfo(?1,'main') WHERE hidden<>1 ORDER BY cid")?.query_map([&actual],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>>>()?;
-                        let affinities=self.db.prepare("SELECT type FROM pragma_table_xinfo(?1,'main') WHERE hidden<>1 ORDER BY cid")?.query_map([&actual],|r|r.get::<_,String>(0))?.collect::<Result<Vec<_>>>()?.iter().map(|s|affinity(s)).collect();
+                        let columns=census::query_map(self.db,Phase::Declare,&actual,"SELECT name FROM pragma_table_xinfo(?1,'main') WHERE hidden<>1 ORDER BY cid",[&actual],|r|r.get::<_,String>(0))?;
+                        let affinities=census::query_map(self.db,Phase::Declare,&actual,"SELECT type FROM pragma_table_xinfo(?1,'main') WHERE hidden<>1 ORDER BY cid",[&actual],|r|r.get::<_,String>(0))?.iter().map(|s|affinity(s)).collect();
                         let mut collations = vec![];
                         for column in &columns {
                             let table_c = std::ffi::CString::new(actual.as_str())

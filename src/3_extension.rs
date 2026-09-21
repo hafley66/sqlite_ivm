@@ -1,4 +1,5 @@
 use crate::catalog::{error, quote};
+use crate::census::{self, Phase};
 use hafley_observe::{Config, FormatConfig, OutputFormat};
 use rusqlite::{functions::FunctionFlags, Connection, Result};
 use std::io::IsTerminal;
@@ -66,10 +67,15 @@ pub fn register(db: &Connection) -> Result<()> {
             // Borrow the invoking connection for this callback; SQLite retains ownership.
             let db = unsafe { ctx.get_connection()? };
             let query = sql.replace('\'', "''");
-            db.execute_batch(&format!(
-                "CREATE VIRTUAL TABLE main.{} USING sqlite_ivm('{query}')",
-                quote(&name)
-            ))?;
+            census::batch(
+                &db,
+                Phase::Declare,
+                &name,
+                &format!(
+                    "CREATE VIRTUAL TABLE main.{} USING sqlite_ivm('{query}')",
+                    quote(&name)
+                ),
+            )?;
             Ok(name)
         },
     )?;
@@ -92,14 +98,21 @@ pub fn register(db: &Connection) -> Result<()> {
         |ctx| {
             let name: String = ctx.get(0)?;
             let db = unsafe { ctx.get_connection()? };
-            let canonical: String = db
-                .query_row(
-                    "SELECT name FROM main.__ivm_views WHERE name=?1",
-                    [&name],
-                    |r| r.get(0),
-                )
-                .map_err(|_| error("no managed view with that name"))?;
-            db.execute_batch(&format!("DROP TABLE main.{}", quote(&canonical)))?;
+            let canonical: String = census::query(
+                &db,
+                Phase::Teardown,
+                &name,
+                "SELECT name FROM main.__ivm_views WHERE name=?1",
+                [&name],
+                |r| r.get(0),
+            )
+            .map_err(|_| error("no managed view with that name"))?;
+            census::batch(
+                &db,
+                Phase::Teardown,
+                &canonical,
+                &format!("DROP TABLE main.{}", quote(&canonical)),
+            )?;
             Ok(canonical)
         },
     )

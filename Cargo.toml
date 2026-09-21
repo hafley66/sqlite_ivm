@@ -16,9 +16,12 @@ crate-type = ["cdylib", "rlib"]
 [features]
 # SQLite's own page cache, not the system dylib's purgeable one (plans/costs/README.md).
 # Extension builds pass --no-default-features: the host supplies SQLite.
-default = ["bundled"]
+default = ["bundled", "census"]
 bundled = ["rusqlite/bundled"]
 extension = ["rusqlite/loadable_extension"]
+# One span per statement site (src/0g_census.rs). Off, the spans compile out and
+# a run pays nothing; that build is the one the recipe times wall clock on.
+census = []
 
 [dependencies]
 hafley-observe = { path = "../../../../hafley-rs/.boop-worktrees/main/crates/hafley-observe" }
