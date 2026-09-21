@@ -2,9 +2,9 @@
 //! Equality keys select membership, while stored row values select emitted identity.
 use crate::{
     query::{error, quote},
-    relational::{Kind, Occurrence, Plan, Rule},
+    relational::{Occurrence, Plan, Rule},
 };
-use rusqlite::{params_from_iter, types::Value, Connection, Result};
+use rusqlite::{types::Value, Connection, Result};
 pub type Row = Vec<Value>;
 pub(crate) fn columns(n: usize) -> String {
     (0..n)
