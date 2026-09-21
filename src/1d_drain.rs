@@ -253,7 +253,6 @@ impl Plan {
                     for sql in &statements.delete_derives[generation] {
                         written += db.execute_cached(sql, [])?;
                     }
-                    work_rows += written;
                     round.record("rows", written);
                     if written == 0 {
                         settled = true;
@@ -279,7 +278,6 @@ impl Plan {
                     for sql in &statements.recursive_delete_derives {
                         written += db.execute_cached(sql, [])?;
                     }
-                    work_rows += written;
                     round.record("rows", written);
                     if written == 0 {
                         break;
