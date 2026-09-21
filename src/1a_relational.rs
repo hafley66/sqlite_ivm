@@ -38,9 +38,6 @@ pub(crate) fn deleted_table(id: usize, width: usize) -> String {
 pub(crate) fn departing_table(id: usize, width: usize) -> String {
     format!("temp.__ivm_departing_{width}_{id}")
 }
-pub(crate) fn next_departing_table(id: usize, width: usize) -> String {
-    format!("temp.__ivm_next_departing_{width}_{id}")
-}
 pub(crate) fn parameters(n: usize) -> String {
     (1..=n)
         .map(|i| format!("?{i}"))

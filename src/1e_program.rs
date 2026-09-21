@@ -6,8 +6,8 @@ use crate::{
     relational_materialize::MaterializeStatements,
     relational_maintenance::{
         arrived_table, columns, deleted_table, delta_index, delta_table, departing_table,
-        identity_sql, json_key, keys_table, left_table, next_departing_table, out_table,
-        parameters, plain, roles, rule_from, rule_where, table, Role,
+        identity_sql, json_key, keys_table, left_table, out_table, parameters, plain, roles,
+        rule_from, rule_where, table, Role, BULK_DEPARTURE_SET_ROUND_BUDGET,
     },
 };
 use rusqlite::{types::Value, Connection};
@@ -82,17 +82,16 @@ pub(crate) struct FixpointStatements {
     pub(crate) drop_deleted: String,
     pub(crate) clear_departing: String,
     pub(crate) seed_departing: String,
-    pub(crate) clear_frontiers: [String; 2],
-    pub(crate) collect_departing: [String; 2],
-    pub(crate) drop_departing: [String; 2],
+    pub(crate) collect_departing: Vec<String>,
+    pub(crate) drop_departing: Vec<String>,
     pub(crate) seed_work_deleted: String,
-    pub(crate) seed_work_frontier: [String; 2],
+    pub(crate) seed_work_frontier: Vec<String>,
     pub(crate) restore_small: String,
     pub(crate) restores: Vec<String>,
     /// Per member rule, in rule order: closure derives over the whole member
     /// table bounded by a rowid range carried in `?1` and `?2`.
     pub(crate) round_derives: Vec<String>,
-    pub(crate) delete_derives: [Vec<String>; 2],
+    pub(crate) delete_derives: Vec<Vec<String>>,
     pub(crate) recursive_delete_derives: Vec<String>,
     pub(crate) retract_gone: String,
     pub(crate) emit_stored: String,
@@ -172,9 +171,8 @@ fn scratch_statements(plan: &Plan) -> Vec<String> {
                 deleted = deleted_table(id, width)
             ));
             statements.push(format!(
-                "CREATE TABLE IF NOT EXISTS {departing}(__k TEXT PRIMARY KEY,{cols}); CREATE TABLE IF NOT EXISTS {next}(__k TEXT PRIMARY KEY,{cols})",
-                departing = departing_table(id, width),
-                next = next_departing_table(id, width)
+                "CREATE TABLE IF NOT EXISTS {departing}(__g INTEGER NOT NULL,__k TEXT NOT NULL,{cols},PRIMARY KEY(__g,__k)) WITHOUT ROWID",
+                departing = departing_table(id, width)
             ));
         }
     }
@@ -349,7 +347,6 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
     let out = out_table(id, width);
     let deleted = deleted_table(id, width);
     let departing = departing_table(id, width);
-    let next_departing = next_departing_table(id, width);
     let identity_of =
         |alias: &str| json_key((0..width).map(|i| plain(&format!("{alias}.c{i}"))).collect());
     let d_identity = identity_of("d");
@@ -395,20 +392,20 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
         ),
         clear_departing: format!("DELETE FROM {departing}"),
         seed_departing: format!(
-            "INSERT OR IGNORE INTO {departing}(__k,{cols}) SELECT __k,{cols} FROM {work}"
+            "INSERT OR IGNORE INTO {departing}(__g,__k,{cols}) SELECT 0,__k,{cols} FROM {work}"
         ),
-        clear_frontiers: [format!("DELETE FROM {departing}"), format!("DELETE FROM {next_departing}")],
-        collect_departing: [&departing, &next_departing].map(|frontier| {
-            format!("INSERT OR IGNORE INTO {deleted}(__k,{cols}) SELECT __k,{cols} FROM {all} WHERE __k IN (SELECT __k FROM {frontier})")
-        }),
-        drop_departing: [&departing, &next_departing]
-            .map(|frontier| format!("DELETE FROM {all} WHERE __k IN (SELECT __k FROM {frontier})")),
+        collect_departing: (0..BULK_DEPARTURE_SET_ROUND_BUDGET)
+            .map(|generation| format!("INSERT OR IGNORE INTO {deleted}(__k,{cols}) SELECT __k,{cols} FROM {all} WHERE __k IN (SELECT __k FROM {departing} WHERE __g={generation})"))
+            .collect(),
+        drop_departing: (0..BULK_DEPARTURE_SET_ROUND_BUDGET)
+            .map(|generation| format!("DELETE FROM {all} WHERE __k IN (SELECT __k FROM {departing} WHERE __g={generation})"))
+            .collect(),
         seed_work_deleted: format!(
             "INSERT OR IGNORE INTO {work}(__k,{cols}) SELECT __k,{cols} FROM {deleted}"
         ),
-        seed_work_frontier: [&departing, &next_departing].map(|frontier| {
-            format!("INSERT OR IGNORE INTO {work}(__k,{cols}) SELECT __k,{cols} FROM {frontier}")
-        }),
+        seed_work_frontier: (1..=BULK_DEPARTURE_SET_ROUND_BUDGET)
+            .map(|generation| format!("INSERT OR IGNORE INTO {work}(__k,{cols}) SELECT __k,{cols} FROM {departing} WHERE __g={generation}"))
+            .collect(),
         restore_small: format!(
             "INSERT OR IGNORE INTO {all}(__k,{cols}) SELECT w.__k,{} FROM {deleted} w WHERE {}",
             (0..width).map(|i| format!("w.c{i}")).collect::<Vec<_>>().join(","),
@@ -431,8 +428,8 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
                 derive_sql(&all, &all, &cols, rule, &from, false)
             })
             .collect(),
-        delete_derives: [(&departing, &next_departing), (&next_departing, &departing)].map(
-            |(source, target)| {
+        delete_derives: (0..BULK_DEPARTURE_SET_ROUND_BUDGET)
+            .map(|generation| {
                 rules
                     .iter()
                     .filter(|r| r.member().is_some())
@@ -440,14 +437,28 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
                         let mut params: Vec<Value> = vec![];
                         let from = rule_from(
                             rule,
-                            &roles(name, id, 0, rule, None, Role::Table(source.clone())),
+                            &roles(
+                                name,
+                                id,
+                                0,
+                                rule,
+                                None,
+                                Role::Table(format!("(SELECT {cols} FROM {departing} WHERE __g={generation})")),
+                            ),
                             &mut params,
                         );
-                        derive_sql(target, &all, &cols, rule, &from, true)
+                        departure_generation_derive_sql(
+                            &departing,
+                            &all,
+                            &cols,
+                            generation + 1,
+                            rule,
+                            &from,
+                        )
                     })
                     .collect()
-            },
-        ),
+            })
+            .collect(),
         recursive_delete_derives: rules
             .iter()
             .filter(|r| r.member().is_some())
@@ -648,6 +659,27 @@ fn fixpoint_side(
             })
             .collect(),
     })
+}
+
+fn departure_generation_derive_sql(
+    target: &str,
+    members: &str,
+    cols: &str,
+    generation: usize,
+    rule: &Rule,
+    from: &str,
+) -> String {
+    format!(
+        "INSERT OR IGNORE INTO {target}(__g,__k,{cols}) SELECT {generation},__k,{cols} FROM (SELECT {} AS __k,{} {from}{}) WHERE __k IN (SELECT __k FROM {members})",
+        rule.key,
+        rule.head
+            .iter()
+            .enumerate()
+            .map(|(i, h)| format!("{h} AS c{i}"))
+            .collect::<Vec<_>>()
+            .join(","),
+        rule_where(rule, None)
+    )
 }
 
 /// The drain's derive: the only-present shape filters members already in the
