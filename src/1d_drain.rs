@@ -234,9 +234,10 @@ impl Plan {
         if any_left {
             db.execute_cached(&statements.clear_work, [])?;
             db.execute_cached(&statements.clear_deleted, [])?;
+            let mut work_rows = 0usize;
             for sqls in &side.left_derives {
                 for sql in sqls {
-                    db.execute_cached(sql, [])?;
+                    work_rows += db.execute_cached(sql, [])?;
                 }
             }
             let mut settled = false;
@@ -248,6 +249,7 @@ impl Plan {
                 for sql in &statements.delete_derives {
                     written += db.execute_cached(sql, [])?;
                 }
+                work_rows += written;
                 round.record("rows", written);
                 if written == 0 {
                     settled = true;
@@ -268,6 +270,7 @@ impl Plan {
                     for sql in &statements.recursive_delete_derives {
                         written += db.execute_cached(sql, [])?;
                     }
+                    work_rows += written;
                     round.record("rows", written);
                     if written == 0 {
                         break;
@@ -275,9 +278,6 @@ impl Plan {
                 }
             }
             let restored = max_rowid(&statements.max_all)?;
-            let work_rows: i64 = db
-                .prepare_cached(&statements.work_rows)?
-                .query_row([], |r| r.get(0))?;
             if work_rows < BULK_DEPARTURE_SET_RESTORE_THRESHOLD {
                 db.execute_cached(&statements.restore_small, [])?;
             } else {
