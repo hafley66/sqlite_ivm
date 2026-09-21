@@ -1,8 +1,8 @@
 ---
 created: 2026-09-19
-updated: 2026-09-20
+updated: 2026-09-21
 type: task
-status: closed
+status: done
 priority: high
 epic: lab-queue-round-one
 labels: [lab]
@@ -84,3 +84,9 @@ rig only has to generate and observe.
 
 **Budgets:** memory budget on the generator only, so a rig that itself allocates
 gigabytes is caught before it poisons lab 1's numbers.
+
+## Comments
+
+### 2026-09-21T04:05:05Z · @fable
+
+archived: labs die on landing
