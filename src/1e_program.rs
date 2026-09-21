@@ -85,6 +85,7 @@ pub(crate) struct FixpointStatements {
     /// table bounded by a rowid range carried in `?1` and `?2`.
     pub(crate) round_derives: Vec<String>,
     pub(crate) delete_derives: Vec<String>,
+    pub(crate) recursive_delete_derives: Vec<String>,
     pub(crate) retract_gone: String,
     pub(crate) emit_stored: String,
     pub(crate) emit_fresh: String,
@@ -368,6 +369,19 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
             })
             .collect(),
         delete_derives: rules
+            .iter()
+            .filter(|r| r.member().is_some())
+            .map(|rule| {
+                let mut params: Vec<Value> = vec![];
+                let from = rule_from(
+                    rule,
+                    &roles(name, id, 0, rule, None, Role::Table(work.clone())),
+                    &mut params,
+                );
+                derive_sql(&work, &all, &cols, rule, &from, true)
+            })
+            .collect(),
+        recursive_delete_derives: rules
             .iter()
             .filter(|r| r.member().is_some())
             .map(|rule| {

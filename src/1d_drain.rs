@@ -2,8 +2,8 @@ use crate::{
     catalog::error,
     relational::{Kind, Plan},
     relational_maintenance::{
-        BULK_DEPARTURE_ROUND_BUDGET, BULK_MULTIPLICITY_BUDGET, BULK_ROUND_BUDGET,
-        CachedExecute, Row,
+        BULK_DEPARTURE_ROUND_BUDGET, BULK_DEPARTURE_SET_ROUND_BUDGET,
+        BULK_MULTIPLICITY_BUDGET, BULK_ROUND_BUDGET, CachedExecute, Row,
     },
     relational_program::{
         ArrangementStatements, FixpointSide, FixpointStatements, KindStatements, Program,
@@ -238,12 +238,8 @@ impl Plan {
                     db.execute_cached(sql, [])?;
                 }
             }
-            let mut delete_rounds = 0usize;
-            loop {
-                if delete_rounds >= BULK_DEPARTURE_ROUND_BUDGET {
-                    return Err(error("fixpoint departure round budget exceeded"));
-                }
-                delete_rounds += 1;
+            let mut settled = false;
+            for _ in 0..BULK_DEPARTURE_SET_ROUND_BUDGET {
                 let round = round_span("delete");
                 db.execute_cached(&statements.collect_deleted, [])?;
                 db.execute_cached(&statements.drop_deleted, [])?;
@@ -253,7 +249,28 @@ impl Plan {
                 }
                 round.record("rows", written);
                 if written == 0 {
+                    settled = true;
                     break;
+                }
+            }
+            if !settled {
+                let mut delete_rounds = 0usize;
+                loop {
+                    if delete_rounds >= BULK_DEPARTURE_ROUND_BUDGET {
+                        return Err(error("fixpoint recursive departure round budget exceeded"));
+                    }
+                    delete_rounds += 1;
+                    let round = round_span("delete_recursive");
+                    db.execute_cached(&statements.collect_deleted, [])?;
+                    db.execute_cached(&statements.drop_deleted, [])?;
+                    let mut written = 0;
+                    for sql in &statements.recursive_delete_derives {
+                        written += db.execute_cached(sql, [])?;
+                    }
+                    round.record("rows", written);
+                    if written == 0 {
+                        break;
+                    }
                 }
             }
             let restored = max_rowid(&statements.max_all)?;
