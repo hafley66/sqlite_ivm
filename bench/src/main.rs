@@ -15,7 +15,12 @@ use anyhow::{anyhow, bail, Result};
 use oracle::Domain;
 
 fn main() {
-    tracing_subscriber::fmt::init();
+    // Span creation events carry the engine's per-round fields (`rounds`,
+    // `rows`), so a debug run can count them. The filter comes from RUST_LOG.
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_span_events(tracing_subscriber::fmt::format::FmtSpan::NEW)
+        .init();
     let code = match run() {
         Ok(code) => code,
         Err(error) => {

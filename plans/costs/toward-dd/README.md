@@ -143,53 +143,95 @@ are three orders of magnitude above every other n, and its disk write (801 MB)
 and disk read (126 MB) are the largest in the sweep. That cell alone is 10.8
 min of the 13.7 min run.
 
-## profile, `reach` fanout 1 n 100000
+## profile, `reach` fanout 1
+
+Two profiles of the same cell shape, plus a shape sweep between them:
 
 ```
+samply record --save-only -o /tmp/reach-f1-n40k.json -- \
+  bench scale --circuits reach --n 40000 --fanout 1 --arms sqlite-ivm
 samply record --save-only -o /tmp/reach-f1-n100k.json -- \
   bench scale --circuits reach --n 100000 --fanout 1 --arms sqlite-ivm
+bench scale --circuits reach --n 20000,40000,60000,80000 --fanout 1 --arms sqlite-ivm
 ```
 
-663488 samples at 1 kHz, 664.4 s. Leaf self time from the profile JSON, frames
-symbolized with `atos` against the bench binary.
+Leaf self time from the profile JSON, frames symbolized with `atos` against the
+bench binary.
 
-Inclusive: `<sqlite_ivm::vtab::Table>::drain` 661.7 s (99.6%),
-`<sqlite_ivm::relational::Plan>::drain` 648.9 s (97.7%),
-`CachedExecute::execute_cached` 652.2 s (98.2%). The cell is one drain per
-statement.
+### the shape
 
-Self, grouped by symbol:
+`cliff.tsv` holds the sweep. Per-statement cost at fanout 1:
+
+| n | delete ms | update ms | replace ms | cell wall ms |
+|---|---|---|---|---|
+| 1000 | 0.4 | 0.7 | 451.2 | 507.6 |
+| 10000 | 10.9 | 12.6 | 794.4 | 1782.9 |
+| 20000 | 64.0 | 77.2 | 2464.2 | 8200.8 |
+| 40000 | 351.5 | 345.4 | 2075.6 | 30118.1 |
+| 60000 | 10189.9 | 5885.5 | 50150.4 | 693419.8 |
+| 80000 | 17784.7 | 11746.8 | 88118.6 | 1269715.4 |
+| 100000 | 5960.0 | 7754.0 | 98720.3 | 647667.4 |
+
+The 40000 to 60000 step is 29x for 1.5x the rows, and the cost falls again from
+80000 to 100000. That is a threshold, not a smooth law.
+
+### the frames
+
+n 40000, 31.8 s of samples: `sqlite3VdbeExec` 65.5%, `sqlite3VdbeSerialGet`
+7.8%, `getCellInfo` 6.8%, `sqlite3BtreeNext` 6.1%, `btreeParseCellPtr` 5.2%.
+Every frame is a b-tree scan.
+
+n 100000, 664.4 s of samples:
 
 | frame | s | share |
 |---|---|---|
-| `sqlite3VdbeExec` | 353.6 | 53.2% |
-| `sqlite3KeyInfoUnref` | 85.8 | 12.9% |
-| `sqlite3VdbeFreeCursorNN` | 61.0 | 9.2% |
-| `memjrnlWrite` | 44.6 | 6.7% |
-| system frame at 0x2704 (malloc or kernel; `atos` cannot split the two) | 37.3 | 5.6% |
-| `sqlite3PagerSharedLock` | 20.5 | 3.1% |
-| `sqlite3VdbeHalt` | 11.8 | 1.8% |
+| `sqlite3VdbeExec` | 354.4 | 53.3% |
+| `sqlite3KeyInfoUnref` | 85.9 | 12.9% |
+| `sqlite3VdbeFreeCursorNN` | 61.1 | 9.2% |
+| `memjrnlWrite` | 44.7 | 6.7% |
+| system frame (malloc or kernel; `atos` cannot split the two) | 39.2 | 5.9% |
+| `sqlite3PagerSharedLock` | 20.6 | 3.1% |
+| `sqlite3VdbeHalt` | 11.9 | 1.8% |
 | `btreeInvokeBusyHandler` | 9.7 | 1.5% |
 | `newDatabase` | 7.8 | 1.2% |
+| `sqlite3VdbeMemTranslate` | 6.0 | 0.9% |
+| `sqlite3VtabUnlock` | 5.2 | 0.8% |
 
-Split by call site inside `apply`: 559.4 s in the 120 single-statement writes,
-101.6 s in the one-transaction 1000-row replace.
+Inclusive: `<sqlite_ivm::vtab::Table>::drain` 99.6%,
+`<sqlite_ivm::relational::Plan>::drain` 97.7%,
+`CachedExecute::execute_cached` 98.2%. The cell is one drain per statement.
 
-Hypothesis: the fixpoint walks one hop per round and each round builds its work
-set over ephemeral b-trees, so statement and ephemeral-btree setup and teardown
-is paid per round. `sqlite3KeyInfoUnref`, `sqlite3VdbeFreeCursorNN`,
-`memjrnlWrite`, `sqlite3PagerSharedLock`, and `newDatabase` together are 33.1%
-of the cell, 220 s, against 53.2% of real VM work. The number to move is that
-220 s: a round that reuses its cursors and its scratch b-tree instead of
-opening them should take it near zero.
+The frames that only appear at the large size are ephemeral-table machinery:
+`sqlite3KeyInfoUnref`, `sqlite3VdbeFreeCursorNN`, `memjrnlWrite`,
+`sqlite3PagerSharedLock`, `newDatabase`, `sqlite3VdbeHalt`. Together 36.0%,
+240 s of 664 s. Splitting `apply` by call site: 559.4 s in the 120
+single-statement writes, 101.6 s in the one-transaction 1000-row replace.
 
-Per-statement cost at fanout 1 backs the round count as the driver: delete is
-0.4 ms at n 1000, 10.9 ms at n 10000, 5960.0 ms at n 100000; the 10x step from
-10000 to 100000 is 547x.
+### hypothesis
 
-Blocked. Any change here is in `src/`, and `refactor-pass-3b-one-engine` is
-live on `src/`, so this arc waits for that merge and rebases. `bench scale
---reps N` is in place for the three-runs-each-side rule.
+The closure is wide, not deep. `b.k` covers every residue, so a breadth first
+walk from the roots reaches every node in one hop (measured directly on the
+seed formula: reached equals g, max distance 1), and `RUST_LOG=sqlite_ivm=debug`
+shows the fixpoint settling in two derive rounds. Round count is not the
+driver.
+
+Hypothesis: above roughly 50000 rows a fixpoint statement stops being a
+single-pass scan and starts building transient ephemeral tables, so statement
+and cursor setup and teardown dominates. The number to move is the 36.0%, 240 s
+of ephemeral machinery at n 100000, and the 29x cliff between n 40000 and
+n 60000.
+
+One candidate change: the fixpoint's `restore` runs `EXISTS(SELECT 1 <from>)`
+once per work row, and `collect_deleted` and `drop_deleted_range` drive off
+`__k IN (SELECT __k FROM work WHERE rowid>?1 AND rowid<=?2)`. Driving the range
+from the outer table, so membership is a join against a materialized key list
+rather than a correlated subquery per row, is the smallest change that removes
+the per-row setup.
+
+Blocked. Any change is in `src/`, and `refactor-pass-3b-one-engine` is live on
+`src/`, so this arc waits for that merge and rebases. `bench scale --reps N` is
+in place for the three-runs-each-side rule, and `RUST_LOG=sqlite_ivm=debug`
+now prints the engine's round spans.
 
 ## SVGs
 
