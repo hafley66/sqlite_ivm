@@ -63,3 +63,6 @@ unless the row says otherwise. Executor glm53f unless noted.
 - dispatched refactor/pass-3-one-engine (glm53f-omp-max): shape table first, retire the trigger engine only if every shape binds through the relational plan. Brief `refactor-3.brief.md`.
 - bench-rust: merged main and restored the dylib rail (`002a964`); PR #26 re-grade next checkpoint.
 - 08:2x checkpoint. bench-rust HEAD `002a964` (unpushed): 17 bins 75/75 here, dylib rail back with three tests, but the merge of main resurrected 33 mjs files, `bench/shared/`, and the scripts; hail m-1a398387 orders arc B re-applied. pass-3 just started. 33G free.
+- 08:5x bench PR #26 graded: 16 binaries 75/75 x2 (14_scale deleted by plan), dylib rail restored with three tests, script era gone (0 mjs/py/pl on main), five sh scripts remain (build, package, statement-costs, crud and verify kept by #23 for references). Merged; main `00f37b2`. Bench: `bench/` crate `sqlite-ivm-bench`, subcommands `shootout`, `scale`, `dump-fixture`; receipts in `plans/costs/shootout-rust.md`.
+- pass-3 step 1 done (`9aebf80`): every old-path shape binds through the relational plan; proceeding to retire.
+- dispatched perf/toward-dd (flash-omp-max) from `00f37b2`.
