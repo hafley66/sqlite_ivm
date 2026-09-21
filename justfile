@@ -10,6 +10,10 @@ shootout profile="smoke" *args:
 crossover *args:
     bash scripts/12_crossover.sh {{args}}
 
+# Current plugin, historical counted C, DD, then hafley-observe diagnostic captures.
+crossover-observe *args:
+    python3 scripts/14_crossover_observe.py {{args}}
+
 # Five workloads: statement counts, row counts, mean/p99, and spans on/off wall.
 every-statement:
     bash scripts/every-statement.sh

@@ -20,6 +20,43 @@ fn rows(db: &Connection, sql: &str) -> Result<Vec<Vec<Value>>> {
 }
 
 #[test]
+fn nullable_sum_support_survives_failure_snapshots_and_reopen() -> Result<()> {
+    let path = std::env::temp_dir().join(format!("ivm-sum-support-{}-{}.db", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+    let query = "SELECT k,COUNT(*) AS n,SUM(v) AS s,SUM(w) AS t FROM a GROUP BY k";
+    let writer = open(&path)?;
+    writer.execute_batch(&format!("CREATE TABLE a(k INTEGER,v,w);INSERT INTO a VALUES(1,NULL,3),(1,4,NULL),(2,1000000,-1000000);CREATE VIRTUAL TABLE totals USING sqlite_ivm('{query}')"))?;
+    let reader = open(&path)?;
+    reader.execute_batch("BEGIN")?;
+    let before = rows(&reader, "SELECT * FROM totals")?;
+    writer.execute_batch("UPDATE a SET v=NULL WHERE k=1")?;
+    assert_eq!(rows(&reader, "SELECT * FROM totals")?, before);
+    assert_eq!(rows(&writer, "SELECT * FROM totals")?, rows(&writer, query)?);
+    reader.execute_batch("COMMIT")?;
+    assert_eq!(rows(&reader, "SELECT * FROM totals")?, rows(&reader, query)?);
+    writer.execute_batch("CREATE TEMP TRIGGER fail_sum BEFORE INSERT ON main.totals_state BEGIN SELECT RAISE(ABORT,'sum failure');END")?;
+    assert!(writer.execute_batch("UPDATE a SET v=7,w=NULL").is_err());
+    writer.execute_batch("DROP TRIGGER fail_sum")?;
+    assert_eq!(rows(&writer, "SELECT * FROM totals")?, rows(&writer, query)?);
+    // Force maintenance inside the savepoint, including the unsafe marker.
+    writer.execute_batch("SAVEPOINT invalid;INSERT INTO a VALUES(1,0.5,3)")?;
+    assert_eq!(rows(&writer, "SELECT * FROM totals")?, rows(&writer, query)?);
+    writer.execute_batch("ROLLBACK TO invalid;RELEASE invalid;UPDATE a SET v=9,w=NULL WHERE k=1;ALTER TABLE totals RENAME TO sums")?;
+    assert_eq!(rows(&writer, "SELECT * FROM sums")?, rows(&writer, query)?);
+    drop(reader);
+    drop(writer);
+    let writer = open(&path)?;
+    for sql in ["DELETE FROM a WHERE v IS NULL", "UPDATE a SET v=NULL", "INSERT INTO a VALUES(1,1000001,NULL)", "DELETE FROM a", "INSERT INTO a VALUES(2,NULL,4)"] {
+        writer.execute_batch(sql)?;
+        assert_eq!(rows(&writer, "SELECT * FROM sums")?, rows(&writer, query)?, "{sql}");
+    }
+    writer.execute_batch("DROP TABLE sums")?;
+    assert_eq!(writer.query_row("SELECT count(*) FROM sqlite_schema WHERE name GLOB 'sums_*'", [], |row| row.get::<_, i64>(0))?, 0);
+    drop(writer);
+    std::fs::remove_file(path).unwrap();
+    Ok(())
+}
+
+#[test]
 fn wal_snapshots_writer_contention_and_failed_maintenance_are_atomic() -> Result<()> {
     let path = std::env::temp_dir().join(format!(
         "ivm-transaction-{}-{}.db",

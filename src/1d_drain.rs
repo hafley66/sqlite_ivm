@@ -120,18 +120,22 @@ impl Plan {
         touched_inputs: &[bool],
     ) -> Result<usize> {
         if let Some(join) = &statements.join_delta {
+            let mut written = 0;
             for (side, touched) in touched_inputs.iter().enumerate() {
                 if !touched {
                     continue;
                 }
                 let side_statements = statements.sides[side].as_ref().expect("inner join arrangement");
                 statements::exec_cached(db, Phase::Maintain, name, &side_statements.intern, [])?;
-                statements::exec_cached(db, Phase::Maintain, name, &join.sides[side], [])?;
+                written += statements::exec_cached(db, Phase::Maintain, name, &join.sides[side], [])?;
                 upsert(db, name, Phase::Maintain, &side_statements.upsert)?;
             }
             let bad: bool = statements::query_cached(db, Phase::Maintain, name, &join.bad, [], |r| r.get(0))?;
             if bad {
                 return Err(error("join multiplicity overflow"));
+            }
+            if !join.consolidate {
+                return Ok(written);
             }
         } else {
             // Touched keys: every key of every input delta row, interned.
@@ -144,7 +148,16 @@ impl Plan {
                 statements::exec_cached(db, Phase::Maintain, name, &side.touch, [])?;
             }
             // Before: the node's output over the touched keys, parked.
-            statements.materialize.execute(db, name)?;
+            if let Some(stored_before) = &statements.stored_before {
+                let corrupt: bool = statements::query_cached(db, Phase::Maintain, name, &stored_before.corrupt, [], |row| row.get(0))?;
+                if corrupt {
+                    statements.materialize.execute(db, name)?;
+                } else {
+                    statements::exec_cached(db, Phase::Maintain, name, &stored_before.read, [])?;
+                }
+            } else {
+                statements.materialize.execute(db, name)?;
+            }
             statements::exec_cached(db, Phase::Maintain, name, &statements.park, [])?;
             statements::exec_cached(db, Phase::Maintain, name, &statements.clear_out, [])?;
             for (side, touched) in touched_inputs.iter().enumerate() {
@@ -156,7 +169,20 @@ impl Plan {
                 }
             }
             // After, then out = after minus before as a bag.
-            statements.materialize.execute(db, name)?;
+            if let Some(aggregate) = &statements.aggregate_delta {
+                let eligible: bool = statements::query_cached(db, Phase::Maintain, name, &aggregate.eligible, [], |row| row.get(0))?;
+                if eligible {
+                    let _aggregate = tracing::debug_span!("aggregate_delta", path = "integer").entered();
+                    statements::exec_cached(db, Phase::Maintain, name, &aggregate.update_counts, [])?;
+                    statements::exec_cached(db, Phase::Maintain, name, &aggregate.apply, [])?;
+                } else {
+                    let _aggregate = tracing::debug_span!("aggregate_delta", path = "recompute").entered();
+                    statements::exec_cached(db, Phase::Maintain, name, &aggregate.invalidate, [])?;
+                    statements.materialize.execute(db, name)?;
+                }
+            } else {
+                statements.materialize.execute(db, name)?;
+            }
             for sql in &statements.diff {
                 statements::exec_cached(db, Phase::Maintain, name, sql, [])?;
             }
@@ -346,7 +372,9 @@ fn upsert(db: &Connection, name: &str, phase: Phase, statements: &UpsertStatemen
     statements::exec_cached(db, phase, name, &statements.clear_delta, [])?;
     statements::exec_cached(db, phase, name, &statements.fill_delta, [])?;
     statements::exec_cached(db, phase, name, &statements.apply, [])?;
-    statements::exec_cached(db, phase, name, &statements.insert_new, [])?;
+    if let Some(insert_new) = &statements.insert_new {
+        statements::exec_cached(db, phase, name, insert_new, [])?;
+    }
     let bad: bool = statements::query_cached(db, phase, name, &statements.bad, [], |r| r.get(0))?;
     if bad {
         return Err(error("negative arrangement multiplicity"));

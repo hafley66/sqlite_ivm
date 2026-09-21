@@ -1,0 +1,583 @@
+{
+  "source_revision_before_changes": "268a1ac",
+  "historical_source": {
+    "revision": "e2052d5ae",
+    "sha256": {
+      "43_sqlite_competitive/0a_state.h": "d5b7be68b7da63ef9b0b49c0564dc52def498a4b7ba7659f968a8c093a080d2a",
+      "43_sqlite_competitive/0ab_expressions.h": "ac75efedde54f5ccbc960cec588380e9487ce1951a7255b734789ea299de5e32",
+      "43_sqlite_competitive/0b_delta.h": "43ba65dfb91b5dae75e2c42283bc9afded7851c72c1d69f4a13547844b4fcbb9",
+      "43_sqlite_competitive/0bc_nonmonotone.h": "0cf1f30c657bb7c7314083c2d91d95f6f14e9e33596666c35e937665712f30af",
+      "43_sqlite_competitive/0c_batch.h": "544c12a205b02ad98e1810adda2b9c140adedac0de62b2f65cd60a1fb7692215",
+      "43_sqlite_competitive/1_native.c": "9254d680a8caa789780e6b920c0b6214bf5ebf1cf03b251b6a812381188cc388",
+      "43_sqlite_competitive/4_shootout.py": "a3e4a33b990dacdcf3ea2a353b22e18ae28e9d146d9d26d498ac0ef9e27fd9e7",
+      "42_sqlite_native_take2/7_shootout.py": "2dbca6dae896a8933683ddb7c3068c733cac63a5197622d6ef1376b4677c1983"
+    },
+    "command": [
+      "scripts/14_crossover_observe.py",
+      "--out",
+      "bench/results/count-sum-observe"
+    ],
+    "time_unix": 1790032706.795022
+  },
+  "timing_metadata": {
+    "command": [
+      "bench/crossover/28_run.py",
+      "--extension",
+      "/Users/chrishafley/projects/sqlite_ivm/target/extension/release/libsqlite_ivm.dylib",
+      "--dd-bin",
+      "/Users/chrishafley/projects/sqlite_ivm/target/release/crossover-dd",
+      "--historical-extension",
+      "/Users/chrishafley/projects/sqlite_ivm/bench/results/count-sum-observe/competitive.dylib",
+      "--historical-adapter",
+      "/Users/chrishafley/projects/sqlite_ivm/bench/results/count-sum-observe/source/43_sqlite_competitive/4_shootout.py",
+      "--reps",
+      "3",
+      "--out",
+      "/Users/chrishafley/projects/sqlite_ivm/bench/results/count-sum-observe/timings"
+    ],
+    "time_unix": 1790032706.839133,
+    "repetitions": 3,
+    "warmups": 0,
+    "source": "sprefa@e2052d5ae",
+    "sha256": {
+      "/Users/chrishafley/projects/sqlite_ivm/target/extension/release/libsqlite_ivm.dylib": "4c22af1b72a83464db293c5e4e30a4fc42714854e957e9f16cb4d9da1bf36b3a",
+      "/Users/chrishafley/projects/sqlite_ivm/target/release/crossover-dd": "6f74e03e89e2d4b712b73eb720608847ef45eb0c82b14fb43aff0ceabb3a34ae",
+      "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/9_crossover_workload.mjs": "fece748f04a08eaa76400a7b0f52e8616b745241ed7141621f46ac6949291f74",
+      "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/22_crossover_dd.rs": "256a2233d24d2512e4204a8637a1df3e81a0046be05f54ac7801aecc8c7857df",
+      "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/26_sqlite_plugin_adapter.py": "1798b03b34f80a4da6a13b305c318866f9c5a4eb490bbb8042cdeefa9e05392d",
+      "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/19_sqlite_template_adapter.py": "bbc04cc74b29c830c0ba4a2606ee99528ec08952ede7b9da75ab68bdbd9e7c8a",
+      "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/28_run.py": "c9457ecb7cc9a765448145e8021027a9be8121e856009ac94515d6d6cfae15ed",
+      "/Users/chrishafley/projects/sqlite_ivm/bench/results/count-sum-observe/competitive.dylib": "398a098ef84f3821b9a3478aee5bd7d253c4d901af9aa85c4ff39c94336bb9e4",
+      "/Users/chrishafley/projects/sqlite_ivm/bench/results/count-sum-observe/source/43_sqlite_competitive/4_shootout.py": "a3e4a33b990dacdcf3ea2a353b22e18ae28e9d146d9d26d498ac0ef9e27fd9e7"
+    }
+  },
+  "cases": [
+    {
+      "rows": 400,
+      "batch": 10,
+      "fanout": 10,
+      "samples_ms": {
+        "sqlite-ivm": [
+          4.799956994247623,
+          4.641708015697077,
+          4.9052500107791275
+        ],
+        "dd": [
+          0.136458,
+          0.138125,
+          0.142207
+        ],
+        "historical-counted": [
+          1.571625005453825,
+          1.6357499844161794,
+          1.6096259787445888
+        ]
+      },
+      "ivm_over_dd": 34.750819867856094
+    },
+    {
+      "rows": 12000,
+      "batch": 10,
+      "fanout": 10,
+      "samples_ms": {
+        "sqlite-ivm": [
+          7.551875984063372,
+          7.458498002961278,
+          7.228918984765187
+        ],
+        "dd": [
+          0.18945800000000002,
+          0.140416,
+          0.158832
+        ],
+        "historical-counted": [
+          1.9729170016944408,
+          2.031416996032931,
+          3.150413991534151
+        ]
+      },
+      "ivm_over_dd": 46.95840890350356
+    },
+    {
+      "rows": 400,
+      "batch": 10,
+      "fanout": 200,
+      "samples_ms": {
+        "sqlite-ivm": [
+          6.529875987325795,
+          6.385915985447355,
+          6.5744159946916625
+        ],
+        "dd": [
+          0.14516800000000002,
+          0.155251,
+          0.143002
+        ],
+        "historical-counted": [
+          1.6173339972738177,
+          1.6709180054022,
+          1.6797499993117526
+        ]
+      },
+      "ivm_over_dd": 44.98151098951418
+    },
+    {
+      "rows": 1200,
+      "batch": 10,
+      "fanout": 200,
+      "samples_ms": {
+        "sqlite-ivm": [
+          7.208916998934001,
+          7.550748021458276,
+          6.975081982091069
+        ],
+        "dd": [
+          0.15037299999999998,
+          0.14658300000000002,
+          0.141376
+        ],
+        "historical-counted": [
+          1.7442509852116928,
+          1.77854199137073,
+          1.7850830045063049
+        ]
+      },
+      "ivm_over_dd": 49.17976162947954
+    },
+    {
+      "rows": 4000,
+      "batch": 10,
+      "fanout": 200,
+      "samples_ms": {
+        "sqlite-ivm": [
+          9.183624963043258,
+          9.05720998707693,
+          8.634999030618928
+        ],
+        "dd": [
+          0.15737600000000002,
+          0.178832,
+          0.15420899999999998
+        ],
+        "historical-counted": [
+          1.9303760200273246,
+          1.9194139895262197,
+          1.9587069982662797
+        ]
+      },
+      "ivm_over_dd": 57.55140546892112
+    },
+    {
+      "rows": 12000,
+      "batch": 10,
+      "fanout": 200,
+      "samples_ms": {
+        "sqlite-ivm": [
+          10.419957019621506,
+          10.220083015155979,
+          10.782498997286893
+        ],
+        "dd": [
+          0.16641599999999998,
+          0.147957,
+          0.251791
+        ],
+        "historical-counted": [
+          2.0739580068038777,
+          2.1099999721627682,
+          2.0882909884676337
+        ]
+      },
+      "ivm_over_dd": 62.61391344354814
+    },
+    {
+      "rows": 12000,
+      "batch": 1000,
+      "fanout": 200,
+      "samples_ms": {
+        "sqlite-ivm": [
+          68.25391699385364,
+          67.5129999872297,
+          67.63820796913933
+        ],
+        "dd": [
+          0.999918,
+          1.138082,
+          0.999791
+        ],
+        "historical-counted": [
+          20.15316601318773,
+          19.779788999585435,
+          20.059000002220273
+        ]
+      },
+      "ivm_over_dd": 67.64375475702941
+    },
+    {
+      "rows": 12000,
+      "batch": 1,
+      "fanout": 200,
+      "samples_ms": {
+        "sqlite-ivm": [
+          7.729541976004839,
+          7.716501000686549,
+          7.7448330266634
+        ],
+        "dd": [
+          0.14795799999999998,
+          0.132582,
+          0.154584
+        ],
+        "historical-counted": [
+          1.799082980141975,
+          1.8469180358806625,
+          1.9034179858863354
+        ]
+      },
+      "ivm_over_dd": 52.24146025226646
+    },
+    {
+      "rows": 12000,
+      "batch": 100,
+      "fanout": 200,
+      "samples_ms": {
+        "sqlite-ivm": [
+          25.437415009946562,
+          27.648668983601965,
+          25.87812599085737
+        ],
+        "dd": [
+          0.30808199999999997,
+          0.3055,
+          0.322709
+        ],
+        "historical-counted": [
+          6.14837599277962,
+          5.904291989281774,
+          14.236917020753026
+        ]
+      },
+      "ivm_over_dd": 83.99752660284396
+    }
+  ],
+  "profiles": {
+    "current": {
+      "path": "bench/results/count-sum-observe/current/profile.json",
+      "sha256": "c54b8adcd59cb23ab62b6afdb63271fb4c48fead7c138b0404abfba5edd01eef",
+      "binary_sha256": "7d1c11fa84c82df2b50dee0f54c074d7367b72cb337ae67d9df850b0bc4614d4",
+      "fixture_sha256": "03a093bf232f8f34a9f254c0ef128ed5c7b9a2fd220b3164ab0b12d6a74d75e7",
+      "database_bytes": 2064384,
+      "states": [
+        {
+          "state": "insert_batch",
+          "sql_profile_calls": 2048,
+          "nodes": [
+            {
+              "calls": 4,
+              "node": [
+                "apply_state",
+                "UInt(6)"
+              ],
+              "profile_nanos": 2000000.0
+            },
+            {
+              "calls": 21,
+              "node": [
+                "group",
+                "UInt(6)"
+              ],
+              "profile_nanos": 5000000.0
+            },
+            {
+              "calls": 8,
+              "node": [
+                "join",
+                "UInt(4)"
+              ],
+              "profile_nanos": 5000000.0
+            },
+            {
+              "calls": 1,
+              "node": [
+                "map",
+                "UInt(1)"
+              ],
+              "profile_nanos": 0.0
+            },
+            {
+              "calls": 1,
+              "node": [
+                "map",
+                "UInt(5)"
+              ],
+              "profile_nanos": 0.0
+            },
+            {
+              "calls": 1000,
+              "node": [
+                "seed",
+                "UInt(7)"
+              ],
+              "profile_nanos": 0.0
+            },
+            {
+              "calls": 5,
+              "node": [
+                "sweep",
+                "UInt(7)"
+              ],
+              "profile_nanos": 0.0
+            }
+          ],
+          "cpu_user_secs": 0.13509300000000002,
+          "cpu_system_secs": 0.079902,
+          "peak_rss_bytes": 141869056,
+          "disk_write_bytes": 95145984
+        },
+        {
+          "state": "delete_batch",
+          "sql_profile_calls": 2048,
+          "nodes": [
+            {
+              "calls": 4,
+              "node": [
+                "apply_state",
+                "UInt(6)"
+              ],
+              "profile_nanos": 0.0
+            },
+            {
+              "calls": 21,
+              "node": [
+                "group",
+                "UInt(6)"
+              ],
+              "profile_nanos": 7000000.0
+            },
+            {
+              "calls": 8,
+              "node": [
+                "join",
+                "UInt(4)"
+              ],
+              "profile_nanos": 7000000.0
+            },
+            {
+              "calls": 1,
+              "node": [
+                "map",
+                "UInt(1)"
+              ],
+              "profile_nanos": 0.0
+            },
+            {
+              "calls": 1,
+              "node": [
+                "map",
+                "UInt(5)"
+              ],
+              "profile_nanos": 0.0
+            },
+            {
+              "calls": 1000,
+              "node": [
+                "seed",
+                "UInt(7)"
+              ],
+              "profile_nanos": 3000000.0
+            },
+            {
+              "calls": 5,
+              "node": [
+                "sweep",
+                "UInt(7)"
+              ],
+              "profile_nanos": 0.0
+            }
+          ],
+          "cpu_user_secs": 0.05569200000000002,
+          "cpu_system_secs": 0.012671000000000002,
+          "peak_rss_bytes": 143769600,
+          "disk_write_bytes": 5644288
+        },
+        {
+          "state": "update_batch",
+          "sql_profile_calls": 3048,
+          "nodes": [
+            {
+              "calls": 4,
+              "node": [
+                "apply_state",
+                "UInt(6)"
+              ],
+              "profile_nanos": 0.0
+            },
+            {
+              "calls": 21,
+              "node": [
+                "group",
+                "UInt(6)"
+              ],
+              "profile_nanos": 10000000.0
+            },
+            {
+              "calls": 8,
+              "node": [
+                "join",
+                "UInt(4)"
+              ],
+              "profile_nanos": 10000000.0
+            },
+            {
+              "calls": 1,
+              "node": [
+                "map",
+                "UInt(1)"
+              ],
+              "profile_nanos": 0.0
+            },
+            {
+              "calls": 1,
+              "node": [
+                "map",
+                "UInt(5)"
+              ],
+              "profile_nanos": 0.0
+            },
+            {
+              "calls": 2000,
+              "node": [
+                "seed",
+                "UInt(7)"
+              ],
+              "profile_nanos": 1000000.0
+            },
+            {
+              "calls": 5,
+              "node": [
+                "sweep",
+                "UInt(7)"
+              ],
+              "profile_nanos": 0.0
+            }
+          ],
+          "cpu_user_secs": 0.09660800000000003,
+          "cpu_system_secs": 0.012829000000000007,
+          "peak_rss_bytes": 143769600,
+          "disk_write_bytes": 13258752
+        },
+        {
+          "state": "dimension_fanout",
+          "sql_profile_calls": 51,
+          "nodes": [
+            {
+              "calls": 4,
+              "node": [
+                "apply_state",
+                "UInt(6)"
+              ],
+              "profile_nanos": 0.0
+            },
+            {
+              "calls": 21,
+              "node": [
+                "group",
+                "UInt(6)"
+              ],
+              "profile_nanos": 2000000.0
+            },
+            {
+              "calls": 8,
+              "node": [
+                "join",
+                "UInt(4)"
+              ],
+              "profile_nanos": 0.0
+            },
+            {
+              "calls": 1,
+              "node": [
+                "map",
+                "UInt(3)"
+              ],
+              "profile_nanos": 0.0
+            },
+            {
+              "calls": 1,
+              "node": [
+                "map",
+                "UInt(5)"
+              ],
+              "profile_nanos": 0.0
+            },
+            {
+              "calls": 2,
+              "node": [
+                "seed",
+                "UInt(7)"
+              ],
+              "profile_nanos": 0.0
+            },
+            {
+              "calls": 5,
+              "node": [
+                "sweep",
+                "UInt(7)"
+              ],
+              "profile_nanos": 0.0
+            }
+          ],
+          "cpu_user_secs": 0.0038549999999999973,
+          "cpu_system_secs": 0.001698000000000005,
+          "peak_rss_bytes": 143769600,
+          "disk_write_bytes": 806912
+        }
+      ]
+    },
+    "historical": {
+      "path": "bench/results/count-sum-observe/historical/profile.json",
+      "sha256": "bd1e648f5cc6d14ec2cc4957b6b3f867b7d6a1b00b0607e9ea43b70e1bd4ef53",
+      "binary_sha256": "7d1c11fa84c82df2b50dee0f54c074d7367b72cb337ae67d9df850b0bc4614d4",
+      "fixture_sha256": "03a093bf232f8f34a9f254c0ef128ed5c7b9a2fd220b3164ab0b12d6a74d75e7",
+      "database_bytes": 1159168,
+      "states": [
+        {
+          "state": "insert_batch",
+          "sql_profile_calls": 3017,
+          "nodes": [],
+          "cpu_user_secs": 0.164398,
+          "cpu_system_secs": 0.05943100000000001,
+          "peak_rss_bytes": 90505216,
+          "disk_write_bytes": 67551232
+        },
+        {
+          "state": "delete_batch",
+          "sql_profile_calls": 3017,
+          "nodes": [],
+          "cpu_user_secs": 0.06020199999999998,
+          "cpu_system_secs": 0.007301999999999975,
+          "peak_rss_bytes": 92405760,
+          "disk_write_bytes": 3055616
+        },
+        {
+          "state": "update_batch",
+          "sql_profile_calls": 4017,
+          "nodes": [],
+          "cpu_user_secs": 0.07072299999999998,
+          "cpu_system_secs": 0.009448000000000012,
+          "peak_rss_bytes": 92405760,
+          "disk_write_bytes": 3616768
+        },
+        {
+          "state": "dimension_fanout",
+          "sql_profile_calls": 21,
+          "nodes": [],
+          "cpu_user_secs": 0.0005990000000000162,
+          "cpu_system_secs": 0.00022199999999999998,
+          "peak_rss_bytes": 92405760,
+          "disk_write_bytes": 32768
+        }
+      ]
+    }
+  }
+}

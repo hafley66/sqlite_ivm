@@ -52,6 +52,20 @@ pub(crate) struct ArrangementStatements {
     pub(crate) clear_before: String,
     pub(crate) sides: Vec<Option<ArrangementSide>>,
     pub(crate) materialize: MaterializeStatements,
+    pub(crate) stored_before: Option<StoredGroupStatements>,
+    pub(crate) aggregate_delta: Option<AggregateDeltaStatements>,
+}
+
+pub(crate) struct StoredGroupStatements {
+    pub(crate) read: String,
+    pub(crate) corrupt: String,
+}
+
+pub(crate) struct AggregateDeltaStatements {
+    pub(crate) eligible: String,
+    pub(crate) apply: String,
+    pub(crate) update_counts: String,
+    pub(crate) invalidate: String,
 }
 
 /// Inner joins propagate signed input deltas against the opposite arrangement.
@@ -59,6 +73,7 @@ pub(crate) struct ArrangementStatements {
 pub(crate) struct JoinDeltaStatements {
     pub(crate) sides: [String; 2],
     pub(crate) bad: String,
+    pub(crate) consolidate: bool,
 }
 
 pub(crate) struct ArrangementSide {
@@ -71,7 +86,7 @@ pub(crate) struct UpsertStatements {
     pub(crate) clear_delta: String,
     pub(crate) fill_delta: String,
     pub(crate) apply: String,
-    pub(crate) insert_new: String,
+    pub(crate) insert_new: Option<String>,
     pub(crate) bad: String,
     pub(crate) drop_zero: String,
 }
@@ -211,7 +226,7 @@ fn node_statements(plan: &Plan, name: &str, db: &Connection, id: usize) -> NodeS
                 KindStatements::Arrangement(arrangement_statements(plan, name, db, id, width))
             }
             Kind::Fixpoint { .. } => {
-                KindStatements::Fixpoint(fixpoint_statements(plan, name, id, width))
+                KindStatements::Fixpoint(fixpoint_statements(plan, name, db, id, width))
             }
         },
     }
@@ -241,9 +256,28 @@ fn arrangement_statements(
         emit: format!("INSERT INTO {out} SELECT * FROM {before}"),
         clear_before: format!("DELETE FROM {before}"),
         sides: (0..node.inputs.len())
-            .map(|side| arrangement_side(plan, name, id, side))
+            .map(|side| arrangement_side(plan, name, db, id, side))
             .collect(),
         materialize: plan.materialize_statements(db, name, id, true),
+        aggregate_delta: aggregate_delta_statements(plan, name, db, id),
+        stored_before: if id == plan.output {
+            plan.stored_group_key().and_then(|key| {
+                let state_name = format!("{name}_state");
+                let suffix = format!("({key})");
+                let indexed = crate::statements::query_map(
+                    db, crate::statements::Phase::Declare, name,
+                    "SELECT sql FROM main.sqlite_schema WHERE type='index' AND tbl_name=?1 AND sql IS NOT NULL",
+                    [&state_name], |row| row.get::<_, String>(0),
+                ).is_ok_and(|definitions| definitions.iter().any(|sql| sql.ends_with(&suffix)));
+                indexed.then(|| {
+                    let selected = format!("FROM main.{} WHERE {key} IN (SELECT __v FROM {} WHERE __i IN (SELECT __k FROM temp.__ivm_touched))", crate::catalog::quote(&state_name), keys_table(name));
+                    StoredGroupStatements {
+                        read: format!("INSERT INTO {out}({cols},__m) SELECT {cols},1 {selected}"),
+                        corrupt: format!("SELECT EXISTS(SELECT 1 {selected} AND __key!={identity})"),
+                    }
+                })
+            })
+        } else { None },
     }
 }
 
@@ -276,10 +310,121 @@ fn join_delta_statements(plan: &Plan, name: &str, id: usize) -> Option<JoinDelta
     Some(JoinDeltaStatements {
         sides,
         bad: format!("SELECT EXISTS(SELECT 1 FROM {out} WHERE typeof(__m)!='integer')"),
+        consolidate: !group_consumers_consolidate(plan, id),
     })
 }
 
-fn arrangement_side(plan: &Plan, name: &str, id: usize, side: usize) -> Option<ArrangementSide> {
+/// A group consolidates its input before applying multiplicities. Plain column
+/// projections between the join and group preserve signed bags and cannot raise
+/// a scalar error on a row that would otherwise cancel at the join.
+fn group_consumers_consolidate(plan: &Plan, id: usize) -> bool {
+    if id == plan.output {
+        return false;
+    }
+    let consumers = plan.nodes.iter().enumerate()
+        .filter(|(_, node)| node.inputs.contains(&id)).collect::<Vec<_>>();
+    !consumers.is_empty() && consumers.into_iter().all(|(consumer, node)| match &node.kind {
+        Kind::Group { .. } => true,
+        Kind::Map { expressions, predicate: None } if expressions.iter().all(|expression| {
+            expression.strip_prefix('c').is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
+        }) => group_consumers_consolidate(plan, consumer),
+        _ => false,
+    })
+}
+
+/// Recover the scalar input of the compiler's weighted SUM through the same
+/// SQLite parser. This accepts its generated CASE/weight form only.
+fn weighted_sum_value(expression: &str) -> Option<String> {
+    use sqlite3_parser::{ast::*, lexer::sql::Parser, Bump, FallibleIterator};
+    fn unwrap<'a>(value: &'a Expr<'a>) -> &'a Expr<'a> {
+        match value {
+            Expr::Parenthesized(values) if values.len() == 1 => unwrap(&values[0]),
+            _ => value,
+        }
+    }
+    let arena = Bump::new();
+    let query = format!("SELECT {expression}");
+    let mut parser = Parser::new(&arena, query.as_bytes());
+    let Cmd::Stmt(Stmt::Select(select)) = parser.next().ok()?? else { return None };
+    let OneSelect::Select { columns, .. } = &select.body.select else { return None };
+    let ResultColumn::Expr(Expr::FunctionCall { name, args: Some(args), distinctness: None, filter_over: None, order_by: None }, _) = &columns[0] else { return None };
+    if !name.0.eq_ignore_ascii_case("sum") || args.len() != 1 { return None; }
+    let Expr::Case { else_expr: Some(weighted), .. } = unwrap(&args[0]) else { return None };
+    let Expr::Binary(value, Operator::Multiply, weight) = unwrap(weighted) else { return None };
+    if crate::relational::sql(unwrap(weight)) != "__n" { return None; }
+    Some(crate::relational::sql(unwrap(value)))
+}
+
+/// Classify the existing compiler output, leaving all other aggregate shapes
+/// on their general arrangement path.
+pub(crate) fn aggregate_sum_inputs(plan: &Plan) -> Option<Vec<(usize, String)>> {
+    let node = &plan.nodes[plan.output];
+    let Kind::Group { keys, expressions, window: false, limit: None, having: None, .. } = &node.kind else { return None };
+    plan.stored_group_key()?;
+    let key_positions = keys.iter().map(|key| expressions.iter().position(|e| e == key)).collect::<Option<Vec<_>>>()?;
+    if key_positions.iter().any(|i| node.fields[*i].affinity != "INTEGER") { return None; }
+    expressions.iter().position(|e| e == "coalesce(sum(__n),0)")?;
+    let mut sums = vec![];
+    for (i, expression) in expressions.iter().enumerate() {
+        if key_positions.contains(&i) || expression == "coalesce(sum(__n),0)" { continue; }
+        sums.push((i, weighted_sum_value(expression)?));
+    }
+    (!sums.is_empty()).then_some(sums)
+}
+
+/// Safe integer groups add signed contributions to their stored before-image.
+/// Nullable sums carry non-null support counts. Groups leaving the bounded
+/// domain use the authoritative input arrangement for subsequent recomputations.
+fn aggregate_delta_statements(plan: &Plan, name: &str, db: &Connection, id: usize) -> Option<AggregateDeltaStatements> {
+    if id != plan.output { return None; }
+    let sums = aggregate_sum_inputs(plan)?;
+    let node = &plan.nodes[id];
+    let Kind::Group { keys, expressions, .. } = &node.kind else { return None };
+    let key_positions = keys.iter().map(|key| expressions.iter().position(|e| e == key)).collect::<Option<Vec<_>>>()?;
+    let count = expressions.iter().position(|e| e == "coalesce(sum(__n),0)")?;
+    let width = node.fields.len();
+    let cols = columns(width);
+    let out = out_table(id, width);
+    let before = format!("temp.__ivm_before_{width}_{id}");
+    let child = out_table(node.inputs[0], plan.nodes[node.inputs[0]].fields.len());
+    let metadata = table(name, id, 1);
+    let metadata_name = format!("{name}_op{id}x1");
+    let present = db.query_row("SELECT EXISTS(SELECT 1 FROM main.sqlite_schema WHERE type='table' AND name=?1)", [&metadata_name], |row| row.get::<_, bool>(0)).unwrap_or(false);
+    if !present { return None; }
+    let delta = format!("(SELECT *,__m AS __n FROM {child})");
+    let mut checks = vec![
+        format!("NOT EXISTS(SELECT 1 FROM {metadata} WHERE __k IN (SELECT __k FROM temp.__ivm_touched) AND __safe=0)"),
+        format!("(SELECT coalesce(max(c{count}),0) FROM {before})+(SELECT total(abs(CAST(__n AS REAL))) FROM {delta})<=1000000"),
+    ];
+    for (_, value) in &sums {
+        checks.push(format!("(SELECT coalesce(min(typeof({value}) IN ('integer','null') AND coalesce(abs(CAST(({value}) AS REAL)),0)<=1000000),1) FROM {delta})"));
+    }
+    let new_count = format!("coalesce(b.c{count},0)+g.c{count}");
+    let values = expressions.iter().enumerate().map(|(i, expression)| {
+        if key_positions.contains(&i) { format!("g.c{i}") }
+        else if expression == "coalesce(sum(__n),0)" { new_count.clone() }
+        else { format!("CASE WHEN m.nn{i}=0 THEN NULL ELSE coalesce(b.c{i},0)+coalesce(g.c{i},0) END") }
+    }).collect::<Vec<_>>().join(",");
+    let groups = if keys.is_empty() { String::new() } else { format!(" GROUP BY {}", plan.key_sql(id, 0)?) };
+    let joined = if key_positions.is_empty() { "1".to_string() } else {
+        key_positions.iter().map(|i| format!("g.c{i} IS b.c{i}")).collect::<Vec<_>>().join(" AND ")
+    };
+    let nonempty = if keys.is_empty() { String::new() } else { format!(" WHERE ({new_count})>0") };
+    let projected = expressions.iter().enumerate().map(|(i, e)|format!("{e} AS c{i}")).collect::<Vec<_>>().join(",");
+    let key = plan.key_sql(id, 0)?;
+    let dict = keys_table(name);
+    let metadata_columns = sums.iter().map(|(i,_)|format!("nn{i}")).collect::<Vec<_>>().join(",");
+    let nonnull = sums.iter().map(|(_,v)|format!("sum(CASE WHEN ({v}) IS NULL THEN 0 ELSE __n END)")).collect::<Vec<_>>().join(",");
+    let updates = sums.iter().map(|(i,_)|format!("nn{i}=nn{i}+excluded.nn{i}")).collect::<Vec<_>>().join(",");
+    Some(AggregateDeltaStatements {
+        eligible: format!("SELECT {}", checks.join(" AND ")),
+        update_counts: format!("INSERT INTO {metadata}(__k,__safe,{metadata_columns}) SELECT (SELECT __i FROM {dict} WHERE __v={key}),1,{nonnull} FROM {delta} WHERE true GROUP BY {key} ON CONFLICT(__k) DO UPDATE SET {updates}"),
+        invalidate: format!("INSERT INTO {metadata}(__k,__safe,{metadata_columns}) SELECT __k,0,{} FROM temp.__ivm_touched WHERE true ON CONFLICT(__k) DO UPDATE SET __safe=0", sums.iter().map(|_|"0").collect::<Vec<_>>().join(",")),
+        apply: format!("INSERT INTO {out}({cols},__m) SELECT {values},1 FROM (SELECT {projected},(SELECT __i FROM {dict} WHERE __v={key}) AS __group_key FROM {delta}{groups}) g LEFT JOIN {before} b ON {joined} JOIN {metadata} m ON m.__k=g.__group_key{nonempty}"),
+    })
+}
+
+fn arrangement_side(plan: &Plan, name: &str, db: &Connection, id: usize, side: usize) -> Option<ArrangementSide> {
     let node = &plan.nodes[id];
     let child = out_table(node.inputs[side], plan.nodes[node.inputs[side]].fields.len());
     let dict = keys_table(name);
@@ -287,13 +432,14 @@ fn arrangement_side(plan: &Plan, name: &str, id: usize, side: usize) -> Option<A
     Some(ArrangementSide {
         intern: format!("INSERT OR IGNORE INTO {dict}(__v) SELECT {key} FROM {child}"),
         touch: format!("INSERT OR IGNORE INTO temp.__ivm_touched SELECT __i FROM {dict} WHERE __v IN (SELECT {key} FROM {child})"),
-        upsert: upsert_statements(plan, name, id, side, &key),
+        upsert: upsert_statements(plan, name, db, id, side, &key),
     })
 }
 
 fn upsert_statements(
     plan: &Plan,
     name: &str,
+    db: &Connection,
     id: usize,
     side: usize,
     key: &str,
@@ -309,20 +455,28 @@ fn upsert_statements(
     let dict = keys_table(name);
     let delta = delta_table(id, side, child_width);
     let arrangement_identity = identity_of(&t);
+    let table_name = format!("{name}_op{id}x{side}");
+    let suffix = format!("(__r,{identity})");
+    let indexed_identity = crate::statements::query_map(
+        db, crate::statements::Phase::Declare, name,
+        "SELECT sql FROM main.sqlite_schema WHERE type='index' AND tbl_name=?1 AND sql LIKE 'CREATE UNIQUE INDEX%'",
+        [&table_name], |row| row.get::<_, String>(0),
+    ).is_ok_and(|definitions| definitions.iter().any(|sql| sql.ends_with(&suffix)));
+    let insert = format!("INSERT INTO {t}(__k,__r,__n,{cols}) SELECT (SELECT __i FROM {dict} WHERE __v={key}),d.__r,d.__n,{cols} FROM {delta} d");
     UpsertStatements {
         clear_delta: format!("DELETE FROM {delta}"),
         fill_delta: format!(
             "INSERT INTO {delta}(__r,__v,__n,{cols}) SELECT sqlite_ivm_hash(__ivm_v),__ivm_v,__ivm_n,{cols} \
              FROM (SELECT {identity} AS __ivm_v,sum(__m) AS __ivm_n,{cols} FROM {child} GROUP BY {identity}) WHERE __ivm_n!=0"
         ),
-        apply: format!(
-            "UPDATE {t} SET __n={t}.__n+d.__n FROM {delta} d WHERE {t}.__r IN (SELECT __r FROM {delta}) AND d.__r={t}.__r AND d.__v={arrangement_identity}"
-        ),
-        insert_new: format!(
-            "INSERT INTO {t}(__k,__r,__n,{cols}) SELECT (SELECT __i FROM {dict} WHERE __v={key}),d.__r,d.__n,{cols} FROM {delta} d \
-             WHERE NOT EXISTS(SELECT 1 FROM {t} a WHERE a.__r=d.__r AND {}=d.__v)",
-            identity_of("a")
-        ),
+        apply: if indexed_identity {
+            format!("{insert} WHERE true ON CONFLICT(__r,{identity}) DO UPDATE SET __n={t}.__n+excluded.__n")
+        } else {
+            format!("UPDATE {t} SET __n={t}.__n+d.__n FROM {delta} d WHERE {t}.__r IN (SELECT __r FROM {delta}) AND d.__r={t}.__r AND d.__v={arrangement_identity}")
+        },
+        insert_new: (!indexed_identity).then(|| format!(
+            "{insert} WHERE NOT EXISTS(SELECT 1 FROM {t} a WHERE a.__r=d.__r AND {}=d.__v)", identity_of("a")
+        )),
         // Only identities present in this delta can have changed multiplicity.
         // The hash bounds the index lookup; the update above still checks the
         // full identity so collisions cannot apply another row's delta.
@@ -361,7 +515,7 @@ fn split_statements(plan: &Plan, name: &str, id: usize, side: usize) -> SplitSta
     }
 }
 
-fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> FixpointStatements {
+fn fixpoint_statements(plan: &Plan, name: &str, db: &Connection, id: usize, width: usize) -> FixpointStatements {
     let node = &plan.nodes[id];
     let Kind::Fixpoint { rules } = &node.kind else {
         unreachable!()
@@ -461,7 +615,7 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
         ),
         seed_new: format!("INSERT INTO {out}({cols},__m) SELECT {cols},1 FROM {all} WHERE rowid>?1"),
         sides: (0..node.inputs.len())
-            .map(|side| fixpoint_side(plan, name, id, side, &all, &work))
+            .map(|side| fixpoint_side(plan, name, db, id, side, &all, &work))
             .collect(),
     }
 }
@@ -469,6 +623,7 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
 fn fixpoint_side(
     plan: &Plan,
     name: &str,
+    db: &Connection,
     id: usize,
     side: usize,
     all: &str,
@@ -517,7 +672,7 @@ fn fixpoint_side(
     Some(FixpointSide {
         intern: format!("INSERT OR IGNORE INTO {dict}(__v) SELECT {key} FROM {child}"),
         touch: format!("INSERT OR IGNORE INTO temp.__ivm_touched SELECT __i FROM {dict} WHERE __v IN (SELECT {key} FROM {child})"),
-        upsert: upsert_statements(plan, name, id, side, &key),
+        upsert: upsert_statements(plan, name, db, id, side, &key),
         split: split_statements(plan, name, id, side),
         exists_left: format!("SELECT EXISTS(SELECT 1 FROM {left})"),
         arrive_derives: side_derives(&arrived),

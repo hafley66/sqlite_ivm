@@ -125,14 +125,11 @@ affected groups or graph regions can still require large work.
 
 `xRename` preserves state and index B-trees; `xDestroy` validates the exact owned
 DDL before cleanup. Shared `__ivm_*` catalogs remain after the last view is dropped.
-Storage format 2 records the operator layouts and typed row identities; format 3
-adds the recursive member layout and is written only for views with a recursive
-CTE, so the 0.2.x extension still maintains non-recursive views created here.
-Recursive views created by 0.2.x keep format 2 and are rejected at first
-maintenance with `recursive views from storage format 2 must be dropped and
-re-created`. Databases containing format 1 views require the matching 0.1.x
-extension. Automatic format migration is unavailable. The original ordinary-view
-prototypes are not migrated.
+New views use storage format 6, including transactional aggregate eligibility
+and non-null support counts. Older extensions reject this format. Format 5 views
+remain usable through the original arrangement path. Formats 2 through 4 use the
+existing writable-database migration path; format 1 requires its matching older
+extension. The original ordinary-view prototypes are not migrated.
 
 Enable `SQLITE_DBCONFIG_DEFENSIVE` to prevent direct shadow-table writes. Reserved
 hidden columns (`__ivm_source`, `__ivm_adding`, `__ivm_row`) and catalogs are internal
@@ -159,7 +156,16 @@ then execute `new_left JOIN delta_right` and update the right arrangement.
 Outer joins, sets, groups, and windows compare results before and after updating
 the affected keys. Recursive operators use their existing semi-naive rounds.
 Output deltas retract and insert stored results in the same transaction.
-Arrangement updates use row-hash indexes followed by exact identity comparison.
+New arrangement indexes combine row hashes with exact identity for one UPSERT;
+older hash-only indexes retain the exact-identity UPDATE/INSERT path.
+
+Terminal COUNT(*)/SUM groups with projected integer keys can reuse indexed stored
+before-images and add signed integer contributions. Nullable sums retain non-null
+support counts in a shadow table. Eligibility bounds each scalar contribution to
+an absolute value of 1,000,000 and conservatively bounds support plus the incoming
+absolute delta to 1,000,000. These bounds keep intermediate integer arithmetic
+exact. Groups leaving this domain retain affected-group recomputation thereafter.
+Other aggregates, HAVING, windows, and LIMIT retain their existing paths.
 
 `hafley-observe::CountRecorder` supplies numeric event samples and aggregates.
 SQL phase names, workloads, cost fixtures, and regression assertions live in this
@@ -176,6 +182,7 @@ cargo fetch --locked --manifest-path bench/Cargo.toml
 just verify
 just shootout smoke
 just crossover
+just crossover-observe
 just package
 ```
 

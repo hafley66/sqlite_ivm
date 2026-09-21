@@ -87,3 +87,33 @@ WAL/FULL; DD remains volatile. Every state is checked against the original
 input and output hashes. Results, process logs, database files, source/binary
 hashes, and invocation time are retained in `bench/results/crossover-*`.
 See [crossover/0_SOURCE.md](crossover/0_SOURCE.md) for provenance.
+
+## Historical comparison and observation
+
+```bash
+cd /Users/chrishafley/projects/sqlite_ivm && just crossover-observe
+```
+
+Builds the historical counted C extension from local `sprefa@e2052d5ae`, builds
+the current plugin and DD consumer, and runs nine cases with three repetitions.
+Arm order rotates. `--sprefa PATH` selects another local sprefa repository.
+The historical source and its hashes are retained beside the results.
+
+After timing completes, a linked Rust host replays the 12,000/1,000/200 fixture
+under hafley-observe for both SQLite arms. Each mutation produces a Chrome trace,
+a queryable SQLite event database, and entries in `profile.json`: SQL calls,
+profile durations, query plans or their errors, operator/site attribution,
+total and p99 statement durations, CPU, peak RSS, and disk writes.
+Fixture and host binary hashes identify the capture. Both independent source
+arrays and aggregate results are checked against the fixture and ordinary SQL.
+The SQL workloads and engine-specific interpretation stay in this repository;
+capture, event aggregation, timeline export, event storage, and process sampling
+come from hafley-observe.
+
+Diagnostic wall times include capture and sink overhead. Nested SQLite profile
+times overlap; raw VM counters accumulate on reused statement handles. Neither
+sum represents total work. Historical C has SQL events but no Rust operator spans.
+Both timing arms use WAL/FULL, but the historical source-view arm has an 8 MiB
+page cache and a source-key index; the current arm uses default cache settings
+and persistent arrangements. Historical population is incremental; current
+population precedes view creation. Setup is outside the mutation timer.

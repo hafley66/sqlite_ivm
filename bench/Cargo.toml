@@ -8,6 +8,7 @@ description = "Circuit shootout and scale sweep harness for sqlite-ivm"
 [workspace]
 
 [dependencies]
+hafley-observe = { path = "../vendor/hafley-observe" }
 anyhow = "1"
 differential-dataflow = "=0.25.1"
 libc = "0.2"
@@ -36,3 +37,7 @@ strip = "none"
 [[bin]]
 name = "crossover-dd"
 path = "crossover/22_crossover_dd.rs"
+
+[[bin]]
+name = "crossover-profile"
+path = "crossover/29_profile.rs"

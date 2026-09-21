@@ -146,11 +146,13 @@ fn defensive_shadow_protection_allows_source_dml_and_native_lifecycle() -> Resul
             ("earnings_op4x0".into(), "shadow".into()),
             ("earnings_op4x1".into(), "shadow".into()),
             ("earnings_op7x0".into(), "shadow".into()),
+            ("earnings_op7x1".into(), "shadow".into()),
             ("earnings_state".into(), "shadow".into())
         ]
     );
     for sql in [
         "DELETE FROM earnings_keys",
+        "UPDATE earnings_op7x1 SET __safe=0",
         "UPDATE earnings_state SET c0=0",
         "DROP TABLE earnings_delta",
         "INSERT INTO earnings VALUES(1,2,3)",

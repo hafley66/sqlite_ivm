@@ -10,6 +10,63 @@ use sqlite_ivm::relational_maintenance::{identity_sql, intern, resolve, row_hash
 mod database;
 use database::register;
 
+#[test]
+fn row_identity_upserts_survive_hash_collisions_and_legacy_indexes() -> Result<()> {
+    for legacy in [false, true] {
+        let path = std::env::temp_dir().join(format!("ivm-row-identity-{}-{legacy}.db", std::process::id()));
+        assert!(!path.exists(), "test receipt already exists: {}", path.display());
+        {
+            let db = Connection::open(&path)?;
+            register(&db)?;
+            db.create_scalar_function(c"sqlite_ivm_hash", 1,
+                rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC | rusqlite::functions::FunctionFlags::SQLITE_INNOCUOUS,
+                |_| Ok(0i64))?;
+            db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON;
+                CREATE TABLE a(k INTEGER,v INTEGER);
+                CREATE VIRTUAL TABLE g USING sqlite_ivm('SELECT k,count(*) AS n,sum(v) AS s FROM a GROUP BY k');
+                INSERT INTO a VALUES(1,2),(1,2),(1,3),(2,9)")?;
+            if legacy {
+                let indexes = db.prepare("SELECT name,tbl_name FROM sqlite_schema WHERE type='index' AND sql LIKE 'CREATE UNIQUE INDEX%' AND tbl_name GLOB 'g_op*'")?
+                    .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+                    .collect::<Result<Vec<_>>>()?;
+                assert!(!indexes.is_empty());
+                for (index, table) in indexes {
+                    db.execute_batch(&format!("DROP INDEX \"{index}\";CREATE INDEX \"{index}\" ON \"{table}\"(__r)"))?;
+                }
+                let support: String = db.query_row("SELECT name FROM sqlite_schema WHERE type='table' AND name GLOB 'g_op*' AND sql LIKE '%__safe%'", [], |row| row.get(0))?;
+                db.execute_batch(&format!("DROP TABLE \"{support}\";DROP INDEX __ivm_g_result_group"))?;
+                db.execute("DELETE FROM __ivm_objects WHERE object_name=?1 OR object_name='__ivm_g_result_group'", [&support])?;
+                db.execute_batch("UPDATE __ivm_schema SET format_version=5")?;
+                db.execute_batch("UPDATE __ivm_objects SET definition=(SELECT sql FROM sqlite_schema WHERE name=object_name) WHERE object_type='index' AND view_name='g'")?;
+            }
+        }
+        {
+            let db = Connection::open(&path)?;
+            register(&db)?;
+            db.create_scalar_function(c"sqlite_ivm_hash", 1,
+                rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC | rusqlite::functions::FunctionFlags::SQLITE_INNOCUOUS,
+                |_| Ok(0i64))?;
+            db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON")?;
+            for mutation in [
+                "BEGIN;UPDATE a SET v=v+1 WHERE k=1;INSERT INTO a VALUES(2,10);COMMIT",
+                "BEGIN;DELETE FROM a WHERE v=3;UPDATE a SET k=3 WHERE k=2;ROLLBACK",
+                "DELETE FROM a WHERE v=3",
+                "DELETE FROM a",
+            ] {
+                db.execute_batch(mutation)?;
+                let read = |sql| -> Result<Vec<(i64,i64,Option<i64>)>> {
+                    db.prepare(sql)?.query_map([], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)))?.collect()
+                };
+                assert_eq!(read("SELECT * FROM g ORDER BY k")?, read("SELECT k,count(*),sum(v) FROM a GROUP BY k ORDER BY k")?, "legacy={legacy}: {mutation}");
+                let check: String = db.query_row("PRAGMA integrity_check", [], |r| r.get(0))?;
+                assert_eq!(check, "ok");
+            }
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+    Ok(())
+}
+
 /// Mirrors the corpus in `tests/7_key_agreement.rs`, which owns the encoder
 /// agreement; this file owns only what the dictionary does with the result.
 const CORPUS_SIZE: usize = 17;

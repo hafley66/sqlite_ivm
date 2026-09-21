@@ -9,6 +9,17 @@ use crate::{
 use rusqlite::{types::Value, Connection, Result};
 
 impl Plan {
+    /// When every grouping key is projected unchanged, stored output rows can
+    /// supply the before-image without aggregating the input arrangement again.
+    pub(crate) fn stored_group_key(&self) -> Option<String> {
+        let node = &self.nodes[self.output];
+        let Kind::Group { keys, expressions, window: false, limit: None, .. } = &node.kind else {
+            return None;
+        };
+        let positions = keys.iter().map(|key| expressions.iter().position(|expression| expression == key))
+            .collect::<Option<Vec<_>>>()?;
+        Some(json_key(positions.iter().map(|i| folded(&format!("c{i}"))).collect()))
+    }
     pub fn create_state(&self, db: &Connection, name: &str) -> Result<Vec<(&'static str, String)>> {
         // A recreated view must not collide with index names a rename retained:
         // allocate a fresh suffix while the name is recorded for another view.
@@ -70,6 +81,19 @@ impl Plan {
         )?;
         objects.push(("table", state));
         objects.push(("index", result_key));
+        if let Some(group_key) = self.stored_group_key() {
+            let index = fresh_index(db, name, format!("__ivm_{name}_result_group"))?;
+            statements::batch(db, Phase::Declare, name, &format!(
+                "CREATE INDEX main.{} ON {}({group_key})", quote(&index), quote(&format!("{name}_state"))
+            ))?;
+            objects.push(("index", index));
+        }
+        if let Some(sums) = crate::relational_program::aggregate_sum_inputs(self) {
+            let metadata = format!("{name}_op{}x1", self.output);
+            let columns = sums.iter().map(|(i,_)|format!("nn{i} INTEGER NOT NULL")).collect::<Vec<_>>().join(",");
+            statements::batch(db, Phase::Declare, name, &format!("CREATE TABLE main.{}(__k INTEGER PRIMARY KEY,__safe INTEGER NOT NULL,{columns})", quote(&metadata)))?;
+            objects.push(("table", metadata));
+        }
         for (id, node) in self.nodes.iter().enumerate() {
             if matches!(node.kind, Kind::Input(_) | Kind::Map { .. }) {
                 continue;
@@ -79,7 +103,7 @@ impl Plan {
                 let n = self.nodes[*input].fields.len();
                 let key = fresh_index(db, name, format!("__ivm_{name}_op{id}_{side}_key"))?;
                 let row = fresh_index(db, name, format!("__ivm_{name}_op{id}_{side}_row"))?;
-                statements::batch(db, Phase::Declare, name, &format!("CREATE TABLE main.{}(__k INTEGER NOT NULL,__r INTEGER NOT NULL,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k); CREATE INDEX main.{} ON {}(__r)",quote(&t),columns(n),quote(&key),quote(&t),quote(&row),quote(&t)))?;
+                statements::batch(db, Phase::Declare, name, &format!("CREATE TABLE main.{}(__k INTEGER NOT NULL,__r INTEGER NOT NULL,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k); CREATE UNIQUE INDEX main.{} ON {}(__r,{})",quote(&t),columns(n),quote(&key),quote(&t),quote(&row),quote(&t),crate::relational_maintenance::identity_sql(n)))?;
                 objects.push(("table", t));
                 objects.push(("index", key));
                 objects.push(("index", row));
@@ -239,6 +263,15 @@ impl Plan {
                 self.write_state(db, name, id)?;
                 self.exhaust(db, name, &mut reads, id)?;
             }
+        }
+        if let Some(sums) = crate::relational_program::aggregate_sum_inputs(self) {
+            let columns = sums.iter().map(|(i,_)|format!("nn{i}")).collect::<Vec<_>>().join(",");
+            let values = sums.iter().map(|(_,v)|format!("sum(CASE WHEN ({v}) IS NULL THEN 0 ELSE __n END)")).collect::<Vec<_>>().join(",");
+            let safe = sums.iter().map(|(_,v)|format!("min(typeof({v}) IN ('integer','null') AND coalesce(abs(CAST(({v}) AS REAL)),0)<=1000000)")).collect::<Vec<_>>().join(" AND ");
+            statements::exec(db, Phase::Materialize, name, &format!(
+                "INSERT INTO {}(__k,__safe,{columns}) SELECT __k,sum(__n)<=1000000 AND {safe},{values} FROM {} GROUP BY __k",
+                table(name, self.output, 1), table(name, self.output, 0)
+            ), [])?;
         }
         Ok(())
     }

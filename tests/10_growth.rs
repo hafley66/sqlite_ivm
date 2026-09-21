@@ -105,6 +105,35 @@ fn group_limit_entries_stay_constant_in_input_multiplicity() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn count_sum_delta_work_stays_constant_as_the_group_grows() -> Result<()> {
+    let measured = |rows: i64| -> Result<SpanCounts> {
+        let db = Connection::open_in_memory()?;
+        register(&db)?;
+        db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON;CREATE TABLE a(id INTEGER PRIMARY KEY,k INTEGER,v INTEGER)")?;
+        db.execute("WITH RECURSIVE r(i) AS(SELECT 1 UNION ALL SELECT i+1 FROM r WHERE i<?1) INSERT INTO a SELECT i,1,i FROM r", [rows])?;
+        db.execute_batch("CREATE VIRTUAL TABLE g USING sqlite_ivm('SELECT k,COUNT(*) AS n,SUM(v) AS s FROM a GROUP BY k')")?;
+        db.flush_prepared_statement_cache();
+        let (recorder, capture) = CountRecorder::new();
+        let _guard = tracing_subscriber::registry().with(capture).set_default();
+        instrument(&db);
+        db.execute_batch("UPDATE a SET v=v+1 WHERE id=1")?;
+        hafley_observe::sqlite::silence(&db);
+        assert_eq!(db.query_row("SELECT n,s FROM g", [], |r| Ok((r.get::<_, i64>(0)?,r.get::<_, i64>(1)?)))?, (rows, rows*(rows+1)/2+1));
+        let paths = recorder.span_counts_by_field("aggregate_delta", "path");
+        assert_eq!(paths, BTreeMap::from([("integer".into(), 1)]));
+        let sums = recorder.event_sums(SQLITE_TARGET, tracing::Level::DEBUG, "drain", "view", None);
+        let mut counts = SpanCounts::default();
+        counts.entries.insert("group_vm_steps".into(), sums.values().map(|s| s.sum_of("vm_step") as usize).sum());
+        assert!(counts.entries_of("group_vm_steps") > 0);
+        Ok(counts)
+    };
+    let small = measured(SMALL_ROWS)?;
+    let large = measured(GROUP_MULTIPLICITY_MAX)?;
+    assert_growth(&small, &large, "group_vm_steps", SIZE_RATIO, Growth::Constant);
+    Ok(())
+}
+
 /// One view per node kind, so one drain exercises every phase.
 const VIEWS: [(&str, &str); 8] = [
     ("window_view", "SELECT id, ROW_NUMBER() OVER (PARTITION BY v ORDER BY id) AS rn FROM a"),

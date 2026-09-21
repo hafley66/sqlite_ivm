@@ -4,7 +4,7 @@
       [
         "declare",
         "CREATE",
-        32
+        34
       ],
       [
         "declare",
@@ -19,12 +19,12 @@
       [
         "declare",
         "INSERT",
-        16
+        18
       ],
       [
         "declare",
         "SELECT",
-        26
+        31
       ],
       [
         "materialize",
@@ -34,7 +34,7 @@
       [
         "materialize",
         "INSERT",
-        6
+        7
       ],
       [
         "materialize",
@@ -45,12 +45,12 @@
     "scans": [
       [
         "declare",
-        2286,
-        102
+        2865,
+        191
       ],
       [
         "materialize",
-        182,
+        216,
         0
       ]
     ]
@@ -60,7 +60,7 @@
       [
         "declare",
         "CREATE",
-        32
+        34
       ],
       [
         "declare",
@@ -75,12 +75,12 @@
       [
         "declare",
         "INSERT",
-        16
+        18
       ],
       [
         "declare",
         "SELECT",
-        126
+        131
       ],
       [
         "drain",
@@ -100,17 +100,12 @@
       [
         "maintain",
         "INSERT",
-        800
+        1100
       ],
       [
         "maintain",
         "SELECT",
-        400
-      ],
-      [
-        "maintain",
-        "UPDATE",
-        100
+        600
       ],
       [
         "materialize",
@@ -120,7 +115,7 @@
       [
         "materialize",
         "INSERT",
-        406
+        207
       ],
       [
         "materialize",
@@ -131,8 +126,8 @@
     "scans": [
       [
         "declare",
-        42686,
-        102
+        43265,
+        191
       ],
       [
         "drain",
@@ -141,12 +136,12 @@
       ],
       [
         "maintain",
-        3916108,
-        0
+        11897158,
+        323400
       ],
       [
         "materialize",
-        1312332,
+        209266,
         0
       ]
     ]
@@ -156,7 +151,7 @@
       [
         "declare",
         "CREATE",
-        32
+        34
       ],
       [
         "declare",
@@ -171,12 +166,12 @@
       [
         "declare",
         "INSERT",
-        16
+        18
       ],
       [
         "declare",
         "SELECT",
-        27
+        32
       ],
       [
         "drain",
@@ -196,17 +191,12 @@
       [
         "maintain",
         "INSERT",
-        8
+        11
       ],
       [
         "maintain",
         "SELECT",
-        4
-      ],
-      [
-        "maintain",
-        "UPDATE",
-        1
+        6
       ],
       [
         "materialize",
@@ -216,7 +206,7 @@
       [
         "materialize",
         "INSERT",
-        10
+        9
       ],
       [
         "materialize",
@@ -227,8 +217,8 @@
     "scans": [
       [
         "declare",
-        2294,
-        102
+        2873,
+        191
       ],
       [
         "drain",
@@ -237,12 +227,12 @@
       ],
       [
         "maintain",
-        37384,
-        1287
+        57844,
+        1584
       ],
       [
         "materialize",
-        8502,
+        2356,
         198
       ]
     ]
@@ -272,7 +262,7 @@
       [
         "declare",
         "SELECT",
-        49
+        51
       ],
       [
         "drain",
@@ -298,11 +288,6 @@
         "fixpoint",
         "SELECT",
         9
-      ],
-      [
-        "fixpoint",
-        "UPDATE",
-        2
       ],
       [
         "maintain",
@@ -333,8 +318,8 @@
     "scans": [
       [
         "declare",
-        5026,
-        369
+        5365,
+        441
       ],
       [
         "drain",
@@ -343,8 +328,8 @@
       ],
       [
         "fixpoint",
-        7087,
-        140
+        6769,
+        126
       ],
       [
         "maintain",
@@ -353,7 +338,7 @@
       ],
       [
         "materialize",
-        1022,
+        1030,
         42
       ]
     ]
@@ -383,7 +368,7 @@
       [
         "declare",
         "SELECT",
-        50
+        52
       ],
       [
         "drain",
@@ -409,11 +394,6 @@
         "fixpoint",
         "SELECT",
         19
-      ],
-      [
-        "fixpoint",
-        "UPDATE",
-        3
       ],
       [
         "maintain",
@@ -444,8 +424,8 @@
     "scans": [
       [
         "declare",
-        5042,
-        369
+        5381,
+        441
       ],
       [
         "drain",
@@ -454,8 +434,8 @@
       ],
       [
         "fixpoint",
-        123600,
-        2970
+        118658,
+        2673
       ],
       [
         "maintain",
@@ -464,7 +444,7 @@
       ],
       [
         "materialize",
-        7683,
+        7691,
         693
       ]
     ]

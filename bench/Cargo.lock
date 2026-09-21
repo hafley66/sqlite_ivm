@@ -1476,6 +1476,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "differential-dataflow",
+ "hafley-observe",
  "libc",
  "parking_lot",
  "postgres",

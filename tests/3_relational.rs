@@ -2,6 +2,47 @@
 use rusqlite::{types::Value, Connection, Result};
 use sqlite_ivm::extension::register;
 #[test]
+fn count_sum_delta_and_recompute_paths_match_sqlite() -> Result<()> {
+    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+    let (recorder, capture) = hafley_observe::CountRecorder::new();
+    let _guard = tracing_subscriber::registry().with(capture).set_default();
+    let db = Connection::open_in_memory()?;
+    register(&db)?;
+    db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON;
+        CREATE TABLE a(k INTEGER,v);
+        CREATE VIRTUAL TABLE grouped USING sqlite_ivm('SELECT k,COUNT(*) AS n,SUM(v) AS s FROM a GROUP BY k');
+        CREATE VIRTUAL TABLE global_sum USING sqlite_ivm('SELECT COUNT(*) AS n,SUM(v) AS s FROM a')")?;
+    let rows = |sql: &str| -> Result<Vec<Vec<Value>>> {
+        let mut statement = db.prepare(sql)?;
+        let width = statement.column_count();
+        let rows = statement.query_map([], |row| (0..width).map(|i| row.get(i)).collect())?.collect();
+        rows
+    };
+    for mutation in [
+        "INSERT INTO a VALUES(1,2),(1,3),(2,8)",
+        "BEGIN;UPDATE a SET v=v*2 WHERE k=1;INSERT INTO a VALUES(NULL,4);COMMIT",
+        "INSERT INTO a VALUES(1,NULL)",
+        "DELETE FROM a WHERE k=1 AND v IS NOT NULL",
+        "DELETE FROM a WHERE v IS NULL",
+        "INSERT INTO a VALUES(2,0.5)",
+        "DELETE FROM a WHERE typeof(v)='real'",
+        "INSERT INTO a VALUES(3,9007199254740993)",
+        "DELETE FROM a WHERE k=3",
+        "BEGIN;INSERT INTO a VALUES(3,-9223372036854775808);COMMIT",
+        "DELETE FROM a WHERE k=3",
+        "BEGIN;DELETE FROM a;ROLLBACK",
+        "DELETE FROM a",
+    ] {
+        db.execute_batch(mutation)?;
+        assert_eq!(rows("SELECT * FROM grouped ORDER BY k")?, rows("SELECT k,COUNT(*),SUM(v) FROM a GROUP BY k ORDER BY k")?, "{mutation}");
+        assert_eq!(rows("SELECT * FROM global_sum")?, rows("SELECT COUNT(*),SUM(v) FROM a")?, "{mutation}");
+    }
+    let paths = recorder.span_counts_by_field("aggregate_delta", "path");
+    assert!(paths.get("integer").copied().unwrap_or(0) > 0, "{paths:?}");
+    assert!(paths.get("recompute").copied().unwrap_or(0) > 0, "{paths:?}");
+    Ok(())
+}
+#[test]
 fn signed_join_deltas_match_bags_when_both_sides_change() -> Result<()> {
     let db = Connection::open_in_memory()?;
     register(&db)?;

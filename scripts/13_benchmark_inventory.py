@@ -58,13 +58,14 @@ for d in sorted((roots[Q]/'archive/labs').iterdir()):
  '20260920.2.the-gang-copies-the-fts5-homework':('Flush/mark savepoint policies; batching; rollback; byte cap','Recorded 13 cases; 100 inserts→1 maintenance; local registry dependency','Virtual-table transaction batching')
  }[d.name]
  rel=str(d.relative_to(roots[Q]));add(Q,rel,rel,'cargo test -- --nocapture && cargo run --release',*desc,receipt=rel+'/HYPOTHESIS.md')
-add(Q,'scripts/9_verify.sh','','just verify','69 root tests; 3 native-load tests; CRUD SQL; CLI compass','69/69 root, 3/3 native, CRUD and CLI pass; timing gate passed on quiet rerun','Correctness, native ABI, timing gate')
+add(Q,'scripts/9_verify.sh','','just verify','73 root tests; 3 native-load tests; CRUD SQL; CLI compass','73 root tests pass; 3/3 native, CRUD and CLI pass; timing gate passed','Correctness, native ABI, timing gate')
 add(Q,'scripts/every-statement.sh','','just every-statement','Five scenarios ×3; spans on/off wall runs','plans/costs/every-statement.tsv; calls, rows, mean/p99, spread, wall','Statement overhead and transaction batching')
 add(Q,'scripts/statement-costs.sh','','just statement-costs','Statement profile attribution','SQL counters and DuckDB report','SQLite execution cost')
 for profile in ['smoke','quick']:
  add(Q,'bench/src/report.rs','','just shootout '+profile,'20 circuits ×3 engines; per-state oracle and lifecycle checks',('60 checksum-valid records' if profile=='smoke' else '240 checksum-valid records incl. warmups')+'; circuits.jsonl, report.json, report.md; mutation+query ms','Native plugin versus recompute and DD')
 add(Q,'bench/src/scale.rs','','just scale','chain/join/group/distinct/window/reach × sizes × fanouts ×3 arms','scale.tsv and SVGs; wall, operations, I/O, RSS, IVM/DD ratio','In-process scale sweep')
-add(Q,'bench/crossover/28_run.py','','just crossover','9 rows/batch/fanout cells ×3 reps ×2 engines; five exact states each','All checksums passed; 12000/1000/200 median SQLite 91.396 ms, DD 1.091 ms; JSONL, report.json, artifact hashes','Historical plugin/DD crossover')
+add(Q,'bench/crossover/28_run.py','','just crossover','9 rows/batch/fanout cells ×3 reps ×2 engines; five exact states each','All checksums passed; 12000/1000/200 median SQLite 67.158 ms, DD 1.019 ms; JSONL, report.json, artifact hashes','Historical plugin/DD crossover')
+add(Q,'scripts/14_crossover_observe.py','','just crossover-observe','9 cells ×3 reps ×3 engines; then four observed mutations per SQLite arm','All hashes passed; target case current 67.638 ms / historical counted 20.059 ms / DD 1.000 ms; Chrome traces, SQLite event stores, SQL plans, CPU/RSS/I/O','Historical recovery and maintenance attribution')
 add(S,'v5/bench/reactivity/probe.py','v5','just perf-reactivity-build && just perf-reactivity','10/100/1000 Rust files; cold, unchanged, edit, rebuild; 5 repeats +1 warmup','raw.json and summary.json; parse counts, call-graph digest, timing mean/stdev','Incremental source analysis','v5/bench/reactivity/README.md')
 for recipe,tests in [('compiler-perf-gate','Nearest-shadow compiler time/RSS ceiling'),('compiler-perf-test','Budget comparator tests')]:
  add(S,'v7/justfile','v7','just '+recipe,tests,'Exit status and time/RSS receipt; not rerun','Compiler budgets')
@@ -95,11 +96,11 @@ for repo,root in roots.items():
    files.append({'repo':repo+'@main','path':f})
 out=roots[Q]/'plans/costs/0_benchmark_inventory.md'
 rows.sort(key=lambda r:(r['timestamp'],r['repo'],r['command']))
-lines=['# Benchmarks and labs','', 'Main checkouts: `sprefa` at `3239a7c7c`; `sqlite_ivm` integration on main. Ages calculated when this inventory was generated. Receipt age is its last committed update, not a verified execution timestamp.','', '| Repo | Command | Tests / workload | Outputs | Last updated | Problem class |','|---|---|---|---|---|---|']
+lines=['# Benchmarks and labs','', 'Main checkouts: '+', '.join('`'+repo+'@'+subprocess.check_output(['git','rev-parse','--short','HEAD'],cwd=root,text=True).strip()+'`' for repo,root in roots.items())+'. Ages calculated when this inventory was generated. Receipt age is its last committed update, not a verified execution timestamp.','', '| Repo | Command | Tests / workload | Outputs | Last updated | Problem class |','|---|---|---|---|---|---|']
 for r in rows:
  vals=[r['repo'],'`'+r['command']+'`',r['tests'],r['output'],r['updated'],r['class']]
  lines.append('| '+' | '.join(v.replace('|','\\|').replace('\n',' ') for v in vals)+' |')
-lines += ['', 'Historical competitive plugin at `e2052d5ae` is absent from sprefa main. Its unchanged fixture generator and DD consumer are recovered in sqlite_ivm/bench/crossover. Historical 12000/1000/200: counted SQLite 21.121 ms, pg_ivm 21.311 ms, volatile DD 1.118 ms. Current replay: SQLite 91.396 ms, DD 1.091 ms. The historical performance target remains unmet.', '', 'Subsidiary source files and archived salvage probes: [1_benchmark_sources.json](1_benchmark_sources.json).']
+lines += ['', 'Historical competitive plugin at `e2052d5ae` is recovered by `just crossover-observe` from local sprefa git objects. Original recorded 12000/1000/200: counted SQLite 21.121 ms, pg_ivm 21.311 ms, volatile DD 1.118 ms. Same-machine three-arm replay: current SQLite 67.638 ms, historical counted 20.059 ms, DD 1.000 ms. The historical performance target remains unmet. [Recovery measurements](5_count_sum_recovery.md).', '', 'Subsidiary source files and archived salvage probes: [1_benchmark_sources.json](1_benchmark_sources.json).']
 out.write_text('\n'.join(lines)+'\n')
 (roots[Q]/'plans/costs/1_benchmark_sources.json').write_text(json.dumps(files,indent=2)+'\n')
 

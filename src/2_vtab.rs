@@ -178,7 +178,7 @@ fn set_schema(conn: &Connection, name: &str, plan: &crate::relational::Plan) -> 
         conn,
         Phase::Declare,
         name,
-        "UPDATE main.__ivm_schema SET declaration=?1, roles=?2, generic=1, format_version=5 WHERE id=(SELECT id FROM main.__ivm_views WHERE name=?3)",
+        "UPDATE main.__ivm_schema SET declaration=?1, roles=?2, generic=1, format_version=6 WHERE id=(SELECT id FROM main.__ivm_views WHERE name=?3)",
         rusqlite::params![declaration(plan), roles, name],
     )?;
     Ok(())
@@ -251,7 +251,7 @@ impl Table {
                 &conn,
                 Phase::Declare,
                 name,
-                "SELECT EXISTS(SELECT 1 FROM main.__ivm_schema WHERE format_version NOT IN (2,3,4,5))",
+                "SELECT EXISTS(SELECT 1 FROM main.__ivm_schema WHERE format_version NOT IN (2,3,4,5,6))",
                 [],
                 |r| r.get(0),
             )?;
@@ -349,13 +349,13 @@ impl Table {
         let declaration = declaration(&plan);
         let roles: Vec<c_int> = (1..=plan.names.len() as c_int).collect();
         statements::batch(&conn,Phase::Declare,name,"CREATE TABLE IF NOT EXISTS main.__ivm_schema(id INTEGER PRIMARY KEY,declaration TEXT NOT NULL,generic INTEGER NOT NULL,roles TEXT NOT NULL,format_version INTEGER NOT NULL)")?;
-        // Format 5: fixpoint member tables carry AUTOINCREMENT rowids, so a
-        // drain can mark new members by rowid after deletes.
+        // Format 6 adds transactional aggregate eligibility/non-null counts.
+        // Older binaries must reject it rather than leave these counts stale.
         statements::exec(
             &conn,
             Phase::Declare,
             name,
-            "INSERT INTO main.__ivm_schema VALUES(?1,?2,1,?3,5)",
+            "INSERT INTO main.__ivm_schema VALUES(?1,?2,1,?3,6)",
             rusqlite::params![
                 id,
                 declaration,
