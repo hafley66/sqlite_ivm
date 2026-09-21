@@ -1,5 +1,5 @@
 use crate::catalog::error;
-use crate::relational::where_keys_for_step;
+use crate::compile_recursive::where_keys_for_step;
 use crate::relational::{
     affinity, alias, explicit_collation, expression, field, implicit_collation, name, resolve,
     Compiler, Field, Kind, Source,

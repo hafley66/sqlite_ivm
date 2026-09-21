@@ -8,6 +8,8 @@ pub mod relational;
 pub mod compile_from;
 #[path = "0d_compile_select.rs"]
 pub mod compile_select;
+#[path = "0e_compile_recursive.rs"]
+pub mod compile_recursive;
 #[path = "0f_columns.rs"]
 pub mod columns;
 #[path = "1a_relational.rs"]
