@@ -19,12 +19,12 @@ trap 'rm -rf "$work"' EXIT
 
 statement_run() {
   cargo test --offline --locked --manifest-path "$ivm_dir/Cargo.toml" \
-    --test 18_statement_counts -- --nocapture 2>/dev/null \
+    --test 18_statement_counts -- --nocapture \
     | awk -F'\t' 'NF>=12'
 }
 wall_run() {
   EVERY_STATEMENT_WALL=1 cargo test --offline --locked --manifest-path "$ivm_dir/Cargo.toml" "$@" \
-    --test 18_statement_counts -- --nocapture 2>/dev/null \
+    --test 18_statement_counts -- --nocapture \
     | grep -a '^WALL'
 }
 
@@ -72,13 +72,14 @@ for path in statement_paths:
                 "per_input_row": float(parts[11]),
             }
     runs.append(rows)
-if not runs:
+if not runs or not runs[0]:
     sys.exit("statement produced no rows")
 
 keys = set(runs[0])
 for other in runs[1:]:
-    keys &= set(other)
-    for key in set(runs[0]) & set(other):
+    if keys != set(other):
+        sys.exit(f"statement groups differ across runs: missing={keys - set(other)}, added={set(other) - keys}")
+    for key in keys:
         if (runs[0][key]["calls"], runs[0][key]["rows"]) != (
             other[key]["calls"],
             other[key]["rows"],
@@ -141,9 +142,9 @@ compiled_out = wall(wall_nostatement)
 print("\n## wall, logging off, median of three (min..max)\n")
 print("| scenario | statements build ms | spans compiled out ms |")
 print("|---|---:|---:|")
+if not statement or statement.keys() != compiled_out.keys():
+    sys.exit("wall scenario sets differ or are empty")
 for name in statement:
-    if name not in compiled_out:
-        continue
     print(
         f"| {name} | {statement[name][1]:.3f} ({statement[name][0]:.3f}..{statement[name][2]:.3f}) "
         f"| {compiled_out[name][1]:.3f} ({compiled_out[name][0]:.3f}..{compiled_out[name][2]:.3f}) |"

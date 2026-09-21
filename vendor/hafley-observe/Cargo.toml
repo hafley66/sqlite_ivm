@@ -1,0 +1,70 @@
+[package]
+name = "hafley-observe"
+version = "0.1.1"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/hafley66/hafley-rs"
+homepage = "https://github.com/hafley66/hafley-rs"
+description = "Shared executable-owned tracing configuration for hafley-rs binaries"
+
+[features]
+# The four shipped layers stay default so an existing host (boop, soopy,
+# sprefa-extract) builds the subscriber it has today. Every layer this lab
+# prices is one feature, enabled alone by the bench.
+default = ["fmt", "chrome", "otlp-trace", "sqlite-sink"]
+fmt = []
+chrome = ["dep:tracing-chrome"]
+otlp-trace = [
+    "dep:tracing-opentelemetry",
+    "dep:opentelemetry",
+    "dep:opentelemetry_sdk",
+    "dep:opentelemetry-otlp",
+]
+otlp-metrics = [
+    "otlp-trace",
+    "dep:metrics",
+    "opentelemetry_sdk/metrics",
+    "opentelemetry-otlp/metrics",
+]
+sysmetrics = ["otlp-metrics", "dep:opentelemetry-system-metrics", "dep:tokio", "dep:sysinfo"]
+procmetrics = ["otlp-metrics", "dep:metrics-process", "metrics-process/metrics-rs"]
+metrics-ctx = ["otlp-metrics", "dep:metrics-tracing-context", "dep:metrics-util"]
+tracy = ["dep:tracing-tracy", "tracing-tracy/enable"]
+tracy-alloc = ["dep:tracy-client", "tracy-client/enable"]
+rusage = []
+sqlite-sink = ["dep:rusqlite"]
+
+[dependencies]
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+tracing-capture = "0.1.0"
+tracing-tunnel = "0.1.0"
+# The process sampler reads rusage through this; it is compiled on every build
+# so the harness can measure with the layers off.
+libc = "0.2"
+tracing-chrome = { version = "0.7.2", optional = true }
+rusqlite = { version = "0.40", default-features = false, features = ["trace"], optional = true }
+tracing-opentelemetry = { version = "0.33", default-features = false, optional = true }
+opentelemetry = { version = "0.32", default-features = false, features = ["trace"], optional = true }
+opentelemetry_sdk = { version = "0.32", default-features = false, features = ["trace", "internal-logs"], optional = true }
+opentelemetry-otlp = { version = "0.32", default-features = false, features = ["trace", "http-proto", "reqwest-blocking-client"], optional = true }
+opentelemetry-system-metrics = { version = "0.32", default-features = false, optional = true }
+metrics = { version = "0.24", default-features = false, optional = true }
+metrics-process = { version = "2.4.3", default-features = false, optional = true }
+metrics-tracing-context = { version = "0.18", default-features = false, optional = true }
+metrics-util = { version = "0.20", default-features = false, features = ["layers"], optional = true }
+tracing-tracy = { version = "0.12", default-features = false, optional = true }
+# One Tracy client for both features. `tracy_full` vendors its own
+# `tracy-client-sys`, and two of those in one binary is a duplicate-symbol
+# link, then a crash; this crate is the one `tracing-tracy` already uses, so
+# the layer and the allocator share a client.
+tracy-client = { version = "0.19", default-features = false, optional = true }
+tokio = { version = "1", default-features = false, features = ["rt", "time"], optional = true }
+sysinfo = { version = "0.35", default-features = false, optional = true }
+
+[dev-dependencies]
+serde_json = "1"
+
+[[bin]]
+name = "watch-the-watchman"
+path = "bench/watch_the_watchman.rs"

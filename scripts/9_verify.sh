@@ -8,8 +8,15 @@
 #          this platform in scripts/timeout-rail.tsv.
 set -euo pipefail
 ivm_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+if [ -z "${SQLITE3:-}" ] && [ "$(uname -s)" = Darwin ] && command -v brew >/dev/null; then
+  ivm_sqlite_prefix=$(brew --prefix sqlite)
+  if [ -x "$ivm_sqlite_prefix/bin/sqlite3" ]; then
+    export SQLITE3="$ivm_sqlite_prefix/bin/sqlite3"
+  fi
+fi
 rail_config="$ivm_dir/scripts/nextest.toml"
-rail_junit="$ivm_dir/target/nextest/default/junit.xml"
+rail_target=$(cargo metadata --no-deps --format-version 1 --manifest-path "$ivm_dir/Cargo.toml" | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+rail_junit="$rail_target/nextest/default/junit.xml"
 rail_tsv="$ivm_dir/scripts/timeout-rail.tsv"
 # 120s is 13.5x the 8.857s recorded battery wall: room for a slower runner, and
 # still a ceiling on a stall. Override for a proof or a slower host.
@@ -54,6 +61,10 @@ fi
 python3 "$ivm_dir/scripts/timeout-rail.py" check "$(uname -sm)" "$rail_tsv" "$rail_junit"
 
 ivm_extension=$(bash "$ivm_dir/scripts/0_build.sh")
+IVM_EXTENSION="$ivm_extension" CARGO_TARGET_DIR="$rail_target" \
+  cargo test --offline --locked --release --manifest-path "$ivm_dir/bench/Cargo.toml" --test 6_extension_load
 for ivm_scenario in "$ivm_dir"/scripts/[1-6]_*.sh; do
   bash "$ivm_scenario" "$ivm_extension"
 done
+IVM_NATIVE_EXTENSION="$ivm_extension" SQLITE3="${SQLITE3:-sqlite3}" \
+  cargo test --offline --locked --manifest-path "$ivm_dir/Cargo.toml" --test 12_compass compass_passes_through_the_cli

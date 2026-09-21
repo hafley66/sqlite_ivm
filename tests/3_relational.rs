@@ -2,6 +2,43 @@
 use rusqlite::{types::Value, Connection, Result};
 use sqlite_ivm::extension::register;
 #[test]
+fn signed_join_deltas_match_bags_when_both_sides_change() -> Result<()> {
+    let db = Connection::open_in_memory()?;
+    register(&db)?;
+    db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON;CREATE TABLE a(k INTEGER,v INTEGER);CREATE TABLE b(k INTEGER,v INTEGER);")?;
+    let queries = [
+        "SELECT a.k,a.v AS av,b.v AS bv FROM a JOIN b ON a.k=b.k",
+        "SELECT a.k,a.v AS av,b.v AS bv FROM a JOIN b ON a.k=b.k WHERE a.v<b.v",
+        "SELECT x.k,x.v AS xv,y.v AS yv FROM a x JOIN a y ON x.k=y.k",
+        "SELECT a.v AS av,b.v AS bv FROM a CROSS JOIN b",
+    ];
+    for (i, query) in queries.iter().enumerate() {
+        db.execute_batch(&format!("CREATE VIRTUAL TABLE v{i} USING sqlite_ivm('{query}')"))?;
+    }
+    let rows = |sql: &str| -> Result<Vec<Vec<Value>>> {
+        let mut statement = db.prepare(sql)?;
+        let width = statement.column_count();
+        let mut rows = statement.query_map([], |row| (0..width).map(|i| row.get(i)).collect())?
+            .collect::<Result<Vec<Vec<Value>>>>()?;
+        rows.sort_by_key(|row| format!("{row:?}"));
+        Ok(rows)
+    };
+    for mutation in [
+        "BEGIN;INSERT INTO a VALUES(1,2),(1,2),(NULL,9);INSERT INTO b VALUES(1,3),(1,3),(NULL,9);COMMIT",
+        "BEGIN;UPDATE a SET v=4 WHERE k=1;UPDATE b SET v=5 WHERE k=1;COMMIT",
+        "BEGIN;DELETE FROM a WHERE rowid=(SELECT min(rowid) FROM a);INSERT INTO a VALUES(1,4);DELETE FROM b;INSERT INTO b VALUES(1,5),(1,5);COMMIT",
+        "BEGIN;UPDATE a SET k=2;UPDATE b SET k=2;ROLLBACK",
+        "BEGIN;UPDATE a SET k=2;UPDATE b SET k=2;COMMIT",
+        "BEGIN;DELETE FROM a;DELETE FROM b;COMMIT",
+    ] {
+        db.execute_batch(mutation)?;
+        for (i, query) in queries.iter().enumerate() {
+            assert_eq!(rows(&format!("SELECT * FROM v{i}"))?, rows(query)?, "{mutation}: {query}");
+        }
+    }
+    Ok(())
+}
+#[test]
 fn shared_circuit_states() -> Result<()> {
     let fixtures: serde_json::Value =
         serde_json::from_str(include_str!("fixtures/0_shared.json")).unwrap();

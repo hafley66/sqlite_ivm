@@ -32,3 +32,7 @@ path = "src/main.rs"
 # is unchanged.
 debug = 1
 strip = "none"
+
+[[bin]]
+name = "crossover-dd"
+path = "crossover/22_crossover_dd.rs"

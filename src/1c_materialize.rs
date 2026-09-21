@@ -13,6 +13,7 @@ impl Plan {
     pub(crate) fn materialize(&self, db: &Connection, name: &str, id: usize, restricted: bool) -> Result<()> {
         self.materialize_statements(db, name, id, restricted)
             .execute(db, name)
+            .map(|_| ())
     }
     /// Every SQL string materializing this node issues, built once and reused by
     /// both the populate path and the per-view drain program.
@@ -369,20 +370,23 @@ pub(crate) struct FixpointMaterializeStatements {
 }
 
 impl MaterializeStatements {
-    pub(crate) fn execute(&self, db: &Connection, name: &str) -> Result<()> {
-        match self {
+    /// Executes this node and returns the number of rows written to its out
+    /// table. The drain carries that count forward instead of probing the table.
+    pub(crate) fn execute(&self, db: &Connection, name: &str) -> Result<usize> {
+        let written = match self {
             MaterializeStatements::Input { insert }
             | MaterializeStatements::Map { insert }
             | MaterializeStatements::Set { insert } => {
-                statements::exec_cached(db, Phase::Materialize, name, insert, [])?;
+                statements::exec_cached(db, Phase::Materialize, name, insert, [])?
             }
             MaterializeStatements::Join { insert, bad } => {
-                statements::exec_cached(db, Phase::Materialize, name, insert, [])?;
+                let written = statements::exec_cached(db, Phase::Materialize, name, insert, [])?;
                 let bad: bool =
                     statements::query_cached(db, Phase::Materialize, name, bad, [], |r| r.get(0))?;
                 if bad {
                     return Err(error("join multiplicity overflow"));
                 }
+                written
             }
             MaterializeStatements::Group(g) => {
                 if g.window || g.limit.is_some() {
@@ -404,7 +408,7 @@ impl MaterializeStatements {
                     if groups as usize > BULK_GROUP_BUDGET {
                         return Err(error("bulk group budget exceeded"));
                     }
-                    statements::exec_cached(db, Phase::Materialize, name, &g.window_insert, [])?;
+                    statements::exec_cached(db, Phase::Materialize, name, &g.window_insert, [])?
                 } else if g.limit.is_some() {
                     // One span per key insert, so each execution carries its own
                     // changes() count. The key read loop is bounded below.
@@ -418,12 +422,13 @@ impl MaterializeStatements {
                     let mut key_statement = db.prepare_cached(&g.limit_keys)?;
                     let mut key_rows = key_statement.query([])?;
                     let mut groups = 0usize;
+                    let mut written = 0usize;
                     while let Some(key) = key_rows.next()? {
                         groups += 1;
                         if groups > BULK_GROUP_BUDGET {
                             return Err(error("bulk group budget exceeded"));
                         }
-                        statements::exec_cached(
+                        written += statements::exec_cached(
                             db,
                             Phase::Materialize,
                             name,
@@ -433,8 +438,9 @@ impl MaterializeStatements {
                     }
                     drop(key_rows);
                     read.rows(groups);
+                    written
                 } else {
-                    statements::exec_cached(db, Phase::Materialize, name, &g.plain_insert, [])?;
+                    statements::exec_cached(db, Phase::Materialize, name, &g.plain_insert, [])?
                 }
             }
             MaterializeStatements::Fixpoint(f) => {
@@ -474,9 +480,9 @@ impl MaterializeStatements {
                     }
                     lo = hi;
                 }
-                statements::exec(db, Phase::Materialize, name, &f.copy, [])?;
+                statements::exec(db, Phase::Materialize, name, &f.copy, [])?
             }
-        }
-        Ok(())
+        };
+        Ok(written)
     }
 }

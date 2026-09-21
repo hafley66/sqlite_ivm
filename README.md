@@ -32,7 +32,6 @@ DROP TABLE income;
 Load the extension on every reader and writer connection. Writers must enable
 both pragmas. Public result CRUD is rejected. Read results with ordinary SELECT;
 row order requires an outer ORDER BY. General results preserve bag multiplicity.
-The specialized integer grouping path also indexes group-key equality reads.
 The general virtual-table reader currently scans stored output rows.
 
 ## Supported query shapes
@@ -63,9 +62,7 @@ BLOB storage uses columns with BLOB or no declared affinity. Load deterministic
 registered functions on every connection and keep their definitions and external
 dependencies stable. Datetime functions and volatile functions are rejected.
 
-The integer COUNT/SUM fast path is selected only when used columns are guaranteed
-non-NULL and sources have no cascades or user triggers. Nullable queries use
-relational arrangements. Accumulator overflow aborts the source statement.
+Accumulator overflow aborts the source statement.
 Floating aggregation follows SQLite arithmetic; accumulation order can affect
 rounding. ORDER BY ties retain SQL's unspecified tie order. Equality keys normalize
 numeric equality; stored row identities preserve types and floating-point bits.
@@ -151,189 +148,46 @@ global subscriber. The default filter is `warn`, so nothing prints until
 table, sign), `fixpoint` (view, node, rows in, rounds) and `round` (phase, index,
 rows written). Fields carry names and integers, never row contents.
 
-## The engine as one reactive pipe
+## Batch maintenance
 
-SQLite callbacks are the only producers. One subscribe, at the bottom. Every
-operator below names the SQL statement it becomes; nothing per row runs in Rust
-once a batch exists. The "today" column in the table after the code names the
-per-row path this pipe replaces.
+`sqlite-bulk-trigger` collects source row changes with savepoint marks. A drain
+seeds signed rows into temporary input tables, then walks the plan in dependency
+order. The number of inserted rows determines which consumers need work.
 
-```ts
-const sqlite$ = fromSqliteCallbacks(db)   // xBegin | xUpdate | xSavepoint | xRelease | xRollbackTo | xSync | xCommit | xRollback
+Inner joins execute `delta_left JOIN old_right`, update the left arrangement,
+then execute `new_left JOIN delta_right` and update the right arrangement.
+Outer joins, sets, groups, and windows compare results before and after updating
+the affected keys. Recursive operators use their existing semi-naive rounds.
+Output deltas retract and insert stored results in the same transaction.
+Arrangement updates use row-hash indexes followed by exact identity comparison.
 
-const view$ = sqlite$.pipe(
-
-  // transaction boundary: everything between xBegin and xSync|xRollback is one window
-  windowToggle(
-    sqlite$.pipe(filter(e => e.kind === 'xBegin')),
-    () => sqlite$.pipe(filter(e => e.kind === 'xSync' || e.kind === 'xRollback')),
-  ),
-
-  mergeMap(transaction$ => transaction$.pipe(
-
-    // collector: per-row events become one ordered batch, savepoints truncate
-    scan((staged, e) => match(e, {
-      xUpdate:     ({ table, sign, values }) => [...staged, { table, sign, values, sequence: staged.length }],
-      xSavepoint:  ({ id }) => tag(staged, { mark: [id, staged.length] }),
-      xRelease:    ({ id }) => untag(staged, id),
-      xRollbackTo: ({ id }) => staged.slice(0, markOf(staged, id) ?? 0),   // absent mark = predates first write = 0
-      default:     () => staged,
-    }), [] as RowChange[]),
-
-    // spill: over either ceiling the tail lives in <name>_delta, same sequence numbers
-    map(staged => staged.length > STAGED_ROWS || bytes(staged) > STAGED_BYTES
-      ? spillToDelta(db, staged) : staged),
-
-    // drain point: deferred = last, eager = every xRelease, read = first xFilter, manual = UDF
-    takeLast(1),                                    // mode 'deferred'
-    // the other modes are bufferWhen(() => drainSignal$) with drainSignal$ one of the four above
-
-    // one batch, one source_delta table; from here on everything is SQL over sets
-    map(batch => writeDelta(db, batch)),            // INSERT INTO source_delta SELECT ... ; rows: |batch|
-
-    // plan walk, topological; each node emits its delta given the input delta and the pre-state arrangements
-    expand(delta => nodesFedBy(delta.node)),        // fan out to every consumer node, bounded by plan depth
-    concatMap(({ node, delta }) => match(node.kind, {
-
-      Map: ({ expressions, predicate }) =>
-        of(delta).pipe(
-          filter(row => predicate ? evalSql(predicate, row) : true),   // INSERT INTO node_delta SELECT exprs FROM in_delta WHERE predicate
-          map(row => project(expressions, row)),
-        ),
-
-      Join: ({ left, right, mode }) =>
-        of(delta).pipe(
-          groupBy(row => row.side),
-          mergeMap(side$ => side$.pipe(
-            // delta(A join B) = deltaA join B_old, then update A, then A_new join deltaB
-            concatMap(deltaA => concat(
-              probeOther(db, node, deltaA),          // INSERT INTO join_delta SELECT d.*, b.*, d.__n*b.__n FROM a_delta d JOIN op_b b USING(__k)
-              upsertArrangement(db, node, deltaA),   // UPDATE t SET __n=__n+d.__n FROM delta d WHERE t.__r=d.__r AND identity(t)=identity(d);
-                                                     // INSERT ... WHERE NOT EXISTS; DELETE WHERE __n=0
-            )),
-          )),
-          // outer modes: a second statement per side for the rows whose match count crossed zero
-          filter(row => mode === 'inner' || crossedZero(row)),
-        ),
-
-      Set: ({ op }) =>
-        of(delta).pipe(
-          map(row => withKey(row, intern(db, row))),                    // dictionary id, one RETURNING seek
-          scan((counts, row) => bump(counts, row.__k, row.side, row.__n), {}),
-          map(counts => presentBefore(counts) !== presentAfter(counts, op) ? emitOne(counts) : nothing),
-        ),
-
-      Group: ({ keys, expressions, having, window, limit }) =>
-        of(delta).pipe(
-          map(row => project(keptColumns(node), row)),                   // the projection Map the planner already inserted
-          groupBy(row => row.__k),                                        // touched keys only
-          mergeMap(key$ => key$.pipe(
-            withLatestFrom(readOld(db, node, key$.key)),                  // SELECT ... FROM _state WHERE __k = key
-            concatMap(([rows, old]) => concat(
-              upsertArrangement(db, node, rows),
-              recompute(db, node, key$.key),                              // SELECT exprs FROM op_group WHERE __k=? [GROUP BY __k HAVING ...], or the window/limit CTE
-            )),
-            map(([old, fresh]) => difference(old, fresh)),               // retract old, add fresh
-          )),
-        ),
-
-      Fixpoint: ({ rules }) =>
-        of(delta).pipe(
-          concatMap(rows => rows.some(r => r.__n < 0)
-            ? deleteAndRederive(db, node, rows)                          // affected set, then rounds
-            : of(rows)),
-          expand(round => semiNaive(db, node, round), FIXPOINT_ROUNDS),   // next delta = rules(delta join arrangements) minus member; bounded, named
-          takeWhile(round => round.length > 0, true),
-          reduce((all, round) => all.concat(round), []),
-        ),
-    })),
-
-    // output: every delta that reaches the output node lands in _state
-    filter(({ node }) => node === plan.output),
-    map(({ delta }) => applyState(db, delta)),                          // DELETE __key IN retracted; INSERT added
-
-    // commit: the pager commits after xSync returns; xCommit asserts staged and *_delta are empty
-    tap(() => truncateDeltas(db)),
-  )),
-
-  // failure anywhere aborts the statement; SQLite's journal unwinds every table the batch touched
-  catchError(err => { throw sqliteError(err) }),
-)
-
-view$.subscribe()   // the one subscribe: SQLite's xSync is the boundary
-```
-
-One transaction on the marble, deferred mode. Source `orders` gets three rows
-and one savepoint is rolled back:
-
-```
-xBegin  xUpdate xUpdate xSavepoint xUpdate xRollbackTo xUpdate                 xSync            xCommit
-  |        a       b        mark       c       unwind       d                    |                 |
-staged:   [a]    [a,b]    [a,b]+mark  [a,b,c]  [a,b]      [a,b,d]                |                 |
-                                                                     drain ─────┤
-                                                                     orders_delta <- a,b,d
-                                                                     join   <- deltaA join B_old, upsert A
-                                                                     group  <- keys{a,b,d}: old, upsert, recompute, diff
-                                                                     _state <- retract, add
-                                                                     truncate *_delta
-                                                                                          assert empty
-```
-
-Where each operator lives:
-
-| rxjs | today | after the batch port |
-|---|---|---|
-| `scan` collector | none; `insert()` runs SQL per row (`src/2_vtab.rs`) | the `sqlite-bulk-trigger` collector |
-| `takeLast` and the drain modes | none | xSync, xRelease, xFilter, `sqlite_ivm_flush()` |
-| Join `concatMap(concat(probe, upsert))` | `apply()` per row (`src/1a_relational.rs`) | two statements per side per transaction |
-| Group `groupBy(__k)`, `withLatestFrom(old)`, `recompute`, `difference` | snapshot before, `change()`, snapshot after, per row | per touched key per transaction |
-| Fixpoint `expand`, bounded | `fixpoint()`, already rounds | unchanged |
-| `map(applyState)` | `emit()` per delta row | one DELETE, one INSERT |
-| the one `subscribe` | trigger into the virtual table | xSync |
-
-Statement sets per transaction of S statements over R rows on a node path of
-depth D, by drain mode:
-
-| mode | maintenance statement sets |
-|---|---|
-| per row (today) | R times D |
-| eager | S times D |
-| read | D per read that follows a write |
-| deferred | D |
+`hafley-observe::CountRecorder` supplies numeric event samples and aggregates.
+SQL phase names, workloads, cost fixtures, and regression assertions live in this
+repository. Vendored dependencies and their upstream commit are recorded in
+[vendor/0_SOURCE.md](vendor/0_SOURCE.md).
 
 ## Build, test, package
 
-```bash
-cargo fetch --locked --manifest-path sqlite_ivm/Cargo.toml
-SQLITE3=sqlite3 bash sqlite_ivm/scripts/9_verify.sh
-bash sqlite_ivm/scripts/10_package.sh
-```
-
-On macOS select a CLI with extension loading, for example Homebrew SQLite:
+Run from this repository:
 
 ```bash
-export SQLITE3="$(brew --prefix sqlite)/bin/sqlite3"
-export SQLITE3_LIB_DIR="$(brew --prefix sqlite)/lib"
-export SQLITE3_INCLUDE_DIR="$(brew --prefix sqlite)/include"
-bash sqlite_ivm/scripts/9_verify.sh
+cargo fetch --locked
+cargo fetch --locked --manifest-path bench/Cargo.toml
+just verify
+just shootout smoke
+just crossover
+just package
 ```
 
-The base gate runs Rust tests, six native Bash scenarios, and the original circuit
-fixtures. The `sqlite-ivm-bench` binary covers the expanded circuits suite:
+`just verify` runs the root correctness and timing gate, three native extension
+loading tests, the CRUD shell scenario, and the CLI compass. On macOS it selects
+Homebrew SQLite when `SQLITE3` is unset. `cargo-nextest`, Python 3, and coreutils
+`timeout` or `gtimeout` are required. The crossover also requires Node.js.
 
-```bash
-IVM_POSTGRES_PREFIX=/path/to/postgres target/release/bench shootout smoke
-```
-
-Raw PostgreSQL comparisons and the recorded pg_ivm 1.15 behavior are checked by
-the binary's receipts: unsupported definitions report their SQLSTATE, ordinary
-PG queries must match, and the Linux/macOS workflow runs the smoke shootout
-with a PostgreSQL/pg_ivm job. Remote CI execution has not been performed here.
-
-The GitHub workflow builds and tests on Linux and macOS and uploads release
-archives. Local execution is distinct from a remote CI run. Archives include the
-native library, README, both licenses, and a SHA-256 sidecar. Source publication
-or an external release requires selecting a destination.
+The native extension builds into `target/extension`, separately from linked Rust
+tests and benchmark binaries. `just package` writes binary and source archives
+plus SHA-256 sidecars into `dist`. The source archive contains committed HEAD,
+including the vendored crates.
 
 ## Shared benchmark
 
@@ -345,14 +199,13 @@ reported explicitly. SQLite and PostgreSQL are durable; DD is volatile.
 
 ## Reading order
 
-1. `src/0_query.rs`: checked integer query binding.
-2. `src/0a_catalog.rs`: ownership manifest and cleanup.
-3. `src/0b_relational.rs`: general SELECT-to-operator compilation.
-4. `src/1_maintenance.rs`: integer delta SQL and hooks.
-5. `src/1a_relational.rs`: persistent relational operators.
-6. `src/2_vtab.rs`: virtual-table lifecycle, scans, update dispatch.
-7. `src/2a_source_ddl.rs`: transactional source DDL.
-8. `src/3_extension.rs`: SQL functions and extension ABI.
+1. `src/0a_catalog.rs`: ownership manifest and cleanup.
+2. `src/0b_relational.rs` through `src/0f_columns.rs`: query compilation and expressions.
+3. `src/1a_relational.rs` and `src/1b_state.rs`: persistent arrangements and keys.
+4. `src/1c_materialize.rs`: SQL for initial and affected-key results.
+5. `src/1d_drain.rs` and `src/1e_program.rs`: batch execution and prepared SQL.
+6. `src/2_vtab.rs` and `src/2a_source_ddl.rs`: lifecycle, reads, managed DDL.
+7. `src/3_extension.rs`: SQL functions and extension ABI.
 
 rusqlite 0.40.2 and sqlite3-parser 0.17.0 are pinned in Cargo.lock. Rusqlite owns
 the virtual-table adapters. A narrow ABI descriptor adapter adds xRename and

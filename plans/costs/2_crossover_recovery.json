@@ -1,0 +1,563 @@
+{
+  "recovery-crossover": {
+    "invocation": {
+      "command": [
+        "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/28_run.py",
+        "--extension",
+        "/Users/chrishafley/projects/sqlite_ivm/target/extension/release/libsqlite_ivm.dylib",
+        "--dd-bin",
+        "/Users/chrishafley/projects/sqlite_ivm/target/release/crossover-dd",
+        "--out",
+        "/Users/chrishafley/projects/sqlite_ivm/bench/results/recovery-crossover"
+      ],
+      "time_unix": 1790029045.0965068,
+      "repetitions": 3,
+      "warmups": 0,
+      "source": "sprefa@e2052d5ae",
+      "sha256": {
+        "/Users/chrishafley/projects/sqlite_ivm/target/extension/release/libsqlite_ivm.dylib": "ebd004702d564029c1e3f45a6fb18d16f42c0d37d57d1a1c6700d3153f792b35",
+        "/Users/chrishafley/projects/sqlite_ivm/target/release/crossover-dd": "e051615a05fda82ca35ed46c513aa7eac0ee16c7839e780172135a448858477e",
+        "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/9_crossover_workload.mjs": "fece748f04a08eaa76400a7b0f52e8616b745241ed7141621f46ac6949291f74",
+        "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/22_crossover_dd.rs": "256a2233d24d2512e4204a8637a1df3e81a0046be05f54ac7801aecc8c7857df"
+      }
+    },
+    "results": [
+      {
+        "rows": 400,
+        "batch": 10,
+        "fanout": 10,
+        "samples_ms": {
+          "sqlite-ivm": [
+            7.597999006975442,
+            7.184205998783,
+            7.342706972849555
+          ],
+          "dd": [
+            0.128541,
+            0.133125,
+            0.13604100000000002
+          ]
+        },
+        "ivm_over_dd": 55.156484303095255
+      },
+      {
+        "rows": 12000,
+        "batch": 10,
+        "fanout": 10,
+        "samples_ms": {
+          "sqlite-ivm": [
+            27.318790977005847,
+            27.257583031314425,
+            28.142040988313965
+          ],
+          "dd": [
+            0.28041800000000006,
+            0.235209,
+            0.244917
+          ]
+        },
+        "ivm_over_dd": 111.54305735006491
+      },
+      {
+        "rows": 400,
+        "batch": 10,
+        "fanout": 200,
+        "samples_ms": {
+          "sqlite-ivm": [
+            8.449085027677938,
+            8.298207991174422,
+            8.273915998870507
+          ],
+          "dd": [
+            0.210667,
+            0.248958,
+            0.147332
+          ]
+        },
+        "ivm_over_dd": 39.3901654799965
+      },
+      {
+        "rows": 1200,
+        "batch": 10,
+        "fanout": 200,
+        "samples_ms": {
+          "sqlite-ivm": [
+            11.303125007543713,
+            11.786083006882109,
+            11.300710990326479
+          ],
+          "dd": [
+            0.15425000000000003,
+            0.142167,
+            0.223333
+          ]
+        },
+        "ivm_over_dd": 73.27795790952163
+      },
+      {
+        "rows": 4000,
+        "batch": 10,
+        "fanout": 200,
+        "samples_ms": {
+          "sqlite-ivm": [
+            17.242582005565055,
+            17.564207999384962,
+            18.384416020126082
+          ],
+          "dd": [
+            0.188583,
+            0.151082,
+            0.19945800000000002
+          ]
+        },
+        "ivm_over_dd": 93.13781199463877
+      },
+      {
+        "rows": 12000,
+        "batch": 10,
+        "fanout": 200,
+        "samples_ms": {
+          "sqlite-ivm": [
+            31.484249979257584,
+            30.868500005453825,
+            31.209666034555994
+          ],
+          "dd": [
+            0.287083,
+            0.31400100000000003,
+            0.33945800000000004
+          ]
+        },
+        "ivm_over_dd": 99.39352433449572
+      },
+      {
+        "rows": 12000,
+        "batch": 1000,
+        "fanout": 200,
+        "samples_ms": {
+          "sqlite-ivm": [
+            196.32741902023554,
+            197.91591700050049,
+            199.17833202634938
+          ],
+          "dd": [
+            1.092209,
+            1.25175,
+            1.175332
+          ]
+        },
+        "ivm_over_dd": 168.3914987429088
+      },
+      {
+        "rows": 12000,
+        "batch": 1,
+        "fanout": 200,
+        "samples_ms": {
+          "sqlite-ivm": [
+            18.878791976021603,
+            18.80616798007395,
+            19.46920799673535
+          ],
+          "dd": [
+            0.22912400000000002,
+            0.1915,
+            0.180749
+          ]
+        },
+        "ivm_over_dd": 98.58377010977338
+      },
+      {
+        "rows": 12000,
+        "batch": 100,
+        "fanout": 200,
+        "samples_ms": {
+          "sqlite-ivm": [
+            147.7998760092305,
+            144.3195409810869,
+            142.7666249946924
+          ],
+          "dd": [
+            0.404292,
+            0.34233199999999997,
+            0.33779099999999995
+          ]
+        },
+        "ivm_over_dd": 421.5777110556037
+      }
+    ]
+  },
+  "recovery-crossover-join-delta": {
+    "invocation": {
+      "command": [
+        "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/28_run.py",
+        "--extension",
+        "/Users/chrishafley/projects/sqlite_ivm/target/extension/release/libsqlite_ivm.dylib",
+        "--dd-bin",
+        "/Users/chrishafley/projects/sqlite_ivm/target/release/crossover-dd",
+        "--out",
+        "bench/results/recovery-crossover-join-delta"
+      ],
+      "time_unix": 1790029410.827214,
+      "repetitions": 3,
+      "warmups": 0,
+      "source": "sprefa@e2052d5ae",
+      "sha256": {
+        "/Users/chrishafley/projects/sqlite_ivm/target/extension/release/libsqlite_ivm.dylib": "35394b1601ab868f4cfde387563d65ff49db5121b5c8171f9e13a840135cbbaa",
+        "/Users/chrishafley/projects/sqlite_ivm/target/release/crossover-dd": "e051615a05fda82ca35ed46c513aa7eac0ee16c7839e780172135a448858477e",
+        "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/9_crossover_workload.mjs": "fece748f04a08eaa76400a7b0f52e8616b745241ed7141621f46ac6949291f74",
+        "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/22_crossover_dd.rs": "256a2233d24d2512e4204a8637a1df3e81a0046be05f54ac7801aecc8c7857df"
+      }
+    },
+    "results": [
+      {
+        "rows": 400,
+        "batch": 10,
+        "fanout": 10,
+        "samples_ms": {
+          "sqlite-ivm": [
+            5.116999018355273,
+            5.033293025917374,
+            4.946289991494268
+          ],
+          "dd": [
+            0.12654,
+            0.12820800000000002,
+            0.13420700000000002
+          ]
+        },
+        "ivm_over_dd": 39.25880620489652
+      },
+      {
+        "rows": 12000,
+        "batch": 10,
+        "fanout": 10,
+        "samples_ms": {
+          "sqlite-ivm": [
+            17.627166002057493,
+            17.652791997534223,
+            17.310793002252467
+          ],
+          "dd": [
+            0.242334,
+            0.256042,
+            0.170753
+          ]
+        },
+        "ivm_over_dd": 72.73913690219901
+      },
+      {
+        "rows": 400,
+        "batch": 10,
+        "fanout": 200,
+        "samples_ms": {
+          "sqlite-ivm": [
+            6.724333041347563,
+            6.547999975737184,
+            6.48275097773876
+          ],
+          "dd": [
+            0.14604,
+            0.140627,
+            0.14354099999999997
+          ]
+        },
+        "ivm_over_dd": 45.61762824375743
+      },
+      {
+        "rows": 1200,
+        "batch": 10,
+        "fanout": 200,
+        "samples_ms": {
+          "sqlite-ivm": [
+            7.982084003742784,
+            7.960499991895631,
+            8.108248992357403
+          ],
+          "dd": [
+            0.151416,
+            0.1425,
+            0.150541
+          ]
+        },
+        "ivm_over_dd": 53.02265830400212
+      },
+      {
+        "rows": 4000,
+        "batch": 10,
+        "fanout": 200,
+        "samples_ms": {
+          "sqlite-ivm": [
+            12.456582961021923,
+            12.566083009005524,
+            12.607999015017413
+          ],
+          "dd": [
+            0.154834,
+            0.146833,
+            0.160916
+          ]
+        },
+        "ivm_over_dd": 81.15842133514296
+      },
+      {
+        "rows": 12000,
+        "batch": 10,
+        "fanout": 200,
+        "samples_ms": {
+          "sqlite-ivm": [
+            20.74995699513238,
+            20.934747997671366,
+            20.07687697187066
+          ],
+          "dd": [
+            0.197041,
+            0.169457,
+            0.157876
+          ]
+        },
+        "ivm_over_dd": 122.44968927298595
+      },
+      {
+        "rows": 12000,
+        "batch": 1000,
+        "fanout": 200,
+        "samples_ms": {
+          "sqlite-ivm": [
+            94.6003339777235,
+            94.99383303045761,
+            96.38137399451807
+          ],
+          "dd": [
+            1.179501,
+            1.0644580000000001,
+            1.117127
+          ]
+        },
+        "ivm_over_dd": 85.03404987119424
+      },
+      {
+        "rows": 12000,
+        "batch": 1,
+        "fanout": 200,
+        "samples_ms": {
+          "sqlite-ivm": [
+            17.1190430119168,
+            17.42704199568834,
+            16.936875981627963
+          ],
+          "dd": [
+            0.17216700000000001,
+            0.208211,
+            0.23095899999999997
+          ]
+        },
+        "ivm_over_dd": 82.21968585673572
+      },
+      {
+        "rows": 12000,
+        "batch": 100,
+        "fanout": 200,
+        "samples_ms": {
+          "sqlite-ivm": [
+            49.98966699349694,
+            50.898956978926435,
+            88.19329101243056
+          ],
+          "dd": [
+            0.316375,
+            0.376707,
+            0.39387300000000003
+          ]
+        },
+        "ivm_over_dd": 135.11550615976458
+      }
+    ]
+  },
+  "recovery-crossover-bounded": {
+    "invocation": {
+      "command": [
+        "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/28_run.py",
+        "--extension",
+        "/Users/chrishafley/projects/sqlite_ivm/target/extension/release/libsqlite_ivm.dylib",
+        "--dd-bin",
+        "/Users/chrishafley/projects/sqlite_ivm/target/release/crossover-dd",
+        "--out",
+        "bench/results/recovery-crossover-bounded"
+      ],
+      "time_unix": 1790029552.5447822,
+      "repetitions": 3,
+      "warmups": 0,
+      "source": "sprefa@e2052d5ae",
+      "sha256": {
+        "/Users/chrishafley/projects/sqlite_ivm/target/extension/release/libsqlite_ivm.dylib": "849d01dd92ab4e20a1d8ae11a870fec8928811e0edad2ddf914e6c9e1fb4b4bb",
+        "/Users/chrishafley/projects/sqlite_ivm/target/release/crossover-dd": "e051615a05fda82ca35ed46c513aa7eac0ee16c7839e780172135a448858477e",
+        "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/9_crossover_workload.mjs": "fece748f04a08eaa76400a7b0f52e8616b745241ed7141621f46ac6949291f74",
+        "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/22_crossover_dd.rs": "256a2233d24d2512e4204a8637a1df3e81a0046be05f54ac7801aecc8c7857df"
+      }
+    },
+    "results": [
+      {
+        "rows": 400,
+        "batch": 10,
+        "fanout": 10,
+        "samples_ms": {
+          "sqlite-ivm": [
+            5.000498989829794,
+            5.142748996149749,
+            5.016667011659592
+          ],
+          "dd": [
+            0.13287500000000002,
+            0.126917,
+            0.135291
+          ]
+        },
+        "ivm_over_dd": 37.75478465971471
+      },
+      {
+        "rows": 12000,
+        "batch": 10,
+        "fanout": 10,
+        "samples_ms": {
+          "sqlite-ivm": [
+            7.679707996430807,
+            7.859292963985354,
+            7.6938330312259495
+          ],
+          "dd": [
+            0.22195800000000002,
+            0.19154100000000002,
+            0.356711
+          ]
+        },
+        "ivm_over_dd": 34.66346349861663
+      },
+      {
+        "rows": 400,
+        "batch": 10,
+        "fanout": 200,
+        "samples_ms": {
+          "sqlite-ivm": [
+            7.560706988442689,
+            6.836042972281575,
+            7.318249030504376
+          ],
+          "dd": [
+            0.145958,
+            0.14033299999999999,
+            0.202958
+          ]
+        },
+        "ivm_over_dd": 50.13941702753104
+      },
+      {
+        "rows": 1200,
+        "batch": 10,
+        "fanout": 200,
+        "samples_ms": {
+          "sqlite-ivm": [
+            7.695416992646642,
+            7.946666999487206,
+            7.599875039886683
+          ],
+          "dd": [
+            0.147126,
+            0.159083,
+            0.150542
+          ]
+        },
+        "ivm_over_dd": 51.118073312740904
+      },
+      {
+        "rows": 4000,
+        "batch": 10,
+        "fanout": 200,
+        "samples_ms": {
+          "sqlite-ivm": [
+            9.242251020623371,
+            10.380457984865643,
+            8.921624976210296
+          ],
+          "dd": [
+            0.155416,
+            0.15545899999999999,
+            0.15212499999999998
+          ]
+        },
+        "ivm_over_dd": 59.46782197858246
+      },
+      {
+        "rows": 12000,
+        "batch": 10,
+        "fanout": 200,
+        "samples_ms": {
+          "sqlite-ivm": [
+            11.143583004013635,
+            11.551792980753817,
+            11.104542994871736
+          ],
+          "dd": [
+            0.256708,
+            0.22591700000000003,
+            0.355999
+          ]
+        },
+        "ivm_over_dd": 43.40956652700202
+      },
+      {
+        "rows": 12000,
+        "batch": 1000,
+        "fanout": 200,
+        "samples_ms": {
+          "sqlite-ivm": [
+            91.16408304544166,
+            95.41016901494004,
+            91.3963340135524
+          ],
+          "dd": [
+            1.2314580000000002,
+            1.090916,
+            1.053917
+          ]
+        },
+        "ivm_over_dd": 83.77944224262217
+      },
+      {
+        "rows": 12000,
+        "batch": 1,
+        "fanout": 200,
+        "samples_ms": {
+          "sqlite-ivm": [
+            8.369627001229674,
+            8.524791992385872,
+            8.634374986286275
+          ],
+          "dd": [
+            0.228957,
+            0.261751,
+            0.15933399999999998
+          ]
+        },
+        "ivm_over_dd": 37.233157284493906
+      },
+      {
+        "rows": 12000,
+        "batch": 100,
+        "fanout": 200,
+        "samples_ms": {
+          "sqlite-ivm": [
+            40.70487499120645,
+            46.20516701834276,
+            41.37270899082068
+          ],
+          "dd": [
+            0.38520800000000005,
+            0.450042,
+            0.44020800000000004
+          ]
+        },
+        "ivm_over_dd": 93.98445505493012
+      }
+    ]
+  }
+}

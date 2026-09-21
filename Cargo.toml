@@ -24,11 +24,11 @@ extension = ["rusqlite/loadable_extension"]
 statements = []
 
 [dependencies]
-hafley-observe = { path = "../../../../hafley-rs/.boop-worktrees/main/crates/hafley-observe" }
+hafley-observe = { path = "vendor/hafley-observe" }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 rusqlite = { version = "=0.40.2", features = ["functions", "vtab"] }
-sqlite-bulk-trigger = { path = "../../../../hafley-rs/.boop-worktrees/main/crates/sqlite-bulk-trigger" }
+sqlite-bulk-trigger = { path = "vendor/sqlite-bulk-trigger" }
 sqlite3-parser = "=0.17.0"
 
 [profile.dev]
@@ -37,9 +37,6 @@ debug = 0
 [dev-dependencies]
 serde_json = "1"
 sha2 = "0.10"
-# The statement counts read raw statement events (per-call nanos, p99) from the same
-# capture layer hafley-observe's CountRecorder wraps.
-tracing-capture = "0.1.0"
 
 
 

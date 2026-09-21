@@ -5,6 +5,7 @@ on:
       - .github/workflows/sqlite-ivm.yml
       - Cargo.toml
       - Cargo.lock
+      - vendor/**
       - src/**
       - tests/**
       - scripts/**
@@ -14,6 +15,7 @@ on:
       - .github/workflows/sqlite-ivm.yml
       - Cargo.toml
       - Cargo.lock
+      - vendor/**
       - src/**
       - tests/**
       - scripts/**
@@ -54,10 +56,14 @@ jobs:
           tool: nextest
       - name: Rust and native acceptance tests
         run: bash scripts/9_verify.sh
-      - name: Build extension dylib and bench binary into one target dir
+      - name: Build extension dylib and bench binary in separate target dirs
         run: |
           export CARGO_TARGET_DIR="$RUNNER_TEMP/ivm-target"
-          cargo build --locked --release --manifest-path Cargo.toml --no-default-features --features extension
+          cargo build --locked --release --manifest-path Cargo.toml --no-default-features --features extension --target-dir "$RUNNER_TEMP/ivm-extension"
+          case "$RUNNER_OS" in
+            macOS) echo "IVM_EXTENSION=$RUNNER_TEMP/ivm-extension/release/libsqlite_ivm.dylib" >> "$GITHUB_ENV" ;;
+            Linux) echo "IVM_EXTENSION=$RUNNER_TEMP/ivm-extension/release/libsqlite_ivm.so" >> "$GITHUB_ENV" ;;
+          esac
           cargo build --locked --release --manifest-path bench/Cargo.toml
       - name: Smoke shootout across SQLite and DD engines
         run: |
@@ -107,7 +113,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Build bench binary
-        run: cargo build --locked --release --manifest-path bench/Cargo.toml
+        run: CARGO_TARGET_DIR="$GITHUB_WORKSPACE/target" cargo build --locked --release --manifest-path bench/Cargo.toml
       - name: Build native pg_ivm 1.15
         run: |
           sudo apt-get update

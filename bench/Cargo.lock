@@ -475,6 +475,7 @@ dependencies = [
 name = "hafley-observe"
 version = "0.1.1"
 dependencies = [
+ "libc",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",

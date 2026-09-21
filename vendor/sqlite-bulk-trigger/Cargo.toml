@@ -1,0 +1,17 @@
+[package]
+name = "sqlite-bulk-trigger"
+description = "One Rust callback per transaction for SQLite row triggers, with savepoint rollback handled inside a collector virtual table."
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/hafley66/hafley-rs"
+homepage = "https://github.com/hafley66/hafley-rs"
+
+# No bundled SQLite here. A host that builds a loadable extension links the
+# SQLite it is loaded into, and a bundled copy in a dependency links a second.
+[dependencies]
+rusqlite = { version = "=0.40.2", features = ["vtab"] }
+tracing = "0.1"
+
+[dev-dependencies]
+rusqlite = { version = "=0.40.2", features = ["bundled", "vtab"] }

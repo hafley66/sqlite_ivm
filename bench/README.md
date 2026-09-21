@@ -1,9 +1,19 @@
 # sqlite-ivm-bench
 
-One Rust harness replacing the `bench/*.mjs`, `scripts/8-16*`, and
-`examples/4|5` shell-script era: circuit shootout, scale sweep, and fixture
-dumps. Zero shell — the only external programs are `initdb`, `pg_ctl`, and
-`gnuplot`. No `eprintln!`; logging goes through `tracing`.
+The Rust harness runs circuit shootouts, scale sweeps, and fixture dumps.
+`crossover/` preserves the earlier sprefa fixture generator and DD consumer,
+with an adapter for the current native plugin.
+
+```bash
+just shootout smoke
+just shootout quick
+just crossover
+just scale
+```
+
+Run these recipes from the repository root. Each builds the required artifacts.
+Native extension builds use `target/extension` to avoid overwriting the linked
+Rust library used by the benchmark binary.
 
 ## Subcommands
 
@@ -14,7 +24,7 @@ engines: `sqlite-ivm`, `pg-ivm`, `sqlite-query`, `pg-query`, `dd`.
 
 - Profiles: `smoke` = 24 rows / 3 batch / 4 fanout, 1 rep, 0 warmups;
   `quick` = 400 / 10 / 10, 3 reps, 1 warmup pass per case.
-- Engine order rotates per rep; each rep rebuilds the arm from scratch.
+- Engines run in configured order; each rep rebuilds the arm from scratch.
 - Timing wraps `apply` only (mutation + materialize); verification and
   lifecycle checks are untimed. Case number = median over timed reps.
 - pg cases share one temp cluster per invocation (`initdb --auth=trust
@@ -27,7 +37,7 @@ engines: `sqlite-ivm`, `pg-ivm`, `sqlite-query`, `pg-query`, `dd`.
   `2` execution failure.
 
 Requires the extension dylib for `sqlite-ivm`: build it at the repo root with
-`cargo build --release --features extension` (the harness resolves
+`bash scripts/0_build.sh release` (the harness resolves
 `libsqlite_ivm.{dylib,so}` next to its own binary, or set `IVM_EXTENSION`).
 For pg engines pass `--pg-prefix` or `IVM_POSTGRES_PREFIX`.
 
@@ -68,3 +78,12 @@ generators.
 
 See `plans/costs/shootout-rust.md` for the receipt slots (R1-R5): fixture
 parity, checksum match, quick-2 comparison, clippy, and the root test suite.
+
+## Recovered crossover
+
+`just crossover` runs all nine historical rows/batch/fanout cases with three
+repetitions and no warmups. Arm order alternates each repetition. SQLite uses
+WAL/FULL; DD remains volatile. Every state is checked against the original
+input and output hashes. Results, process logs, database files, source/binary
+hashes, and invocation time are retained in `bench/results/crossover-*`.
+See [crossover/0_SOURCE.md](crossover/0_SOURCE.md) for provenance.

@@ -24,8 +24,6 @@ pub(crate) struct Program {
 
 pub(crate) struct NodeStatements {
     pub(crate) sweep: String,
-    /// Per input side: whether that side's out table holds any row.
-    pub(crate) touched: Vec<String>,
     pub(crate) kind: KindStatements,
 }
 
@@ -47,9 +45,20 @@ pub(crate) struct ArrangementStatements {
     pub(crate) park: String,
     pub(crate) clear_out: String,
     /// After-state minus before-state, executed in order.
-    pub(crate) diff: [String; 6],
+    pub(crate) diff: [String; 2],
+    pub(crate) consolidate: String,
+    pub(crate) join_delta: Option<JoinDeltaStatements>,
+    pub(crate) emit: String,
+    pub(crate) clear_before: String,
     pub(crate) sides: Vec<Option<ArrangementSide>>,
     pub(crate) materialize: MaterializeStatements,
+}
+
+/// Inner joins propagate signed input deltas against the opposite arrangement.
+/// Side zero runs before its upsert; side one sees that updated side zero.
+pub(crate) struct JoinDeltaStatements {
+    pub(crate) sides: [String; 2],
+    pub(crate) bad: String,
 }
 
 pub(crate) struct ArrangementSide {
@@ -175,14 +184,6 @@ fn node_statements(plan: &Plan, name: &str, db: &Connection, id: usize) -> NodeS
     let out = out_table(id, width);
     NodeStatements {
         sweep: format!("DELETE FROM {out}"),
-        touched: node
-            .inputs
-            .iter()
-            .map(|input| {
-                let child = out_table(*input, plan.nodes[*input].fields.len());
-                format!("SELECT EXISTS(SELECT 1 FROM {child})")
-            })
-            .collect(),
         kind: match &node.kind {
             Kind::Input(source) => {
                 let width = plan.sources[*source].columns.len();
@@ -234,16 +235,48 @@ fn arrangement_statements(
         diff: [
             format!("INSERT INTO {out} SELECT {cols},-__m FROM {before}"),
             format!("DELETE FROM {before}"),
-            format!("INSERT INTO {before} SELECT {cols},sum(__m) FROM {out} GROUP BY {identity} HAVING sum(__m)!=0"),
-            format!("DELETE FROM {out}"),
-            format!("INSERT INTO {out} SELECT * FROM {before}"),
-            format!("DELETE FROM {before}"),
         ],
+        consolidate: format!("INSERT INTO {before} SELECT {cols},sum(__m) FROM {out} GROUP BY {identity} HAVING sum(__m)!=0"),
+        join_delta: join_delta_statements(plan, name, id),
+        emit: format!("INSERT INTO {out} SELECT * FROM {before}"),
+        clear_before: format!("DELETE FROM {before}"),
         sides: (0..node.inputs.len())
             .map(|side| arrangement_side(plan, name, id, side))
             .collect(),
         materialize: plan.materialize_statements(db, name, id, true),
     }
+}
+
+fn join_delta_statements(plan: &Plan, name: &str, id: usize) -> Option<JoinDeltaStatements> {
+    let node = &plan.nodes[id];
+    let Kind::Join { mode: "inner", predicate, .. } = &node.kind else {
+        return None;
+    };
+    let left_width = plan.nodes[node.inputs[0]].fields.len();
+    let right_width = plan.nodes[node.inputs[1]].fields.len();
+    let cols = columns(node.fields.len());
+    let out = out_table(id, node.fields.len());
+    let dict = keys_table(name);
+    let projection = (0..left_width).map(|i| format!("l.c{i} AS c{i}"))
+        .chain((0..right_width).map(|i| format!("r.c{i} AS c{}", left_width + i)))
+        .collect::<Vec<_>>().join(",");
+    let sides = [0, 1].map(|side| {
+        let child = out_table(node.inputs[side], plan.nodes[node.inputs[side]].fields.len());
+        let key = plan.key_sql(id, side).expect("inner join input key");
+        let delta = format!("(SELECT *, (SELECT __i FROM {dict} WHERE __v={key}) AS __k FROM {child})");
+        let (left, right, weight) = if side == 0 {
+            (delta, table(name, id, 1), "l.__m*r.__n")
+        } else {
+            (table(name, id, 0), delta, "l.__n*r.__m")
+        };
+        let body = format!("SELECT {projection},{weight} AS __m FROM {left} l JOIN {right} r ON l.__k=r.__k AND NOT EXISTS(SELECT 1 FROM json_each((SELECT __v FROM {dict} WHERE __i=l.__k)) WHERE type='null')");
+        let filter = predicate.as_ref().map(|p| format!(" WHERE {p}")).unwrap_or_default();
+        format!("INSERT INTO {out}({cols},__m) SELECT * FROM ({body}){filter}")
+    });
+    Some(JoinDeltaStatements {
+        sides,
+        bad: format!("SELECT EXISTS(SELECT 1 FROM {out} WHERE typeof(__m)!='integer')"),
+    })
 }
 
 fn arrangement_side(plan: &Plan, name: &str, id: usize, side: usize) -> Option<ArrangementSide> {
@@ -283,15 +316,18 @@ fn upsert_statements(
              FROM (SELECT {identity} AS __ivm_v,sum(__m) AS __ivm_n,{cols} FROM {child} GROUP BY {identity}) WHERE __ivm_n!=0"
         ),
         apply: format!(
-            "UPDATE {t} SET __n={t}.__n+d.__n FROM {delta} d WHERE d.__r={t}.__r AND d.__v={arrangement_identity}"
+            "UPDATE {t} SET __n={t}.__n+d.__n FROM {delta} d WHERE {t}.__r IN (SELECT __r FROM {delta}) AND d.__r={t}.__r AND d.__v={arrangement_identity}"
         ),
         insert_new: format!(
             "INSERT INTO {t}(__k,__r,__n,{cols}) SELECT (SELECT __i FROM {dict} WHERE __v={key}),d.__r,d.__n,{cols} FROM {delta} d \
              WHERE NOT EXISTS(SELECT 1 FROM {t} a WHERE a.__r=d.__r AND {}=d.__v)",
             identity_of("a")
         ),
-        bad: format!("SELECT EXISTS(SELECT 1 FROM {t} WHERE __n<0 OR typeof(__n)!='integer')"),
-        drop_zero: format!("DELETE FROM {t} WHERE __n=0"),
+        // Only identities present in this delta can have changed multiplicity.
+        // The hash bounds the index lookup; the update above still checks the
+        // full identity so collisions cannot apply another row's delta.
+        bad: format!("SELECT EXISTS(SELECT 1 FROM {t} WHERE __r IN (SELECT __r FROM {delta}) AND (__n<0 OR typeof(__n)!='integer'))"),
+        drop_zero: format!("DELETE FROM {t} WHERE __r IN (SELECT __r FROM {delta}) AND __n=0"),
     }
 }
 

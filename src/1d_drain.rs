@@ -30,6 +30,7 @@ impl Plan {
     pub(crate) fn drain(&self, db: &Connection, program: &Program, batch: &[(usize, Row, i64)]) -> Result<()> {
         let name = program.name.as_str();
         let _span = tracing::debug_span!("drain", view = name, rows = batch.len()).entered();
+        let mut out_rows = vec![0usize; self.nodes.len()];
         let seed = tracing::debug_span!("node", kind = "seed", id = self.nodes.len()).entered();
         // One prepared insert per input node; the batch is the only per-row loop.
         for (id, node) in self.nodes.iter().enumerate() {
@@ -50,7 +51,7 @@ impl Plan {
                     return Err(error("seed statement budget exceeded"));
                 }
                 bound += 1;
-                statements::exec_cached(
+                out_rows[id] += statements::exec_cached(
                     db,
                     Phase::Drain,
                     name,
@@ -63,32 +64,27 @@ impl Plan {
         for id in 0..self.nodes.len() {
             let node = &self.nodes[id];
             let statements = &program.nodes[id];
+            if matches!(statements.kind, KindStatements::Input { .. }) {
+                continue;
+            }
             let touched_inputs = node
                 .inputs
                 .iter()
-                .enumerate()
-                .map(|(side, _)| {
-                    statements::query_cached(
-                        db,
-                        Phase::Drain,
-                        name,
-                        &statements.touched[side],
-                        [],
-                        |r| r.get::<_, bool>(0),
-                    )
-                })
-                .collect::<Result<Vec<bool>>>()?;
+                .map(|input| out_rows[*input] != 0)
+                .collect::<Vec<_>>();
             if !touched_inputs.iter().any(|t| *t) {
                 continue;
             }
             let _node = tracing::debug_span!("node", kind = node.kind.label(), id).entered();
-            match &statements.kind {
-                KindStatements::Input { .. } => {}
+            let written = match &statements.kind {
+                KindStatements::Input { .. } => unreachable!(),
                 KindStatements::Map { materialize } => materialize.execute(db, name)?,
                 KindStatements::SetAll { copies } => {
+                    let mut written = 0usize;
                     for sql in copies {
-                        statements::exec_cached(db, Phase::Maintain, name, sql, [])?;
+                        written += statements::exec_cached(db, Phase::Maintain, name, sql, [])?;
                     }
+                    written
                 }
                 KindStatements::Arrangement(arrangement) => {
                     self.drain_arrangement(db, name, arrangement, &touched_inputs)?
@@ -97,10 +93,11 @@ impl Plan {
                     let Kind::Fixpoint { .. } = &node.kind else {
                         unreachable!()
                     };
-                    self.drain_fixpoint(db, name, id, fixpoint, &touched_inputs)?;
+                    self.drain_fixpoint(db, name, id, fixpoint, &touched_inputs)?
                 }
-            }
-            if id == self.output {
+            };
+            out_rows[id] = written;
+            if id == self.output && written != 0 {
                 let _apply = tracing::debug_span!("node", kind = "apply_state", id).entered();
                 self.apply_state(db, program)?;
             }
@@ -108,8 +105,10 @@ impl Plan {
         // Sweep is the only clear: seed trusts it, and a failed drain aborts the
         // enclosing statement, which unwinds the temp writes with it.
         let _sweep = tracing::debug_span!("node", kind = "sweep", id = self.nodes.len()).entered();
-        for statements in &program.nodes {
-            statements::exec_cached(db, Phase::Drain, name, &statements.sweep, [])?;
+        for (statements, rows) in program.nodes.iter().zip(out_rows) {
+            if rows != 0 {
+                statements::exec_cached(db, Phase::Drain, name, &statements.sweep, [])?;
+            }
         }
         Ok(())
     }
@@ -119,34 +118,54 @@ impl Plan {
         name: &str,
         statements: &ArrangementStatements,
         touched_inputs: &[bool],
-    ) -> Result<()> {
-        // Touched keys: every key of every input delta row, interned.
-        statements::exec_cached(db, Phase::Maintain, name, CLEAR_TOUCHED, [])?;
-        for side in &statements.sides {
-            let side = side
-                .as_ref()
-                .ok_or_else(|| error("arrangement node without a key"))?;
-            statements::exec_cached(db, Phase::Maintain, name, &side.intern, [])?;
-            statements::exec_cached(db, Phase::Maintain, name, &side.touch, [])?;
-        }
-        // Before: the node's output over the touched keys, parked.
-        statements.materialize.execute(db, name)?;
-        statements::exec_cached(db, Phase::Maintain, name, &statements.park, [])?;
-        statements::exec_cached(db, Phase::Maintain, name, &statements.clear_out, [])?;
-        for (side, touched) in touched_inputs.iter().enumerate() {
-            if *touched {
-                let side = statements.sides[side]
+    ) -> Result<usize> {
+        if let Some(join) = &statements.join_delta {
+            for (side, touched) in touched_inputs.iter().enumerate() {
+                if !touched {
+                    continue;
+                }
+                let side_statements = statements.sides[side].as_ref().expect("inner join arrangement");
+                statements::exec_cached(db, Phase::Maintain, name, &side_statements.intern, [])?;
+                statements::exec_cached(db, Phase::Maintain, name, &join.sides[side], [])?;
+                upsert(db, name, Phase::Maintain, &side_statements.upsert)?;
+            }
+            let bad: bool = statements::query_cached(db, Phase::Maintain, name, &join.bad, [], |r| r.get(0))?;
+            if bad {
+                return Err(error("join multiplicity overflow"));
+            }
+        } else {
+            // Touched keys: every key of every input delta row, interned.
+            statements::exec_cached(db, Phase::Maintain, name, CLEAR_TOUCHED, [])?;
+            for side in &statements.sides {
+                let side = side
                     .as_ref()
                     .ok_or_else(|| error("arrangement node without a key"))?;
-                upsert(db, name, Phase::Maintain, &side.upsert)?;
+                statements::exec_cached(db, Phase::Maintain, name, &side.intern, [])?;
+                statements::exec_cached(db, Phase::Maintain, name, &side.touch, [])?;
+            }
+            // Before: the node's output over the touched keys, parked.
+            statements.materialize.execute(db, name)?;
+            statements::exec_cached(db, Phase::Maintain, name, &statements.park, [])?;
+            statements::exec_cached(db, Phase::Maintain, name, &statements.clear_out, [])?;
+            for (side, touched) in touched_inputs.iter().enumerate() {
+                if *touched {
+                    let side = statements.sides[side]
+                        .as_ref()
+                        .ok_or_else(|| error("arrangement node without a key"))?;
+                    upsert(db, name, Phase::Maintain, &side.upsert)?;
+                }
+            }
+            // After, then out = after minus before as a bag.
+            statements.materialize.execute(db, name)?;
+            for sql in &statements.diff {
+                statements::exec_cached(db, Phase::Maintain, name, sql, [])?;
             }
         }
-        // After, then out = after minus before as a bag.
-        statements.materialize.execute(db, name)?;
-        for sql in &statements.diff {
-            statements::exec_cached(db, Phase::Maintain, name, sql, [])?;
-        }
-        Ok(())
+        statements::exec_cached(db, Phase::Maintain, name, &statements.consolidate, [])?;
+        statements::exec_cached(db, Phase::Maintain, name, &statements.clear_out, [])?;
+        let written = statements::exec_cached(db, Phase::Maintain, name, &statements.emit, [])?;
+        statements::exec_cached(db, Phase::Maintain, name, &statements.clear_before, [])?;
+        Ok(written)
     }
     fn drain_fixpoint(
         &self,
@@ -155,7 +174,8 @@ impl Plan {
         id: usize,
         statements: &FixpointStatements,
         touched_inputs: &[bool],
-    ) -> Result<()> {
+    ) -> Result<usize> {
+        let mut written = 0usize;
         for (side, touched) in touched_inputs.iter().enumerate() {
             if *touched {
                 let statements_side = statements.sides[side]
@@ -165,10 +185,10 @@ impl Plan {
                 statements::exec_cached(db, Phase::Fixpoint, name, &statements_side.touch, [])?;
                 split_side(db, name, &statements_side.split)?;
                 upsert(db, name, Phase::Fixpoint, &statements_side.upsert)?;
-                self.fixpoint(db, name, id, statements, statements_side)?;
+                written += self.fixpoint(db, name, id, statements, statements_side)?;
             }
         }
-        Ok(())
+        Ok(written)
     }
     /// Applies the output node's delta to the result rows: retractions delete
     /// that many copies by key, additions insert that many copies.
@@ -204,7 +224,7 @@ impl Plan {
         id: usize,
         statements: &FixpointStatements,
         side: &FixpointSide,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         let span = tracing::debug_span!(
             "fixpoint",
             view = name,
@@ -305,15 +325,17 @@ impl Plan {
         // Deltas: a deleted member gone for good retracts; one stored again with
         // another representative retracts the old row and emits the new one;
         // rows past `lo` that were not deleted this pass are new.
-        if any_left {
-            statements::exec_cached(db, Phase::Fixpoint, name, &statements.retract_gone, [])?;
-            statements::exec_cached(db, Phase::Fixpoint, name, &statements.emit_stored, [])?;
-            statements::exec_cached(db, Phase::Fixpoint, name, &statements.emit_fresh, [lo])?;
+        let written = if any_left {
+            let mut written = 0usize;
+            written += statements::exec_cached(db, Phase::Fixpoint, name, &statements.retract_gone, [])?;
+            written += statements::exec_cached(db, Phase::Fixpoint, name, &statements.emit_stored, [])?;
+            written += statements::exec_cached(db, Phase::Fixpoint, name, &statements.emit_fresh, [lo])?;
             statements::exec_cached(db, Phase::Fixpoint, name, &statements.clear_deleted, [])?;
+            written
         } else {
-            statements::exec_cached(db, Phase::Fixpoint, name, &statements.seed_new, [lo])?;
-        }
-        Ok(())
+            statements::exec_cached(db, Phase::Fixpoint, name, &statements.seed_new, [lo])?
+        };
+        Ok(written)
     }
 }
 

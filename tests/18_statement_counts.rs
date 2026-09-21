@@ -18,7 +18,7 @@ use hafley_observe::sqlite::SQLITE_TARGET;
 #[cfg(feature = "statements")]
 use std::collections::BTreeMap;
 #[cfg(feature = "statements")]
-use tracing_capture::{CapturedEvent, CapturedSpan, SharedStorage};
+use hafley_observe::{CountRecorder, FieldStats};
 #[cfg(feature = "statements")]
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -128,144 +128,57 @@ fn run(db: &Connection, scenario: fn(&Connection) -> Result<()>) -> Result<()> {
 }
 
 #[cfg(feature = "statements")]
-/// Per (phase, verb), the number of statement executions.
-fn counts(storage: &SharedStorage) -> BTreeMap<(String, String), usize> {
-    let mut counts = BTreeMap::new();
-    let storage = storage.lock();
-    for event in storage.all_events() {
-        if !is_statement_event(event.metadata()) {
-            continue;
-        }
-        let Some(span) = event
-            .ancestors()
-            .find(|span| span.metadata().name() == "stmt")
-        else {
-            continue;
-        };
-        *counts
-            .entry((span_field(span, "phase"), span_field(span, "verb")))
-            .or_default() += 1;
-    }
-    counts
+fn counts(recorder: &CountRecorder) -> BTreeMap<(String, String), usize> {
+    recorder.event_stats(SQLITE_TARGET, tracing::Level::DEBUG, "stmt", ["phase", "verb"])
+        .into_iter()
+        .map(|([phase, verb], stats)| ((phase, verb), stats.events))
+        .collect()
 }
 
+/// Raw cumulative SQLite counters, preserved here for comparison with the
+/// existing pins. These sums depend on prepared-handle reuse and are not
+/// per-execution work measurements.
 #[cfg(feature = "statements")]
-fn is_statement_event(meta: &tracing::Metadata<'_>) -> bool {
-    meta.target() == SQLITE_TARGET && *meta.level() == tracing::Level::DEBUG
-}
-
-/// Per phase, the run's summed `vm_step` and `fullscan_step`. Both are
-/// SQLite statement counters, cumulative per prepared handle and summed over
-/// every execution in the run; the sum is deterministic for a fixed scenario
-/// and execution order, but it is a run-level cost, not a per-statement one
-/// (`docs/failure-modes.md`, "vm_step per statement read as thousands").
-#[cfg(feature = "statements")]
-fn scan_metrics(storage: &SharedStorage) -> BTreeMap<String, (i64, i64)> {
-    let mut metrics: BTreeMap<String, (i64, i64)> = BTreeMap::new();
-    let storage = storage.lock();
-    for event in storage.all_events() {
-        if !is_statement_event(event.metadata()) {
-            continue;
-        }
-        let Some(span) = event
-            .ancestors()
-            .find(|span| span.metadata().name() == "stmt")
-        else {
-            continue;
-        };
-        let entry = metrics.entry(span_field(span, "phase")).or_default();
-        entry.0 += event_int(&event, "vm_step");
-        entry.1 += event_int(&event, "fullscan_step");
-    }
-    metrics
-}
-
-#[cfg(feature = "statements")]
-fn span_field(span: CapturedSpan<'_>, name: &str) -> String {
-    let Some(value) = span.value(name) else {
-        return String::new();
-    };
-    value
-        .as_str()
-        .map(str::to_string)
-        .or_else(|| value.as_debug_str().map(str::to_string))
-        .unwrap_or_else(|| format!("{value:?}"))
-}
-
-#[cfg(feature = "statements")]
-fn event_int(event: &CapturedEvent<'_>, name: &str) -> i64 {
-    let Some(value) = event.value(name) else {
-        return 0;
-    };
-    if let Some(n) = value.as_int() {
-        return n as i64;
-    }
-    if let Some(n) = value.as_uint() {
-        return n as i64;
-    }
-    if let Some(f) = value.as_float() {
-        return f as i64;
-    }
-    0
+fn scan_metrics(recorder: &CountRecorder) -> BTreeMap<String, (i64, i64)> {
+    recorder.event_stats(SQLITE_TARGET, tracing::Level::DEBUG, "stmt", ["phase"])
+        .into_iter()
+        .map(|([phase], stats)| (phase, (
+            stats.fields.get("vm_step").map_or(0.0, FieldStats::sum) as i64,
+            stats.fields.get("fullscan_step").map_or(0.0, FieldStats::sum) as i64,
+        )))
+        .collect()
 }
 
 #[cfg(feature = "statements")]
 #[derive(Default)]
 struct Cell {
     calls: usize,
-    nanos: Vec<i64>,
+    nanos: FieldStats,
     rows: i64,
-    /// False when the span left `rows` unrecorded: a batch, a guard or a
-    /// pragma reports no row count, and the table shows a blank.
     rows_known: bool,
     cached: usize,
 }
 
 #[cfg(feature = "statements")]
-/// Every statement execution, grouped by phase, verb, site and object, read
-/// off the capture layer's raw events so the per-call tail survives.
-fn cells(storage: &SharedStorage) -> BTreeMap<(String, String, String, String), Cell> {
-    let mut cells: BTreeMap<(String, String, String, String), Cell> = BTreeMap::new();
-    let storage = storage.lock();
-    for event in storage.all_events() {
-        if !is_statement_event(event.metadata()) {
-            continue;
+fn cells(recorder: &CountRecorder) -> BTreeMap<(String, String, String, String), Cell> {
+    let mut cells = BTreeMap::<(String, String, String, String), Cell>::new();
+    for ([phase, verb, site, object, prepared], mut stats) in recorder.event_stats(
+        SQLITE_TARGET, tracing::Level::DEBUG, "stmt", ["phase", "verb", "site", "object", "prepared"],
+    ) {
+        let cell = cells.entry((phase, verb, site, object)).or_default();
+        cell.calls += stats.events;
+        if let Some(nanos) = stats.fields.remove("nanos") {
+            cell.nanos.samples.extend(nanos.samples);
         }
-        let Some(span) = event
-            .ancestors()
-            .find(|span| span.metadata().name() == "stmt")
-        else {
-            continue;
-        };
-        let key = (
-            span_field(span, "phase"),
-            span_field(span, "verb"),
-            span_field(span, "site"),
-            span_field(span, "object"),
-        );
-        let cell = cells.entry(key).or_default();
-        cell.calls += 1;
-        cell.nanos.push(event_int(&event, "nanos"));
-        if let Some(value) = span.value("rows").and_then(|value| value.as_uint()) {
+        if let Some(rows) = stats.ancestor_fields.get("rows") {
             cell.rows_known = true;
-            cell.rows += value as i64;
+            cell.rows += rows.sum() as i64;
         }
-        if span_field(span, "prepared") == "cached" {
-            cell.cached += 1;
+        if prepared == "cached" {
+            cell.cached += stats.events;
         }
     }
     cells
-}
-
-#[cfg(feature = "statements")]
-fn p99(nanos: &[i64]) -> f64 {
-    if nanos.is_empty() {
-        return 0.0;
-    }
-    let mut sorted = nanos.to_vec();
-    sorted.sort_unstable();
-    let index = ((sorted.len() as f64 * 0.99).ceil() as usize).saturating_sub(1);
-    sorted[index] as f64
 }
 
 /// The tsv the recipe commits: one row per (phase, verb, site, object), raw
@@ -279,7 +192,7 @@ fn print_table(
     let mut rows: Vec<_> = cells
         .iter()
         .map(|(key, cell)| {
-            let total_ns: i64 = cell.nanos.iter().sum();
+            let total_ns = cell.nanos.sum();
             let mean_us = if cell.calls == 0 {
                 0.0
             } else {
@@ -305,109 +218,28 @@ fn print_table(
         println!(
             "{scenario}\t{phase}\t{verb_name}\t{site}\t{object}\t{}\t{total_us:.1}\t{mean_us:.1}\t{:.1}\t{rows}\t{prepared_pct:.1}\t{per_input_row:.2}",
             cell.calls,
-            p99(&cell.nanos) / 1000.0,
+            cell.nanos.percentile(99.0).unwrap_or_default() / 1000.0,
         );
     }
 }
 
 #[cfg(feature = "statements")]
-/// Counts measured on this tree, per (phase, verb). A change that moves any of
-/// these numbers fails here; the numbers are the measurement, not an aim.
-fn pinned_counts(name: &str) -> Vec<(&'static str, &'static str, usize)> {
-    match name {
-        "create_group" => vec![
-            ("declare", "CREATE", 32),
-            ("declare", "DELETE", 4),
-            ("declare", "EXPLAIN", 1),
-            ("declare", "INSERT", 16),
-            ("declare", "SELECT", 26),
-            ("materialize", "DELETE", 4),
-            ("materialize", "INSERT", 6),
-            ("materialize", "SELECT", 3),
-        ],
-        "inserts_one_txn" => vec![
-            ("declare", "CREATE", 32),
-            ("declare", "DELETE", 4),
-            ("declare", "EXPLAIN", 1),
-            ("declare", "INSERT", 16),
-            ("declare", "SELECT", 27),
-            ("drain", "DELETE", 4),
-            ("drain", "INSERT", 100),
-            ("drain", "SELECT", 3),
-            ("maintain", "DELETE", 8),
-            ("maintain", "INSERT", 8),
-            ("maintain", "SELECT", 4),
-            ("maintain", "UPDATE", 1),
-            ("materialize", "DELETE", 4),
-            ("materialize", "INSERT", 10),
-            ("materialize", "SELECT", 3),
-        ],
-        "inserts_many_txn" => vec![
-            ("declare", "CREATE", 32),
-            ("declare", "DELETE", 4),
-            ("declare", "EXPLAIN", 1),
-            ("declare", "INSERT", 16),
-            ("declare", "SELECT", 126),
-            ("drain", "DELETE", 400),
-            ("drain", "INSERT", 100),
-            ("drain", "SELECT", 300),
-            ("maintain", "DELETE", 800),
-            ("maintain", "INSERT", 800),
-            ("maintain", "SELECT", 400),
-            ("maintain", "UPDATE", 100),
-            ("materialize", "DELETE", 4),
-            ("materialize", "INSERT", 406),
-            ("materialize", "SELECT", 3),
-        ],
-        "retract_recursive" => vec![
-            ("declare", "CREATE", 64),
-            ("declare", "DELETE", 9),
-            ("declare", "EXPLAIN", 1),
-            ("declare", "INSERT", 30),
-            ("declare", "SELECT", 50),
-            ("drain", "DELETE", 18),
-            ("drain", "INSERT", 201),
-            ("drain", "SELECT", 16),
-            ("fixpoint", "DELETE", 17),
-            ("fixpoint", "INSERT", 33),
-            ("fixpoint", "SELECT", 19),
-            ("fixpoint", "UPDATE", 3),
-            ("maintain", "DELETE", 1),
-            ("maintain", "SELECT", 3),
-            ("materialize", "DELETE", 9),
-            ("materialize", "INSERT", 22),
-            ("materialize", "SELECT", 6),
-        ],
-        "reach_small" => vec![
-            ("declare", "CREATE", 64),
-            ("declare", "DELETE", 9),
-            ("declare", "EXPLAIN", 1),
-            ("declare", "INSERT", 30),
-            ("declare", "SELECT", 49),
-            ("drain", "DELETE", 9),
-            ("drain", "INSERT", 16),
-            ("drain", "SELECT", 8),
-            ("fixpoint", "DELETE", 8),
-            ("fixpoint", "INSERT", 17),
-            ("fixpoint", "SELECT", 9),
-            ("fixpoint", "UPDATE", 2),
-            ("maintain", "DELETE", 1),
-            ("maintain", "SELECT", 3),
-            ("materialize", "DELETE", 9),
-            ("materialize", "INSERT", 21),
-            ("materialize", "SELECT", 6),
-        ],
-        other => panic!("no pinned counts for scenario {other}"),
-    }
+fn recorded_counts(recorder: &CountRecorder) -> serde_json::Value {
+    serde_json::json!({
+        "counts": counts(recorder).into_iter().map(|((phase, verb), calls)| (phase, verb, calls)).collect::<Vec<_>>(),
+        "scans": scan_metrics(recorder).into_iter().map(|(phase, (vm, scan))| (phase, vm, scan)).collect::<Vec<_>>(),
+    })
 }
 
 #[cfg(feature = "statements")]
-fn pinned(name: &str, counts: &BTreeMap<(String, String), usize>) {
-    let expected: BTreeMap<(String, String), usize> = pinned_counts(name)
-        .into_iter()
-        .map(|(phase, verb_name, calls)| ((phase.to_string(), verb_name.to_string()), calls))
-        .collect();
-    assert_eq!(*counts, expected, "statement counts for {name}");
+fn record(scenario: fn(&Connection) -> Result<()>) -> Result<CountRecorder> {
+    let (recorder, layer) = CountRecorder::new();
+    let _guard = tracing_subscriber::registry().with(layer).set_default();
+    let db = Connection::open_in_memory()?;
+    register(&db)?;
+    hafley_observe::sqlite::instrument(&db);
+    run(&db, scenario)?;
+    Ok(recorder)
 }
 
 /// The wall-time pass: logging off, three runs per scenario, the median and
@@ -452,70 +284,32 @@ fn statement_counts_match_pinned() -> Result<()> {
 
 #[cfg(feature = "statements")]
 fn counts_pass() -> Result<()> {
+    let pinned: serde_json::Value = serde_json::from_str(include_str!("fixtures/3_statement_counts.json")).unwrap();
     for (name, input_rows, scenario) in scenarios() {
-        let storage = SharedStorage::default();
-        let _guard = tracing_subscriber::registry()
-            .with(tracing_capture::CaptureLayer::new(&storage))
-            .set_default();
-        let db = Connection::open_in_memory()?;
-        register(&db)?;
-        hafley_observe::sqlite::instrument(&db);
-        run(&db, scenario)?;
-        let counts = counts(&storage);
-        print_table(name, input_rows, &cells(&storage));
-        assert!(!counts.is_empty(), "{name} issued no instrumented statement");
-        pinned(name, &counts);
-        let scans = scan_metrics(&storage);
-        for (phase, (vm_step, fullscan_step)) in &scans {
+        let recorder = record(scenario)?;
+        print_table(name, input_rows, &cells(&recorder));
+        let actual = recorded_counts(&recorder);
+        assert!(!actual["counts"].as_array().unwrap().is_empty(), "{name} issued no instrumented statement");
+        for (phase, (vm_step, fullscan_step)) in scan_metrics(&recorder) {
             println!("SCAN\t{name}\t{phase}\t{vm_step}\t{fullscan_step}");
         }
-        pinned_scans(name, &scans);
+        assert_eq!(actual, pinned[name], "statement counts for {name}");
     }
     Ok(())
 }
 
+/// Refresh only after reviewing the SQL execution changes, then review the diff.
 #[cfg(feature = "statements")]
-fn pinned_scan_counts(name: &str) -> Vec<(&'static str, i64, i64)> {
-    match name {
-        "create_group" => vec![("declare", 2286, 102), ("materialize", 182, 0)],
-        "inserts_one_txn" => vec![
-            ("declare", 2294, 102),
-            ("drain", 60672, 0),
-            ("maintain", 33556, 1188),
-            ("materialize", 8502, 198),
-        ],
-        "inserts_many_txn" => vec![
-            ("declare", 42686, 102),
-            ("drain", 424200, 0),
-            ("maintain", 5739850, 495000),
-            ("materialize", 1312332, 0),
-        ],
-        "retract_recursive" => vec![
-            ("declare", 5042, 369),
-            ("drain", 122871, 0),
-            ("fixpoint", 114334, 2970),
-            ("maintain", 6592, 495),
-            ("materialize", 7683, 693),
-        ],
-        "reach_small" => vec![
-            ("declare", 5026, 369),
-            ("drain", 1021, 0),
-            ("fixpoint", 6502, 126),
-            ("maintain", 612, 35),
-            ("materialize", 1022, 42),
-        ],
-        other => panic!("no pinned scans for scenario {other}"),
+#[test]
+#[ignore]
+fn refresh_statement_counts() -> Result<(), Box<dyn std::error::Error>> {
+    let mut fixture = serde_json::Map::new();
+    for (name, _, scenario) in scenarios() {
+        fixture.insert(name.into(), recorded_counts(&record(scenario)?));
     }
-}
-
-/// The run's summed `vm_step` and `fullscan_step` per phase, pinned exactly.
-#[cfg(feature = "statements")]
-fn pinned_scans(name: &str, scans: &BTreeMap<String, (i64, i64)>) {
-    let expected: BTreeMap<String, (i64, i64)> = pinned_scan_counts(name)
-        .into_iter()
-        .map(|(phase, vm_step, fullscan_step)| {
-            (phase.to_string(), (vm_step, fullscan_step))
-        })
-        .collect();
-    assert_eq!(*scans, expected, "scan metrics for {name}");
+    std::fs::write(
+        concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/3_statement_counts.json"),
+        serde_json::to_string_pretty(&fixture)? + "\n",
+    )?;
+    Ok(())
 }
