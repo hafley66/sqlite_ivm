@@ -171,6 +171,26 @@ fn dropping_the_view_drops_its_dictionary() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn result_state_keys_are_dictionary_ids() -> Result<()> {
+    let db = view_database()?;
+    db.execute_batch(
+        "INSERT INTO intern_source VALUES(1,'north'),(2,'north'),(3,'south')",
+    )?;
+    let state_type: String = db.query_row(
+        "SELECT type FROM pragma_table_info('intern_view_state') WHERE name='__key'",
+        [],
+        |row| row.get(0),
+    )?;
+    let missing: i64 = db.query_row(
+        "SELECT count(*) FROM intern_view_state s LEFT JOIN intern_view_keys k ON k.__i=s.__key WHERE k.__i IS NULL",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!((state_type, missing), ("INTEGER".to_string(), 0));
+    Ok(())
+}
+
 /// Every arrangement table for a view, with the width of its `c{i}` columns.
 fn arrangements(db: &Connection, view: &str) -> Result<Vec<(String, usize)>> {
     let names = db

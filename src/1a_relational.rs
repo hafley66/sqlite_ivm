@@ -190,7 +190,7 @@ impl Plan {
         objects.push(("table", dictionary));
         let state = format!("{name}_state");
         db.execute_batch(&format!(
-            "CREATE TABLE main.{}(__key TEXT NOT NULL,{}); CREATE INDEX main.{} ON {}(__key)",
+            "CREATE TABLE main.{}(__key INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__key)",
             quote(&state),
             (0..self.names.len())
                 .map(|i| format!("c{i}"))
@@ -818,6 +818,12 @@ impl Plan {
             return Err(error("result multiplicity expansion exceeds budget"));
         }
         let k = json_key((0..width).map(|i| plain(&format!("o.c{i}"))).collect());
+        let dict = keys_table(name);
+        db.execute(
+            &format!("INSERT OR IGNORE INTO {dict}(__v) SELECT {k} FROM {out} o"),
+            [],
+        )?;
+        let k = format!("(SELECT __i FROM {dict} WHERE __v={k})");
         db.execute(
             &format!(
                 "WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<(SELECT coalesce((SELECT max(__m) FROM {out}),0))) INSERT INTO {state}(__key,{}) SELECT {k},o.c0{} FROM {out} o,seq WHERE seq.n<=o.__m",
@@ -1073,6 +1079,12 @@ impl Plan {
         let out = out_table(id, width);
         let state = format!("main.{}", quote(&format!("{name}_state")));
         let key = json_key((0..width).map(|i| plain(&format!("o.c{i}"))).collect());
+        let dict = keys_table(name);
+        db.execute_cached(
+            &format!("INSERT OR IGNORE INTO {dict}(__v) SELECT {key} FROM {out} o"),
+            [],
+        )?;
+        let key = format!("(SELECT __i FROM {dict} WHERE __v={key})");
         let wanted: i64 = db
             .prepare_cached(&format!("SELECT coalesce(sum(-__m),0) FROM {out} o WHERE __m<0"))?
             .query_row([], |r| r.get(0))?;
