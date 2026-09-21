@@ -302,6 +302,46 @@ in one recursive statement, is a rewrite of `Plan::fixpoint`'s departure pass.
 Making `__k` cheaper to compare than `TEXT` for single integer keys is a
 storage format bump. Both are the parent's call under the lane's stop rule.
 
+## arc 3 landing baseline
+
+Three runs each, `--reps 3 --arms sqlite-ivm`, on main 1f64504:
+
+| cell | wall ms |
+|---|---|
+| reach fanout 1 n 10000 | 1754.7, 1765.6, 1755.9 |
+| reach fanout 1 n 100000 | 641314.9, 644299.7, 646832.7 |
+| reach fanout 10 n 10000 | 662.9, 662.4, 662.0 |
+| reach fanout 10 n 100000 | 3294.6, 3337.9, 3314.4 |
+
+Anything landing on the departure pass has to put all three after-runs of each
+of those cells below all three numbers above it. The fanout 1 pair is where the
+cost is; fanout 10 is two orders of magnitude cheaper at the same n.
+
+### the departure step, as generated
+
+Dumped from a debug build at bind time. One departure round runs three
+statements over the rowid slice `?1..?2` of the work table; the derive is:
+
+```
+INSERT OR IGNORE INTO work(__k,c0)
+SELECT __k,c0 FROM (
+  SELECT <key of the rule head> AS __k, CAST(c2 AS INTEGER) AS c0
+  FROM (SELECT c0,c1,c2 FROM <input relation>) q0,
+       (SELECT c0 AS c3 FROM work WHERE rowid>?1 AND rowid<=?2) q1
+  WHERE CAST(c1 AS INTEGER) = CAST(c3 AS INTEGER))
+WHERE __k IN (SELECT __k FROM <member relation>)
+```
+
+The step extends the departing set by exactly one hop: the work slice is the
+recursive occurrence, joined to the input relation. Every hop is a new round,
+which is why the round count is the graph's propagation depth.
+
+Both sides of the join are cast, so no index on either column can serve the
+predicate and the round scans rather than probes. That, plus the hop count, is
+the bill. Neither is a one-statement edit: the cast is the engine's key
+comparison rule, and the hop count is only removable by computing the departing
+set as a closure in one statement.
+
 ## SVGs
 
 `0_baseline-<circuit>.svg` plots wall ms against n for each arm at fanout 1 and
