@@ -35,7 +35,7 @@ fn run() -> Result<u8> {
         _ => bail!(
             "usage: bench shootout [smoke|quick] [--engines e1,e2] [--out DIR] \
              [--circuits c1,c2] [--pg-prefix DIR]\n       \
-             bench scale [--circuits c1,c2] [--n 10,100,...] [--fanout 1,10] [--out DIR]\n       \
+             bench scale [--circuits c1,c2] [--n 10,100,...] [--fanout 1,10] [--arms a1,a2] [--reps N] [--out DIR]\n       \
              bench dump-fixture <circuit|all> [--rows N] [--batch N] [--fanout N] [--domain D]"
         ),
     }
@@ -145,6 +145,10 @@ fn parse_i64s(items: Vec<String>) -> Result<Vec<i64>> {
         }
         None => scale::ARMS.iter().map(|arm| arm.to_string()).collect(),
     };
+    let reps: usize = flag(&flags, "reps").map(|v| v.parse()).transpose()?.unwrap_or(1);
+    if reps == 0 {
+        bail!("--reps must be at least 1");
+    }
     let runner = scale::Scale {
         circuits: flag(&flags, "circuits").map(list).unwrap_or_else(|| {
             ["chain", "join", "group", "distinct", "window", "reach"]
@@ -162,6 +166,7 @@ fn parse_i64s(items: Vec<String>) -> Result<Vec<i64>> {
             .transpose()?
             .unwrap_or_else(|| vec![1, 10]),
         arms,
+        reps,
         out,
     };
     runner.run()
