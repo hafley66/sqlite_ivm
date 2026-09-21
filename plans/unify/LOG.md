@@ -67,3 +67,4 @@ unless the row says otherwise. Executor glm53f unless noted.
 - pass-3 step 1 done (`9aebf80`): every old-path shape binds through the relational plan; proceeding to retire.
 - dispatched perf/toward-dd (flash-omp-max) from `00f37b2`.
 - 09:1x checkpoint. Stray PR #27 (arc B stacked on the old #26 head) closed as superseded by #26. pass-3 retiring (18 min, no second commit yet). perf/toward-dd 8 min in. 34G free.
+- 09:3x checkpoint. pass-3 mid-retire: `0_query.rs` and `1_maintenance.rs` deleted in the tree, catalog/relational edited, not committed. perf/toward-dd adding a `scale_dd.rs` arm to the bench (the `scale` subcommand lacked a dd arm). Both alive. 33G free.
