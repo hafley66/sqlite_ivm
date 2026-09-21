@@ -8,6 +8,8 @@ mod arms;
 mod fixture;
 mod oracle;
 mod report;
+mod scale;
+mod scale_dd;
 use std::path::{Path, PathBuf};
 use anyhow::{anyhow, bail, Result};
 use oracle::Domain;
@@ -131,12 +133,35 @@ fn parse_i64s(items: Vec<String>) -> Result<Vec<i64>> {
     let (_positional, flags) = parse_flags(args)?;
     let out = flag(&flags, "out").map(PathBuf::from).unwrap_or_else(|| default_out("scale"));
     fresh_out(&out)?;
-    let runner = report::Scale {
-        circuits: flag(&flags, "circuits")
+    let arms = match flag(&flags, "arms") {
+        Some(requested) => {
+            let requested = list(requested);
+            for arm in &requested {
+                if !scale::ARMS.contains(&arm.as_str()) {
+                    bail!("unknown arm {arm}; expected one of {:?}", scale::ARMS);
+                }
+            }
+            requested
+        }
+        None => scale::ARMS.iter().map(|arm| arm.to_string()).collect(),
+    };
+    let runner = scale::Scale {
+        circuits: flag(&flags, "circuits").map(list).unwrap_or_else(|| {
+            ["chain", "join", "group", "distinct", "window", "reach"]
+                .map(String::from)
+                .to_vec()
+        }),
+        ns: flag(&flags, "n")
             .map(list)
-            .unwrap_or_else(|| ["chain", "group", "distinct", "topk", "reach"].map(String::from).to_vec()),
-        ns: flag(&flags, "n").map(list).map(parse_i64s).transpose()?.unwrap_or_else(|| vec![10, 100, 1000, 10000, 100000]),
-        fanouts: flag(&flags, "fanout").map(list).map(parse_i64s).transpose()?.unwrap_or_else(|| vec![1, 10]),
+            .map(parse_i64s)
+            .transpose()?
+            .unwrap_or_else(|| vec![10, 100, 1000, 10000, 100000]),
+        fanouts: flag(&flags, "fanout")
+            .map(list)
+            .map(parse_i64s)
+            .transpose()?
+            .unwrap_or_else(|| vec![1, 10]),
+        arms,
         out,
     };
     runner.run()
