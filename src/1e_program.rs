@@ -82,17 +82,17 @@ pub(crate) struct FixpointStatements {
     pub(crate) drop_deleted: String,
     pub(crate) clear_departing: String,
     pub(crate) seed_departing: String,
-    pub(crate) clear_next_departing: String,
-    pub(crate) collect_departing: String,
-    pub(crate) drop_departing: String,
-    pub(crate) extend_work: String,
-    pub(crate) advance_departing: String,
+    pub(crate) clear_frontiers: [String; 2],
+    pub(crate) collect_departing: [String; 2],
+    pub(crate) drop_departing: [String; 2],
+    pub(crate) seed_work_deleted: String,
+    pub(crate) seed_work_frontier: [String; 2],
     pub(crate) restore_small: String,
     pub(crate) restores: Vec<String>,
     /// Per member rule, in rule order: closure derives over the whole member
     /// table bounded by a rowid range carried in `?1` and `?2`.
     pub(crate) round_derives: Vec<String>,
-    pub(crate) delete_derives: Vec<String>,
+    pub(crate) delete_derives: [Vec<String>; 2],
     pub(crate) recursive_delete_derives: Vec<String>,
     pub(crate) retract_gone: String,
     pub(crate) emit_stored: String,
@@ -397,27 +397,26 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
         seed_departing: format!(
             "INSERT OR IGNORE INTO {departing}(__k,{cols}) SELECT __k,{cols} FROM {work}"
         ),
-        clear_next_departing: format!("DELETE FROM {next_departing}"),
-        collect_departing: format!(
-            "INSERT OR IGNORE INTO {deleted}(__k,{cols}) SELECT __k,{cols} FROM {all} WHERE __k IN (SELECT __k FROM {departing})"
+        clear_frontiers: [format!("DELETE FROM {departing}"), format!("DELETE FROM {next_departing}")],
+        collect_departing: [&departing, &next_departing].map(|frontier| {
+            format!("INSERT OR IGNORE INTO {deleted}(__k,{cols}) SELECT __k,{cols} FROM {all} WHERE __k IN (SELECT __k FROM {frontier})")
+        }),
+        drop_departing: [&departing, &next_departing]
+            .map(|frontier| format!("DELETE FROM {all} WHERE __k IN (SELECT __k FROM {frontier})")),
+        seed_work_deleted: format!(
+            "INSERT OR IGNORE INTO {work}(__k,{cols}) SELECT __k,{cols} FROM {deleted}"
         ),
-        drop_departing: format!(
-            "DELETE FROM {all} WHERE __k IN (SELECT __k FROM {departing})"
-        ),
-        extend_work: format!(
-            "INSERT OR IGNORE INTO {work}(__k,{cols}) SELECT __k,{cols} FROM {next_departing}"
-        ),
-        advance_departing: format!(
-            "INSERT INTO {departing}(__k,{cols}) SELECT __k,{cols} FROM {next_departing}"
-        ),
+        seed_work_frontier: [&departing, &next_departing].map(|frontier| {
+            format!("INSERT OR IGNORE INTO {work}(__k,{cols}) SELECT __k,{cols} FROM {frontier}")
+        }),
         restore_small: format!(
-            "INSERT OR IGNORE INTO {all}(__k,{cols}) SELECT w.__k,{} FROM {work} w WHERE {}",
+            "INSERT OR IGNORE INTO {all}(__k,{cols}) SELECT w.__k,{} FROM {deleted} w WHERE {}",
             (0..width).map(|i| format!("w.c{i}")).collect::<Vec<_>>().join(","),
             restore_parts.join(" OR ")
         ),
         restores: rules
             .iter()
-            .map(|rule| restore_sql(name, id, &all, &work, &cols, width, rule))
+            .map(|rule| restore_sql(name, id, &all, &deleted, &cols, width, rule))
             .collect(),
         round_derives: rules
             .iter()
@@ -432,19 +431,23 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
                 derive_sql(&all, &all, &cols, rule, &from, false)
             })
             .collect(),
-        delete_derives: rules
-            .iter()
-            .filter(|r| r.member().is_some())
-            .map(|rule| {
-                let mut params: Vec<Value> = vec![];
-                let from = rule_from(
-                    rule,
-                    &roles(name, id, 0, rule, None, Role::Table(departing.clone())),
-                    &mut params,
-                );
-                derive_sql(&next_departing, &all, &cols, rule, &from, true)
-            })
-            .collect(),
+        delete_derives: [(&departing, &next_departing), (&next_departing, &departing)].map(
+            |(source, target)| {
+                rules
+                    .iter()
+                    .filter(|r| r.member().is_some())
+                    .map(|rule| {
+                        let mut params: Vec<Value> = vec![];
+                        let from = rule_from(
+                            rule,
+                            &roles(name, id, 0, rule, None, Role::Table(source.clone())),
+                            &mut params,
+                        );
+                        derive_sql(target, &all, &cols, rule, &from, true)
+                    })
+                    .collect()
+            },
+        ),
         recursive_delete_derives: rules
             .iter()
             .filter(|r| r.member().is_some())

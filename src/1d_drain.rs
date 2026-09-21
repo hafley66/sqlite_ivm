@@ -243,13 +243,15 @@ impl Plan {
             db.execute_cached(&statements.clear_departing, [])?;
             db.execute_cached(&statements.seed_departing, [])?;
             let mut settled = false;
+            let mut frontier = 0usize;
             for _ in 0..BULK_DEPARTURE_SET_ROUND_BUDGET {
                 let round = round_span("delete");
-                db.execute_cached(&statements.clear_next_departing, [])?;
-                db.execute_cached(&statements.collect_departing, [])?;
-                db.execute_cached(&statements.drop_departing, [])?;
+                let next = 1 - frontier;
+                db.execute_cached(&statements.clear_frontiers[next], [])?;
+                db.execute_cached(&statements.collect_departing[frontier], [])?;
+                db.execute_cached(&statements.drop_departing[frontier], [])?;
                 let mut written = 0;
-                for sql in &statements.delete_derives {
+                for sql in &statements.delete_derives[frontier] {
                     written += db.execute_cached(sql, [])?;
                 }
                 work_rows += written;
@@ -258,11 +260,12 @@ impl Plan {
                     settled = true;
                     break;
                 }
-                db.execute_cached(&statements.extend_work, [])?;
-                db.execute_cached(&statements.clear_departing, [])?;
-                db.execute_cached(&statements.advance_departing, [])?;
+                frontier = next;
             }
             if !settled {
+                db.execute_cached(&statements.clear_work, [])?;
+                db.execute_cached(&statements.seed_work_deleted, [])?;
+                db.execute_cached(&statements.seed_work_frontier[frontier], [])?;
                 let mut delete_rounds = 0usize;
                 loop {
                     if delete_rounds >= BULK_DEPARTURE_ROUND_BUDGET {
