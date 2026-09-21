@@ -1,125 +1,62 @@
-# Native feature acceptance and circuit benchmark
+# sqlite-ivm-bench
 
-Run the combined report from the repository root:
+One Rust harness replacing the `bench/*.mjs`, `scripts/8-16*`, and
+`examples/4|5` shell-script era: circuit shootout, scale sweep, and fixture
+dumps. Zero shell — the only external programs are `initdb`, `pg_ctl`, and
+`gnuplot`. No `eprintln!`; logging goes through `tracing`.
 
-```bash
-just ivm-shootout
-```
+## Subcommands
 
-This builds and executes SQLite IVM, DD, Prolog, PostgreSQL/pg_ivm and PGlite,
-then prints semantic coverage, DD operator contracts, and repeated timings.
-[Command, engine contracts, profiles and exit codes](54_shootout.md).
-The commands below remain available for individual phases.
+### `bench shootout [smoke|quick] [--engines e1,e2] [--out DIR] [--circuits c1,c2] [--pg-prefix DIR]`
 
-The current query-feature gate is described in [46_feature_acceptance.md](46_feature_acceptance.md).
-It checks 51 combinations over 174 states against loaded SQLite IVM, independent
-DD graphs, a separate SQLite connection, and PostgreSQL. Value, collation,
-recursive deletion, trigger/cascade, failure and concurrency probes also run
-through the loaded extension. DDL is outside this feature gate.
+Runs every circuit in `bench/shared`-parity fixture space against up to five
+engines: `sqlite-ivm`, `pg-ivm`, `sqlite-query`, `pg-query`, `dd`.
 
-```bash
-bash sqlite_ivm/scripts/12_features.sh /absolute/new/features
-IVM_POSTGRES_PREFIX=/path/to/postgres bash sqlite_ivm/scripts/13_feature_pg.sh /absolute/new/features
-# Strict comparison above reports pg_ivm 1.15's observed mismatch.
-IVM_POSTGRES_PREFIX=/path/to/postgres bash sqlite_ivm/scripts/15_pg_baseline.sh /absolute/new/features
-```
+- Profiles: `smoke` = 24 rows / 3 batch / 4 fanout, 1 rep, 0 warmups;
+  `quick` = 400 / 10 / 10, 3 reps, 1 warmup pass per case.
+- Engine order rotates per rep; each rep rebuilds the arm from scratch.
+- Timing wraps `apply` only (mutation + materialize); verification and
+  lifecycle checks are untimed. Case number = median over timed reps.
+- pg cases share one temp cluster per invocation (`initdb --auth=trust
+  --no-locale --encoding=UTF8`, `pg_ctl -m immediate stop` on drop). Views
+  pg_ivm refuses (SQLSTATE 0A000) print `n/a (<reason>)` and do not fail the
+  run.
+- Outputs: `circuits.jsonl` (per-rep receipts), `report.md` (quick-2 columns),
+  `report.json`, and the same table on stdout.
+- Exit codes: `0` all checksums matched, `1` fixture/oracle mismatch,
+  `2` execution failure.
 
-PostgreSQL SQL spells NULL ordering explicitly, uses ILIKE for the fixture's ASCII
-LIKE case, expands HAVING aliases, and spells SQLite's merged USING-star columns
-explicitly. Receipts distinguish a rejected pg_ivm definition from an admitted
-view whose maintained rows disagree. The latter remains a mismatch.
+Requires the extension dylib for `sqlite-ivm`: build it at the repo root with
+`cargo build --release --features extension` (the harness resolves
+`libsqlite_ivm.{dylib,so}` next to its own binary, or set `IVM_EXTENSION`).
+For pg engines pass `--pg-prefix` or `IVM_POSTGRES_PREFIX`.
 
-The following timing harness retains the original 20 circuit families.
-[39_acceptance.md](39_acceptance.md) contains historical 0.1.0 measurements and
-cannot establish performance of the current binary.
+### `bench scale [--circuits ...] [--n 10,100,...] [--fanout 1,10] [--out DIR]`
 
-The SQLite arm loads this project's compiled Rust extension through SQLite's
-extension API. DD and pg_ivm execute the same fixed circuit families and the
-same 13 mutation states. The original JavaScript oracle supplies expected bags
-and SHA-256 hashes independently of SQL and the SQLite implementation.
+Port of `tests/14_scale.rs` as a driver. Circuits: `chain`, `group`,
+`distinct`, `topk`, `reach`; seed `k=(id*7)%(n/fanout+1)`,
+`v=(id*13)%(n/fanout+1)` into a/b/c in one transaction; WAL/NORMAL pragma set;
+in-process `sqlite_ivm::extension::register`.
 
-## Reproduce
+- Columns: insert/delete/update are means over 40 single-statement writes;
+  `replace_ms` is a single 1000-row `INSERT OR REPLACE` transaction (one
+  sample — 40 repeats of a 1000-row transaction would blow the bounded-run
+  budget at n=100000); `recompute_ms` is the mean of 20 reads, 3 at n>=10000,
+  1 at n>=100000; `rss_delta_mib` is the getrusage maxrss delta across the
+  cell; `db_bytes` after `PRAGMA wal_checkpoint(TRUNCATE)`;
+  `arrangement_rows` counts `__ivm_v_*` tables in `sqlite_schema`.
+- Writes `scale.tsv`, prints it, renders one SVG per circuit via gnuplot
+  (log axes when the data spans >10x), and prints a `defect:` line for every
+  cell over 10 s.
 
-Build and verify the component first:
+### `bench dump-fixture <circuit|all> [--rows N] [--batch N] [--fanout N] [--domain D]`
 
-```bash
-bash sqlite_ivm/scripts/9_verify.sh
-```
+Prints the fixture (same JSON shape as `bench/37_fixture_export.mjs`,
+including key order) to stdout. Domains: `integers` (default), `text_nocase`,
+`mixed_int_real`. Used for the sha256 parity receipt against the node
+generators.
 
-For PostgreSQL comparison, install Node dependencies in `bench/shared` using its
-lockfile (`npm ci --prefix sqlite_ivm/bench/shared`) and set `IVM_POSTGRES_PREFIX`
-to PostgreSQL 18.6 with pg_ivm installed. The runner creates and destroys its own
-cluster with Unix sockets and `listen_addresses=''`.
+## Receipts
 
-```bash
-export IVM_POSTGRES_PREFIX=/path/to/postgres-18.6
-export IVM_TEMP_FILE_LIMIT=128MB
-bash sqlite_ivm/scripts/11_shootout.sh /absolute/new/400.jsonl \
-  --circuit-grid 12k --circuit-cells 400:10:10 --warmups 1 --repetitions 5
-```
-
-The SQLite/DD comparison does not require PostgreSQL or npm dependencies:
-
-```bash
-IVM_ARMS=sqlite-plugin-delta,dd,sqlite-query \
-  bash sqlite_ivm/scripts/11_shootout.sh /absolute/new/12000.jsonl \
-  --circuit-grid 12k --circuit-cells 12000:10:10 --warmups 0 --repetitions 1
-node sqlite_ivm/bench/38_report.mjs /absolute/new/400.jsonl /absolute/new/12000.jsonl
-```
-
-`--circuit-cells` selects existing shared grid cells as rows:batch:fanout. It does
-not change fixture generation. `--circuits` selects named families. Receipts must
-use new paths; the shell wrapper refuses overwrites. The driver builds the pinned
-DD adapters before measurement and executes engine processes serially.
-
-## Timing and acceptance
-
-Each state times source mutations plus maintenance completion, then result
-materialization. Exact source rows, expected output bags, SQL oracle checks, and
-hashes are checked outside that interval. Native reopen/rename/rollback/drop
-checks also run after timed states. A failed create, mutation, check, or lifecycle
-operation makes the native consumer fail. SQLite cannot claim an unsupported
-family as a pass.
-
-The report separates initial loading, whole-source deletion, and the remaining
-11 states. Whole-case totals include all 13 states. Engine order rotates between
-measured repetitions. Fixture caching retains only the current case, outside
-measurement, without changing its generator or contents.
-
-SQLite uses WAL and synchronous FULL. PostgreSQL uses fsync, synchronous_commit,
-and full_page_writes. DD is single-worker, volatile, and advances all input
-frontiers before awaiting the output probe. Its scope here is sequential u64
-epochs, not arbitrary partially ordered timestamps or durable recovery.
-
-There is a 120-second process timeout and 20-minute overall deadline. Memory is
-observed where process inspection is available; no cgroup memory cap is enforced.
-Unavailable observations are null. PostgreSQL temporary-file limits are recorded
-in metadata. These are local runs, without CPU isolation.
-
-## Provenance
-
-`shared/` preserves the circuit and semantic fixtures, PostgreSQL adapters,
-DD implementations, and receipt protocol from the existing
-`postgres_pglite_ivm` lab in worktree `feature/sqlite-ivm-astra`, whose HEAD was
-`f7a7f937ffa5425edb5a30aec634ef5bbb9d16fe`. Source-file hashes, rather than that HEAD
-alone, identify the copied working tree content.
-
-The two fixture generators and the DD/PostgreSQL adapters retain their original
-contents. The copied runner adds a native SQLite consumer path, exact-cell
-selection, fixture reuse outside timing, and native binary/source fingerprints.
-The original Python SQLite adapters remain preserved source references; these
-commands use the Rust native consumer. Historical baseline files are hashed for
-provenance and are never relabeled as measurements of this extension.
-
-`37_fixture_export.mjs` generates `tests/fixtures/0_shared.json` for Rust/native
-acceptance tests. `38_report.mjs` accepts successful complete receipts and prints
-median timings. The standalone DD Cargo manifest pins differential-dataflow
-0.25.1 and timely 0.31.0 with a lockfile.
-
-## Local results
-
-The final receipts and their generated TSV reports are under `bench/results/`.
-These generated case artifacts are excluded from source archives. A concise
-checked-in result record is maintained in [39_acceptance.md](39_acceptance.md).
-CI executes the shared SQLite/DD/SQLite-query smoke acceptance on Linux and
-macOS. Remote CI execution has not been performed from this working tree.
+See `plans/costs/shootout-rust.md` for the receipt slots (R1-R5): fixture
+parity, checksum match, quick-2 comparison, clippy, and the root test suite.

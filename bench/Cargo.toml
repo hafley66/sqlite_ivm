@@ -1,27 +1,31 @@
 [package]
-name = "sqlite-ivm-shootout"
+name = "sqlite-ivm-bench"
 version = "0.1.0"
 edition = "2021"
 publish = false
+description = "Circuit shootout and scale sweep harness for sqlite-ivm"
+
 [workspace]
+
 [dependencies]
+anyhow = "1"
 differential-dataflow = "=0.25.1"
-timely = "=0.31.0"
+libc = "0.2"
+parking_lot = "0.12"
+postgres = "0.19"
+rusqlite = { version = "=0.40.2", features = ["functions", "vtab", "load_extension"] }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+sqlite-ivm = { path = ".." }
+sysinfo = "0.33"
+timely = "=0.31.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
 [[bin]]
-name = "circuit_dd"
-path = "shared/34_circuit_dd.rs"
-[[bin]]
-name = "semantic_dd"
-path = "shared/38a_semantic_dd.rs"
+name = "bench"
+path = "src/main.rs"
+
 [profile.release]
 debug = 0
-
-[[bin]]
-name = "feature_dd"
-path = "41_feature_dd.rs"
-
-[[bin]]
-name = "dd_contracts"
-path = "49_dd_contracts.rs"
