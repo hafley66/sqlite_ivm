@@ -26,7 +26,7 @@ Arc B deletes: every file under `bench/` and `bench/shared/` that is not in the
 list above, plus `scripts/11_shootout.sh`, `scripts/16_shootout.sh`,
 `scripts/7_native_shared.mjs`, `scripts/8_native_shared.sh`,
 `scripts/12_features.sh`, `scripts/13_feature_pg.sh`, `scripts/14_native_values.sh`,
-`scripts/15_pg_baseline.sh`, `examples/4_sqlite_case.rs`, `examples/5_feature_case.rs`
+`scripts/15_pg_baseline.sh`, `examples/4_sqlite_case.rs`, `examples/5_feature_case.rs`, `tests/14_scale.rs`
 and their `[[example]]` blocks and the `bench` feature in the root `Cargo.toml`.
 
 Forbidden: `src/**`, `tests/**`, `docs/**`, `plans/**` except
@@ -48,6 +48,27 @@ Forbidden: `src/**`, `tests/**`, `docs/**`, `plans/**` except
 
 Drop with no port: prolog arm, pglite arms, feature fixtures
 (`tests/fixtures/1_features.json` stays for `tests/4_features.rs`, the bench does not read it).
+
+## Second subcommand: `scale`
+
+Replaces `tests/14_scale.rs` (delete it in arc B, with its `plans/costs/scale-sweep.md` numbers kept as history).
+
+`bench scale --circuits chain,group,distinct,topk,reach --n 10,100,1000,10000,100000 --fanout 1,10 --out DIR`
+
+- Disk db, `journal_mode=WAL`, `synchronous=NORMAL`, never in-memory.
+- Seed shape from `tests/14_scale.rs:31-53` with `fanout` as a parameter:
+  fanout 1 is one match per join key (dictionary shape), fanout 10 is the
+  current shape. Both reported.
+- Write columns: single insert, single delete, single update, 1000-row
+  replace in one transaction. Each mean of 40, recompute capped at 3 reps
+  above 10000.
+- Cost columns per cell: write ms, recompute ms, peak RSS delta MiB (process
+  metrics crate from the build-vs-buy table), db bytes after `wal_checkpoint(TRUNCATE)`,
+  arrangement row count (`SELECT count(*)` over every `__ivm` table for the view).
+- Output: TSV to `DIR/scale.tsv` plus one SVG per circuit via gnuplot, the
+  `bench/55_shootout_plot.mjs` pattern ported.
+- Whole sweep under 10 minutes in the background; any cell over 10 s is
+  printed as a defect line, not hidden.
 
 ## Design laws
 
