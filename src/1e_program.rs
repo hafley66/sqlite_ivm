@@ -76,6 +76,7 @@ pub(crate) struct SplitStatements {
 
 pub(crate) struct FixpointStatements {
     pub(crate) max_all: String,
+    pub(crate) max_work: String,
     pub(crate) clear_work: String,
     pub(crate) clear_deleted: String,
     pub(crate) collect_deleted: String,
@@ -383,6 +384,7 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
         .collect::<Vec<_>>();
     FixpointStatements {
         max_all: format!("SELECT coalesce(max(rowid),0) FROM {all}"),
+        max_work: format!("SELECT coalesce(max(rowid),0) FROM {work}"),
         clear_work: format!("DELETE FROM {work}"),
         clear_deleted: format!("DELETE FROM {deleted}"),
         collect_deleted: format!(

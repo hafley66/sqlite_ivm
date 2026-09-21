@@ -271,6 +271,7 @@ impl Plan {
                         return Err(error("fixpoint recursive departure round budget exceeded"));
                     }
                     delete_rounds += 1;
+                    let before = max_rowid(&statements.max_work)?;
                     let round = round_span("delete_recursive");
                     db.execute_cached(&statements.collect_deleted, [])?;
                     db.execute_cached(&statements.drop_deleted, [])?;
@@ -279,7 +280,7 @@ impl Plan {
                         written += db.execute_cached(sql, [])?;
                     }
                     round.record("rows", written);
-                    if written == 0 {
+                    if max_rowid(&statements.max_work)? == before {
                         break;
                     }
                 }
