@@ -1,11 +1,12 @@
 ---
 created: 2026-09-19
-updated: 2026-09-20
+updated: 2026-09-21
 type: bug
-status: closed
+status: done
 priority: high
 epic: ivm-correctness-and-storage
 labels: [perf, reproduced]
+closed: 2026-09-20
 ---
 
 # Group LIMIT unrolls every multiplicity copy before the LIMIT applies
@@ -49,6 +50,6 @@ rather than capping it.
 
 - [x] the `limit` branch seeds `min(__n, limit+offset)`
 - [x] the `window` branch carries its complexity in a commit message
-- [ ] a growth assertion pins Group entry count as Constant in input
+- [x] a growth assertion pins Group entry count as Constant in input
       multiplicity (blocked: `assert_growth` landed in hafley-observe after the
       `0.1` this crate pins at `Cargo.toml:23`)
