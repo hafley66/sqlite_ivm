@@ -302,6 +302,21 @@ in one recursive statement, is a rewrite of `Plan::fixpoint`'s departure pass.
 Making `__k` cheaper to compare than `TEXT` for single integer keys is a
 storage format bump. Both are the parent's call under the lane's stop rule.
 
+## arc 3 landing baseline
+
+Three runs each, `--reps 3 --arms sqlite-ivm`, on main 1f64504:
+
+| cell | wall ms |
+|---|---|
+| reach fanout 1 n 10000 | 1754.7, 1765.6, 1755.9 |
+| reach fanout 1 n 100000 | 641314.9, 644299.7, 646832.7 |
+| reach fanout 10 n 10000 | 662.9, 662.4, 662.0 |
+| reach fanout 10 n 100000 | 3294.6, 3337.9, 3314.4 |
+
+Anything landing on the departure pass has to put all three after-runs of each
+of those cells below all three numbers above it. The fanout 1 pair is where the
+cost is; fanout 10 is two orders of magnitude cheaper at the same n.
+
 ## SVGs
 
 `0_baseline-<circuit>.svg` plots wall ms against n for each arm at fanout 1 and
