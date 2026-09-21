@@ -1,5 +1,5 @@
 use crate::{
-    query::error,
+    catalog::error,
     relational::{Kind, Plan},
     relational_maintenance::{BULK_MULTIPLICITY_BUDGET, BULK_ROUND_BUDGET, CachedExecute, Row},
     relational_program::{

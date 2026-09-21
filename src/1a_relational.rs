@@ -1,7 +1,7 @@
 //! Every operator emits the row stored in its arrangement.
 //! Equality keys select membership, while stored row values select emitted identity.
 use crate::{
-    query::{error, quote},
+    catalog::{error, quote},
     relational::{Occurrence, Plan, Rule},
 };
 use rusqlite::{types::Value, Connection, Result};
@@ -13,7 +13,7 @@ pub(crate) fn columns(n: usize) -> String {
         .join(",")
 }
 pub(crate) fn table(name: &str, id: usize, side: usize) -> String {
-    format!("main.{}", quote(&format!("{name}_op{id}_{side}")))
+    format!("main.{}", quote(&format!("{name}_op{id}x{side}")))
 }
 /// Upsert scratch: one side's delta summed per identity, the identity and its
 /// hash computed once per row instead of once per comparison.
@@ -62,6 +62,20 @@ pub fn register_functions(db: &Connection) -> Result<()> {
             | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
         |ctx| Ok(row_hash(ctx.get_raw(0).as_str()?.as_bytes())),
     )
+}
+
+pub fn validate_name(name: &str) -> Result<()> {
+    if name.is_empty()
+        || name.len() > 128
+        || name.contains('\0')
+        || name.to_ascii_lowercase().starts_with("sqlite_")
+        || name.to_ascii_lowercase().starts_with("__ivm_")
+    {
+        return Err(error(
+            "view name must be 1..128 bytes, NUL-free and non-reserved",
+        ));
+    }
+    Ok(())
 }
 pub fn keys_table(name: &str) -> String {
     format!("main.{}", quote(&format!("{name}_keys")))
@@ -181,7 +195,7 @@ pub(crate) fn plain(value: &str) -> String {
 }
 
 pub fn install(db: &Connection, name: &str, sql: &str, plan: &Plan) -> Result<()> {
-    crate::maintenance::validate_name(name)?;
+    validate_name(name)?;
     let settings:bool=db.query_row("SELECT (SELECT recursive_triggers FROM pragma_recursive_triggers)=1 AND (SELECT trusted_schema FROM pragma_trusted_schema)=1",[],|r|r.get(0))?;
     if !settings {
         return Err(error(
@@ -198,7 +212,7 @@ pub fn install(db: &Connection, name: &str, sql: &str, plan: &Plan) -> Result<()
         .iter()
         .enumerate()
         .flat_map(|(source, s)| {
-            s.columns.iter().map(move |name| crate::query::Column {
+            s.columns.iter().map(move |name| crate::catalog::Column {
                 source,
                 name: name.clone(),
             })

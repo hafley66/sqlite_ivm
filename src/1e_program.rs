@@ -551,7 +551,7 @@ fn apply_state_statements(plan: &Plan, name: &str) -> ApplyStateStatements {
     let node = &plan.nodes[plan.output];
     let width = node.fields.len();
     let out = out_table(plan.output, width);
-    let state = format!("main.{}", crate::query::quote(&format!("{name}_state")));
+    let state = format!("main.{}", crate::catalog::quote(&format!("{name}_state")));
     let key = json_key((0..width).map(|i| plain(&format!("o.c{i}"))).collect());
     ApplyStateStatements {
         wanted: format!("SELECT coalesce(sum(-__m),0) FROM {out} o WHERE __m<0"),

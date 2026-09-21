@@ -1,6 +1,6 @@
 use crate::{
-    catalog, maintenance,
-    query::{bind, error, quote, Query},
+    catalog::{self, error, quote},
+    relational_maintenance,
     relational_program::Program,
 };
 use rusqlite::{ffi, types::ValueRef, vtab::*, Connection, Result};
@@ -37,8 +37,6 @@ struct Table {
     /// Source DDL generation `sql` was read at; `refresh` reads the catalog again only after a rewrite.
     generation: u64,
     roles: Vec<c_int>,
-    generic: bool,
-    query: Option<Query>,
     plan: Option<crate::relational::Plan>,
     /// Every SQL string this view's drain issues, built beside the plan.
     program: Option<Program>,
@@ -51,66 +49,105 @@ fn recursive(plan: &crate::relational::Plan) -> bool {
         .iter()
         .any(|n| matches!(n.kind, crate::relational::Kind::Fixpoint { .. }))
 }
-fn declaration(query: Option<&Query>, plan: Option<&crate::relational::Plan>) -> String {
-    let arity = if let Some(plan) = plan {
-        plan.sources.iter().map(|s| s.columns.len()).max().unwrap_or(0)
-    } else {
-        let query = query.unwrap();
-        (0..query.tables.len())
-            .map(|source| {
-                maintenance::used_columns(query)
-                    .iter()
-                    .filter(|c| c.source == source)
-                    .count()
-            })
-            .max()
-            .unwrap_or(0)
-    };
+fn declaration(plan: &crate::relational::Plan) -> String {
+    let arity = plan.sources.iter().map(|s| s.columns.len()).max().unwrap_or(0);
     let hidden = (0..arity)
         .map(|i| format!("__ivm_v{i} HIDDEN"))
         .collect::<Vec<_>>()
         .join(",");
     format!("CREATE TABLE x({},{},{})",
-    if let Some(query)=query {query.outputs.iter().map(|(name,_)|format!("{} INTEGER",quote(name))).collect::<Vec<_>>().join(",")}else{let plan=plan.unwrap();plan.names.iter().zip(&plan.nodes[plan.output].fields).map(|(name,f)|format!("{} {} COLLATE {}",quote(name),f.affinity,f.collation)).collect::<Vec<_>>().join(",")},
+    plan.names.iter().zip(&plan.nodes[plan.output].fields).map(|(name,f)|format!("{} {} COLLATE {}",quote(name),f.affinity,f.collation)).collect::<Vec<_>>().join(","),
     "__ivm_source INTEGER HIDDEN,__ivm_adding INTEGER HIDDEN",
     hidden)
 }
-fn migrate(conn: &Connection, name: &str, generic: bool, format: i64) -> Result<Option<String>> {
+// Storage formats before this pass: `format_version<5` predates AUTOINCREMENT
+// fixpoint members; `generic=0` rows carry the retired per-row engine's
+// `_state(g,n,s)`/`_delta` tables and source key indexes. Both rebind here,
+// inside xConnect, before any trigger of the stored hooks can run.
+pub(crate) fn migrate(
+    conn: &Connection,
+    name: &str,
+    legacy: bool,
+    format: i64,
+) -> Result<Option<String>> {
     let sql: String = conn.query_row(
         "SELECT query_sql FROM main.__ivm_views WHERE name=?1",
         [name],
         |r| r.get(0),
     )?;
-    let (fresh, generic_hooks) = if generic {
-        let plan = crate::relational::bind(conn, &sql)?;
-        if format < 5 && recursive(&plan) {
-            return Ok(None);
-        }
-        (declaration(None, Some(&plan)), true)
+    let plan = crate::relational::bind(conn, &sql)?;
+    if format < 5 && recursive(&plan) {
+        return Ok(None);
+    }
+    drop_triggers(conn, name)?;
+    if legacy {
+        convert(conn, name, &plan)?;
     } else {
-        let query = bind(conn, &sql)?;
-        (declaration(Some(&query), None), false)
-    };
+        relational_maintenance::hooks(conn, name, &plan)?;
+        conn.execute("UPDATE main.__ivm_objects SET definition=(SELECT sql FROM main.sqlite_schema WHERE type=object_type AND name=object_name) WHERE view_name=?1",[name])?;
+        set_schema(conn, name, &plan)?;
+    }
+    Ok(Some(declaration(&plan)))
+}
+// A `generic=0` row stores the retired engine's shadows. Every entry that can
+// meet one rebuilds it as a relational arrangement: xConnect through `migrate`,
+// source DDL directly, with the already-rewritten SQL.
+pub(crate) fn convert(
+    conn: &Connection,
+    name: &str,
+    plan: &crate::relational::Plan,
+) -> Result<()> {
+    let retired: Vec<(String, String)> = conn
+        .prepare("SELECT object_type,object_name FROM main.__ivm_objects WHERE view_name=?1 AND object_type IN ('table','index')")?
+        .query_map([name], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<Vec<_>>>()?;
+    for (kind, object) in &retired {
+        conn.execute_batch(&format!("DROP {kind} main.{}", quote(object)))?;
+    }
+    let mut objects = plan.create_state(conn, name)?;
+    let collector = plan.collector(name);
+    collector.create_shadow(conn)?;
+    objects.push(("table", collector.shadow_table()));
+    objects.extend(relational_maintenance::hooks(conn, name, plan)?);
+    conn.execute(
+        "DELETE FROM main.__ivm_objects WHERE view_name=?1",
+        [name],
+    )?;
+    for (kind, object) in &objects {
+        let definition: String = conn.query_row(
+            "SELECT coalesce(sql,'') FROM main.sqlite_schema WHERE type=?1 AND name=?2",
+            rusqlite::params![kind, object],
+            |r| r.get(0),
+        )?;
+        conn.execute(
+            "INSERT INTO main.__ivm_objects VALUES(?1,?2,?3,?4)",
+            rusqlite::params![name, kind, object, definition],
+        )?;
+    }
+    plan.populate(conn, name)?;
+    set_schema(conn, name, plan)?;
+    Ok(())
+}
+pub(crate) fn drop_triggers(conn: &Connection, name: &str) -> Result<()> {
     let triggers: Vec<String> = conn
         .prepare("SELECT object_name FROM main.__ivm_objects WHERE view_name=?1 AND object_type='trigger'")?
         .query_map([name], |r| r.get(0))?
         .collect::<Result<Vec<_>>>()?;
-    for trigger in triggers {
-        conn.execute_batch(&format!("DROP TRIGGER main.{}", quote(&trigger)))?;
+    for trigger in &triggers {
+        conn.execute_batch(&format!("DROP TRIGGER main.{}", quote(trigger)))?;
     }
-    if generic_hooks {
-        let plan = crate::relational::bind(conn, &sql)?;
-        crate::relational_maintenance::hooks(conn, name, &plan)?;
-    } else {
-        let query = bind(conn, &sql)?;
-        maintenance::create_hooks(conn, name, &query, false)?;
-    }
-    conn.execute("UPDATE main.__ivm_objects SET definition=(SELECT sql FROM main.sqlite_schema WHERE type=object_type AND name=object_name) WHERE view_name=?1",[name])?;
+    Ok(())
+}
+fn set_schema(conn: &Connection, name: &str, plan: &crate::relational::Plan) -> Result<()> {
+    let roles = (1..=plan.names.len())
+        .map(|i| i.to_string())
+        .collect::<Vec<_>>()
+        .join(",");
     conn.execute(
-        "UPDATE main.__ivm_schema SET declaration=?1, format_version=5 WHERE id=(SELECT id FROM main.__ivm_views WHERE name=?2)",
-        rusqlite::params![fresh, name],
+        "UPDATE main.__ivm_schema SET declaration=?1, roles=?2, generic=1, format_version=5 WHERE id=(SELECT id FROM main.__ivm_views WHERE name=?3)",
+        rusqlite::params![declaration(plan), roles, name],
     )?;
-    Ok(Some(fresh))
+    Ok(())
 }
 fn text(bytes: &[u8]) -> Result<&str> {
     std::str::from_utf8(bytes).map_err(|e| error(e.to_string()))
@@ -188,7 +225,7 @@ impl Table {
         };
         if !create {
             let (id,declaration,generic,roles,format):(i64,String,bool,String,i64)=conn.query_row("SELECT v.id,s.declaration,s.generic,s.roles,s.format_version FROM main.__ivm_views v JOIN main.__ivm_schema s ON s.id=v.id WHERE v.name=?1",[name],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?;
-            let roles = roles
+            let mut roles = roles
                 .split(',')
                 .map(|s| {
                     s.parse::<c_int>()
@@ -196,9 +233,22 @@ impl Table {
                 })
                 .collect::<Result<Vec<_>>>()?;
             let mut declaration = declaration;
-            if format < 5 {
-                match migrate(&conn, name, generic, format) {
-                    Ok(Some(fresh)) => declaration = fresh,
+            if format < 5 || !generic {
+                match migrate(&conn, name, !generic, format) {
+                    Ok(Some(fresh)) => {
+                        declaration = fresh;
+                        roles = conn
+                            .query_row(
+                                "SELECT s.roles FROM main.__ivm_schema s JOIN main.__ivm_views v ON v.id=s.id WHERE v.name=?1",
+                                [name],
+                                |r| {
+                                    r.get::<_, String>(0)?
+                                        .split(',')
+                                        .map(|p| p.parse::<c_int>().map_err(|_| error("invalid stored schema")))
+                                        .collect::<Result<Vec<_>>>()
+                                },
+                            )?;
+                    }
                     Ok(None) => {}
                     Err(e) => {
                         let readonly = matches!(
@@ -222,8 +272,6 @@ impl Table {
                 sql: String::new(),
                 generation: u64::MAX, // Never the live value, so the refresh below reads.
                 roles,
-                generic,
-                query: None,
                 plan: None,
                 program: None,
                 collector: None,
@@ -236,66 +284,30 @@ impl Table {
                 table,
             ));
         }
-        let narrow=bind(&conn,&sql).and_then(|query|{
-        for table in &query.tables {
-            let effects:bool=conn.query_row("SELECT EXISTS(SELECT 1 FROM pragma_foreign_key_list(?1,'main')) OR EXISTS(SELECT 1 FROM main.sqlite_schema WHERE type='trigger' AND tbl_name=?1 AND substr(name,1,6)!='__ivm_')",[table],|r|r.get(0))?;
-            if effects{return Err(error("cascades and source triggers require relational arrangements"));}
-        }
-        for c in maintenance::used_columns(&query) {
-            let guaranteed:bool=conn.query_row("SELECT \"notnull\" OR (pk=1 AND upper(type)='INTEGER' AND NOT EXISTS(SELECT 1 FROM pragma_index_list(?1) WHERE origin='pk')) FROM pragma_table_info(?1) WHERE name=?2",rusqlite::params![query.tables[c.source],c.name],|r|r.get(0))?;
-            if !guaranteed{return Err(error("nullable columns require relational maintenance"));}
-        }
-        Ok(query)
-    });
-        let (query, plan, program) = match narrow {
-            Ok(query) => {
-                maintenance::install(&conn, name, &sql)?;
-                (Some(query), None, None)
-            }
-            Err(_) => {
-                let plan = crate::relational::bind(&conn, &sql)?;
-                crate::relational_maintenance::install(&conn, name, &sql, &plan)?;
-                let program = Program::build(&plan, name, &conn);
-                plan.prepare_scratch(&conn, &program)?;
-                (None, Some(plan), Some(program))
-            }
-        };
+        let plan = crate::relational::bind(&conn, &sql)?;
+        relational_maintenance::install(&conn, name, &sql, &plan)?;
+        let program = Program::build(&plan, name, &conn);
+        plan.prepare_scratch(&conn, &program)?;
         let id = conn.query_row(
             "SELECT id FROM main.__ivm_views WHERE name=?1",
             [name],
             |r| r.get(0),
         )?;
-        let declaration = declaration(query.as_ref(), plan.as_ref());
-        let generic = plan.is_some();
-        let roles: Vec<c_int> = if let Some(query) = &query {
-            query
-                .outputs
-                .iter()
-                .map(|(_, role)| match *role {
-                    "g" => 0,
-                    "n" => 1,
-                    _ => 2,
-                })
-                .collect()
-        } else {
-            (1..=plan.as_ref().unwrap().names.len() as c_int).collect()
-        };
+        let declaration = declaration(&plan);
+        let roles: Vec<c_int> = (1..=plan.names.len() as c_int).collect();
         conn.execute_batch("CREATE TABLE IF NOT EXISTS main.__ivm_schema(id INTEGER PRIMARY KEY,declaration TEXT NOT NULL,generic INTEGER NOT NULL,roles TEXT NOT NULL,format_version INTEGER NOT NULL)")?;
         // Format 5: fixpoint member tables carry AUTOINCREMENT rowids, so a
         // drain can mark new members by rowid after deletes.
-        let format = 5;
         conn.execute(
-            "INSERT INTO main.__ivm_schema VALUES(?1,?2,?3,?4,?5)",
+            "INSERT INTO main.__ivm_schema VALUES(?1,?2,1,?3,5)",
             rusqlite::params![
                 id,
                 declaration,
-                generic,
                 roles
                     .iter()
                     .map(|i| i.to_string())
                     .collect::<Vec<_>>()
                     .join(","),
-                format
             ],
         )?;
         Ok((
@@ -307,11 +319,9 @@ impl Table {
                 sql,
                 generation: crate::source_ddl::generation(),
                 roles,
-                generic,
-                query,
-                collector: plan.as_ref().map(|plan| plan.collector(name)),
-                plan,
-                program,
+                collector: Some(plan.collector(name)),
+                plan: Some(plan),
+                program: Some(program),
             },
         ))
     }
@@ -325,27 +335,23 @@ impl Table {
             .prepare_cached("SELECT query_sql FROM main.__ivm_views WHERE id=?1")?
             .query_row([self.id], |r| r.get(0))?;
         if sql != self.sql {
-            if !self.generic {
-                self.query = Some(bind(&self.db, &sql)?);
-            } else {
-                let plan = crate::relational::bind(&self.db, &sql)?;
-                let format: i64 = self.db.query_row(
-                    "SELECT format_version FROM main.__ivm_schema WHERE id=?1",
-                    [self.id],
-                    |r| r.get(0),
-                )?;
-                if format < 5 && recursive(&plan) {
-                    return Err(error(
-                        "recursive views from storage formats before 5 must be dropped and re-created",
-                    ));
-                }
-                let name = self.name()?;
-                let program = Program::build(&plan, &name, &self.db);
-                plan.prepare_scratch(&self.db, &program)?;
-                self.collector = Some(plan.collector(&name));
-                self.plan = Some(plan);
-                self.program = Some(program);
+            let plan = crate::relational::bind(&self.db, &sql)?;
+            let format: i64 = self.db.query_row(
+                "SELECT format_version FROM main.__ivm_schema WHERE id=?1",
+                [self.id],
+                |r| r.get(0),
+            )?;
+            if format < 5 && recursive(&plan) {
+                return Err(error(
+                    "recursive views from storage formats before 5 must be dropped and re-created",
+                ));
             }
+            let name = self.name()?;
+            let program = Program::build(&plan, &name, &self.db);
+            plan.prepare_scratch(&self.db, &program)?;
+            self.collector = Some(plan.collector(&name));
+            self.plan = Some(plan);
+            self.program = Some(program);
             self.sql = sql;
         }
         // Stamped after the bind: a failed connect-time bind must run again.
@@ -353,7 +359,7 @@ impl Table {
         Ok(())
     }
     fn rename_to(&self, new: &str) -> Result<()> {
-        maintenance::validate_name(new)?;
+        relational_maintenance::validate_name(new)?;
         let old = self.name()?;
         let objects = catalog::manifest(&self.db, &old, Some(new))?;
         let mut renamed = Vec::new();
@@ -390,11 +396,11 @@ impl Table {
                 renamed.push(("table", target));
             }
         }
-        renamed.extend(if let Some(query) = &self.query {
-            maintenance::create_hooks(&self.db, new, query, false)?
-        } else {
-            crate::relational_maintenance::hooks(&self.db, new, self.plan.as_ref().unwrap())?
-        });
+        renamed.extend(relational_maintenance::hooks(
+            &self.db,
+            new,
+            self.plan.as_ref().ok_or_else(|| error("plan missing after bind"))?,
+        )?);
         self.db
             .execute("DELETE FROM main.__ivm_objects WHERE view_name=?1", [&old])?;
         for table in ["__ivm_sources", "__ivm_columns"] {
@@ -538,27 +544,7 @@ unsafe impl<'vtab> VTab<'vtab> for Table {
         Self::attach(db, schema, name, args, false)
     }
     fn best_index(&self, info: &mut IndexInfo) -> Result<bool> {
-        if self.generic {
-            info.set_estimated_cost(1_000_000.0);
-            return Ok(true);
-        }
-        let group = self.roles.iter().position(|role| *role == 0).unwrap() as c_int;
-        let mut equality = false;
-        for (constraint, mut usage) in info.constraints_and_usages() {
-            if !equality
-                && constraint.is_usable()
-                && (constraint.column() == group || constraint.column() == -1)
-                && constraint.operator() == IndexConstraintOp::SQLITE_INDEX_CONSTRAINT_EQ
-            {
-                usage.set_argv_index(1);
-                // Let SQLite recheck affinity/collation semantics on the exposed column.
-                equality = true;
-            }
-        }
-        info.set_idx_num(i32::from(equality));
-        info.set_idx_str(if equality { "group_key" } else { "stored_scan" });
-        info.set_estimated_cost(if equality { 1.0 } else { 1_000_000.0 });
-        info.set_estimated_rows(if equality { 1 } else { 1_000_000 });
+        info.set_estimated_cost(1_000_000.0);
         Ok(true)
     }
     fn open(&'vtab mut self) -> Result<Cursor> {
@@ -569,7 +555,6 @@ unsafe impl<'vtab> VTab<'vtab> for Table {
             db: unsafe { self.db.handle() },
             state: format!("{}_state", self.name()?),
             roles: self.roles.clone(),
-            generic: self.generic,
             statement: ptr::null_mut(),
             done: true,
         })
@@ -601,20 +586,15 @@ impl<'vtab> UpdateVTab<'vtab> for Table {
     fn insert(&mut self, args: &Inserts<'_>) -> Result<i64> {
         self.refresh()?;
         let count = self.roles.len();
-        let arity = if let Some(plan) = &self.plan {
-            plan.sources.iter().map(|s| s.columns.len()).max().unwrap_or(0)
-        } else {
-            let query = self.query.as_ref().unwrap();
-            (0..query.tables.len())
-                .map(|source| {
-                    maintenance::used_columns(query)
-                        .iter()
-                        .filter(|c| c.source == source)
-                        .count()
-                })
-                .max()
-                .unwrap_or(0)
-        };
+        let arity = self
+            .plan
+            .as_ref()
+            .ok_or_else(|| error("plan missing after bind"))?
+            .sources
+            .iter()
+            .map(|s| s.columns.len())
+            .max()
+            .unwrap_or(0);
         if args.len() != count + 4 + arity
             || args.iter().take(count + 2).any(|v| v != ValueRef::Null)
         {
@@ -626,52 +606,30 @@ impl<'vtab> UpdateVTab<'vtab> for Table {
         if !(0..=1).contains(&adding) {
             return Err(error("invalid maintenance command"));
         }
-        if let Some(plan) = &self.plan {
-            let src = plan
-                .sources
-                .get(source)
-                .ok_or_else(|| error("invalid source ordinal"))?;
-            let row: Vec<rusqlite::types::Value> = (0..src.columns.len())
-                .map(|i| args.get(count + 4 + i))
-                .collect::<Result<Vec<_>>>()?;
-            plan.validate(source, &row)?;
-            let sign = if adding == 1 {
-                sqlite_bulk_trigger::Sign::Insert
-            } else {
-                sqlite_bulk_trigger::Sign::Delete
-            };
-            let collector = self
-                .collector
-                .as_mut()
-                .ok_or_else(|| error("collector missing after bind"))?;
-            collector.update(
-                &self.db,
-                sqlite_bulk_trigger::RowChange::new(source.to_string(), sign, row),
-            )?;
-            return Ok(0);
-        }
-        let query = self.query.as_ref().unwrap();
-        if source >= query.tables.len() {
-            return Err(error("invalid source ordinal"));
-        }
-        let width = maintenance::used_columns(query)
-            .iter()
-            .filter(|c| c.source == source)
-            .count();
-        let mut image = Vec::with_capacity(width);
-        for i in 0..width {
-            match args.get::<rusqlite::types::Value>(count + 4 + i)? {
-                rusqlite::types::Value::Integer(v) => image.push(rusqlite::types::Value::Integer(v)),
-                _ => return Err(error("maintenance rows require integers")),
-            }
-        }
-        maintenance::maintain(
+        let plan = self
+            .plan
+            .as_ref()
+            .ok_or_else(|| error("plan missing after bind"))?;
+        let src = plan
+            .sources
+            .get(source)
+            .ok_or_else(|| error("invalid source ordinal"))?;
+        let row: Vec<rusqlite::types::Value> = (0..src.columns.len())
+            .map(|i| args.get(count + 4 + i))
+            .collect::<Result<Vec<_>>>()?;
+        plan.validate(source, &row)?;
+        let sign = if adding == 1 {
+            sqlite_bulk_trigger::Sign::Insert
+        } else {
+            sqlite_bulk_trigger::Sign::Delete
+        };
+        let collector = self
+            .collector
+            .as_mut()
+            .ok_or_else(|| error("collector missing after bind"))?;
+        collector.update(
             &self.db,
-            &self.name()?,
-            query,
-            source,
-            adding == 1,
-            image,
+            sqlite_bulk_trigger::RowChange::new(source.to_string(), sign, row),
         )?;
         Ok(0)
     }
@@ -683,7 +641,6 @@ struct Cursor {
     db: *mut ffi::sqlite3,
     state: String,
     roles: Vec<c_int>,
-    generic: bool,
     statement: *mut ffi::sqlite3_stmt,
     done: bool,
 }
@@ -710,27 +667,19 @@ impl Drop for Cursor {
     }
 }
 unsafe impl VTabCursor for Cursor {
-    fn filter(&mut self, plan: c_int, _: Option<&str>, args: &Filters<'_>) -> Result<()> {
+    fn filter(&mut self, _: c_int, _: Option<&str>, _: &Filters<'_>) -> Result<()> {
         unsafe {
             ffi::sqlite3_finalize(self.statement);
         }
         self.statement = ptr::null_mut();
         self.done = true;
         let sql = CString::new(format!(
-            "SELECT {} FROM main.{}{}",
-            if self.generic {
-                format!(
-                    "rowid,{}",
-                    (0..self.roles.len())
-                        .map(|i| format!("c{i}"))
-                        .collect::<Vec<_>>()
-                        .join(",")
-                )
-            } else {
-                "g,n,s".into()
-            },
-            quote(&self.state),
-            if plan == 1 { " WHERE g=?1" } else { "" }
+            "SELECT rowid,{} FROM main.{}",
+            (0..self.roles.len())
+                .map(|i| format!("c{i}"))
+                .collect::<Vec<_>>()
+                .join(","),
+            quote(&self.state)
         ))
         .map_err(|e| error(e.to_string()))?;
         let rc = unsafe {
@@ -743,34 +692,6 @@ unsafe impl VTabCursor for Cursor {
             )
         };
         self.check(rc)?;
-        if plan == 1 {
-            let value = args
-                .iter()
-                .next()
-                .ok_or_else(|| error("missing group key"))?;
-            let rc = unsafe {
-                match value {
-                    ValueRef::Null => ffi::sqlite3_bind_null(self.statement, 1),
-                    ValueRef::Integer(n) => ffi::sqlite3_bind_int64(self.statement, 1, n),
-                    ValueRef::Real(n) => ffi::sqlite3_bind_double(self.statement, 1, n),
-                    ValueRef::Text(s) => ffi::sqlite3_bind_text(
-                        self.statement,
-                        1,
-                        s.as_ptr().cast(),
-                        s.len() as c_int,
-                        ffi::SQLITE_TRANSIENT(),
-                    ),
-                    ValueRef::Blob(s) => ffi::sqlite3_bind_blob(
-                        self.statement,
-                        1,
-                        s.as_ptr().cast(),
-                        s.len() as c_int,
-                        ffi::SQLITE_TRANSIENT(),
-                    ),
-                }
-            };
-            self.check(rc)?;
-        }
         self.next()
     }
     fn next(&mut self) -> Result<()> {
@@ -850,8 +771,10 @@ unsafe extern "C" fn rename(raw: *mut ffi::sqlite3_vtab, new: *const c_char) -> 
 unsafe extern "C" fn shadow_name(name: *const c_char) -> c_int {
     let suffix = unsafe { CStr::from_ptr(name) }.to_bytes();
     i32::from(
-        matches!(suffix, b"state" | b"delta")
+        matches!(suffix, b"state" | b"delta" | b"keys")
             || (suffix.starts_with(b"op")
-                && suffix[2..].iter().all(|c| c.is_ascii_digit() || *c == b'_')),
+                && suffix[2..]
+                    .iter()
+                    .all(|c| c.is_ascii_alphanumeric())),
     )
 }

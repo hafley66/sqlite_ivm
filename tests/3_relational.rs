@@ -362,3 +362,79 @@ fn ignored_and_replaced_source_updates_preserve_arrangements() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn recursive_shapes_bind_to_one_fixpoint_node_or_name_their_rejection() -> Result<()> {
+    use sqlite_ivm::relational::{bind as bind_plan, Kind};
+    let db = Connection::open_in_memory()?;
+    db.execute_batch("CREATE TABLE roots(k INTEGER);CREATE TABLE edges(a INTEGER,b INTEGER);CREATE TABLE allowed(k INTEGER)")?;
+    let step = "SELECT e.b FROM r JOIN edges e ON r.n=e.a";
+    let accepted = [
+        (format!("WITH RECURSIVE r(n) AS(SELECT k FROM roots UNION {step}) SELECT n FROM r"), 2, 1),
+        ("WITH RECURSIVE path(src,dst) AS(SELECT a,b FROM edges UNION SELECT p.src,e.b FROM path p JOIN edges e ON p.dst=e.a) SELECT src,dst FROM path".into(), 2, 2),
+        ("WITH RECURSIVE r(n) AS(SELECT k FROM roots UNION SELECT k FROM allowed UNION SELECT e.b FROM r,edges e WHERE r.n=e.a UNION SELECT DISTINCT e.a FROM r JOIN edges e ON r.n=e.b JOIN allowed al ON al.k=e.a WHERE e.a>0) SELECT n FROM r".into(), 4, 1),
+        ("WITH RECURSIVE walk(node,dist) AS(SELECT k,0 FROM roots UNION SELECT e.b,w.dist+1 FROM walk w JOIN edges e ON w.node=e.a WHERE w.dist<3) SELECT node,MIN(dist) AS dist FROM walk GROUP BY node".into(), 2, 2),
+        ("WITH RECURSIVE r(n) AS(SELECT k FROM roots UNION SELECT s.b FROM r JOIN (SELECT a,b FROM edges WHERE b IS NOT NULL) s ON r.n=s.a) SELECT n FROM r WHERE NOT EXISTS(SELECT 1 FROM allowed WHERE allowed.k=r.n)".into(), 2, 1),
+    ];
+    for (sql, rules, width) in accepted {
+        let plan = bind_plan(&db, &sql)?;
+        let fixpoints = plan
+            .nodes
+            .iter()
+            .filter_map(|n| match &n.kind {
+                Kind::Fixpoint { rules } => Some((rules.len(), n.fields.len())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(fixpoints, vec![(rules, width)], "{sql}");
+    }
+    let rejected = [
+        (format!("WITH RECURSIVE r(n) AS(SELECT k FROM roots UNION ALL {step}) SELECT n FROM r"), "recursive UNION ALL unsupported"),
+        ("WITH RECURSIVE r(n) AS(SELECT k FROM roots UNION SELECT max(e.b) FROM r JOIN edges e ON r.n=e.a) SELECT n FROM r".into(), "recursive step may not aggregate or negate its own relation"),
+        ("WITH RECURSIVE r(n) AS(SELECT k FROM roots UNION SELECT e.b FROM r JOIN edges e ON r.n=e.a GROUP BY e.b) SELECT n FROM r".into(), "recursive step may not aggregate or negate its own relation"),
+        ("WITH RECURSIVE r(n) AS(SELECT k FROM roots UNION SELECT e.b FROM r JOIN edges e ON r.n=e.a WHERE NOT EXISTS(SELECT 1 FROM r r2 WHERE r2.n=e.b)) SELECT n FROM r".into(), "recursive step may not aggregate or negate its own relation"),
+        ("WITH RECURSIVE r(n) AS(SELECT k FROM roots UNION SELECT e.b FROM edges e WHERE e.a IN (SELECT n FROM r)) SELECT n FROM r".into(), "recursive step may not aggregate or negate its own relation"),
+        ("WITH RECURSIVE r(n) AS(SELECT k FROM roots UNION SELECT e.b FROM r LEFT JOIN edges e ON r.n=e.a) SELECT n FROM r".into(), "recursive step requires inner join"),
+        ("WITH RECURSIVE r(n) AS(SELECT k FROM roots UNION SELECT e.b FROM r JOIN edges e ON r.n=e.a ORDER BY 1 LIMIT 5) SELECT n FROM r".into(), "recursive ordering and LIMIT unsupported"),
+        ("WITH RECURSIVE r(a) AS(SELECT k FROM roots UNION SELECT e.b FROM r JOIN edges e USING(a)) SELECT a FROM r".into(), "unsupported recursive step"),
+    ];
+    for (sql, message) in rejected {
+        assert_eq!(
+            bind_plan(&db, &sql).unwrap_err().to_string(),
+            message,
+            "{sql}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn comma_joins_take_equality_keys_from_where() -> Result<()> {
+    use sqlite_ivm::relational::{bind as bind_plan, Kind};
+    let db = Connection::open_in_memory()?;
+    db.execute_batch("CREATE TABLE items (id INTEGER PRIMARY KEY, group_id INTEGER, amount INTEGER);")?;
+    let sql = "SELECT i.id AS x,p.id AS y,q.id AS z FROM items i, items p, items q
+        WHERE p.group_id=i.group_id AND q.group_id=i.group_id";
+    let plan = bind_plan(&db, sql)?;
+    let joins = plan
+        .nodes
+        .iter()
+        .filter_map(|n| match &n.kind {
+            Kind::Join { left, right, .. } => Some((left.len(), right.len())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(joins, vec![(1, 1), (1, 1)], "{sql}");
+    let sql = "SELECT i.id AS x,p.id AS y FROM items i, items p WHERE p.group_id=i.group_id AND i.amount>0";
+    let plan = bind_plan(&db, sql)?;
+    let joins = plan
+        .nodes
+        .iter()
+        .filter_map(|n| match &n.kind {
+            Kind::Join { left, right, .. } => Some((left.len(), right.len())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(joins, vec![(1, 1)], "{sql}");
+    Ok(())
+}

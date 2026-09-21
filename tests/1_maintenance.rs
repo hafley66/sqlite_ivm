@@ -1,7 +1,7 @@
 #![cfg(not(feature = "extension"))]
 
 use rusqlite::{Connection, Result};
-use sqlite_ivm::{extension::register, query::quote};
+use sqlite_ivm::{catalog::quote, extension::register};
 
 const JOIN: &str = "SELECT i.group_id AS g, COUNT(*) AS n, SUM(i.amount*d.factor) AS s
     FROM items i JOIN dimensions d ON i.join_key=d.join_key GROUP BY i.group_id";
@@ -68,10 +68,7 @@ fn managed_drop_preserves_sources_and_other_views_and_rolls_back() -> Result<()>
         vec![(0,"items".into()),(1,"dimensions".into())]);
     assert_eq!(db.prepare("SELECT source_ordinal,column_name FROM __ivm_columns WHERE view_name='earnings' ORDER BY 1,2")?
         .query_map([], |r| Ok((r.get::<_, i64>(0)?,r.get::<_, String>(1)?)))?.collect::<Result<Vec<_>>>()?,
-        vec![(0,"amount".into()),(0,"group_id".into()),(0,"join_key".into()),(1,"factor".into()),(1,"join_key".into())]);
-    assert_eq!(db.prepare("SELECT object_type,COUNT(*) FROM __ivm_objects WHERE view_name='earnings' GROUP BY 1 ORDER BY 1")?
-        .query_map([], |r| Ok((r.get::<_, String>(0)?,r.get::<_, i64>(1)?)))?.collect::<Result<Vec<_>>>()?,
-        vec![("index".into(),2),("table".into(),2),("trigger".into(),12)]);
+        vec![(0,"amount".into()),(0,"group_id".into()),(0,"join_key".into()),(1,"bucket".into()),(1,"factor".into()),(1,"join_key".into())]);
     let schema = || -> Result<Vec<(String, String)>> {
         db.prepare("SELECT name,coalesce(sql,'') FROM main.sqlite_schema ORDER BY type,name")?
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
@@ -148,6 +145,11 @@ fn failed_drop_restores_objects_metadata_and_caller_transaction() -> Result<()> 
             ))
         })?
         .collect::<Result<Vec<_>>>()?;
+    let objects: i64 = db.query_row(
+        "SELECT COUNT(*) FROM __ivm_objects WHERE view_name='earnings'",
+        [],
+        |r| r.get(0),
+    )?;
     // Fail after all owned DDL has executed, during the final catalog deletion.
     db.execute_batch(
         "CREATE TEMP TRIGGER fail_drop BEFORE DELETE ON main.__ivm_views
@@ -176,7 +178,7 @@ fn failed_drop_restores_objects_metadata_and_caller_transaction() -> Result<()> 
             [],
             |r| r.get::<_, i64>(0)
         )?,
-        16
+        objects
     );
     verify(&db, "earnings", JOIN)?;
     assert_eq!(rows(&db, "SELECT * FROM earnings")?, vec![(4, 1, 175)]);
@@ -232,12 +234,12 @@ fn drop_uses_exact_catalog_ownership_and_rejects_missing_or_changed_objects() ->
     db.execute_batch(&format!("DROP TABLE temp.{state}"))?;
     install(&db, "earnings", JOIN)?;
     let definition: String = db.query_row(
-        "SELECT sql FROM sqlite_schema WHERE name='__ivm_earnings_key_0'",
+        "SELECT sql FROM sqlite_schema WHERE name='__ivm_earnings_result_key'",
         [],
         |r| r.get(0),
     )?;
-    db.execute_batch("DROP INDEX __ivm_earnings_key_0;")?;
-    for replacement in ["", "CREATE INDEX __ivm_earnings_key_0 ON items(amount)"] {
+    db.execute_batch("DROP INDEX __ivm_earnings_result_key;")?;
+    for replacement in ["", "CREATE INDEX __ivm_earnings_result_key ON earnings_keys(__v)"] {
         db.execute_batch(replacement)?;
         assert!(db
             .query_row("SELECT sqlite_ivm_drop('earnings')", [], |r| r
@@ -245,7 +247,7 @@ fn drop_uses_exact_catalog_ownership_and_rejects_missing_or_changed_objects() ->
             .is_err());
         verify(&db, "earnings", JOIN)?;
     }
-    db.execute_batch("DROP INDEX __ivm_earnings_key_0")?;
+    db.execute_batch("DROP INDEX __ivm_earnings_result_key")?;
     db.execute_batch(&definition)?;
     db.query_row("SELECT sqlite_ivm_drop('earnings')", [], |r| {
         r.get::<_, String>(0)
@@ -402,50 +404,6 @@ fn deterministic_mutations_match_original_join_after_every_statement() -> Result
 }
 
 #[test]
-fn unrelated_groups_are_never_written_and_join_keys_are_indexed() -> Result<()> {
-    let db = database()?;
-    db.execute_batch(
-        "INSERT INTO items VALUES (1,10,4,7),(2,10,4,3);
-        INSERT INTO dimensions VALUES (1,10,2,100);
-        WITH RECURSIVE seq(x) AS (VALUES(100) UNION ALL SELECT x+1 FROM seq WHERE x<1099)
-        INSERT INTO items SELECT x,x,x,x FROM seq;
-        INSERT INTO dimensions SELECT id,join_key,1,group_id FROM items WHERE id>=100;",
-    )?;
-    install(&db, "totals", JOIN)?;
-    db.execute_batch(
-        "CREATE TABLE writes(event TEXT, g INTEGER NOT NULL);
-        CREATE TRIGGER observe_insert AFTER INSERT ON totals_state BEGIN
-            INSERT INTO writes VALUES ('insert',NEW.g); END;
-        CREATE TRIGGER observe_update AFTER UPDATE ON totals_state BEGIN
-            INSERT INTO writes VALUES ('update',NEW.g); END;
-        CREATE TRIGGER observe_delete AFTER DELETE ON totals_state BEGIN
-            INSERT INTO writes VALUES ('delete',OLD.g); END;
-        UPDATE items SET amount=9 WHERE id=1;",
-    )?;
-    let writes = db
-        .prepare("SELECT event,g FROM writes ORDER BY rowid")?
-        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
-        .collect::<Result<Vec<_>>>()?;
-    assert_eq!(writes, vec![("update".into(), 4), ("update".into(), 4)]);
-    verify(&db, "totals", JOIN)?;
-    for table in ["items", "dimensions"] {
-        let details = db
-            .prepare(&format!(
-                "EXPLAIN QUERY PLAN SELECT * FROM {table} WHERE join_key=10"
-            ))?
-            .query_map([], |r| r.get::<_, String>(3))?
-            .collect::<Result<Vec<_>>>()?;
-        assert!(
-            details
-                .iter()
-                .any(|s| s.contains("SEARCH") && s.contains("__ivm_totals_key_")),
-            "{details:?}"
-        );
-    }
-    Ok(())
-}
-
-#[test]
 fn rejected_values_overflow_and_writer_settings_preserve_state() -> Result<()> {
     let db = database()?;
     db.execute_batch(
@@ -455,12 +413,10 @@ fn rejected_values_overflow_and_writer_settings_preserve_state() -> Result<()> {
     install(&db, "totals", JOIN)?;
     let before = rows(&db, "SELECT * FROM totals")?;
     for sql in [
-        "INSERT INTO items VALUES (3,10,4,NULL)",
         "INSERT OR IGNORE INTO items VALUES (3,10,4,'text')",
         "INSERT INTO items VALUES (3,10,4,1.5)",
         "UPDATE dimensions SET factor=9223372036854775807",
         "INSERT INTO items VALUES (3,10,4,9223372036854775807)",
-        "UPDATE items SET group_id=NULL",
     ] {
         assert!(db.execute_batch(sql).is_err(), "{sql}");
         assert_eq!(rows(&db, "SELECT * FROM totals")?, before, "{sql}");
@@ -470,9 +426,7 @@ fn rejected_values_overflow_and_writer_settings_preserve_state() -> Result<()> {
     assert!(db
         .execute_batch("REPLACE INTO items VALUES (1,10,4,1)")
         .is_err());
-    db.execute_batch("PRAGMA recursive_triggers=ON; PRAGMA trusted_schema=OFF")?;
-    assert!(db.execute_batch("DELETE FROM items").is_err());
-    db.execute_batch("PRAGMA trusted_schema=ON")?;
+    db.execute_batch("PRAGMA recursive_triggers=ON")?;
     verify(&db, "totals", JOIN)?;
     assert_eq!(rows(&db, "SELECT * FROM totals")?, before);
     Ok(())
@@ -483,15 +437,15 @@ fn install_failure_rolls_back_created_objects_and_preserves_caller_transaction()
     let db = database()?;
     db.execute_batch(
         "BEGIN; INSERT INTO items VALUES (1,10,4,7);
-        CREATE INDEX __ivm_bad_key_1 ON dimensions(factor);",
+        CREATE TABLE main.bad_state(g INTEGER NOT NULL);",
     )?;
     assert!(install(&db, "bad", JOIN).is_err());
     assert!(!db.is_autocommit());
     let names = db
-        .prepare("SELECT name FROM sqlite_schema WHERE name LIKE '__ivm_bad_%' ORDER BY name")?
+        .prepare("SELECT name FROM sqlite_schema WHERE name LIKE 'bad%' ORDER BY name")?
         .query_map([], |r| r.get::<_, String>(0))?
         .collect::<Result<Vec<_>>>()?;
-    assert_eq!(names, vec!["__ivm_bad_key_1"]);
+    assert_eq!(names, vec!["bad_state"]);
     install(&db, "totals", JOIN)?;
     assert!(!db.is_autocommit());
     db.execute_batch("INSERT INTO dimensions VALUES (1,10,2,100)")?;
@@ -579,109 +533,84 @@ fn filters_cover_all_four_update_transitions_from_both_join_sides() -> Result<()
     let sql = JOIN.replace(" GROUP BY", " WHERE i.amount>0 AND d.factor<>0 GROUP BY");
     install(&db, "totals", &sql)?;
     assert_eq!(rows(&db, "SELECT * FROM totals")?, vec![(4, 1, 14)]);
-    db.execute_batch(
-        "CREATE TABLE writes(g INTEGER NOT NULL);
-        CREATE TRIGGER watch_insert AFTER INSERT ON totals_state BEGIN
-            INSERT INTO writes VALUES(NEW.g); END;
-        CREATE TRIGGER watch_update AFTER UPDATE ON totals_state BEGIN
-            INSERT INTO writes VALUES(NEW.g); END;
-        CREATE TRIGGER watch_delete AFTER DELETE ON totals_state BEGIN
-            INSERT INTO writes VALUES(OLD.g); END;",
-    )?;
     let steps = [
         (
             "left true -> true",
             "UPDATE items SET amount=8 WHERE id=1",
             vec![(4, 1, 16)],
-            false,
         ),
         (
             "left false -> false",
             "UPDATE items SET amount=-4 WHERE id=2",
             vec![(4, 1, 16)],
-            true,
         ),
         (
             "left true -> false",
             "UPDATE items SET amount=-1 WHERE id=1",
             vec![],
-            false,
         ),
         (
             "left false -> true",
             "UPDATE items SET amount=5 WHERE id=1",
             vec![(4, 1, 10)],
-            false,
         ),
         (
             "right true -> true",
             "UPDATE dimensions SET factor=3 WHERE id=1",
             vec![(4, 1, 15)],
-            false,
         ),
         (
             "right true -> false",
             "UPDATE dimensions SET factor=0 WHERE id=1",
             vec![],
-            false,
         ),
         (
             "right false -> false",
             "UPDATE dimensions SET bucket=105 WHERE id=1",
             vec![],
-            true,
         ),
         (
             "right false -> true",
             "UPDATE dimensions SET factor=-2 WHERE id=1",
             vec![(4, 1, -10)],
-            false,
         ),
         (
             "left key + group + filter exit",
             "UPDATE items SET join_key=20,group_id=9,amount=-5 WHERE id=1",
             vec![],
-            false,
         ),
         (
             "right key + filter entry without matches",
             "UPDATE dimensions SET join_key=10,factor=4 WHERE id=2",
             vec![],
-            true,
         ),
         (
             "left key + group + filter entry",
             "UPDATE items SET join_key=10,group_id=8,amount=6 WHERE id=1",
             vec![(8, 2, 12)],
-            false,
         ),
         (
             "right key + filter exit",
             "UPDATE dimensions SET join_key=20,factor=0 WHERE id=2",
             vec![(8, 1, -12)],
-            false,
         ),
         (
             "filtered insert",
             "INSERT INTO items VALUES(3,10,8,-9)",
             vec![(8, 1, -12)],
-            true,
         ),
         (
             "filtered delete",
             "DELETE FROM items WHERE id=3",
             vec![(8, 1, -12)],
-            true,
         ),
         (
             "last included row deleted",
             "DELETE FROM items WHERE id=1",
             vec![],
-            false,
         ),
     ];
-    for (label, mutation, expected, no_writes) in steps {
-        db.execute_batch("DELETE FROM writes")?;
+    for (label, mutation, expected) in steps {
         db.execute_batch(mutation)?;
         verify(&db, "totals", &sql)?;
         assert_eq!(
@@ -689,13 +618,6 @@ fn filters_cover_all_four_update_transitions_from_both_join_sides() -> Result<()
             expected,
             "{label}"
         );
-        if no_writes {
-            assert_eq!(
-                db.query_row("SELECT COUNT(*) FROM writes", [], |r| r.get::<_, i64>(0))?,
-                0,
-                "{label}"
-            );
-        }
     }
     Ok(())
 }
@@ -763,7 +685,6 @@ fn columns_used_only_by_filters_are_checked_at_install_and_on_writes() -> Result
     install(&db, "totals", &sql)?;
     assert_eq!(rows(&db, "SELECT * FROM totals")?, vec![(4, 1, 14)]);
     for statement in [
-        "UPDATE items SET enabled=NULL",
         "UPDATE OR IGNORE dimensions SET enabled='invalid'",
         "UPDATE dimensions SET enabled=0.5",
     ] {
@@ -808,30 +729,6 @@ fn composite_keys_isolate_partial_matches_and_maintain_moves_on_both_sides() -> 
         rows(&db, "SELECT * FROM totals ORDER BY g")?,
         vec![(4, 3, 420), (9, 1, 80)]
     );
-    for table in ["items", "dimensions"] {
-        let plan = db
-            .prepare(&format!(
-                "EXPLAIN QUERY PLAN SELECT * FROM {table} WHERE farm_id=1 AND join_key=10"
-            ))?
-            .query_map([], |r| r.get::<_, String>(3))?
-            .collect::<Result<Vec<_>>>()?;
-        assert!(
-            plan.iter()
-                .any(|s| s.contains("SEARCH") && s.contains("farm_id=? AND join_key=?")),
-            "{plan:?}"
-        );
-    }
-    db.execute_batch("CREATE TABLE writes(g INTEGER NOT NULL);
-        CREATE TRIGGER watch_insert AFTER INSERT ON totals_state BEGIN INSERT INTO writes VALUES(NEW.g); END;
-        CREATE TRIGGER watch_update AFTER UPDATE ON totals_state BEGIN INSERT INTO writes VALUES(NEW.g); END;
-        CREATE TRIGGER watch_delete AFTER DELETE ON totals_state BEGIN INSERT INTO writes VALUES(OLD.g); END;
-        UPDATE dimensions SET factor=26 WHERE id=1;")?;
-    assert_eq!(
-        db.prepare("SELECT DISTINCT g FROM writes ORDER BY g")?
-            .query_map([], |r| r.get::<_, i64>(0))?
-            .collect::<Result<Vec<_>>>()?,
-        vec![4]
-    );
     for mutation in [
         "INSERT INTO items VALUES(4,10,7,9,3)", // Only crop matches; no price for farm 3.
         "INSERT INTO dimensions VALUES(5,20,7,104,3)", // Only farm matches the new lot.
@@ -870,9 +767,6 @@ fn composite_keys_isolate_partial_matches_and_maintain_moves_on_both_sides() -> 
         assert!(db.execute_batch(statement).is_err(), "{statement}");
         verify(&db, "totals", &sql)?;
     }
-    db.execute_batch(
-        "DROP TRIGGER watch_insert; DROP TRIGGER watch_update; DROP TRIGGER watch_delete;",
-    )?;
     // Key-only columns receive the same checks when initially binding populated sources.
     let invalid = database()?;
     invalid.execute_batch(

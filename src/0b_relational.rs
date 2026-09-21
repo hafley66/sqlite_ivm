@@ -1,5 +1,5 @@
 //! Owned relational plans lowered from sqlite3-parser. SQLite evaluates scalar expressions.
-use crate::query::error;
+use crate::catalog::error;
 use rusqlite::{Connection, Result};
 use sqlite3_parser::{ast::*, lexer::sql::Parser, Bump, FallibleIterator};
 fn sql<T: fmt::ToTokens>(value: &T) -> String {
@@ -439,7 +439,7 @@ fn expression_aliases(
                 // reach this branch; SQLite checks their arity and value types.
                 format!(
                     "{}({})",
-                    crate::query::quote(&function),
+                    crate::catalog::quote(&function),
                     args.iter().map(sub).collect::<Result<Vec<_>>>()?.join(",")
                 )
             }

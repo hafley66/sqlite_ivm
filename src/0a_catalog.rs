@@ -1,17 +1,19 @@
-use crate::query::{error, quote, Column, Query};
-use rusqlite::{Connection, OptionalExtension, Result};
+use rusqlite::{Connection, Error, OptionalExtension, Result};
 
-// Called inside xCreate's DDL transaction, after the shadow objects exist.
-pub fn record(
-    db: &Connection,
-    name: &str,
-    sql: &str,
-    query: &Query,
-    columns: &[&Column],
-    objects: &[(&str, String)],
-) -> Result<()> {
-    record_objects(db, name, sql, &query.tables, columns, objects)
+pub fn error(message: impl Into<String>) -> Error {
+    Error::UserFunctionError(Box::new(std::io::Error::other(message.into())))
 }
+
+pub fn quote(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Column {
+    pub source: usize,
+    pub name: String,
+}
+
 pub fn record_objects(
     db: &Connection,
     name: &str,
