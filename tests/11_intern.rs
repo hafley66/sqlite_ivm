@@ -172,7 +172,7 @@ fn dropping_the_view_drops_its_dictionary() -> Result<()> {
 }
 
 #[test]
-fn result_state_keys_are_dictionary_ids() -> Result<()> {
+fn write_path_keys_are_dictionary_ids() -> Result<()> {
     let db = view_database()?;
     db.execute_batch(
         "INSERT INTO intern_source VALUES(1,'north'),(2,'north'),(3,'south')",
@@ -187,7 +187,20 @@ fn result_state_keys_are_dictionary_ids() -> Result<()> {
         [],
         |row| row.get(0),
     )?;
-    assert_eq!((state_type, missing), ("INTEGER".to_string(), 0));
+    let delta: String = db.query_row(
+        "SELECT name FROM sqlite_temp_schema WHERE name LIKE '__ivm_delta_%' LIMIT 1",
+        [],
+        |row| row.get(0),
+    )?;
+    let delta_type: String = db.query_row(
+        "SELECT type FROM pragma_table_info(?1) WHERE name='__v'",
+        [&delta],
+        |row| row.get(0),
+    )?;
+    assert_eq!(
+        (state_type, missing, delta_type),
+        ("INTEGER".to_string(), 0, "INTEGER".to_string())
+    );
     Ok(())
 }
 

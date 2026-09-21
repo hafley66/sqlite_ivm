@@ -874,7 +874,7 @@ impl Plan {
                 for side in 0..node.inputs.len() {
                     let side_width = self.nodes[node.inputs[side]].fields.len();
                     db.execute_batch(&format!(
-                        "CREATE TABLE IF NOT EXISTS {}(__r INTEGER NOT NULL,__v TEXT NOT NULL,__n INTEGER NOT NULL,{}); CREATE INDEX IF NOT EXISTS {}_r ON {}(__r)",
+                        "CREATE TABLE IF NOT EXISTS {}(__r INTEGER NOT NULL,__v INTEGER NOT NULL,__n INTEGER NOT NULL,{}); CREATE INDEX IF NOT EXISTS {}_r ON {}(__r)",
                         delta_table(id, side, side_width),
                         columns(side_width),
                         delta_index(id, side, side_width),
@@ -1043,22 +1043,26 @@ impl Plan {
         let arrangement_identity = identity_of(&t);
         db.execute_cached(&format!("DELETE FROM {delta}"), [])?;
         db.execute_cached(
+            &format!("INSERT OR IGNORE INTO {dict}(__v) SELECT {identity} FROM {child} GROUP BY {identity}"),
+            [],
+        )?;
+        db.execute_cached(
             &format!(
-                "INSERT INTO {delta}(__r,__v,__n,{cols}) SELECT sqlite_ivm_hash(__ivm_v),__ivm_v,__ivm_n,{cols} \
+                "INSERT INTO {delta}(__r,__v,__n,{cols}) SELECT sqlite_ivm_hash(__ivm_v),(SELECT __i FROM {dict} WHERE __v=__ivm_v),__ivm_n,{cols} \
                  FROM (SELECT {identity} AS __ivm_v,sum(__m) AS __ivm_n,{cols} FROM {child} GROUP BY {identity}) WHERE __ivm_n!=0"
             ),
             [],
         )?;
         db.execute_cached(
             &format!(
-                "UPDATE {t} SET __n={t}.__n+d.__n FROM {delta} d WHERE d.__r={t}.__r AND d.__v={arrangement_identity}"
+                "UPDATE {t} SET __n={t}.__n+d.__n FROM {delta} d WHERE d.__r={t}.__r AND d.__v=(SELECT __i FROM {dict} WHERE __v={arrangement_identity})"
             ),
             [],
         )?;
         db.execute_cached(
             &format!(
                 "INSERT INTO {t}(__k,__r,__n,{cols}) SELECT (SELECT __i FROM {dict} WHERE __v={key}),d.__r,d.__n,{cols} FROM {delta} d \
-                 WHERE NOT EXISTS(SELECT 1 FROM {t} a WHERE a.__r=d.__r AND {}=d.__v)",
+                 WHERE NOT EXISTS(SELECT 1 FROM {t} a WHERE a.__r=d.__r AND (SELECT __i FROM {dict} WHERE __v={})=d.__v)",
                 identity_of("a")
             ),
             [],
