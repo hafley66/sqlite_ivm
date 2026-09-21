@@ -76,11 +76,10 @@ pub(crate) struct SplitStatements {
 
 pub(crate) struct FixpointStatements {
     pub(crate) max_all: String,
-    pub(crate) max_work: String,
     pub(crate) clear_work: String,
     pub(crate) clear_deleted: String,
     pub(crate) collect_deleted: String,
-    pub(crate) drop_deleted_range: String,
+    pub(crate) drop_deleted: String,
     /// Per member rule: the rederivability test over the work rows.
     pub(crate) restore: String,
     /// Per member rule, in rule order: closure derives over the whole member
@@ -371,14 +370,13 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
         .collect::<Vec<_>>();
     FixpointStatements {
         max_all: format!("SELECT coalesce(max(rowid),0) FROM {all}"),
-        max_work: format!("SELECT coalesce(max(rowid),0) FROM {work}"),
         clear_work: format!("DELETE FROM {work}"),
         clear_deleted: format!("DELETE FROM {deleted}"),
         collect_deleted: format!(
-            "INSERT OR IGNORE INTO {deleted}(__k,{cols}) SELECT __k,{cols} FROM {all} WHERE __k IN (SELECT __k FROM {work} WHERE rowid>?1 AND rowid<=?2)"
+            "INSERT OR IGNORE INTO {deleted}(__k,{cols}) SELECT __k,{cols} FROM {all} WHERE __k IN (SELECT __k FROM {work})"
         ),
-        drop_deleted_range: format!(
-            "DELETE FROM {all} WHERE __k IN (SELECT __k FROM {work} WHERE rowid>?1 AND rowid<=?2)"
+        drop_deleted: format!(
+            "DELETE FROM {all} WHERE __k IN (SELECT __k FROM {work})"
         ),
         restore: format!(
             "INSERT OR IGNORE INTO {all}(__k,{cols}) SELECT w.__k,{} FROM {work} w WHERE {}",
@@ -405,7 +403,7 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
                 let mut params: Vec<Value> = vec![];
                 let from = rule_from(
                     rule,
-                    &roles(name, id, 0, rule, None, Role::Range(work.clone(), 0, 0)),
+                    &roles(name, id, 0, rule, None, Role::Table(work.clone())),
                     &mut params,
                 );
                 derive_sql(&work, &all, &cols, rule, &from, true)

@@ -1,7 +1,10 @@
 use crate::{
     catalog::error,
     relational::{Kind, Plan},
-    relational_maintenance::{BULK_MULTIPLICITY_BUDGET, BULK_ROUND_BUDGET, CachedExecute, Row},
+    relational_maintenance::{
+        BULK_DEPARTURE_ROUND_BUDGET, BULK_MULTIPLICITY_BUDGET, BULK_ROUND_BUDGET,
+        CachedExecute, Row,
+    },
     relational_program::{
         ArrangementStatements, FixpointSide, FixpointStatements, KindStatements, Program,
         SplitStatements, UpsertStatements, CLEAR_TOUCHED,
@@ -235,29 +238,23 @@ impl Plan {
                     db.execute_cached(sql, [])?;
                 }
             }
-            let mut lo = 0;
             let mut delete_rounds = 0usize;
             loop {
-                if delete_rounds >= BULK_ROUND_BUDGET {
-                    return Err(error("fixpoint closure round budget exceeded"));
+                if delete_rounds >= BULK_DEPARTURE_ROUND_BUDGET {
+                    return Err(error("fixpoint departure round budget exceeded"));
                 }
                 delete_rounds += 1;
-                let hi = max_rowid(&statements.max_work)?;
-                if hi == lo {
-                    break;
-                }
                 let round = round_span("delete");
-                db.execute_cached(&statements.collect_deleted, params![lo, hi])?;
-                db.execute_cached(&statements.drop_deleted_range, params![lo, hi])?;
+                db.execute_cached(&statements.collect_deleted, [])?;
+                db.execute_cached(&statements.drop_deleted, [])?;
                 let mut written = 0;
                 for sql in &statements.delete_derives {
-                    written += db.execute_cached(
-                        sql,
-                        params_from_iter([Value::Integer(lo), Value::Integer(hi)]),
-                    )?;
+                    written += db.execute_cached(sql, [])?;
                 }
                 round.record("rows", written);
-                lo = hi;
+                if written == 0 {
+                    break;
+                }
             }
             let restored = max_rowid(&statements.max_all)?;
             db.execute_cached(&statements.restore, [])?;
