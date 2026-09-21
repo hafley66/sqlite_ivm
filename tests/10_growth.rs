@@ -295,7 +295,8 @@ fn one_line(sql: &str) -> String {
 #[test]
 fn phase_and_cost_growth_classes_hold() -> Result<()> {
     let (small_spans, small_statements, small_kinds) = drain_statements(SMALL_ROWS)?;
-    let (large_spans, large_statements, large_kinds) = drain_statements(SMALL_ROWS * 16)?;
+    let (large_spans, large_statements, large_kinds) =
+        drain_statements(SMALL_ROWS * SIZE_RATIO as i64)?;
     for (phase, expected) in [
         ("drain", Growth::Constant),
         ("node", Growth::Constant),
@@ -314,7 +315,7 @@ fn phase_and_cost_growth_classes_hold() -> Result<()> {
             large_kinds.get(kind).copied().unwrap_or_default(),
             expected,
             "node span instances of kind {kind} at {} rows",
-            SMALL_ROWS * 16
+            SMALL_ROWS * SIZE_RATIO as i64
         );
     }
     let cost = |statements: &DrainStatements| -> SpanCounts {
