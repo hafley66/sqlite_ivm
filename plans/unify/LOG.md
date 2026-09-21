@@ -84,3 +84,4 @@ unless the row says otherwise. Executor glm53f unless noted.
 - 13:2x checkpoint. perf lane clean tree, no new commit in 40 min (profiling the cliff). ledger lane 9 min in. No PRs. 33G free.
 - 13:4x docs PR #32 graded (one file, six rows, two cells `not found` with the search named) and merged; main `a4756c9`. Board: only perf/toward-dd remains live.
 - 14:0x checkpoint. perf lane first engine edit in the tree (`1d_drain.rs`, `1e_program.rs`, 13+/11-): the fixpoint `restore` statement becomes a list, the ephemeral-table cliff fix in progress; uncommitted. Only lane live. 33G free.
+- 14:2x checkpoint. perf lane same two files dirty for 40 min, measuring; hailed to commit wip. 34G free.
