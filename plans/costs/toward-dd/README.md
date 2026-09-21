@@ -260,6 +260,23 @@ Two changes, no commit in `src/`:
 | `restore` was one statement whose `WHERE` is `EXISTS(r1) OR EXISTS(r2)`; it became one statement whose body is `SELECT .. WHERE EXISTS(r1) UNION ALL SELECT .. WHERE EXISTS(r2)`, one branch per rule | reach fanout 1 n 100000 | 647947.0, 647428.6, 644158.9 | 2141392.0, rep 0 only, killed | 3.3x slower: the compound select materializes |
 | `drop_deleted_range` was `DELETE FROM all WHERE __k IN (SELECT __k FROM work WHERE rowid range)`; it became `DELETE FROM all WHERE rowid IN (SELECT a.rowid FROM work w JOIN all a ON a.__k=w.__k WHERE w.rowid range)` | reach fanout 1 n 40000 | 351.5 delete, 30118.1 wall | 355.9 delete, 30480.4 wall | no change: SQLite already drove the membership test from the range |
 
+### departure rounds
+
+`RUST_LOG=sqlite_ivm=debug` counts the engine's round spans for the reach
+fanout 1 cell:
+
+| n | delete rounds | derive rounds | wall s |
+|---|---|---|---|
+| 10000 | 5795 | 168 | 2 |
+| 40000 | 52236 | 161 | 36 |
+
+The forward closure settles in a flat 161 to 168 derive rounds, as the one-hop
+diameter predicts. The departure loop is the one that grows: 5795 rounds to
+52236 for 4x the rows. The cell runs 40 deletes and 40 updates, so that is
+roughly 72 delete rounds per departure statement at n 10000 and 653 at
+n 40000, each round scanning the member table. Per statement cost is rounds
+times the closure scan, and that is the whole of the superlinear term.
+
 ### where this stands
 
 Two attempts did not move the worst cell, and both targeted the shape of the
@@ -268,10 +285,13 @@ scans of the member table per statement, not the shape of any one of them:
 say 5.9 s per delete at n 100000 against roughly 10 ms for a scan of the
 100001-row member table, so of the order of 500 scans per statement.
 
-The two changes that follow from that are not one-file, one-SQL-statement
-work: cut the number of departure rounds per statement, or make `__k` cheaper
-to compare than `TEXT` for single integer keys. The second is a storage format
-bump. Both are the parent's call under the lane's stop rule.
+Cutting the departure rounds is not a one-SQL-statement change: one application
+of a rule extends the departing set by one hop, so a round count that runs to
+hundreds per statement means the departing set is walked hop by hop. Deriving
+from the member table instead of from the work range, or closing the departure
+in one recursive statement, is a rewrite of `Plan::fixpoint`'s departure pass.
+Making `__k` cheaper to compare than `TEXT` for single integer keys is a
+storage format bump. Both are the parent's call under the lane's stop rule.
 
 ## SVGs
 
