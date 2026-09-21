@@ -77,3 +77,4 @@ unless the row says otherwise. Executor glm53f unless noted.
 - 11:1x checkpoint. pass-3b amended its wip (`54fcdfa`), probing `2_vtab.rs` with a temp test; 57 min on receipts. perf lane 20 min since its last commit, profiling. No PRs. 33G free.
 - 11:4x refactor pass 3b PR #30 graded: 15 binaries 68/68 x3 (75 - 8 internals - 1 duplicate + 2 moved), clippy clean, `13_statements_per_drain` counts identical, `src/` 6173 -> 5348 lines, `8_group_limit` and `4_features` release wall not slower. One engine behind the vtab: `0_query.rs` and `1_maintenance.rs` gone. Merged; main `bdfe84e`.
 - dispatched refactor/pass-4-compiler-split (flash-omp-max) from `bdfe84e`; brief `refactor-4.brief.md`.
+- 12:0x checkpoint. perf lane 60 min since last commit, no src change yet; hailed for a three-line status. pass-4 18 min in, no commit. No PRs. 34G free.
