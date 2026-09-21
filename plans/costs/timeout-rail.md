@@ -20,14 +20,29 @@ machine and in no way assumed: the run below proves what it does.
 | `timeout(1)` around the cargo invocation | whole-gate wall ceiling, no per-test attribution | one wrapper line | ADOPTED, but only as level 2, which is precisely what it provides |
 | GitHub Actions `timeout-minutes` | job-level ceiling, no per-test attribution | one workflow key | ADOPTED as the CI outer bound |
 | hand-rolled runner, timer, or scheduler | the thing the law says to avoid | unbounded | REFUSED |
+| the `hafley-observe` rails, already a path dependency | `assert_growth` names a span's complexity class between two input sizes; `StatementCounters` reads `vm_step` and `fullscan_step` per statement; `sqlite::instrument` turns both on with one call | nothing new. The crate is already a dependency, `src/3_extension.rs:54` already calls `instrument`, and `tests/10_growth.rs` and `tests/13_statements_per_drain.rs` already use it | **CHOSEN** for level 3. Deterministic, exact, no clock |
 
-Level 1 is bought, not built. Level 2 is bought. Level 3 has no buyer: nextest
-reports each test's wall and compares nothing to a recorded number. The gap is
-filled by a comparator over nextest's own JUnit file. It times nothing, runs
-nothing, and schedules nothing; it reads numbers nextest already wrote.
+Level 1 is bought, not built. Level 2 is bought. Level 3 has no buyer in
+nextest: it reports each test's wall and compares nothing to a recorded number.
+
+Which levels are timed and which are deterministic:
+
+| level | what it does | clock? |
+|---|---|---|
+| 1, per test | nextest `slow-timeout` period, `terminate-after = 1` | timed. A hang has no count to read |
+| 2, per battery | `timeout(1)` ceiling, and `timeout-minutes` in CI | timed. A stall has no count to read |
+| 3, per statement | pinned `vm_step`, `fullscan_step` and `events` per statement, exact | **deterministic.** One run, no tolerance, cannot flap |
+| 3, per phase | pinned node span instances per kind, and the growth class of each phase span and of each view's `vm_step` | **deterministic.** One run, no tolerance, cannot flap |
+| 3, residue | the recorded per-test wall and battery wall | timed, because a wall moves with page cache, I/O and lock waits while every count holds still |
+
+The timed residue keeps a warmup discard, so a cold run cannot enter the
+baseline, and the gate builds every test binary before the timed run, so a cold
+run cannot enter the measurement either. R3 states both. The exact pins are the
+legs that answer the incident: a statement that doubles or rises forty percent
+moves a pinned number, and a busy machine moves none of them.
 
 The proof that nextest enforces a per-test budget, names the test, and kills
-the process is in R4.
+the process is in R4, beside the proofs for the deterministic legs.
 
 ## R2: the base timings, three runs, raw
 
@@ -378,6 +393,11 @@ that also clears a quiet-machine measurement, because that leg already runs
 8.9s wall of `recursion_statement_count_is_linear_in_new_closure_rows` is
 itself a named slow leg in R5.
 
+The two legs this lane adds are measured the same way, in the same record run:
+`10_growth::drain_statement_costs_match_the_pinned_counts` 0.048s and
+`10_growth::phase_and_cost_growth_classes_hold` 0.084s, medians of three. Both
+take the 1s floor, so neither needs an override.
+
 ### Tolerance, measured
 
 Level 3 fires when a leg is above both `recorded x 1.5` and
@@ -395,6 +415,33 @@ blind: a small leg doubling stays inside 0.150s. Requiring both means the
 13.39s (1.5x recorded). The allowance is 3.2x the largest observed spread. The
 incident's 1.7x sits at 15.2s on that leg, above the 13.39s limit, and R4 shows
 that exact number firing.
+
+### Level 3 split: pinned counts first, recorded wall second
+
+The wall tolerance above is the residue, not the regression rail. The
+regression rail is deterministic and it is already in the tree.
+
+Deterministic legs, all in `tests/10_growth.rs`, all one run, all without a
+tolerance band, because `4_counts.rs:78` and `5_sqlite.rs:90` say counts are
+the same on every machine for the same input:
+
+| leg | pins | catches |
+|---|---|---|
+| `drain_statement_costs_match_the_pinned_counts` | every statement the drain runs for eight views, as `vm_step/fullscan_step/events`, compared as a multiset per view against `tests/fixtures/2_statement_costs.json` (250 statements) | a statement that grows by any factor, including forty percent, and any statement that starts scanning |
+| `phase_and_cost_growth_classes_hold` | the growth class of the `drain`, `node`, `fixpoint` and `round` spans between 8 and 128 source rows; the node span instance count of every kind at both sizes; the growth class of each view's `vm_step` | a phase that turns quadratic, and a node kind that starts making one span per row |
+
+Measured classes at base: `drain`, `node`, `fixpoint` and `round` are Constant;
+all eight views' `vm_step` is Linear. `refresh_statement_costs`, marked
+`#[ignore]`, rewrites the fixture.
+
+The timed legs stay for what counts cannot express: a wall moves with page
+cache, I/O, lock waits and process start while every count holds still. Two
+guards keep that residue from flapping. The record script discards a warmup
+run, so a cold baseline cannot be committed. The gate builds every test binary
+with `cargo nextest run --no-run` before the timed run, so a cold run cannot
+reach the measurement either, and no test in the battery builds anything: the
+one test that loads a native artifact skips when the artifact is absent, and
+the scenarios that build it run after the check.
 
 ## R4: the rail seen to fail
 
@@ -483,29 +530,65 @@ timeout rail: 1 leg(s) above the recorded wall. Re-run scripts/timeout-rail-reco
 exit 1
 ```
 
+### The deterministic legs, seen to fail
+
+Three perturbations, each reverted before the commit. The first is the incident
+at forty percent, on one statement of one view:
+
+```
+$ python3 -c 'raise the map_view pin from 470/14/1 to 658/14/1'
+$ cargo nextest run -E 'test(=drain_statement_costs_match_the_pinned_counts)'
+    statement costs moved:
+    map_view: 12 statements measured, 12 pinned
+      measured only: ["470/14/1 x1"]
+      pinned only:   ["658/14/1 x1"]
+      heaviest measured: 470/14/1 WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<(SELECT coalesce(max(__m),0) FROM temp.__ivm_out_1_2)) INSERT INTO main."map_view_state"(__key,c0) SELECT ... | 396/0/8 INSERT INTO temp.__ivm_out_2_0 VALUES(?1,?2,?3) | 110/7/1 ...
+EXIT=100
+```
+
+The failure names the view, both multisets, and the statement with its SQL, so
+the regressed statement is the first line of the output.
+
+```
+$ # expected class for the drain span changed from Constant to Linear
+$ cargo nextest run -E 'test(=phase_and_cost_growth_classes_hold)'
+assertion `left == right` failed: span drain grew Constant from 8 to 8 entries across a 16x input
+CLASS_EXIT=100
+
+$ # pinned node span instance count for kind map changed from 20 to 19
+$ cargo nextest run -E 'test(=phase_and_cost_growth_classes_hold)'
+assertion `left == right` failed: node span instances of kind map at 8 rows
+  left: 20
+ right: 19
+INSTANCE_EXIT=100
+```
+
 ## R5: the battery green, and what the rail costs
 
 Three full gate runs with the rail on, `SQLITE3` pointed at a `sqlite3` built
-with extension loading (see the note below), all six Bash scenarios included:
+with extension loading (see the note below), all six Bash scenarios included,
+70 tests after the two deterministic legs:
 
 ```
 $ SQLITE3=/opt/homebrew/opt/sqlite/bin/sqlite3 bash scripts/9_verify.sh
-timeout rail: 68 tests and the battery within tolerance for Darwin arm64
-     Summary [   8.945s] 68 tests run: 68 passed, 0 skipped
-...
-real 9.85      (run 1)
-real 9.53      (run 2)
-real 9.57      (run 3)
+timeout rail: 70 tests and the battery within tolerance for Darwin arm64
+     Summary [   8.918s] 70 tests run: 70 passed, 1 skipped      (run 1, real 9.58s)
+     Summary [   8.900s] 70 tests run: 70 passed, 1 skipped      (run 2, real 9.57s)
+     Summary [   8.877s] 70 tests run: 70 passed, 1 skipped      (run 3, real 9.47s)
 exit 0 three times; the six scenarios end in PASS
 ```
 
+The one skipped test is the ignored fixture refresh, which the gate never runs.
+The two new legs cost 0.036s and 0.093s inside the battery, both under the 1s
+floor, so neither needs an override.
+
 The gate wall is the battery plus 0.4s to 0.6s of scenarios. Battery wall
 without the rail, the old `cargo test --locked` invocation, three runs:
-12.73s, 12.75s, 12.81s. Battery wall with the rail, nextest, three runs: 9.02s,
-9.00s, 9.02s, from the `Summary` lines above. The rail is 3.7s cheaper than the
-line it replaces, because nextest runs test binaries in parallel. The level 3
-comparator costs 0.04s: `python3 scripts/timeout-rail.py check` reads one JUnit
-file. The rail adds no measurable wall.
+12.73s, 12.75s, 12.81s. Battery wall with the rail, nextest: 8.88s to 8.92s
+above. The rail is about 3.8s cheaper than the line it replaces, because
+nextest runs test binaries in parallel. The level 3 comparator costs 0.02s:
+`python3 scripts/timeout-rail.py check` reads one JUnit file. The rail adds no
+measurable wall, and the deterministic legs add 0.13s of it.
 
 Environment note. Run without `SQLITE3`, the six Bash scenarios fail on this
 machine: `/usr/bin/sqlite3` is Apple's 3.43.2 and refuses `load_extension`
@@ -514,40 +597,63 @@ older than this lane and unchanged by it, and `scripts/[1-6]_*.sh` are not
 touched here. CI sets `SQLITE3` to Homebrew's sqlite3 on macOS and installs the
 distro sqlite3 on Linux, so the scenarios run there.
 
-## R6: the recorded file and its refresh
+## R6: the recorded files and their refresh
 
-`scripts/timeout-rail.tsv` holds one row per platform per test plus one
-`BATTERY` row, all medians of three runs. The row in this commit is
-`Darwin arm64`, 68 tests, battery 8.857s. The comparator uses the row for the
+Two checked-in artifacts carry level 3, one deterministic and one timed.
+
+`tests/fixtures/2_statement_costs.json` is the deterministic one: 250
+statements, 4.4 KB, one `vm_step/fullscan_step/events` entry per distinct
+statement per view, sorted. Refresh procedure, one paragraph: run
+`cargo nextest run --run-ignored ignored-only -E 'test(=refresh_statement_costs)'`.
+That test rebuilds the fixture from one drain of eight views over eight source
+rows and writes it back. Commit the file only after the change to a statement's
+work is understood, because a moved pin is the rail working, not the rail
+failing. The numbers are SQLite's own opcode counts, so they do not drift with
+the machine; they move only when a statement's work changes or when the pinned
+`rusqlite` build changes.
+
+`scripts/timeout-rail.tsv` is the timed one: one row per platform per test plus
+one `BATTERY` row, all medians of three runs. The row in this commit is
+`Darwin arm64`, 70 tests, battery 8.826s. The comparator uses the row for the
 platform in `uname -sm` and prints a notice, leaving levels 1 and 2 in force,
 when the platform has no row yet.
 
-Refresh procedure, one paragraph: on a quiet machine at the sha whose walls are
-to be recorded, run `bash scripts/timeout-rail-record.sh`. It runs the battery
-three times through `cargo nextest run` with the rail's own config, copies each
-JUnit report, and writes the per-test median and the battery median for
-`uname -sm` into `scripts/timeout-rail.tsv`. Commit the file. Run it only after
-a wall change is understood, because the file is the level 3 oracle.
+Refresh procedure for the timed file, one paragraph: on a quiet machine at the
+sha whose walls are to be recorded, run `bash scripts/timeout-rail-record.sh`.
+It runs the battery four times through `cargo nextest run` with the rail's own
+config, discards run 1 as a warmup, copies the three JUnit reports that follow,
+and writes the per-test median and the battery median for `uname -sm` into
+`scripts/timeout-rail.tsv`. Commit the file. The discard exists because a cold
+target dir or a cold page cache swings the first run far above the rest, and a
+baseline taken from it would fire on the next warm run.
 
 ## R7: the diff
 
 ```
 $ git diff --stat origin/main...HEAD
- .github/workflows/sqlite-ivm.yml |  26 +-
- plans/costs/timeout-rail.md      | 524 +++++++++++++++++++++++++++++++++++++++
- scripts/9_verify.sh              |  55 +++-
- scripts/nextest.toml             |  37 +++
- scripts/timeout-rail-record.sh   |  25 ++
- scripts/timeout-rail.py          | 115 +++++++++
- scripts/timeout-rail.tsv         |  71 ++++++
- 7 files changed, 848 insertions(+), 5 deletions(-)
+ .github/workflows/sqlite-ivm.yml      |  26 +-
+ plans/costs/timeout-rail.md           | 658 ++++++++++++++++++++++++++++++++++
+ scripts/9_verify.sh                   |  55 ++-
+ scripts/nextest.toml                  |  37 ++
+ scripts/timeout-rail-record.sh        |  32 ++
+ scripts/timeout-rail.py               | 115 ++++++
+ scripts/timeout-rail.tsv              |  73 ++++
+ tests/10_growth.rs                    | 252 ++++++++++++-
+ tests/fixtures/2_statement_costs.json | 272 ++++++++++++++
+ 9 files changed, 1514 insertions(+), 6 deletions(-)
 ```
 
 Every path is owned: `.github/workflows/**`, `scripts/` (the repo has no
-`justfile`, so `scripts/` is the gate), and the receipts page. Nothing under
-`src/`, `bench/`, or `archive/`. `Cargo.toml` is untouched: the rail needs no
-harness dependency, only the `cargo-nextest` binary that CI installs with
-`taiki-e/install-action@v2`.
+`justfile`, so `scripts/` is the gate), `tests/**` for the deterministic legs,
+and the receipts page. Nothing under `src/`, `bench/`, or `archive/`.
+`Cargo.toml` is untouched: the rail needs no harness dependency, only the
+`cargo-nextest` binary that CI installs with `taiki-e/install-action@v2`, and
+`hafley-observe`, which is already a dependency.
+
+`tests/10_growth.rs` gains two tests, one ignored refresh test, a view list, a
+pinned instance map and a helper. No existing test's assertions change; the
+only edit to existing lines is the import. The fixture is generated, and R6
+gives the command that regenerates it.
 
 Two changes inside the workflow need naming. First, the verify job gains
 `timeout-minutes: 30`, the outer bound over the gate's own 120s ceiling.
