@@ -257,7 +257,9 @@ impl Plan {
                 }
             }
             let restored = max_rowid(&statements.max_all)?;
-            db.execute_cached(&statements.restore, [])?;
+            for sql in &statements.restores {
+                db.execute_cached(sql, [])?;
+            }
             rounds(restored)?;
             db.execute_cached(&statements.clear_work, [])?;
         }

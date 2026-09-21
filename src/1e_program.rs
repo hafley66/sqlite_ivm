@@ -80,8 +80,7 @@ pub(crate) struct FixpointStatements {
     pub(crate) clear_deleted: String,
     pub(crate) collect_deleted: String,
     pub(crate) drop_deleted: String,
-    /// Per member rule: the rederivability test over the work rows.
-    pub(crate) restore: String,
+    pub(crate) restores: Vec<String>,
     /// Per member rule, in rule order: closure derives over the whole member
     /// table bounded by a rowid range carried in `?1` and `?2`.
     pub(crate) round_derives: Vec<String>,
@@ -341,33 +340,6 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
     let a_identity = identity_of("a");
     let d_cols = (0..width).map(|i| format!("d.c{i}")).collect::<Vec<_>>().join(",");
     let a_cols = (0..width).map(|i| format!("a.c{i}")).collect::<Vec<_>>().join(",");
-    let matched = |rule: &Rule| {
-        rule.head
-            .iter()
-            .zip(&node.fields)
-            .enumerate()
-            .map(|(i, (h, f))| format!("(({h}) COLLATE {}) IS w.c{i}", f.collation))
-            .collect::<Vec<_>>()
-            .join(" AND ")
-    };
-    let plain_from = |rule: &Rule| {
-        let mut params: Vec<Value> = vec![];
-        rule_from(
-            rule,
-            &roles(name, id, 0, rule, None, Role::Table(all.clone())),
-            &mut params,
-        )
-    };
-    let restore_parts = rules
-        .iter()
-        .map(|rule| {
-            format!(
-                "EXISTS(SELECT 1 {}{})",
-                plain_from(rule),
-                rule_where(rule, Some(&matched(rule)))
-            )
-        })
-        .collect::<Vec<_>>();
     FixpointStatements {
         max_all: format!("SELECT coalesce(max(rowid),0) FROM {all}"),
         clear_work: format!("DELETE FROM {work}"),
@@ -378,11 +350,10 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
         drop_deleted: format!(
             "DELETE FROM {all} WHERE __k IN (SELECT __k FROM {work})"
         ),
-        restore: format!(
-            "INSERT OR IGNORE INTO {all}(__k,{cols}) SELECT w.__k,{} FROM {work} w WHERE {}",
-            (0..width).map(|i| format!("w.c{i}")).collect::<Vec<_>>().join(","),
-            restore_parts.join(" OR ")
-        ),
+        restores: rules
+            .iter()
+            .map(|rule| restore_sql(name, id, &all, &work, &cols, width, rule))
+            .collect(),
         round_derives: rules
             .iter()
             .filter(|r| r.member().is_some())
@@ -420,6 +391,48 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
             .map(|side| fixpoint_side(plan, name, id, side, &all, &work))
             .collect(),
     }
+}
+
+fn restore_sql(
+    name: &str,
+    id: usize,
+    members: &str,
+    work: &str,
+    cols: &str,
+    width: usize,
+    rule: &Rule,
+) -> String {
+    let mut offset = 0;
+    let mut sources = rule
+        .occurrences
+        .iter()
+        .enumerate()
+        .map(|(n, (occurrence, source_width))| {
+            let source = match occurrence {
+                Occurrence::Input(side) => table(name, id, *side),
+                Occurrence::Member => members.to_string(),
+            };
+            let renamed = (0..*source_width)
+                .map(|i| format!("c{i} AS c{}", offset + i))
+                .collect::<Vec<_>>()
+                .join(",");
+            offset += source_width;
+            let member = *occurrence == Occurrence::Member;
+            (member, format!("(SELECT {renamed} FROM {source}) q{n}"))
+        })
+        .collect::<Vec<_>>();
+    sources.sort_by_key(|(member, _)| !member);
+    let from = sources.into_iter().map(|(_, sql)| sql).collect::<Vec<_>>().join(" CROSS JOIN ");
+    let work_projection = (0..width)
+        .map(|i| format!("c{i} AS __work_c{i}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let work_cols = (0..width).map(|i| format!("w.__work_c{i}")).collect::<Vec<_>>().join(",");
+    format!(
+        "INSERT OR IGNORE INTO {members}(__k,{cols}) SELECT w.__work_k,{work_cols} \
+         FROM {from} CROSS JOIN (SELECT __k AS __work_k,{work_projection} FROM {work}) w{}",
+        rule_where(rule, Some(&format!("{}=w.__work_k", rule.key)))
+    )
 }
 
 fn departure_derive_sql(
