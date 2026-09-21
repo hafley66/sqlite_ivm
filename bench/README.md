@@ -31,7 +31,7 @@ Requires the extension dylib for `sqlite-ivm`: build it at the repo root with
 `libsqlite_ivm.{dylib,so}` next to its own binary, or set `IVM_EXTENSION`).
 For pg engines pass `--pg-prefix` or `IVM_POSTGRES_PREFIX`.
 
-### `bench scale [--circuits ...] [--n 10,100,...] [--fanout 1,10] [--arms a1,a2] [--out DIR]`
+### `bench scale [--circuits ...] [--n 10,100,...] [--fanout 1,10] [--arms a1,a2] [--reps N] [--out DIR]`
 
 Arm sweep. Circuits: `chain`, `join`, `group`, `distinct`, `window`, `reach`;
 seed `k=(id*7)%(n/fanout+1)`, `v=(id*13)%(n/fanout+1)` into a/b/c in one
@@ -39,7 +39,8 @@ transaction; WAL/NORMAL pragma set. Arms: `sqlite-ivm` (in-process
 `sqlite_ivm::extension::register` plus a virtual table), `sqlite-query` (the
 circuit query run directly), `dd` (the scale dataflow graphs in
 `scale_dd.rs`). Every arm takes the same write stream, and each cell's final
-read is checked against a plain in-memory recompute.
+read is checked against a plain in-memory recompute. `--reps N` runs every
+cell N times, one `rep` column per row; the SVGs plot the median rep.
 
 - Columns: `wall_ms` is the whole cell, writes plus reads. insert/delete/update
   are means over 40 single-statement writes; `replace_ms` is a single 1000-row

@@ -40,6 +40,7 @@ pub struct Scale {
     pub ns: Vec<i64>,
     pub fanouts: Vec<i64>,
     pub arms: Vec<String>,
+    pub reps: usize,
     pub out: PathBuf,
 }
 
@@ -312,6 +313,7 @@ struct ScaleRow {
     circuit: String,
     fanout: i64,
     n: i64,
+    rep: usize,
     arm: String,
     wall_ms: f64,
     insert_ms: f64,
@@ -335,7 +337,7 @@ impl Scale {
         let mut tsv = std::fs::File::create(self.out.join("scale.tsv"))?;
         writeln!(
             tsv,
-            "circuit\tfanout\tn\tarm\twall_ms\tinsert_ms\tdelete_ms\tupdate_ms\treplace_ms\
+            "circuit\tfanout\tn\trep\tarm\twall_ms\tinsert_ms\tdelete_ms\tupdate_ms\treplace_ms\
              \trecompute_ms\tpeak_rss_mib\tdisk_read_bytes\tdisk_write_bytes\tdb_bytes\
              \tarrangement_rows\tivm_over_dd"
         )?;
@@ -348,40 +350,45 @@ impl Scale {
                 for &n in &self.ns {
                     let spec = CellSpec::new(circuit, query, n, fanout);
                     let started = Instant::now();
-                    match self.cell(&spec) {
-                        Ok(cell_rows) => {
-                            for row in &cell_rows {
-                                for (column, ms) in [
-                                    ("wall", row.wall_ms),
-                                    ("insert", row.insert_ms),
-                                    ("delete", row.delete_ms),
-                                    ("update", row.update_ms),
-                                    ("replace", row.replace_ms),
-                                    ("recompute", row.recompute_ms),
-                                ] {
-                                    if ms > 10_000.0 {
-                                        println!(
-                                            "defect: {} fanout={} n={n} arm={}: {column} {:.1} ms > 10 s",
-                                            circuit, fanout, row.arm, ms,
-                                        );
+                    for rep in 0..self.reps.max(1) {
+                        match self.cell(&spec, rep) {
+                            Ok(cell_rows) => {
+                                for row in &cell_rows {
+                                    for (column, ms) in [
+                                        ("wall", row.wall_ms),
+                                        ("insert", row.insert_ms),
+                                        ("delete", row.delete_ms),
+                                        ("update", row.update_ms),
+                                        ("replace", row.replace_ms),
+                                        ("recompute", row.recompute_ms),
+                                    ] {
+                                        if ms > 10_000.0 {
+                                            println!(
+                                                "defect: {} fanout={} n={n} rep={rep} arm={}: {column} {:.1} ms > 10 s",
+                                                circuit, fanout, row.arm, ms,
+                                            );
+                                        }
                                     }
+                                    write!(tsv, "{}", row.tsv_line())?;
                                 }
-                                write!(tsv, "{}", row.tsv_line())?;
+                                tsv.flush()?;
+                                rows.extend(cell_rows);
                             }
-                            tsv.flush()?;
-                            info!(
-                                "{} fanout={fanout} n={n} done in {:.1} s",
-                                circuit,
-                                started.elapsed().as_secs_f64()
-                            );
-                            rows.extend(cell_rows);
-                        }
-                        Err(error) => {
-                            println!("defect: {circuit} fanout={fanout} n={n}: {error:#}");
-                            tsv.flush()?;
-                            exit = 2;
+                            Err(error) => {
+                                println!(
+                                    "defect: {circuit} fanout={fanout} n={n} rep={rep}: {error:#}"
+                                );
+                                tsv.flush()?;
+                                exit = 2;
+                            }
                         }
                     }
+                    info!(
+                        "{} fanout={fanout} n={n} {} reps done in {:.1} s",
+                        circuit,
+                        self.reps.max(1),
+                        started.elapsed().as_secs_f64()
+                    );
                 }
             }
         }
@@ -389,12 +396,12 @@ impl Scale {
         Ok(exit)
     }
 
-    fn cell(&self, spec: &CellSpec) -> Result<Vec<ScaleRow>> {
+    fn cell(&self, spec: &CellSpec, rep: usize) -> Result<Vec<ScaleRow>> {
         let oracle = oracle_rows(spec)?;
         let mut cell_rows: Vec<ScaleRow> = Vec::new();
         for arm_name in &self.arms {
             let scratch = self.out.join("scratch").join(format!(
-                "{}-{}-f{}-n{}",
+                "{}-{}-f{}-n{}-r{rep}",
                 arm_name, spec.circuit, spec.fanout, spec.n
             ));
             std::fs::create_dir_all(&scratch)?;
@@ -453,6 +460,7 @@ impl Scale {
                 circuit: spec.circuit.clone(),
                 fanout: spec.fanout,
                 n: spec.n,
+                rep,
                 arm: arm_name.clone(),
                 wall_ms,
                 insert_ms,
@@ -488,10 +496,11 @@ impl ScaleRow {
             value.map(|bytes| bytes.to_string()).unwrap_or_else(|| "null".to_string())
         };
         format!(
-            "{}\t{}\t{}\t{}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{}\t{}\t{}\t{}\t{}\n",
+            "{}\t{}\t{}\t{}\t{}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{:.1}\t{}\t{}\t{}\t{}\t{}\n",
             self.circuit,
             self.fanout,
             self.n,
+            self.rep,
             self.arm,
             self.wall_ms,
             self.insert_ms,
@@ -528,13 +537,30 @@ fn render_svgs(out: &Path, rows: &[ScaleRow]) -> Result<()> {
     for circuit in &circuits {
         let cells: Vec<&ScaleRow> =
             rows.iter().filter(|row| &row.circuit == circuit).collect();
+        let median = |mut values: Vec<f64>| -> f64 {
+            values.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            values[values.len() / 2]
+        };
         let mut series: Vec<(String, Vec<(i64, f64)>)> = Vec::new();
         for arm in ARMS {
             for fanout in [1i64, 10] {
-                let points: Vec<(i64, f64)> = cells
+                let mut ns: Vec<i64> = cells
                     .iter()
                     .filter(|row| row.arm == arm && row.fanout == fanout)
-                    .map(|row| (row.n, row.wall_ms))
+                    .map(|row| row.n)
+                    .collect();
+                ns.sort();
+                ns.dedup();
+                let points: Vec<(i64, f64)> = ns
+                    .into_iter()
+                    .map(|n| {
+                        let values = cells
+                            .iter()
+                            .filter(|row| row.arm == arm && row.fanout == fanout && row.n == n)
+                            .map(|row| row.wall_ms)
+                            .collect();
+                        (n, median(values))
+                    })
                     .collect();
                 if !points.is_empty() {
                     series.push((format!("{arm} f={fanout}"), points));
@@ -551,10 +577,27 @@ fn render_svgs(out: &Path, rows: &[ScaleRow]) -> Result<()> {
         let ratio: Vec<(String, Vec<(i64, f64)>)> = [1i64, 10]
             .into_iter()
             .filter_map(|fanout| {
-                let points: Vec<(i64, f64)> = cells
+                let mut ns: Vec<i64> = cells
                     .iter()
                     .filter(|row| row.fanout == fanout && row.ivm_over_dd.is_some())
-                    .map(|row| (row.n, row.ivm_over_dd.unwrap()))
+                    .map(|row| row.n)
+                    .collect();
+                ns.sort();
+                ns.dedup();
+                let points: Vec<(i64, f64)> = ns
+                    .into_iter()
+                    .map(|n| {
+                        let values = cells
+                            .iter()
+                            .filter(|row| {
+                                row.fanout == fanout
+                                    && row.n == n
+                                    && row.ivm_over_dd.is_some()
+                            })
+                            .map(|row| row.ivm_over_dd.unwrap())
+                            .collect();
+                        (n, median(values))
+                    })
                     .collect();
                 (!points.is_empty()).then(|| (format!("ivm/dd f={fanout}"), points))
             })

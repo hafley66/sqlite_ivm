@@ -21,11 +21,14 @@ sqlite-ivm = { path = ".." }
 sysinfo = "0.33"
 timely = "=0.31.0"
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [[bin]]
 name = "bench"
 path = "src/main.rs"
 
 [profile.release]
-debug = 0
+# Symbols stay in so `samply` profiles resolve to function and line. Codegen
+# is unchanged.
+debug = 1
+strip = "none"
