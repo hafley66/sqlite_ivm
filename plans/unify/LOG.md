@@ -98,3 +98,4 @@ unless the row says otherwise. Executor glm53f unless noted.
 - 17:5x checkpoint. perf lane clean tree, no src edit yet on arc 3 (reading `1d_drain.rs` fixpoint). 6.5 h alive. 32G free.
 - 18:1x checkpoint. perf lane: baseline banked (`5c73317`), src clean, rewrite not yet in the tree. 32G free.
 - 18:2x perf lane `4b6171b`, the bill: the departure derive step joins the work rowid slice to the input relation one hop per round, and both sides of the join predicate are wrapped in a cast, so no index can serve it (full scan per round). Two fixes stack: set-at-a-time (rounds) and an index-serving predicate (scan). Lane proceeds.
+- 18:4x checkpoint. PR #35 (ledger only) merged. Disk fell to 22G: 9 GB of `/private/tmp/item5-*.log` from the bugs lane's HAFLEY_LOG runs (647 MiB each, 130 log files in /tmp). Deleted tonight's; 31G free. Rail for future briefs: measurement logs go under the lane's `CARGO_TARGET_DIR`, never /tmp.
