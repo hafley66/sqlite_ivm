@@ -6,6 +6,8 @@ pub mod extension;
 pub mod relational;
 #[path = "0c_compile_from.rs"]
 pub mod compile_from;
+#[path = "0d_compile_select.rs"]
+pub mod compile_select;
 #[path = "0f_columns.rs"]
 pub mod columns;
 #[path = "1a_relational.rs"]
