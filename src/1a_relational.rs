@@ -181,7 +181,7 @@ impl CachedExecute for Connection {
 }
 pub(crate) const BULK_ROUND_BUDGET: usize = 100_000;
 pub(crate) const BULK_DEPARTURE_ROUND_BUDGET: usize = 100_000;
-pub(crate) const BULK_DEPARTURE_SET_ROUND_BUDGET: usize = 8;
+pub(crate) const BULK_DEPARTURE_SET_ROUND_BUDGET: usize = 32;
 pub(crate) const BULK_DEPARTURE_SET_RESTORE_THRESHOLD: usize = 1_024;
 pub(crate) const BULK_GROUP_BUDGET: usize = 100_000;
 pub(crate) const BULK_MULTIPLICITY_BUDGET: i64 = 1_000_000;
