@@ -51,3 +51,4 @@ unless the row says otherwise. Executor glm53f unless noted.
 - 05:3x refactor pass 1 PR #25 graded: 75/75 x3 here, clippy clean, `format!` strings byte-identical, only owned files, `1a` 259 / `1b_state` 327 / `1c_materialize` 406 / `1d_drain` 553 lines, one fn per arm. Merged; main `a35146c`.
 - dispatched refactor/pass-2-statement-program (glm53f-omp-max) from `a35146c`; brief `refactor-2.brief.md`.
 - 05:5x checkpoint. bench-rust at tool call 610, its own words "all cells pass", fixing pg_ivm error text and disk columns; still zero commits (omp takes the commit hail at turn end). pass-2 running 10 min, no commit. No PRs open.
+- 06:1x checkpoint. bench-rust 84 min, tool call 861, "remaining items (4)", zero commits. pass-2 30 min, `1e_program.rs` on disk, editing after a stale-offset mishap, zero commits. Both alive. No PRs.
