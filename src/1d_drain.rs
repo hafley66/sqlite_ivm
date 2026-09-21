@@ -240,11 +240,14 @@ impl Plan {
                     work_rows += db.execute_cached(sql, [])?;
                 }
             }
+            db.execute_cached(&statements.clear_departing, [])?;
+            db.execute_cached(&statements.seed_departing, [])?;
             let mut settled = false;
             for _ in 0..BULK_DEPARTURE_SET_ROUND_BUDGET {
                 let round = round_span("delete");
-                db.execute_cached(&statements.collect_deleted, [])?;
-                db.execute_cached(&statements.drop_deleted, [])?;
+                db.execute_cached(&statements.clear_next_departing, [])?;
+                db.execute_cached(&statements.collect_departing, [])?;
+                db.execute_cached(&statements.drop_departing, [])?;
                 let mut written = 0;
                 for sql in &statements.delete_derives {
                     written += db.execute_cached(sql, [])?;
@@ -255,6 +258,9 @@ impl Plan {
                     settled = true;
                     break;
                 }
+                db.execute_cached(&statements.extend_work, [])?;
+                db.execute_cached(&statements.clear_departing, [])?;
+                db.execute_cached(&statements.advance_departing, [])?;
             }
             if !settled {
                 let mut delete_rounds = 0usize;

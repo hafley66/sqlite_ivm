@@ -5,9 +5,9 @@ use crate::{
     relational::{Kind, Occurrence, Plan, Rule},
     relational_materialize::MaterializeStatements,
     relational_maintenance::{
-        arrived_table, columns, deleted_table, delta_index, delta_table, identity_sql, json_key,
-        keys_table, left_table, out_table, parameters, plain, roles, rule_from, rule_where, table,
-        Role,
+        arrived_table, columns, deleted_table, delta_index, delta_table, departing_table,
+        identity_sql, json_key, keys_table, left_table, next_departing_table, out_table,
+        parameters, plain, roles, rule_from, rule_where, table, Role,
     },
 };
 use rusqlite::{types::Value, Connection};
@@ -80,6 +80,13 @@ pub(crate) struct FixpointStatements {
     pub(crate) clear_deleted: String,
     pub(crate) collect_deleted: String,
     pub(crate) drop_deleted: String,
+    pub(crate) clear_departing: String,
+    pub(crate) seed_departing: String,
+    pub(crate) clear_next_departing: String,
+    pub(crate) collect_departing: String,
+    pub(crate) drop_departing: String,
+    pub(crate) extend_work: String,
+    pub(crate) advance_departing: String,
     pub(crate) restore_small: String,
     pub(crate) restores: Vec<String>,
     /// Per member rule, in rule order: closure derives over the whole member
@@ -163,6 +170,11 @@ fn scratch_statements(plan: &Plan) -> Vec<String> {
             statements.push(format!(
                 "CREATE TABLE IF NOT EXISTS {deleted}(__k TEXT PRIMARY KEY,{cols})",
                 deleted = deleted_table(id, width)
+            ));
+            statements.push(format!(
+                "CREATE TABLE IF NOT EXISTS {departing}(__k TEXT PRIMARY KEY,{cols}); CREATE TABLE IF NOT EXISTS {next}(__k TEXT PRIMARY KEY,{cols})",
+                departing = departing_table(id, width),
+                next = next_departing_table(id, width)
             ));
         }
     }
@@ -336,6 +348,8 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
     let cols = columns(width);
     let out = out_table(id, width);
     let deleted = deleted_table(id, width);
+    let departing = departing_table(id, width);
+    let next_departing = next_departing_table(id, width);
     let identity_of =
         |alias: &str| json_key((0..width).map(|i| plain(&format!("{alias}.c{i}"))).collect());
     let d_identity = identity_of("d");
@@ -379,6 +393,23 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
         drop_deleted: format!(
             "DELETE FROM {all} WHERE __k IN (SELECT __k FROM {work})"
         ),
+        clear_departing: format!("DELETE FROM {departing}"),
+        seed_departing: format!(
+            "INSERT OR IGNORE INTO {departing}(__k,{cols}) SELECT __k,{cols} FROM {work}"
+        ),
+        clear_next_departing: format!("DELETE FROM {next_departing}"),
+        collect_departing: format!(
+            "INSERT OR IGNORE INTO {deleted}(__k,{cols}) SELECT __k,{cols} FROM {all} WHERE __k IN (SELECT __k FROM {departing})"
+        ),
+        drop_departing: format!(
+            "DELETE FROM {all} WHERE __k IN (SELECT __k FROM {departing})"
+        ),
+        extend_work: format!(
+            "INSERT OR IGNORE INTO {work}(__k,{cols}) SELECT __k,{cols} FROM {next_departing}"
+        ),
+        advance_departing: format!(
+            "INSERT INTO {departing}(__k,{cols}) SELECT __k,{cols} FROM {next_departing}"
+        ),
         restore_small: format!(
             "INSERT OR IGNORE INTO {all}(__k,{cols}) SELECT w.__k,{} FROM {work} w WHERE {}",
             (0..width).map(|i| format!("w.c{i}")).collect::<Vec<_>>().join(","),
@@ -408,10 +439,10 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
                 let mut params: Vec<Value> = vec![];
                 let from = rule_from(
                     rule,
-                    &roles(name, id, 0, rule, None, Role::Table(work.clone())),
+                    &roles(name, id, 0, rule, None, Role::Table(departing.clone())),
                     &mut params,
                 );
-                derive_sql(&work, &all, &cols, rule, &from, true)
+                derive_sql(&next_departing, &all, &cols, rule, &from, true)
             })
             .collect(),
         recursive_delete_derives: rules

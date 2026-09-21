@@ -35,6 +35,12 @@ pub(crate) fn left_table(id: usize, side: usize, width: usize) -> String {
 pub(crate) fn deleted_table(id: usize, width: usize) -> String {
     format!("temp.__ivm_deleted_{width}_{id}")
 }
+pub(crate) fn departing_table(id: usize, width: usize) -> String {
+    format!("temp.__ivm_departing_{width}_{id}")
+}
+pub(crate) fn next_departing_table(id: usize, width: usize) -> String {
+    format!("temp.__ivm_next_departing_{width}_{id}")
+}
 pub(crate) fn parameters(n: usize) -> String {
     (1..=n)
         .map(|i| format!("?{i}"))
@@ -176,7 +182,7 @@ impl CachedExecute for Connection {
 pub(crate) const BULK_ROUND_BUDGET: usize = 100_000;
 pub(crate) const BULK_DEPARTURE_ROUND_BUDGET: usize = 100_000;
 pub(crate) const BULK_DEPARTURE_SET_ROUND_BUDGET: usize = 8;
-pub(crate) const BULK_DEPARTURE_SET_RESTORE_THRESHOLD: usize = 20_000;
+pub(crate) const BULK_DEPARTURE_SET_RESTORE_THRESHOLD: usize = 1_024;
 pub(crate) const BULK_GROUP_BUDGET: usize = 100_000;
 pub(crate) const BULK_MULTIPLICITY_BUDGET: i64 = 1_000_000;
 pub(crate) fn out_table(id: usize, width: usize) -> String {
