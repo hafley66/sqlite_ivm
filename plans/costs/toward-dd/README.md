@@ -360,6 +360,50 @@ tables, so the storage format is unchanged.
 The round count moved independently of the scan cost. Change 1 still carries
 the casted recursive join predicate measured below.
 
+Change 2 replaces the per-work-row correlated restore test with one set join
+per rule. The surviving member relation is the first side of a `CROSS JOIN`,
+the existing computed index probes the recursive input, and the derived
+identity probes the work table's unique `__k` index. No table or index was
+added, and the storage format remains 5.
+
+The bundled SQLite plan on main already used the computed input index for the
+rowid-slice derive, contrary to the earlier generated-SQL diagnosis:
+
+```
+SEARCH work USING INTEGER PRIMARY KEY (rowid>? AND rowid<?)
+SEARCH input USING INDEX input_key (<expr>=?)
+USING INDEX sqlite_autoindex_members_1 FOR IN-OPERATOR
+```
+
+The remaining repeated scan was the correlated restore. Before and after:
+
+```
+BEFORE
+SCAN w
+CORRELATED SCALAR SUBQUERY 3
+  SCAN input
+  SEARCH members USING INDEX member_key (<expr>=?)
+
+AFTER
+SCAN members
+SEARCH input USING INDEX input_key (<expr>=?)
+SEARCH work USING INDEX sqlite_autoindex_work_1 (__k=?)
+```
+
+Both plans were taken with `EXPLAIN QUERY PLAN` against the reach tables and
+their generated computed indexes. The receipt is
+`$CARGO_TARGET_DIR/logs/change2-restore-eqp.txt`.
+
+Reach fanout 1 n 40000, one unlogged scale repetition:
+
+| measure | after change 1 | after change 2 |
+|---|---:|---:|
+| delete round spans | 159 | 159 |
+| derive round spans | 161 | 161 |
+| wall ms | 31406.0 | 4587.9 |
+| mean delete ms | 368.0 | 45.7 |
+| mean update ms | 358.2 | 50.1 |
+
 ## SVGs
 
 `0_baseline-<circuit>.svg` plots wall ms against n for each arm at fanout 1 and
