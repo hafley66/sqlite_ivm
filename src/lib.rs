@@ -10,6 +10,8 @@ pub mod query;
 pub mod relational;
 #[path = "1a_relational.rs"]
 pub mod relational_maintenance;
+#[path = "1b_state.rs"]
+pub mod relational_state;
 #[path = "2a_source_ddl.rs"]
 pub mod source_ddl;
 #[path = "2_vtab.rs"]
