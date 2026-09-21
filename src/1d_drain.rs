@@ -287,7 +287,10 @@ impl Plan {
                 }
             }
             let restored = max_rowid(&statements.max_all)?;
-            if work_rows < BULK_DEPARTURE_SET_RESTORE_THRESHOLD {
+            let deleted_rows: i64 = db
+                .prepare_cached(&statements.deleted_rows)?
+                .query_row([], |r| r.get(0))?;
+            if deleted_rows < BULK_DEPARTURE_SET_RESTORE_THRESHOLD as i64 {
                 db.execute_cached(&statements.restore_small, [])?;
             } else {
                 for sql in &statements.restores {

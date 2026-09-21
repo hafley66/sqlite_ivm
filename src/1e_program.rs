@@ -86,6 +86,7 @@ pub(crate) struct FixpointStatements {
     pub(crate) drop_departing: Vec<String>,
     pub(crate) seed_work_deleted: String,
     pub(crate) seed_work_frontier: Vec<String>,
+    pub(crate) deleted_rows: String,
     pub(crate) restore_small: String,
     pub(crate) restores: Vec<String>,
     /// Per member rule, in rule order: closure derives over the whole member
@@ -406,6 +407,7 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
         seed_work_frontier: (0..=BULK_DEPARTURE_SET_ROUND_BUDGET)
             .map(|generation| format!("INSERT OR IGNORE INTO {work}(__k,{cols}) SELECT __k,{cols} FROM {departing} WHERE __g={generation}"))
             .collect(),
+        deleted_rows: format!("SELECT count(*) FROM {deleted}"),
         restore_small: format!(
             "INSERT OR IGNORE INTO {all}(__k,{cols}) SELECT w.__k,{} FROM {deleted} w WHERE {}",
             (0..width).map(|i| format!("w.c{i}")).collect::<Vec<_>>().join(","),
