@@ -84,9 +84,9 @@ runs 36 over eight. Both stay flat as the batch grows.
 
 | phase | verb | site | object | calls | total_ms | mean_us | p99_us | rows | prepared_pct | per_input_row | spread_us |
 |---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| declare | CREATE | src/1d_drain.rs:23 | g | 11 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 11.00 | 1000.0 |
+| declare | CREATE | src/1d_drain.rs:23 | g | 11 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 11.00 | 0.0 |
 | declare | INSERT | src/0a_catalog.rs:79 | g | 10 | no effect at this scale | 0.0 | 0.0 | 10 | 0.0 | 10.00 | 0.0 |
-| declare | SELECT | src/0a_catalog.rs:71 | g | 10 | no effect at this scale | 0.0 | 0.0 | 10 | 0.0 | 10.00 | 0.0 |
+| declare | SELECT | src/0a_catalog.rs:71 | g | 10 | no effect at this scale | 0.0 | 0.0 | 10 | 0.0 | 10.00 | 1000.0 |
 | declare | CREATE | src/0a_catalog.rs:26 | g | 6 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 6.00 | 0.0 |
 | declare | CREATE | src/1b_state.rs:195 | g | 4 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 4.00 | 0.0 |
 | declare | DELETE | src/1b_state.rs:205 | g | 4 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 4.00 | 0.0 |
@@ -123,29 +123,29 @@ runs 36 over eight. Both stay flat as the batch grows.
 
 | phase | verb | site | object | calls | total_ms | mean_us | p99_us | rows | prepared_pct | per_input_row | spread_us |
 |---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| drain | DELETE | src/1d_drain.rs:112 | g | 400 | 1.000 | 2.5 | 0.0 | 400 | 100.0 | 4.00 | 2000.0 |
-| drain | SELECT | src/1d_drain.rs:71 | g | 300 | 1.000 | 3.3 | 0.0 | 300 | 100.0 | 3.00 | 1000.0 |
-| maintain | DELETE | src/1d_drain.rs:147 | g | 300 | no effect at this scale | 0.0 | 0.0 | 200 | 100.0 | 3.00 | 1000.0 |
-| maintain | INSERT | src/1d_drain.rs:147 | g | 300 | 2.000 | 6.7 | 0.0 | 200 | 100.0 | 3.00 | 2000.0 |
-| materialize | INSERT | src/1c_materialize.rs:377 | g | 203 | no effect at this scale | 0.0 | 0.0 | 200 | 100.0 | 2.03 | 1000.0 |
-| materialize | INSERT | src/1c_materialize.rs:437 | g | 201 | 1.000 | 5.0 | 0.0 | 100 | 100.0 | 2.01 | 1000.0 |
+| drain | DELETE | src/1d_drain.rs:112 | g | 400 | 1.000 | 2.5 | 0.0 | 400 | 100.0 | 4.00 | 1000.0 |
+| drain | SELECT | src/1d_drain.rs:71 | g | 300 | no effect at this scale | 0.0 | 0.0 | 300 | 100.0 | 3.00 | 1000.0 |
+| maintain | DELETE | src/1d_drain.rs:147 | g | 300 | 1.000 | 3.3 | 0.0 | 200 | 100.0 | 3.00 | 1000.0 |
+| maintain | INSERT | src/1d_drain.rs:147 | g | 300 | 1.000 | 3.3 | 0.0 | 200 | 100.0 | 3.00 | 2000.0 |
+| materialize | INSERT | src/1c_materialize.rs:377 | g | 203 | 1.000 | 4.9 | 0.0 | 200 | 100.0 | 2.03 | 1000.0 |
+| materialize | INSERT | src/1c_materialize.rs:437 | g | 201 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 2.01 | 0.0 |
 | declare | SELECT | src/2_vtab.rs:215 | catalog | 100 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 1.00 | 0.0 |
 | drain | INSERT | src/1d_drain.rs:53 | g | 100 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 1.00 | 1000.0 |
 | maintain | DELETE | src/1d_drain.rs:124 | g | 100 | no effect at this scale | 0.0 | 0.0 | 99 | 100.0 | 1.00 | 0.0 |
-| maintain | DELETE | src/1d_drain.rs:135 | g | 100 | no effect at this scale | 0.0 | 0.0 | 0 | 100.0 | 1.00 | 2000.0 |
-| maintain | DELETE | src/1d_drain.rs:181 | g | 100 | no effect at this scale | 0.0 | 0.0 | 0 | 100.0 | 1.00 | 1000.0 |
-| maintain | DELETE | src/1d_drain.rs:324 | g | 100 | no effect at this scale | 0.0 | 0.0 | 99 | 100.0 | 1.00 | 0.0 |
-| maintain | DELETE | src/1d_drain.rs:332 | g | 100 | no effect at this scale | 0.0 | 0.0 | 0 | 100.0 | 1.00 | 0.0 |
-| maintain | INSERT | src/1d_drain.rs:129 | g | 100 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 1.00 | 1000.0 |
-| maintain | INSERT | src/1d_drain.rs:130 | g | 100 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 1.00 | 2000.0 |
+| maintain | DELETE | src/1d_drain.rs:135 | g | 100 | no effect at this scale | 0.0 | 0.0 | 0 | 100.0 | 1.00 | 0.0 |
+| maintain | DELETE | src/1d_drain.rs:181 | g | 100 | no effect at this scale | 0.0 | 0.0 | 0 | 100.0 | 1.00 | 3000.0 |
+| maintain | DELETE | src/1d_drain.rs:324 | g | 100 | no effect at this scale | 0.0 | 0.0 | 99 | 100.0 | 1.00 | 2000.0 |
+| maintain | DELETE | src/1d_drain.rs:332 | g | 100 | 1.000 | 10.0 | 0.0 | 0 | 100.0 | 1.00 | 1000.0 |
+| maintain | INSERT | src/1d_drain.rs:129 | g | 100 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 1.00 | 0.0 |
+| maintain | INSERT | src/1d_drain.rs:130 | g | 100 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 1.00 | 0.0 |
 | maintain | INSERT | src/1d_drain.rs:134 | g | 100 | no effect at this scale | 0.0 | 0.0 | 0 | 100.0 | 1.00 | 0.0 |
-| maintain | INSERT | src/1d_drain.rs:325 | g | 100 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 1.00 | 1000.0 |
-| maintain | INSERT | src/1d_drain.rs:327 | g | 100 | 1.000 | 10.0 | 0.0 | 100 | 100.0 | 1.00 | 2000.0 |
-| maintain | SELECT | src/1d_drain.rs:178 | g | 100 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 1.00 | 1000.0 |
-| maintain | SELECT | src/1d_drain.rs:187 | g | 100 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 1.00 | 1000.0 |
-| maintain | SELECT | src/1d_drain.rs:193 | g | 100 | 1.000 | 10.0 | 0.0 | 100 | 100.0 | 1.00 | 2000.0 |
-| maintain | SELECT | src/1d_drain.rs:328 | g | 100 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 1.00 | 1000.0 |
-| maintain | UPDATE | src/1d_drain.rs:326 | g | 100 | no effect at this scale | 0.0 | 0.0 | 0 | 100.0 | 1.00 | 1000.0 |
+| maintain | INSERT | src/1d_drain.rs:325 | g | 100 | 1.000 | 10.0 | 0.0 | 100 | 100.0 | 1.00 | 0.0 |
+| maintain | INSERT | src/1d_drain.rs:327 | g | 100 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 1.00 | 3000.0 |
+| maintain | SELECT | src/1d_drain.rs:178 | g | 100 | 1.000 | 10.0 | 0.0 | 100 | 100.0 | 1.00 | 1000.0 |
+| maintain | SELECT | src/1d_drain.rs:187 | g | 100 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 1.00 | 0.0 |
+| maintain | SELECT | src/1d_drain.rs:193 | g | 100 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 1.00 | 1000.0 |
+| maintain | SELECT | src/1d_drain.rs:328 | g | 100 | 1.000 | 10.0 | 0.0 | 100 | 100.0 | 1.00 | 1000.0 |
+| maintain | UPDATE | src/1d_drain.rs:326 | g | 100 | 1.000 | 10.0 | 0.0 | 0 | 100.0 | 1.00 | 1000.0 |
 | declare | CREATE | src/1d_drain.rs:23 | g | 11 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.11 | 0.0 |
 | declare | INSERT | src/0a_catalog.rs:79 | g | 10 | no effect at this scale | 0.0 | 0.0 | 10 | 0.0 | 0.10 | 0.0 |
 | declare | SELECT | src/0a_catalog.rs:71 | g | 10 | no effect at this scale | 0.0 | 0.0 | 10 | 0.0 | 0.10 | 0.0 |
@@ -154,8 +154,8 @@ runs 36 over eight. Both stay flat as the batch grows.
 | declare | DELETE | src/1b_state.rs:205 | g | 4 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.04 | 0.0 |
 | materialize | DELETE | src/1b_state.rs:249 | g | 4 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.04 | 0.0 |
 | declare | CREATE | src/1a_relational.rs:270 | g | 3 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.03 | 0.0 |
-| declare | CREATE | src/1b_state.rs:82 | g | 3 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.03 | 0.0 |
-| declare | INSERT | src/0a_catalog.rs:62 | g | 3 | no effect at this scale | 0.0 | 0.0 | 3 | 0.0 | 0.03 | 1000.0 |
+| declare | CREATE | src/1b_state.rs:82 | g | 3 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.03 | 1000.0 |
+| declare | INSERT | src/0a_catalog.rs:62 | g | 3 | no effect at this scale | 0.0 | 0.0 | 3 | 0.0 | 0.03 | 0.0 |
 | declare | SELECT | src/1a_relational.rs:200 | g | 3 | no effect at this scale | 0.0 | 0.0 | 3 | 0.0 | 0.03 | 0.0 |
 | declare | SELECT | src/1b_state.rs:17 | g | 3 | no effect at this scale | 0.0 | 0.0 | 3 | 0.0 | 0.03 | 0.0 |
 | declare | CREATE | src/1b_state.rs:56 | g | 2 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.02 | 0.0 |
@@ -163,14 +163,14 @@ runs 36 over eight. Both stay flat as the batch grows.
 | declare | SELECT | src/0c_compile_from.rs:47 | a | 2 | no effect at this scale | 0.0 | 0.0 | 6 | 0.0 | 0.02 | 0.0 |
 | declare | SELECT | src/0c_compile_from.rs:48 | a | 2 | no effect at this scale | 0.0 | 0.0 | 6 | 0.0 | 0.02 | 0.0 |
 | declare | CREATE | src/1a_relational.rs:208 | g | 1 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.01 | 0.0 |
-| declare | CREATE | src/1b_state.rs:44 | g | 1 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.01 | 1000.0 |
+| declare | CREATE | src/1b_state.rs:44 | g | 1 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.01 | 0.0 |
 | declare | CREATE | src/2_vtab.rs:351 | g | 1 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.01 | 0.0 |
 | declare | INSERT | src/0a_catalog.rs:45 | g | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 0.01 | 0.0 |
 | declare | INSERT | src/0a_catalog.rs:53 | g | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 0.01 | 0.0 |
 | declare | INSERT | src/2_vtab.rs:354 | g | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 0.01 | 0.0 |
 | declare | SELECT | src/0b_relational.rs:626 | catalog | 1 | no effect at this scale | 0.0 | 0.0 | 48 | 0.0 | 0.01 | 0.0 |
 | declare | SELECT | src/0c_compile_from.rs:41 | a | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 0.01 | 0.0 |
-| declare | SELECT | src/1b_state.rs:177 | g | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 0.01 | 1000.0 |
+| declare | SELECT | src/1b_state.rs:177 | g | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 0.01 | 0.0 |
 | declare | SELECT | src/2_vtab.rs:237 | g | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 0.01 | 0.0 |
 | declare | SELECT | src/2_vtab.rs:341 | g | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 0.01 | 0.0 |
 | materialize | INSERT | src/1b_state.rs:309 | g | 1 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.01 | 0.0 |
@@ -183,16 +183,16 @@ runs 36 over eight. Both stay flat as the batch grows.
 
 | phase | verb | site | object | calls | total_ms | mean_us | p99_us | rows | prepared_pct | per_input_row | spread_us |
 |---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| drain | INSERT | src/1d_drain.rs:53 | g | 100 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 1.00 | 1000.0 |
-| declare | CREATE | src/1d_drain.rs:23 | g | 11 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.11 | 1000.0 |
-| declare | INSERT | src/0a_catalog.rs:79 | g | 10 | no effect at this scale | 0.0 | 0.0 | 10 | 0.0 | 0.10 | 1000.0 |
+| drain | INSERT | src/1d_drain.rs:53 | g | 100 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 1.00 | 0.0 |
+| declare | CREATE | src/1d_drain.rs:23 | g | 11 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.11 | 0.0 |
+| declare | INSERT | src/0a_catalog.rs:79 | g | 10 | no effect at this scale | 0.0 | 0.0 | 10 | 0.0 | 0.10 | 0.0 |
 | declare | SELECT | src/0a_catalog.rs:71 | g | 10 | no effect at this scale | 0.0 | 0.0 | 10 | 0.0 | 0.10 | 0.0 |
 | declare | CREATE | src/0a_catalog.rs:26 | g | 6 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.06 | 0.0 |
 | materialize | INSERT | src/1c_materialize.rs:377 | g | 5 | no effect at this scale | 0.0 | 0.0 | 200 | 100.0 | 0.05 | 0.0 |
 | declare | CREATE | src/1b_state.rs:195 | g | 4 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 0.04 | 1000.0 |
 | declare | DELETE | src/1b_state.rs:205 | g | 4 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.04 | 0.0 |
 | drain | DELETE | src/1d_drain.rs:112 | g | 4 | no effect at this scale | 0.0 | 0.0 | 400 | 100.0 | 0.04 | 0.0 |
-| materialize | DELETE | src/1b_state.rs:249 | g | 4 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.04 | 1000.0 |
+| materialize | DELETE | src/1b_state.rs:249 | g | 4 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.04 | 0.0 |
 | declare | CREATE | src/1a_relational.rs:270 | g | 3 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.03 | 0.0 |
 | declare | CREATE | src/1b_state.rs:82 | g | 3 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.03 | 0.0 |
 | declare | INSERT | src/0a_catalog.rs:62 | g | 3 | no effect at this scale | 0.0 | 0.0 | 3 | 0.0 | 0.03 | 0.0 |
@@ -212,7 +212,7 @@ runs 36 over eight. Both stay flat as the batch grows.
 | declare | INSERT | src/0a_catalog.rs:45 | g | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 0.01 | 0.0 |
 | declare | INSERT | src/0a_catalog.rs:53 | g | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 0.01 | 0.0 |
 | declare | INSERT | src/2_vtab.rs:354 | g | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 0.01 | 0.0 |
-| declare | SELECT | src/0b_relational.rs:626 | catalog | 1 | no effect at this scale | 0.0 | 0.0 | 48 | 0.0 | 0.01 | 0.0 |
+| declare | SELECT | src/0b_relational.rs:626 | catalog | 1 | no effect at this scale | 0.0 | 0.0 | 48 | 0.0 | 0.01 | 1000.0 |
 | declare | SELECT | src/0c_compile_from.rs:41 | a | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 0.01 | 0.0 |
 | declare | SELECT | src/1b_state.rs:177 | g | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 0.01 | 0.0 |
 | declare | SELECT | src/2_vtab.rs:215 | catalog | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 100.0 | 0.01 | 0.0 |
@@ -226,11 +226,11 @@ runs 36 over eight. Both stay flat as the batch grows.
 | maintain | INSERT | src/1d_drain.rs:129 | g | 1 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 0.01 | 0.0 |
 | maintain | INSERT | src/1d_drain.rs:130 | g | 1 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 0.01 | 1000.0 |
 | maintain | INSERT | src/1d_drain.rs:134 | g | 1 | no effect at this scale | 0.0 | 0.0 | 0 | 100.0 | 0.01 | 0.0 |
-| maintain | INSERT | src/1d_drain.rs:325 | g | 1 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 0.01 | 1000.0 |
-| maintain | INSERT | src/1d_drain.rs:327 | g | 1 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 0.01 | 0.0 |
+| maintain | INSERT | src/1d_drain.rs:325 | g | 1 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 0.01 | 0.0 |
+| maintain | INSERT | src/1d_drain.rs:327 | g | 1 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 0.01 | 1000.0 |
 | maintain | SELECT | src/1d_drain.rs:178 | g | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 100.0 | 0.01 | 0.0 |
 | maintain | SELECT | src/1d_drain.rs:187 | g | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 100.0 | 0.01 | 0.0 |
-| maintain | SELECT | src/1d_drain.rs:193 | g | 1 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 0.01 | 1000.0 |
+| maintain | SELECT | src/1d_drain.rs:193 | g | 1 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 0.01 | 0.0 |
 | maintain | SELECT | src/1d_drain.rs:328 | g | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 100.0 | 0.01 | 0.0 |
 | maintain | UPDATE | src/1d_drain.rs:326 | g | 1 | no effect at this scale | 0.0 | 0.0 | 0 | 100.0 | 0.01 | 0.0 |
 | materialize | INSERT | src/1b_state.rs:309 | g | 1 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.01 | 0.0 |
@@ -243,18 +243,18 @@ runs 36 over eight. Both stay flat as the batch grows.
 
 | phase | verb | site | object | calls | total_ms | mean_us | p99_us | rows | prepared_pct | per_input_row | spread_us |
 |---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| declare | CREATE | src/1d_drain.rs:23 | r | 28 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 3.50 | 0.0 |
+| declare | CREATE | src/1d_drain.rs:23 | r | 28 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 3.50 | 1000.0 |
 | declare | INSERT | src/0a_catalog.rs:79 | r | 20 | no effect at this scale | 0.0 | 0.0 | 20 | 0.0 | 2.50 | 0.0 |
 | declare | SELECT | src/0a_catalog.rs:71 | r | 20 | no effect at this scale | 0.0 | 0.0 | 20 | 0.0 | 2.50 | 0.0 |
 | drain | INSERT | src/1d_drain.rs:53 | r | 16 | no effect at this scale | 0.0 | 0.0 | 16 | 100.0 | 2.00 | 0.0 |
 | materialize | INSERT | src/1c_materialize.rs:377 | r | 14 | 1.000 | 71.4 | 1000.0 | 48 | 100.0 | 1.75 | 1000.0 |
-| declare | CREATE | src/1b_state.rs:195 | r | 9 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 1.12 | 1000.0 |
+| declare | CREATE | src/1b_state.rs:195 | r | 9 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 1.12 | 0.0 |
 | declare | DELETE | src/1b_state.rs:205 | r | 9 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 1.12 | 0.0 |
 | drain | DELETE | src/1d_drain.rs:112 | r | 9 | no effect at this scale | 0.0 | 0.0 | 72 | 100.0 | 1.12 | 0.0 |
 | materialize | DELETE | src/1b_state.rs:249 | r | 9 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 1.12 | 0.0 |
 | drain | SELECT | src/1d_drain.rs:71 | r | 8 | no effect at this scale | 0.0 | 0.0 | 8 | 100.0 | 1.00 | 0.0 |
 | declare | SELECT | src/1b_state.rs:17 | r | 7 | no effect at this scale | 0.0 | 0.0 | 7 | 0.0 | 0.88 | 0.0 |
-| declare | CREATE | src/0a_catalog.rs:26 | r | 6 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.75 | 0.0 |
+| declare | CREATE | src/0a_catalog.rs:26 | r | 6 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.75 | 1000.0 |
 | declare | CREATE | src/1a_relational.rs:270 | r | 6 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.75 | 0.0 |
 | declare | CREATE | src/1b_state.rs:82 | r | 6 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.75 | 0.0 |
 | declare | INSERT | src/0a_catalog.rs:62 | r | 6 | no effect at this scale | 0.0 | 0.0 | 6 | 0.0 | 0.75 | 0.0 |
@@ -270,23 +270,23 @@ runs 36 over eight. Both stay flat as the batch grows.
 | declare | SELECT | src/0c_compile_from.rs:47 | b | 2 | no effect at this scale | 0.0 | 0.0 | 6 | 0.0 | 0.25 | 0.0 |
 | declare | SELECT | src/0c_compile_from.rs:48 | a | 2 | no effect at this scale | 0.0 | 0.0 | 6 | 0.0 | 0.25 | 0.0 |
 | declare | SELECT | src/0c_compile_from.rs:48 | b | 2 | no effect at this scale | 0.0 | 0.0 | 6 | 0.0 | 0.25 | 0.0 |
-| declare | SELECT | src/1b_state.rs:177 | r | 2 | no effect at this scale | 0.0 | 0.0 | 2 | 0.0 | 0.25 | 0.0 |
+| declare | SELECT | src/1b_state.rs:177 | r | 2 | no effect at this scale | 0.0 | 0.0 | 2 | 0.0 | 0.25 | 1000.0 |
 | fixpoint | DELETE | src/1d_drain.rs:324 | r | 2 | no effect at this scale | 0.0 | 0.0 | 0 | 100.0 | 0.25 | 0.0 |
 | fixpoint | DELETE | src/1d_drain.rs:332 | r | 2 | no effect at this scale | 0.0 | 0.0 | 0 | 100.0 | 0.25 | 0.0 |
 | fixpoint | DELETE | src/1d_drain.rs:339 | r | 2 | no effect at this scale | 0.0 | 0.0 | 0 | 100.0 | 0.25 | 0.0 |
-| fixpoint | DELETE | src/1d_drain.rs:340 | r | 2 | no effect at this scale | 0.0 | 0.0 | 0 | 100.0 | 0.25 | 1000.0 |
+| fixpoint | DELETE | src/1d_drain.rs:340 | r | 2 | no effect at this scale | 0.0 | 0.0 | 0 | 100.0 | 0.25 | 0.0 |
 | fixpoint | INSERT | src/1d_drain.rs:164 | r | 2 | no effect at this scale | 0.0 | 0.0 | 16 | 100.0 | 0.25 | 0.0 |
 | fixpoint | INSERT | src/1d_drain.rs:165 | r | 2 | no effect at this scale | 0.0 | 0.0 | 16 | 100.0 | 0.25 | 0.0 |
-| fixpoint | INSERT | src/1d_drain.rs:301 | r | 2 | no effect at this scale | 0.0 | 0.0 | 8 | 100.0 | 0.25 | 0.0 |
+| fixpoint | INSERT | src/1d_drain.rs:301 | r | 2 | no effect at this scale | 0.0 | 0.0 | 8 | 100.0 | 0.25 | 1000.0 |
 | fixpoint | INSERT | src/1d_drain.rs:314 | r | 2 | no effect at this scale | 0.0 | 0.0 | 8 | 100.0 | 0.25 | 0.0 |
-| fixpoint | INSERT | src/1d_drain.rs:325 | r | 2 | no effect at this scale | 0.0 | 0.0 | 16 | 100.0 | 0.25 | 0.0 |
+| fixpoint | INSERT | src/1d_drain.rs:325 | r | 2 | no effect at this scale | 0.0 | 0.0 | 16 | 100.0 | 0.25 | 1000.0 |
 | fixpoint | INSERT | src/1d_drain.rs:327 | r | 2 | no effect at this scale | 0.0 | 0.0 | 16 | 100.0 | 0.25 | 0.0 |
 | fixpoint | INSERT | src/1d_drain.rs:341 | r | 2 | no effect at this scale | 0.0 | 0.0 | 0 | 100.0 | 0.25 | 0.0 |
 | fixpoint | INSERT | src/1d_drain.rs:342 | r | 2 | no effect at this scale | 0.0 | 0.0 | 16 | 100.0 | 0.25 | 0.0 |
 | fixpoint | SELECT | src/1d_drain.rs:255 | r | 2 | no effect at this scale | 0.0 | 0.0 | 2 | 100.0 | 0.25 | 0.0 |
 | fixpoint | SELECT | src/1d_drain.rs:328 | r | 2 | no effect at this scale | 0.0 | 0.0 | 2 | 100.0 | 0.25 | 0.0 |
 | fixpoint | UPDATE | src/1d_drain.rs:326 | r | 2 | no effect at this scale | 0.0 | 0.0 | 0 | 100.0 | 0.25 | 0.0 |
-| materialize | INSERT | src/1b_state.rs:309 | r | 2 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.25 | 1000.0 |
+| materialize | INSERT | src/1b_state.rs:309 | r | 2 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.25 | 0.0 |
 | materialize | INSERT | src/1b_state.rs:319 | r | 2 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 0.25 | 0.0 |
 | materialize | INSERT | src/1c_materialize.rs:448 | r | 2 | no effect at this scale | 0.0 | 0.0 | 0 | 100.0 | 0.25 | 0.0 |
 | materialize | SELECT | src/1b_state.rs:329 | r | 2 | no effect at this scale | 0.0 | 0.0 | 2 | 0.0 | 0.25 | 0.0 |
@@ -317,9 +317,9 @@ runs 36 over eight. Both stay flat as the batch grows.
 | phase | verb | site | object | calls | total_ms | mean_us | p99_us | rows | prepared_pct | per_input_row | spread_us |
 |---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
 | drain | INSERT | src/1d_drain.rs:53 | r | 201 | no effect at this scale | 0.0 | 0.0 | 201 | 100.0 | 201.00 | 0.0 |
-| declare | CREATE | src/1d_drain.rs:23 | r | 28 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 28.00 | 0.0 |
+| declare | CREATE | src/1d_drain.rs:23 | r | 28 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 28.00 | 1000.0 |
 | declare | INSERT | src/0a_catalog.rs:79 | r | 20 | no effect at this scale | 0.0 | 0.0 | 20 | 0.0 | 20.00 | 1000.0 |
-| declare | SELECT | src/0a_catalog.rs:71 | r | 20 | no effect at this scale | 0.0 | 0.0 | 20 | 0.0 | 20.00 | 0.0 |
+| declare | SELECT | src/0a_catalog.rs:71 | r | 20 | no effect at this scale | 0.0 | 0.0 | 20 | 0.0 | 20.00 | 1000.0 |
 | drain | DELETE | src/1d_drain.rs:112 | r | 18 | no effect at this scale | 0.0 | 0.0 | 902 | 100.0 | 18.00 | 0.0 |
 | drain | SELECT | src/1d_drain.rs:71 | r | 16 | no effect at this scale | 0.0 | 0.0 | 16 | 100.0 | 16.00 | 0.0 |
 | materialize | INSERT | src/1c_materialize.rs:377 | r | 15 | no effect at this scale | 0.0 | 0.0 | 601 | 100.0 | 15.00 | 1000.0 |
@@ -334,16 +334,16 @@ runs 36 over eight. Both stay flat as the batch grows.
 | declare | INSERT | src/0a_catalog.rs:62 | r | 6 | no effect at this scale | 0.0 | 0.0 | 6 | 0.0 | 6.00 | 0.0 |
 | declare | SELECT | src/1a_relational.rs:200 | r | 3 | no effect at this scale | 0.0 | 0.0 | 3 | 0.0 | 3.00 | 0.0 |
 | fixpoint | DELETE | src/1d_drain.rs:324 | r | 3 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 3.00 | 0.0 |
-| fixpoint | DELETE | src/1d_drain.rs:332 | r | 3 | no effect at this scale | 0.0 | 0.0 | 1 | 100.0 | 3.00 | 1000.0 |
+| fixpoint | DELETE | src/1d_drain.rs:332 | r | 3 | no effect at this scale | 0.0 | 0.0 | 1 | 100.0 | 3.00 | 0.0 |
 | fixpoint | DELETE | src/1d_drain.rs:339 | r | 3 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 3.00 | 0.0 |
 | fixpoint | DELETE | src/1d_drain.rs:340 | r | 3 | no effect at this scale | 0.0 | 0.0 | 0 | 100.0 | 3.00 | 0.0 |
 | fixpoint | INSERT | src/1d_drain.rs:164 | r | 3 | no effect at this scale | 0.0 | 0.0 | 200 | 100.0 | 3.00 | 0.0 |
 | fixpoint | INSERT | src/1d_drain.rs:165 | r | 3 | no effect at this scale | 0.0 | 0.0 | 200 | 100.0 | 3.00 | 0.0 |
 | fixpoint | INSERT | src/1d_drain.rs:239 | r | 3 | no effect at this scale | 0.0 | 0.0 | 0 | 100.0 | 3.00 | 0.0 |
 | fixpoint | INSERT | src/1d_drain.rs:301 | r | 3 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 3.00 | 0.0 |
-| fixpoint | INSERT | src/1d_drain.rs:325 | r | 3 | no effect at this scale | 0.0 | 0.0 | 201 | 100.0 | 3.00 | 0.0 |
-| fixpoint | INSERT | src/1d_drain.rs:327 | r | 3 | no effect at this scale | 0.0 | 0.0 | 200 | 100.0 | 3.00 | 0.0 |
-| fixpoint | INSERT | src/1d_drain.rs:341 | r | 3 | no effect at this scale | 0.0 | 0.0 | 1 | 100.0 | 3.00 | 1000.0 |
+| fixpoint | INSERT | src/1d_drain.rs:325 | r | 3 | no effect at this scale | 0.0 | 0.0 | 201 | 100.0 | 3.00 | 1000.0 |
+| fixpoint | INSERT | src/1d_drain.rs:327 | r | 3 | no effect at this scale | 0.0 | 0.0 | 200 | 100.0 | 3.00 | 1000.0 |
+| fixpoint | INSERT | src/1d_drain.rs:341 | r | 3 | no effect at this scale | 0.0 | 0.0 | 1 | 100.0 | 3.00 | 0.0 |
 | fixpoint | INSERT | src/1d_drain.rs:342 | r | 3 | no effect at this scale | 0.0 | 0.0 | 200 | 100.0 | 3.00 | 0.0 |
 | fixpoint | SELECT | src/1d_drain.rs:255 | r | 3 | no effect at this scale | 0.0 | 0.0 | 3 | 100.0 | 3.00 | 0.0 |
 | fixpoint | SELECT | src/1d_drain.rs:328 | r | 3 | no effect at this scale | 0.0 | 0.0 | 3 | 100.0 | 3.00 | 0.0 |
@@ -370,7 +370,7 @@ runs 36 over eight. Both stay flat as the batch grows.
 | declare | CREATE | src/2_vtab.rs:351 | r | 1 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 1.00 | 0.0 |
 | declare | INSERT | src/0a_catalog.rs:45 | r | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 1.00 | 0.0 |
 | declare | INSERT | src/2_vtab.rs:354 | r | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 1.00 | 0.0 |
-| declare | SELECT | src/0b_relational.rs:626 | catalog | 1 | no effect at this scale | 0.0 | 0.0 | 56 | 0.0 | 1.00 | 1000.0 |
+| declare | SELECT | src/0b_relational.rs:626 | catalog | 1 | no effect at this scale | 0.0 | 0.0 | 56 | 0.0 | 1.00 | 0.0 |
 | declare | SELECT | src/0c_compile_from.rs:41 | a | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 1.00 | 0.0 |
 | declare | SELECT | src/0c_compile_from.rs:41 | b | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 1.00 | 0.0 |
 | declare | SELECT | src/2_vtab.rs:237 | r | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 1.00 | 0.0 |
@@ -390,7 +390,7 @@ runs 36 over eight. Both stay flat as the batch grows.
 | maintain | DELETE | src/1d_drain.rs:181 | r | 1 | no effect at this scale | 0.0 | 0.0 | 0 | 100.0 | 1.00 | 0.0 |
 | maintain | SELECT | src/1d_drain.rs:178 | r | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 100.0 | 1.00 | 0.0 |
 | maintain | SELECT | src/1d_drain.rs:187 | r | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 100.0 | 1.00 | 0.0 |
-| maintain | SELECT | src/1d_drain.rs:193 | r | 1 | no effect at this scale | 0.0 | 0.0 | 100 | 100.0 | 1.00 | 0.0 |
+| maintain | SELECT | src/1d_drain.rs:193 | r | 1 | 1.000 | 1000.0 | 1000.0 | 100 | 100.0 | 1.00 | 1000.0 |
 | materialize | INSERT | src/1c_materialize.rs:477 | r | 1 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 1.00 | 0.0 |
 | materialize | SELECT | src/1b_state.rs:360 | r | 1 | no effect at this scale | 0.0 | 0.0 | 1 | 0.0 | 1.00 | 0.0 |
 | materialize | SELECT | src/1b_state.rs:372 | r | 1 | no effect at this scale | 0.0 | 0.0 | 0 | 0.0 | 1.00 | 0.0 |
@@ -401,11 +401,11 @@ runs 36 over eight. Both stay flat as the batch grows.
 
 | scenario | census build ms | spans compiled out ms |
 |---|---:|---:|
-| create_group | 0.917 (0.883..1.360) | 1.100 (0.975..2.736) |
-| inserts_one_txn | 2.087 (2.050..2.090) | 2.188 (2.177..2.302) |
-| inserts_many_txn | 9.519 (9.122..9.776) | 8.941 (8.927..9.056) |
-| retract_recursive | 5.145 (4.871..6.290) | 5.387 (5.284..5.632) |
-| reach_small | 2.893 (2.876..3.077) | 3.303 (3.220..3.475) |
+| create_group | 0.977 (0.924..1.325) | 0.981 (0.942..2.603) |
+| inserts_one_txn | 2.153 (2.113..2.220) | 2.287 (2.275..2.414) |
+| inserts_many_txn | 9.162 (9.048..9.628) | 9.476 (9.340..9.620) |
+| retract_recursive | 5.243 (5.151..5.665) | 5.110 (4.931..5.273) |
+| reach_small | 3.283 (3.027..3.401) | 2.860 (2.763..3.230) |
 
 wrote /Users/chrishafley/projects/sqlite_ivm/.boop-worktrees/feature/every-statement/plans/costs/every-statement.tsv
 
