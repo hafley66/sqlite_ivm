@@ -156,7 +156,8 @@ bench scale --circuits reach --n 20000,40000,60000,80000 --fanout 1 --arms sqlit
 ```
 
 Leaf self time from the profile JSON, frames symbolized with `atos` against the
-bench binary.
+bench binary. `bench/Cargo.toml` keeps symbols in the release profile, so a
+later profile resolves to function and line.
 
 ### the shape
 
@@ -176,6 +177,10 @@ The 40000 to 60000 step is 29x for 1.5x the rows, and the cost falls again from
 80000 to 100000. That is a threshold, not a smooth law.
 
 ### the frames
+
+These two tables come from a `debug = 0` binary, where `atos` falls back to
+the nearest symbol; treat the small frames as approximate. The reliable
+symbolized profile is in the next section.
 
 n 40000, 31.8 s of samples: `sqlite3VdbeExec` 65.5%, `sqlite3VdbeSerialGet`
 7.8%, `getCellInfo` 6.8%, `sqlite3BtreeNext` 6.1%, `btreeParseCellPtr` 5.2%.
@@ -215,23 +220,58 @@ seed formula: reached equals g, max distance 1), and `RUST_LOG=sqlite_ivm=debug`
 shows the fixpoint settling in two derive rounds. Round count is not the
 driver.
 
-Hypothesis: above roughly 50000 rows a fixpoint statement stops being a
-single-pass scan and starts building transient ephemeral tables, so statement
-and cursor setup and teardown dominates. The number to move is the 36.0%, 240 s
-of ephemeral machinery at n 100000, and the 29x cliff between n 40000 and
-n 60000.
+Arrivals and departures cost differently. The insert phase, which grows the
+closure, stays linear across the whole shape sweep: 1.9 ms per statement at
+n 20000, 3.7 at 40000, 5.4 at 60000, 7.3 at 80000. The delete and update
+phases, which shrink it, cliff: 351.5 ms at n 40000 against 10189.9 at n 60000.
+So the cost sits in the departure pass, not in the closure derive.
 
-One candidate change: the fixpoint's `restore` runs `EXISTS(SELECT 1 <from>)`
-once per work row, and `collect_deleted` and `drop_deleted_range` drive off
-`__k IN (SELECT __k FROM work WHERE rowid>?1 AND rowid<=?2)`. Driving the range
-from the outer table, so membership is a join against a materialized key list
-rather than a correlated subquery per row, is the smallest change that removes
-the per-row setup.
+Hypothesis: the departure pass costs a number of full scans of the member
+table per statement, and that number rises with the closure, so the cost is
+superlinear in the closure size and shows a cliff where the working set stops
+fitting in cache. The number to move is the per-statement delete cost, 351.5 ms
+at n 40000 against 10189.9 ms at n 60000, and 5960.0 ms at n 100000.
 
-Blocked. Any change is in `src/`, and `refactor-pass-3b-one-engine` is live on
-`src/`, so this arc waits for that merge and rebases. `bench scale --reps N` is
-in place for the three-runs-each-side rule, and `RUST_LOG=sqlite_ivm=debug`
-now prints the engine's round spans.
+### profile with symbols
+
+The first profile was taken with `debug = 0`, where `atos` falls back to the
+nearest symbol and its frame names are wrong: it read as 36% ephemeral-table
+machinery. `bench/Cargo.toml` now keeps symbols in release, and the same cell
+resolves to:
+
+| frame | s | share |
+|---|---|---|
+| `sqlite3VdbeExec` | 408.8 | 61.5% |
+| `sqlite3VdbeSerialGet` | 76.2 | 11.5% |
+| `btreeParseCellPtr` | 42.7 | 6.4% |
+| `getCellInfo` | 42.0 | 6.3% |
+| `sqlite3BtreeNext` | 41.0 | 6.2% |
+
+91.9% is SQLite's row scan and record deserialization path, with almost
+nothing in ephemeral-table setup. The cell is a very large number of full
+scans of the member table.
+
+### rejected
+
+Two changes, no commit in `src/`:
+
+| change | cell | before ms | after ms | verdict |
+|---|---|---|---|---|
+| `restore` was one statement whose `WHERE` is `EXISTS(r1) OR EXISTS(r2)`; it became one statement whose body is `SELECT .. WHERE EXISTS(r1) UNION ALL SELECT .. WHERE EXISTS(r2)`, one branch per rule | reach fanout 1 n 100000 | 647947.0, 647428.6, 644158.9 | 2141392.0, rep 0 only, killed | 3.3x slower: the compound select materializes |
+| `drop_deleted_range` was `DELETE FROM all WHERE __k IN (SELECT __k FROM work WHERE rowid range)`; it became `DELETE FROM all WHERE rowid IN (SELECT a.rowid FROM work w JOIN all a ON a.__k=w.__k WHERE w.rowid range)` | reach fanout 1 n 40000 | 351.5 delete, 30118.1 wall | 355.9 delete, 30480.4 wall | no change: SQLite already drove the membership test from the range |
+
+### where this stands
+
+Two attempts did not move the worst cell, and both targeted the shape of the
+departure pass SQL. The symbolized profile says the cost is the number of full
+scans of the member table per statement, not the shape of any one of them:
+say 5.9 s per delete at n 100000 against roughly 10 ms for a scan of the
+100001-row member table, so of the order of 500 scans per statement.
+
+The two changes that follow from that are not one-file, one-SQL-statement
+work: cut the number of departure rounds per statement, or make `__k` cheaper
+to compare than `TEXT` for single integer keys. The second is a storage format
+bump. Both are the parent's call under the lane's stop rule.
 
 ## SVGs
 
