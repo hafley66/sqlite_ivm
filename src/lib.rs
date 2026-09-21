@@ -14,6 +14,8 @@ pub mod relational_maintenance;
 pub mod relational_state;
 #[path = "1c_materialize.rs"]
 pub mod relational_materialize;
+#[path = "1d_drain.rs"]
+pub mod relational_drain;
 #[path = "2a_source_ddl.rs"]
 pub mod source_ddl;
 #[path = "2_vtab.rs"]
