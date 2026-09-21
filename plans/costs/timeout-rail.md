@@ -37,6 +37,14 @@ runs. Machine `Darwin arm64`, 12 cores, load average 3.9 while other lanes run,
 so the numbers are a little above a fully idle host. Raw output per run, only
 the nextest section, cargo's two `unexpected cfg` warnings dropped:
 
+Base state. No known-red record exists in this repo: `.github/CI-KNOWN-RED.md`
+appears in old briefs under `archive/plans/` but in no branch (checked with
+`git log --all -- .github/CI-KNOWN-RED.md` and `git ls-tree` over `main`,
+`chore/observe-rails`, `plan/unify`, and `feature/every-statement`). So the
+battery is re-measured rather than assumed: all three runs below are 68 passed,
+0 skipped, wall 9.31s, 9.25s, 9.26s. A budget only terminates a slow leg; a
+wrong answer still fails as a test failure first.
+
 ### run 1
 
 ```
