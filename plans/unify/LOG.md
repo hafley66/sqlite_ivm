@@ -17,7 +17,17 @@ Rungs: dispatched, running, reported, verified (named check), merged.
 | perf/scale | flash-omp-max | scale sweep with RSS, disk, arrangement rows, amplification; chain profile; fixes | queued on arc A + bugs | |
 | refactor pass 1..4 | glm53f-omp | see passes | queued on bugs | |
 
-## Passes (filled after the module map lands)
+## Passes (module map 2026-09-21, `src/` 5660 lines, no dead pub items, no >15-line duplicate blocks)
+
+Serial, each from the main that holds the one before. Behavior-preserving
+unless the row says otherwise. Executor glm53f unless noted.
+
+| pass | what | why (fact from the map) | receipt |
+|---|---|---|---|
+| 1 | split `src/1a_relational.rs` `impl Plan` (1180 lines) into ddl / materialize / drain files; one fn per `Kind` arm | `materialize` match is 312 lines, Join arm 112, Group 92 | pure move: battery identical, `13_statements_per_drain` counts identical, no `format!` string changes (`git diff -w` on moved text) |
+| 2 | per-view statement program: every drain-path SQL string built once at connect into a struct keyed by node; drain runs prepared statements only | 187 `format!` sites in `1a`, 11% of profile is SQL text rebuild, 20% statement-cache hashing | `time.busy` on `8_group_limit`, `13_statements_per_drain`, three runs each side; counts unchanged; glm53f-omp-max |
+| 3 | retire the single-row trigger path (`0_query.rs` 372 + `1_maintenance.rs` 411) if the relational plan answers every shape in `tests/0_query.rs` and `tests/1_maintenance.rs` | two engines behind one vtab (`2_vtab.rs` imports both `maintenance` and `relational_maintenance`) | those tests pass through the relational path, or a table of shapes that do not, and the pass stops there |
+| 4 | split `src/0b_relational.rs` `impl Compiler` (1170 lines) by clause; `Field` literal helper (4 copies at 791, 1309, 1337, 1403); `2_vtab.rs` `dispatch` and `migrate` read | largest file, one impl | pure move, battery identical |
 
 ## Entries
 
