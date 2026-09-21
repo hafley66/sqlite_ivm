@@ -35,12 +35,12 @@ fn counts_for(rows: i64) -> Result<SpanCounts> {
     Ok(recorder.counts())
 }
 
-/// One maintain span per changed row and no more. A per-row path that re-walked
+/// One drain span per autocommit statement and no more. A path that re-walked
 /// what it had already seen would read Quadratic here.
 #[test]
-fn maintain_spans_stay_linear_in_changed_rows() -> Result<()> {
+fn drain_spans_stay_linear_in_changed_rows() -> Result<()> {
     let small = counts_for(SMALL_ROWS)?;
     let large = counts_for(SMALL_ROWS * SIZE_RATIO as i64)?;
-    assert_growth(&small, &large, "maintain", SIZE_RATIO, Growth::Linear);
+    assert_growth(&small, &large, "drain", SIZE_RATIO, Growth::Linear);
     Ok(())
 }

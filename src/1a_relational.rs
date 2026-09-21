@@ -61,19 +61,12 @@ pub fn keys_table(name: &str) -> String {
 /// Interning is idempotent and monotone: one composite takes one id for the
 /// life of the view, so two equal composites can never reach two ids.
 pub fn intern(db: &Connection, dict: &str, value: &str) -> Result<i64> {
-    let select = format!("SELECT __i FROM {dict} WHERE __v=?1");
-    if let Some(id) = db
-        .prepare_cached(&select)?
-        .query_row([value], |r| r.get(0))
-        .optional()?
-    {
-        return Ok(id);
-    }
-    db.execute_cached(
-        &format!("INSERT OR IGNORE INTO {dict}(__v) VALUES(?1)"),
-        [value],
-    )?;
-    db.prepare_cached(&select)?.query_row([value], |r| r.get(0))
+    // One seek on hit and on miss: the conflict arm updates nothing and still
+    // returns the existing id.
+    db.prepare_cached(&format!(
+        "INSERT INTO {dict}(__v) VALUES(?1) ON CONFLICT(__v) DO UPDATE SET __v=__v RETURNING __i"
+    ))?
+    .query_row([value], |r| r.get(0))
 }
 pub fn resolve(db: &Connection, dict: &str, id: i64) -> Result<String> {
     db.prepare_cached(&format!("SELECT __v FROM {dict} WHERE __i=?1"))?
@@ -116,35 +109,6 @@ fn identity(db: &Connection, row: &[Value]) -> Result<String> {
     db.prepare_cached(&format!("SELECT json_array({})", expressions.join(",")))?
         .query_row(params_from_iter(&values), |r| r.get(0))
 }
-fn evaluate(
-    db: &Connection,
-    row: &Row,
-    expressions: &[String],
-    predicate: Option<&str>,
-) -> Result<Vec<Row>> {
-    if predicate.is_none()
-        && expressions.len() == row.len()
-        && expressions
-            .iter()
-            .enumerate()
-            .all(|(i, e)| e == &format!("c{i}"))
-    {
-        return Ok(vec![row.clone()]);
-    }
-    let fields = (0..row.len())
-        .map(|i| format!("?{} AS c{i}", i + 1))
-        .collect::<Vec<_>>()
-        .join(",");
-    rows(
-        db,
-        &format!(
-            "SELECT {} FROM (SELECT {fields}){}",
-            expressions.join(","),
-            predicate.map(|p| format!(" WHERE {p}")).unwrap_or_default()
-        ),
-        row,
-    )
-}
 fn key_id(db: &Connection, dict: &str, row: &[Value]) -> Result<i64> {
     let text = key(db, row)?;
     intern(db, dict, &text)
@@ -152,15 +116,12 @@ fn key_id(db: &Connection, dict: &str, row: &[Value]) -> Result<i64> {
 fn change(db: &Connection, t: &str, k: Value, row: &Row, d: i64) -> Result<(i64, i64)> {
     let composite = identity(db, row)?;
     let r = row_hash(composite.as_bytes());
-    // __r is a hash, so equality on it only narrows. __c carries the composite
-    // out of every index while keeping the decision one string compare.
-    let same = "__r=?1 AND __c=?2";
+    // __r is a hash, so equality on it only narrows. The composite is rebuilt
+    // from the row's own columns on the one hit, so no copy of it is stored.
+    let same = format!("__r=?1 AND {}=?2", identity_sql(row.len()));
     let old: Option<i64> = db
-        .query_row(
-            &format!("SELECT __n FROM {t} WHERE {same}"),
-            rusqlite::params![r, &composite],
-            |r| r.get(0),
-        )
+        .prepare_cached(&format!("SELECT __n FROM {t} WHERE {same}"))?
+        .query_row(rusqlite::params![r, &composite], |r| r.get(0))
         .optional()?;
     let new = old
         .unwrap_or(0)
@@ -180,12 +141,7 @@ fn change(db: &Connection, t: &str, k: Value, row: &Row, d: i64) -> Result<(i64,
             rusqlite::params![r, &composite, new],
         )?;
     } else {
-        let mut params = vec![
-            k,
-            Value::Integer(r),
-            Value::Text(composite.clone()),
-            Value::Integer(new),
-        ];
+        let mut params = vec![k, Value::Integer(r), Value::Integer(new)];
         params.extend(row.clone());
         db.execute_cached(
             &format!("INSERT INTO {t} VALUES({})", parameters(params.len())),
@@ -282,32 +238,6 @@ impl CachedExecute for Connection {
         self.prepare_cached(sql)?.execute(params)
     }
 }
-fn differences(db: &Connection, before: Vec<Delta>, after: Vec<Delta>) -> Result<Vec<Delta>> {
-    let mut values = BTreeMap::<String, Delta>::new();
-    for (rows, sign) in [(before, -1), (after, 1)] {
-        for (row, n) in rows {
-            let k = identity(db, &row)?;
-            let entry = values.entry(k).or_insert((row, 0));
-            entry.1 = entry
-                .1
-                .checked_add(
-                    n.checked_mul(sign)
-                        .ok_or_else(|| error("multiplicity overflow"))?,
-                )
-                .ok_or_else(|| error("multiplicity overflow"))?;
-        }
-    }
-    Ok(values.into_values().filter(|(_, n)| *n != 0).collect())
-}
-fn weighted(db: &Connection, sql: &str, k: i64) -> Result<Vec<Delta>> {
-    rows(db, sql, &[Value::Integer(k)])?
-        .into_iter()
-        .map(|mut r| match r.pop() {
-            Some(Value::Integer(n)) => Ok((r, n)),
-            _ => Err(error("invalid multiplicity")),
-        })
-        .collect()
-}
 const BULK_ROUND_BUDGET: usize = 100_000;
 const BULK_GROUP_BUDGET: usize = 100_000;
 const BULK_MULTIPLICITY_BUDGET: i64 = 1_000_000;
@@ -318,7 +248,7 @@ fn json_key(parts: Vec<String>) -> String {
     format!("json_array({})", parts.join(","))
 }
 fn folded(value: &str) -> String {
-    format!("CASE typeof({value}) WHEN 'blob' THEN json_object('blob',hex({value})) WHEN 'real' THEN CASE WHEN {value}=CAST({value} AS INTEGER) AND typeof(CAST({value} AS INTEGER))='integer' THEN CAST({value} AS INTEGER) ELSE json_object('real',sqlite_ivm_real_hex({value})) END ELSE {value} END")
+    format!("CASE typeof({value}) WHEN 'blob' THEN json_object('blob',hex({value})) WHEN 'real' THEN CASE WHEN {value}=CAST({value} AS INTEGER) AND typeof(CAST({value} AS INTEGER))='integer' THEN CAST({value} AS INTEGER) ELSE json_object('real',sqlite_ivm_real_hex({value})) END WHEN 'text' THEN {value}||'' ELSE {value} END")
 }
 /// The composite an arrangement row rebuilds from its own stored columns.
 /// `fill` writes it and `change` compares against it, so the two must agree.
@@ -326,7 +256,7 @@ pub fn identity_sql(width: usize) -> String {
     json_key((0..width).map(|i| plain(&format!("c{i}"))).collect())
 }
 fn plain(value: &str) -> String {
-    format!("CASE typeof({value}) WHEN 'blob' THEN json_object('blob',hex({value})) WHEN 'real' THEN json_object('real',sqlite_ivm_real_hex({value})) ELSE {value} END")
+    format!("CASE typeof({value}) WHEN 'blob' THEN json_object('blob',hex({value})) WHEN 'real' THEN json_object('real',sqlite_ivm_real_hex({value})) WHEN 'text' THEN {value}||'' ELSE {value} END")
 }
 impl Plan {
     pub fn create_state(&self, db: &Connection, name: &str) -> Result<Vec<(&'static str, String)>> {
@@ -357,7 +287,7 @@ impl Plan {
             for (side, input) in node.inputs.iter().enumerate() {
                 let t = format!("{name}_op{id}_{side}");
                 let n = self.nodes[*input].fields.len();
-                db.execute_batch(&format!("CREATE TABLE main.{}(__k INTEGER NOT NULL,__r INTEGER NOT NULL,__c TEXT NOT NULL,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k); CREATE INDEX main.{} ON {}(__r)",quote(&t),columns(n),quote(&format!("__ivm_{name}_op{id}_{side}_key")),quote(&t),quote(&format!("__ivm_{name}_op{id}_{side}_row")),quote(&t)))?;
+                db.execute_batch(&format!("CREATE TABLE main.{}(__k INTEGER NOT NULL,__r INTEGER NOT NULL,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k); CREATE INDEX main.{} ON {}(__r)",quote(&t),columns(n),quote(&format!("__ivm_{name}_op{id}_{side}_key")),quote(&t),quote(&format!("__ivm_{name}_op{id}_{side}_row")),quote(&t)))?;
                 objects.push(("table", t));
                 objects.push(("index", format!("__ivm_{name}_op{id}_{side}_key")));
                 objects.push(("index", format!("__ivm_{name}_op{id}_{side}_row")));
@@ -486,7 +416,7 @@ impl Plan {
                     self.exhaust(db, &mut reads, node.inputs[side])?;
                 }
             }
-            self.materialize(db, name, id)?;
+            self.materialize(db, name, id, false)?;
             if !direct {
                 self.exhaust(db, &mut reads, node.inputs[0])?;
             }
@@ -508,15 +438,13 @@ impl Plan {
         }
         Ok(())
     }
-    fn fill(&self, db: &Connection, name: &str, id: usize, side: usize) -> Result<()> {
+    /// The `__k` composite of one input side of an arrangement node, as SQL
+    /// over that side's `c<i>` columns. None for nodes without arrangements.
+    fn key_sql(&self, id: usize, side: usize) -> Option<String> {
         let node = &self.nodes[id];
-        let child = node.inputs[side];
-        let child_node = &self.nodes[child];
+        let child_node = &self.nodes[node.inputs[side]];
         let width = child_node.fields.len();
-        let out = out_table(child, width);
-        let t = table(name, id, side);
-        let r = json_key((0..width).map(|i| plain(&format!("c{i}"))).collect());
-        let k = match &node.kind {
+        Some(match &node.kind {
             Kind::Set(_) => json_key(
                 (0..node.fields.len())
                     .map(|i| {
@@ -545,7 +473,19 @@ impl Plan {
             Kind::Fixpoint { .. } => {
                 json_key((0..width).map(|i| folded(&format!("c{i}"))).collect())
             }
-            _ => return Ok(()),
+            _ => return None,
+        })
+    }
+    fn fill(&self, db: &Connection, name: &str, id: usize, side: usize) -> Result<()> {
+        let node = &self.nodes[id];
+        let child = node.inputs[side];
+        let child_node = &self.nodes[child];
+        let width = child_node.fields.len();
+        let out = out_table(child, width);
+        let t = table(name, id, side);
+        let r = json_key((0..width).map(|i| plain(&format!("c{i}"))).collect());
+        let Some(k) = self.key_sql(id, side) else {
+            return Ok(());
         };
         let dict = keys_table(name);
         db.execute(
@@ -557,7 +497,7 @@ impl Plan {
         // are equal in every column, so the grouped select keeps the same row.
         db.execute(
             &format!(
-                "INSERT INTO {t}(__k,__r,__c,__n,{cols}) SELECT {k},sqlite_ivm_hash(__ivm_r),__ivm_r,__ivm_n,{cols} FROM (SELECT {r} AS __ivm_r,sum(__m) AS __ivm_n,{cols} FROM {out} GROUP BY {r})",
+                "INSERT INTO {t}(__k,__r,__n,{cols}) SELECT {k},sqlite_ivm_hash(__ivm_r),__ivm_n,{cols} FROM (SELECT {r} AS __ivm_r,sum(__m) AS __ivm_n,{cols} FROM {out} GROUP BY {r})",
                 cols = columns(width)
             ),
             [],
@@ -572,7 +512,21 @@ impl Plan {
         }
         Ok(())
     }
-    fn materialize(&self, db: &Connection, name: &str, id: usize) -> Result<()> {
+    /// The arrangement a bulk read scans: the whole table when populating, or a
+    /// subquery over the touched keys when draining a batch. The subquery names
+    /// `rowid` explicitly so the Set representative select can read it. No
+    /// DDL here: a drain runs inside a trigger program.
+    fn source_table(&self, db: &Connection, name: &str, id: usize, side: usize, restricted: bool) -> Result<String> {
+        let full = table(name, id, side);
+        if !restricted {
+            return Ok(full);
+        }
+        let _ = db;
+        Ok(format!(
+            "(SELECT rowid AS rowid,* FROM {full} WHERE __k IN (SELECT __k FROM temp.__ivm_touched))"
+        ))
+    }
+    fn materialize(&self, db: &Connection, name: &str, id: usize, restricted: bool) -> Result<()> {
         let node = &self.nodes[id];
         let out = out_table(id, node.fields.len());
         let cols = columns(node.fields.len());
@@ -617,7 +571,12 @@ impl Plan {
                         (1..width).map(|i| format!(",a.c{i}")).collect::<String>()
                     )
                 };
-                let t0 = table(name, id, 0);
+                let t0 = self.source_table(db, name, id, 0, restricted)?;
+                let t1 = if node.inputs.len() == 2 {
+                    self.source_table(db, name, id, 1, restricted)?
+                } else {
+                    String::new()
+                };
                 let sql = match (*op, node.inputs.len()) {
                     ("all", _) => {
                         let child =
@@ -631,19 +590,19 @@ impl Plan {
                         "INSERT INTO {out}({cols},__m) {} UNION ALL SELECT a.c0{},1 FROM {} a WHERE a.rowid=(SELECT MIN(rowid) FROM {} b WHERE b.__k=a.__k) AND a.__k NOT IN(SELECT __k FROM {})",
                         reps(&t0),
                         (1..width).map(|i| format!(",a.c{i}")).collect::<String>(),
-                        table(name, id, 1),
-                        table(name, id, 1),
+                        t1.clone(),
+                        t1.clone(),
                         t0
                     ),
                     ("except", _) => format!(
                         "INSERT INTO {out}({cols},__m) {} AND a.__k NOT IN(SELECT __k FROM {})",
                         reps(&t0),
-                        table(name, id, 1)
+                        t1.clone()
                     ),
                     _ => format!(
                         "INSERT INTO {out}({cols},__m) {} AND a.__k IN(SELECT __k FROM {})",
                         reps(&t0),
-                        table(name, id, 1)
+                        t1.clone()
                     ),
                 };
                 db.execute(&sql, [])?;
@@ -656,13 +615,13 @@ impl Plan {
             } => {
                 let left_n = self.nodes[node.inputs[0]].fields.len();
                 let right_n = self.nodes[node.inputs[1]].fields.len();
-                let t0 = table(name, id, 0);
-                let t1 = table(name, id, 1);
+                let t0 = self.source_table(db, name, id, 0, restricted)?;
+                let t1 = self.source_table(db, name, id, 1, restricted)?;
                 // A join key equal on both sides still cannot match when a
                 // component is NULL, and the components live in the dictionary.
                 let dict = keys_table(name);
                 let no_null = |k: &str| {
-                    format!("NOT EXISTS(SELECT 1 FROM json_each((SELECT __v FROM {dict} WHERE __i={k})) WHERE json_type(value)='null')")
+                    format!("NOT EXISTS(SELECT 1 FROM json_each((SELECT __v FROM {dict} WHERE __i={k})) WHERE type='null')")
                 };
                 let left_cols = |q: &str| {
                     (0..left_n)
@@ -771,7 +730,7 @@ impl Plan {
                 having,
                 window,
             } => {
-                let t = table(name, id, 0);
+                let t = self.source_table(db, name, id, 0, restricted)?;
                 let replaced = expressions
                     .iter()
                     .map(|e| e.replace("__window__", &format!("ORDER BY {}", order.join(","))))
@@ -916,21 +875,10 @@ impl Plan {
         )?;
         Ok(())
     }
-    pub fn input(
-        &self,
-        db: &Connection,
-        name: &str,
-        source: usize,
-        row: Row,
-        d: i64,
-    ) -> Result<()> {
-        let _span = tracing::debug_span!(
-            "maintain",
-            view = name,
-            source = self.sources[source].name.as_str(),
-            sign = d.signum()
-        )
-        .entered();
+    /// Rejects a source row whose values do not fit its declared affinities.
+    /// Runs at the trigger, before staging, so the statement fails, not the
+    /// commit.
+    pub fn validate(&self, source: usize, row: &[Value]) -> Result<()> {
         for (value, affinity) in row.iter().zip(&self.sources[source].affinities) {
             let valid = match value {
                 Value::Null => true,
@@ -943,330 +891,237 @@ impl Plan {
                 return Err(error("source value does not conform to declared affinity"));
             }
         }
+        Ok(())
+    }
+    /// The collector that stages this view's source rows between a trigger
+    /// firing and the drain. Its shadow table is one of the view's objects.
+    pub fn collector(&self, name: &str) -> sqlite_bulk_trigger::Collector {
+        let width = self.sources.iter().map(|s| s.columns.len()).max().unwrap_or(0);
+        sqlite_bulk_trigger::Collector::new(format!("{name}_staged"), width)
+    }
+    /// The temp scratch every drain writes: one out table and one before table
+    /// per node, plus the touched-key set. Runs at bind time, outside any
+    /// trigger program, because DDL inside a trigger aborts the statement.
+    pub fn prepare_scratch(&self, db: &Connection) -> Result<()> {
+        db.execute_batch("CREATE TEMP TABLE IF NOT EXISTS __ivm_touched(__k INTEGER PRIMARY KEY)")?;
         for (id, node) in self.nodes.iter().enumerate() {
-            if matches!(node.kind,Kind::Input(s) if s==source) {
-                self.emit(db, name, id, row.clone(), d)?;
-            }
+            let width = node.fields.len();
+            db.execute_batch(&format!(
+                "CREATE TABLE IF NOT EXISTS {}({cols},__m); CREATE TABLE IF NOT EXISTS temp.__ivm_before_{width}_{id}({cols},__m)",
+                out_table(id, width),
+                cols = columns(width)
+            ))?;
         }
         Ok(())
     }
-    fn emit(&self, db: &Connection, name: &str, id: usize, row: Row, d: i64) -> Result<()> {
-        if d == 0 {
-            return Ok(());
+    /// Set-at-a-time maintenance of one batch. Every node kind runs a constant
+    /// number of statements per batch; row counts live inside SQLite. Node ids
+    /// are topological because `push` appends after its inputs.
+    pub fn drain(&self, db: &Connection, name: &str, batch: &[(usize, Row, i64)]) -> Result<()> {
+        let _span = tracing::debug_span!("drain", view = name, rows = batch.len()).entered();
+        let seed = tracing::debug_span!("node", kind = "seed", id = self.nodes.len()).entered();
+        for (id, node) in self.nodes.iter().enumerate() {
+            db.execute_batch(&format!("DELETE FROM {}", out_table(id, node.fields.len())))?;
         }
-        if id == self.output {
-            let state = format!("main.{}", quote(&format!("{name}_state")));
-            let k = identity(db, &row)?;
-            if d > 0 {
-                let mut params = vec![Value::Text(k)];
-                params.extend(row.clone());
-                let mut statement = db.prepare_cached(&format!(
-                    "INSERT INTO {state} VALUES({})",
-                    parameters(params.len())
-                ))?;
-                for _ in 0..d {
-                    statement.execute(params_from_iter(&params))?;
-                }
-            } else {
-                let changed=db.execute_cached(&format!("DELETE FROM {state} WHERE rowid IN(SELECT rowid FROM {state} WHERE __key=?1 LIMIT ?2)"),rusqlite::params![k,-d])?;
-                if changed as i64 != -d {
-                    return Err(error("missing result multiplicity"));
+        for (source, row, d) in batch {
+            if *d == 0 {
+                continue;
+            }
+            for (id, node) in self.nodes.iter().enumerate() {
+                if matches!(node.kind, Kind::Input(s) if s == *source) {
+                    let mut params = row.clone();
+                    params.push(Value::Integer(*d));
+                    db.execute_cached(
+                        &format!("INSERT INTO {} VALUES({})", out_table(id, row.len()), parameters(params.len())),
+                        params_from_iter(params),
+                    )?;
                 }
             }
         }
-        for (next, node) in self.nodes.iter().enumerate() {
-            for (side, input) in node.inputs.iter().enumerate() {
-                if *input == id {
-                    for (out, diff) in self.apply(db, name, next, side, &row, d)? {
-                        self.emit(db, name, next, out, diff)?;
+        drop(seed);
+        let dict = keys_table(name);
+        for id in 0..self.nodes.len() {
+            let node = &self.nodes[id];
+            let width = node.fields.len();
+            let out = out_table(id, width);
+            let cols = columns(width);
+            let touched_inputs = node
+                .inputs
+                .iter()
+                .map(|input| {
+                    let child = out_table(*input, self.nodes[*input].fields.len());
+                    db.prepare_cached(&format!("SELECT EXISTS(SELECT 1 FROM {child})"))?
+                        .query_row([], |r| r.get::<_, bool>(0))
+                })
+                .collect::<Result<Vec<bool>>>()?;
+            if !touched_inputs.iter().any(|t| *t) {
+                continue;
+            }
+            let _node = tracing::debug_span!("node", kind = node.kind.label(), id).entered();
+            match &node.kind {
+                Kind::Input(_) => {}
+                Kind::Map { .. } => self.materialize(db, name, id, false)?,
+                Kind::Set(op) if *op == "all" => {
+                    for input in &node.inputs {
+                        let child = out_table(*input, self.nodes[*input].fields.len());
+                        db.execute_cached(
+                            &format!("INSERT INTO {out}({cols},__m) SELECT {cols},__m FROM {child}"),
+                            [],
+                        )?;
+                    }
+                }
+                Kind::Set(_) | Kind::Join { .. } | Kind::Group { .. } => {
+                    // Touched keys: every key of every input delta row, interned.
+                    db.execute_batch("DELETE FROM temp.__ivm_touched")?;
+                    for side in 0..node.inputs.len() {
+                        let child = out_table(node.inputs[side], self.nodes[node.inputs[side]].fields.len());
+                        let key = self.key_sql(id, side).ok_or_else(|| error("arrangement node without a key"))?;
+                        db.execute_cached(
+                            &format!("INSERT OR IGNORE INTO {dict}(__v) SELECT {key} FROM {child}"),
+                            [],
+                        )?;
+                        db.execute_cached(
+                            &format!("INSERT OR IGNORE INTO temp.__ivm_touched SELECT __i FROM {dict} WHERE __v IN (SELECT {key} FROM {child})"),
+                            [],
+                        )?;
+                    }
+                    // Before: the node's output over the touched keys, parked.
+                    let before = format!("temp.__ivm_before_{width}_{id}");
+                    db.execute_batch(&format!("DELETE FROM {before}"))?;
+                    self.materialize(db, name, id, true)?;
+                    db.execute_batch(&format!(
+                        "INSERT INTO {before} SELECT * FROM {out}; DELETE FROM {out}"
+                    ))?;
+                    // Apply every input delta to its side's arrangement.
+                    for (side, touched) in touched_inputs.iter().enumerate() {
+                        if *touched {
+                            self.upsert(db, name, id, side)?;
+                        }
+                    }
+                    // After, then out = after minus before as a bag.
+                    self.materialize(db, name, id, true)?;
+                    let identity = json_key((0..width).map(|i| plain(&format!("c{i}"))).collect());
+                    db.execute_batch(&format!(
+                        "INSERT INTO {out} SELECT {cols},-__m FROM {before};
+                         DELETE FROM {before};
+                         INSERT INTO {before} SELECT {cols},sum(__m) FROM {out} GROUP BY {identity} HAVING sum(__m)!=0;
+                         DELETE FROM {out};
+                         INSERT INTO {out} SELECT * FROM {before};
+                         DELETE FROM {before}"
+                    ))?;
+                }
+                Kind::Fixpoint { rules } => {
+                    for side in 0..node.inputs.len() {
+                        let child_width = self.nodes[node.inputs[side]].fields.len();
+                        let child = out_table(node.inputs[side], child_width);
+                        let deltas = rows(db, &format!("SELECT * FROM {child}"), &[])?;
+                        // Bounded by the batch: one entry per input delta row.
+                        for mut delta in deltas {
+                            let Some(Value::Integer(d)) = delta.pop() else {
+                                return Err(error("invalid multiplicity"));
+                            };
+                            for (out_row, diff) in self.fixpoint(db, name, id, side, &delta, d, rules)? {
+                                let mut params = out_row;
+                                params.push(Value::Integer(diff));
+                                db.execute_cached(
+                                    &format!("INSERT INTO {out} VALUES({})", parameters(params.len())),
+                                    params_from_iter(params),
+                                )?;
+                            }
+                        }
                     }
                 }
             }
+            if id == self.output {
+                let _apply = tracing::debug_span!("node", kind = "apply_state", id).entered();
+                self.apply_state(db, name, id)?;
+            }
+        }
+        let _sweep = tracing::debug_span!("node", kind = "sweep", id = self.nodes.len()).entered();
+        for (id, node) in self.nodes.iter().enumerate() {
+            db.execute_batch(&format!("DELETE FROM {}", out_table(id, node.fields.len())))?;
         }
         Ok(())
     }
-    fn apply(
-        &self,
-        db: &Connection,
-        name: &str,
-        id: usize,
-        side: usize,
-        row: &Row,
-        d: i64,
-    ) -> Result<Vec<Delta>> {
+    /// Adds one side's delta rows (in that input's out table) to the
+    /// arrangement. Existing identities take the summed multiplicity; new
+    /// identities are inserted; zero rows leave; a negative row is an error.
+    fn upsert(&self, db: &Connection, name: &str, id: usize, side: usize) -> Result<()> {
         let node = &self.nodes[id];
-        match &node.kind {
-            Kind::Input(_) => unreachable!(),
-            Kind::Map {
-                expressions,
-                predicate,
-            } => Ok(evaluate(db, row, expressions, predicate.as_deref())?
-                .into_iter()
-                .map(|r| (r, d))
-                .collect()),
-            Kind::Set(op) => {
-                if *op == "all" {
-                    return Ok(vec![(row.clone(), d)]);
-                }
-                let normalized = node
-                    .fields
-                    .iter()
-                    .enumerate()
-                    .map(|(i, f)| crate::relational::key_expression(&format!("c{i}"), &f.collation))
-                    .collect::<Vec<_>>();
-                let k = key_id(
-                    db,
-                    &keys_table(name),
-                    &evaluate(db, row, &normalized, None)?.remove(0),
-                )?;
-                let count = |side| -> Result<i64> {
-                    db.query_row(
-                        &format!(
-                            "SELECT coalesce(sum(__n),0) FROM {} WHERE __k=?1",
-                            table(name, id, side)
-                        ),
-                        [k],
-                        |r| r.get(0),
-                    )
-                };
-                let present = |l: i64, r: i64| match *op {
-                    "distinct" => l > 0,
-                    "union" => l + r > 0,
-                    "except" => l > 0 && r == 0,
-                    _ => l > 0 && r > 0,
-                };
-                let snapshot = || -> Result<Vec<Delta>> {
-                    let l = count(0)?;
-                    let r = if node.inputs.len() == 2 { count(1)? } else { 0 };
-                    if !present(l, r) {
-                        return Ok(vec![]);
-                    }
-                    let side = if l > 0 { 0 } else { 1 };
-                    Ok(rows(
-                        db,
-                        &format!(
-                            "SELECT {} FROM {} WHERE __k=?1 ORDER BY rowid LIMIT 1",
-                            columns(row.len()),
-                            table(name, id, side)
-                        ),
-                        &[Value::Integer(k)],
-                    )?
-                    .into_iter()
-                    .map(|r| (r, 1))
-                    .collect())
-                };
-                let before = snapshot()?;
-                change(db, &table(name, id, side), Value::Integer(k), row, d)?;
-                differences(db, before, snapshot()?)
-            }
-            Kind::Join {
-                left,
-                right,
-                mode,
-                predicate,
-            } => {
-                let positions = if side == 0 { left } else { right };
-                let expressions = positions
-                    .iter()
-                    .map(|i| {
-                        crate::relational::key_expression(
-                            &format!("c{i}"),
-                            &self.nodes[node.inputs[side]].fields[*i].collation,
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let values = if positions.is_empty() {
-                    vec![]
-                } else {
-                    evaluate(db, row, &expressions, None)?.remove(0)
-                };
-                let null = values.contains(&Value::Null);
-                let k = key_id(db, &keys_table(name), &values)?;
-                let left_n = self.nodes[node.inputs[0]].fields.len();
-                let right_n = self.nodes[node.inputs[1]].fields.len();
-                if *mode == "inner" {
-                    let other = table(name, id, 1 - side);
-                    let n = if side == 0 { right_n } else { left_n };
-                    let matches = if null {
-                        vec![]
-                    } else {
-                        weighted(
-                            db,
-                            &format!("SELECT {},__n FROM {other} WHERE __k=?1", columns(n)),
-                            k,
-                        )?
-                    };
-                    change(db, &table(name, id, side), Value::Integer(k), row, d)?;
-                    let mut result = vec![];
-                    for (other, n) in matches {
-                        let mut output = if side == 0 {
-                            row.clone()
-                        } else {
-                            other.clone()
-                        };
-                        output.extend(if side == 0 { other } else { row.clone() });
-                        if predicate
-                            .as_ref()
-                            .map(|p| {
-                                evaluate(db, &output, &["1".into()], Some(p)).map(|r| !r.is_empty())
-                            })
-                            .transpose()?
-                            .unwrap_or(true)
-                        {
-                            result.push((
-                                output,
-                                d.checked_mul(n)
-                                    .ok_or_else(|| error("join multiplicity overflow"))?,
-                            ));
-                        }
-                    }
-                    return Ok(result);
-                }
-                let snapshot = || -> Result<Vec<Delta>> {
-                    let l = weighted(
-                        db,
-                        &format!(
-                            "SELECT {},__n FROM {} WHERE __k=?1",
-                            columns(left_n),
-                            table(name, id, 0)
-                        ),
-                        k,
-                    )?;
-                    let r = weighted(
-                        db,
-                        &format!(
-                            "SELECT {},__n FROM {} WHERE __k=?1",
-                            columns(right_n),
-                            table(name, id, 1)
-                        ),
-                        k,
-                    )?;
-                    let mut result = vec![];
-                    let mut right_matched = vec![false; r.len()];
-                    for (a, na) in &l {
-                        let mut matched = false;
-                        if !null {
-                            for (j, (b, nb)) in r.iter().enumerate() {
-                                let mut out = a.clone();
-                                out.extend(b.clone());
-                                if predicate
-                                    .as_ref()
-                                    .map(|p| {
-                                        evaluate(db, &out, &["1".into()], Some(p))
-                                            .map(|r| !r.is_empty())
-                                    })
-                                    .transpose()?
-                                    .unwrap_or(true)
-                                {
-                                    matched = true;
-                                    right_matched[j] = true;
-                                    if !["semi", "anti"].contains(mode) {
-                                        result.push((
-                                            out,
-                                            na.checked_mul(*nb).ok_or_else(|| {
-                                                error("join multiplicity overflow")
-                                            })?,
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-                        if *mode == "semi" && matched || *mode == "anti" && !matched {
-                            result.push((a.clone(), *na));
-                        }
-                        if !matched && ["left", "full"].contains(mode) {
-                            let mut out = a.clone();
-                            out.extend(vec![Value::Null; right_n]);
-                            result.push((out, *na));
-                        }
-                    }
-                    if ["right", "full"].contains(mode) {
-                        for (j, (b, nb)) in r.iter().enumerate() {
-                            if !right_matched[j] {
-                                let mut out = vec![Value::Null; left_n];
-                                out.extend(b.clone());
-                                result.push((out, *nb));
-                            }
-                        }
-                    }
-                    Ok(result)
-                };
-                let before = snapshot()?;
-                change(db, &table(name, id, side), Value::Integer(k), row, d)?;
-                differences(db, before, snapshot()?)
-            }
-            Kind::Group {
-                keys,
-                expressions,
-                order,
-                limit,
-                offset,
-                having,
-                window,
-            } => {
-                let t = table(name, id, 0);
-                let dict = keys_table(name);
-                let k = if keys.is_empty() {
-                    intern(db, &dict, "[]")?
-                } else {
-                    key_id(db, &dict, &evaluate(db, row, keys, None)?.remove(0))?
-                };
-                let snapshot = || -> Result<Vec<Delta>> {
-                    let present: bool = db.query_row(
-                        &format!("SELECT EXISTS(SELECT 1 FROM {t} WHERE __k=?1)"),
-                        [k],
-                        |r| r.get(0),
-                    )?;
-                    if !present && (!keys.is_empty() || *window || limit.is_some()) {
-                        return Ok(vec![]);
-                    }
-                    let expressions = expressions
-                        .iter()
-                        .map(|e| e.replace("__window__", &format!("ORDER BY {}", order.join(","))))
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    let sql = if *window || limit.is_some() {
-                        let width = self.nodes[node.inputs[0]].fields.len();
-                        let cols = columns(width);
-                        // At most k distinct positive-support rows can contribute
-                        // to the first k bag rows. The ordered index bounds reads.
-                        let wanted = limit.filter(|n| *n >= 0).map(|n| n.saturating_add(*offset));
-                        let copies = wanted
-                            .filter(|_| !*window)
-                            .map(|n| format!("min(__n,{n}) AS __n"))
-                            .unwrap_or_else(|| "__n".to_string());
-                        let candidates = format!(
-                            "SELECT {cols},{copies} FROM {t} WHERE __k=?1{}{}",
-                            if !order.is_empty() {
-                                format!(" ORDER BY {}", order.join(","))
-                            } else {
-                                String::new()
-                            },
-                            wanted.map(|n| format!(" LIMIT {n}")).unwrap_or_default()
-                        );
-                        format!("WITH RECURSIVE candidates AS ({candidates}), expanded({cols},__copies) AS (SELECT {cols},__n FROM candidates UNION ALL SELECT {cols},__copies-1 FROM expanded WHERE __copies>1) SELECT {expressions} FROM expanded{}{}",
-                            if !*window&&!order.is_empty(){format!(" ORDER BY {}",order.join(","))}else{String::new()},limit.map(|n|format!(" LIMIT {n} OFFSET {offset}")).unwrap_or_default())
-                    } else {
-                        format!(
-                            "SELECT {expressions} FROM {t} WHERE __k=?1{}{}",
-                            if keys.is_empty() { "" } else { " GROUP BY __k" },
-                            having
-                                .as_ref()
-                                .map(|h| format!(" HAVING {h}"))
-                                .unwrap_or_default()
-                        )
-                    };
-                    Ok(rows(db, &sql, &[Value::Integer(k)])?
-                        .into_iter()
-                        .map(|r| (r, 1))
-                        .collect())
-                };
-                let before = snapshot()?;
-                change(db, &t, Value::Integer(k), row, d)?;
-                differences(db, before, snapshot()?)
-            }
-            Kind::Fixpoint { rules } => self.fixpoint(db, name, id, side, row, d, rules),
+        let child_width = self.nodes[node.inputs[side]].fields.len();
+        let child = out_table(node.inputs[side], child_width);
+        let t = table(name, id, side);
+        let cols = columns(child_width);
+        let identity = identity_sql(child_width);
+        let identity_of = |alias: &str| json_key((0..child_width).map(|i| plain(&format!("{alias}.c{i}"))).collect());
+        let key = self.key_sql(id, side).ok_or_else(|| error("arrangement node without a key"))?;
+        let dict = keys_table(name);
+        let delta_identity = identity_of("o");
+        let arrangement_identity = identity_of(&t);
+        db.execute_cached(
+            &format!(
+                "UPDATE {t} SET __n=__n+(SELECT sum(o.__m) FROM {child} o WHERE sqlite_ivm_hash({delta_identity})={t}.__r AND {delta_identity}={arrangement_identity}) \
+                 WHERE __r IN (SELECT sqlite_ivm_hash({delta_identity}) FROM {child} o) \
+                   AND EXISTS(SELECT 1 FROM {child} o WHERE sqlite_ivm_hash({delta_identity})={t}.__r AND {delta_identity}={arrangement_identity})"
+            ),
+            [],
+        )?;
+        db.execute_cached(
+            &format!(
+                "INSERT INTO {t}(__k,__r,__n,{cols}) SELECT (SELECT __i FROM {dict} WHERE __v={key}),sqlite_ivm_hash(__ivm_r),__ivm_n,{cols} \
+                 FROM (SELECT {identity} AS __ivm_r,sum(__m) AS __ivm_n,{cols} FROM {child} GROUP BY {identity}) \
+                 WHERE __ivm_n!=0 AND NOT EXISTS(SELECT 1 FROM {t} a WHERE a.__r=sqlite_ivm_hash(__ivm_r) AND {}=__ivm_r)",
+                identity_of("a")
+            ),
+            [],
+        )?;
+        let bad: bool = db
+            .prepare_cached(&format!("SELECT EXISTS(SELECT 1 FROM {t} WHERE __n<0 OR typeof(__n)!='integer')"))?
+            .query_row([], |r| r.get(0))?;
+        if bad {
+            return Err(error("negative arrangement multiplicity"));
         }
+        db.execute_cached(&format!("DELETE FROM {t} WHERE __n=0"), [])?;
+        Ok(())
+    }
+    /// Applies the output node's delta to the result rows: retractions delete
+    /// that many copies by key, additions insert that many copies.
+    fn apply_state(&self, db: &Connection, name: &str, id: usize) -> Result<()> {
+        let width = self.nodes[id].fields.len();
+        let out = out_table(id, width);
+        let state = format!("main.{}", quote(&format!("{name}_state")));
+        let key = json_key((0..width).map(|i| plain(&format!("o.c{i}"))).collect());
+        let wanted: i64 = db
+            .prepare_cached(&format!("SELECT coalesce(sum(-__m),0) FROM {out} o WHERE __m<0"))?
+            .query_row([], |r| r.get(0))?;
+        let removed = db.execute_cached(
+            &format!(
+                "DELETE FROM {state} WHERE rowid IN (SELECT s.rowid FROM {state} s JOIN (SELECT {key} AS __key,sum(-__m) AS __n FROM {out} o WHERE __m<0 GROUP BY {key}) d ON s.__key=d.__key \
+                 WHERE (SELECT count(*) FROM {state} p WHERE p.__key=s.__key AND p.rowid<=s.rowid)<=d.__n)"
+            ),
+            [],
+        )?;
+        if removed as i64 != wanted {
+            return Err(error(format!(
+                "missing result multiplicity: {wanted} retractions, {removed} rows present"
+            )));
+        }
+        let peak: i64 = db
+            .prepare_cached(&format!("SELECT coalesce(max(__m),0) FROM {out}"))?
+            .query_row([], |r| r.get(0))?;
+        if peak > BULK_MULTIPLICITY_BUDGET {
+            return Err(error("result multiplicity expansion exceeds budget"));
+        }
+        db.execute_cached(
+            &format!(
+                "WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<(SELECT coalesce(max(__m),0) FROM {out})) \
+                 INSERT INTO {state}(__key,{}) SELECT {key},o.c0{} FROM {out} o,seq WHERE o.__m>0 AND seq.n<=o.__m",
+                columns(width),
+                (1..width).map(|i| format!(",o.c{i}")).collect::<String>()
+            ),
+            [],
+        )?;
+        Ok(())
     }
     /// Delete-and-rederive over one member set. Insertion and rederivation run
     /// semi-naive rounds whose delta is a rowid range of the member table.
@@ -1511,6 +1366,9 @@ pub fn install(db: &Connection, name: &str, sql: &str, plan: &Plan) -> Result<()
         ));
     }
     let mut objects = plan.create_state(db, name)?;
+    let collector = plan.collector(name);
+    collector.create_shadow(db)?;
+    objects.push(("table", collector.shadow_table()));
     objects.extend(hooks(db, name, plan)?);
     let columns = plan
         .sources

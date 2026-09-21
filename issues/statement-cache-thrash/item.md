@@ -2,13 +2,18 @@
 created: 2026-09-20
 updated: 2026-09-20
 type: improvement
-status: open
+status: done
 priority: high
 epic: lab-queue-round-one
 lane: lab-cache
 lane_seq: 10
 labels: [perf]
 collision: [src/1_maintenance.rs, src/1a_relational.rs]
+closed: 2026-09-20
+closed_by: fable
+commits:
+- hash: a6c987c
+  summary: set-at-a-time drain
 ---
 
 # Statement cache thrashing: the maintenance path re-prepares every row
@@ -74,3 +79,9 @@ Other agents may hold the machine. The claim is a prepare count, not a duration:
 - [ ] the cache is bounded, and the bound is stated with what it protects
 - [ ] a test fails if a new fresh-prepare call site appears on the maintenance path
 - [ ] the existing battery is green and unchanged
+
+## Resolution
+
+### 2026-09-20T19:30:31Z · @fable
+
+per-row apply/emit/differences/weighted/evaluate deleted; drain is set-at-a-time with prepare_cached; remaining execute_batch(format!) sites at 1a_relational.rs:923,972,987,989,1002,1038 re-parse per drain

@@ -53,7 +53,7 @@ fn open_loaded() -> Result<Option<Connection>> {
              run: cargo test --locked --features bench --features rusqlite/bundled \
              --test 6_extension_load"
         );
-        return Ok(None);
+        Ok(None)
     }
     #[cfg(feature = "bench")]
     {

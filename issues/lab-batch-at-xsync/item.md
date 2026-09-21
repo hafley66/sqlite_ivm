@@ -2,7 +2,7 @@
 created: 2026-09-20
 updated: 2026-09-20
 type: task
-status: open
+status: done
 priority: high
 epic: lab-queue-round-one
 lane: lab-engine
@@ -11,6 +11,11 @@ labels: [lab]
 size: L
 blocked_by: ['@statement-cache-thrash']
 collision: [src/1_maintenance.rs, src/2_vtab.rs]
+closed: 2026-09-20
+closed_by: fable
+commits:
+- hash: bdf85ee
+  summary: embed the collector
 ---
 
 # Lab 5: the gang copies the fts5 homework
@@ -104,3 +109,9 @@ runs the CLI scenarios and is the outer gate.
 
 **The trap:** a buffer that passes every test above by flushing on every `xUpdate`
 anyway. The `CountRecorder` assertion in row one is what catches it.
+
+## Resolution
+
+### 2026-09-20T19:30:31Z · @fable
+
+sqlite_bulk_trigger::Collector embedded in 2_vtab.rs; rows stage at the trigger, drain at xSync or first read; savepoint trio forwarded; mid-transaction drain then ROLLBACK TO re-stages (hafley-rs #85, dc20afa5)
