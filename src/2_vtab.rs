@@ -1,6 +1,7 @@
 use crate::{
     catalog, maintenance,
     query::{bind, error, quote, Query},
+    relational_program::Program,
 };
 use rusqlite::{ffi, types::ValueRef, vtab::*, Connection, Result};
 use std::{
@@ -39,6 +40,8 @@ struct Table {
     generic: bool,
     query: Option<Query>,
     plan: Option<crate::relational::Plan>,
+    /// Every SQL string this view's drain issues, built beside the plan.
+    program: Option<Program>,
     /// Source rows staged since the last drain. Present once the plan is bound.
     collector: Option<sqlite_bulk_trigger::Collector>,
 }
@@ -222,6 +225,7 @@ impl Table {
                 generic,
                 query: None,
                 plan: None,
+                program: None,
                 collector: None,
             };
             // Bind now so the scratch tables exist before any trigger program
@@ -243,16 +247,17 @@ impl Table {
         }
         Ok(query)
     });
-        let (query, plan) = match narrow {
+        let (query, plan, program) = match narrow {
             Ok(query) => {
                 maintenance::install(&conn, name, &sql)?;
-                (Some(query), None)
+                (Some(query), None, None)
             }
             Err(_) => {
                 let plan = crate::relational::bind(&conn, &sql)?;
                 crate::relational_maintenance::install(&conn, name, &sql, &plan)?;
-                plan.prepare_scratch(&conn)?;
-                (None, Some(plan))
+                let program = Program::build(&plan, name, &conn);
+                plan.prepare_scratch(&conn, &program)?;
+                (None, Some(plan), Some(program))
             }
         };
         let id = conn.query_row(
@@ -306,6 +311,7 @@ impl Table {
                 query,
                 collector: plan.as_ref().map(|plan| plan.collector(name)),
                 plan,
+                program,
             },
         ))
     }
@@ -333,9 +339,12 @@ impl Table {
                         "recursive views from storage formats before 5 must be dropped and re-created",
                     ));
                 }
-                plan.prepare_scratch(&self.db)?;
-                self.collector = Some(plan.collector(&self.name()?));
+                let name = self.name()?;
+                let program = Program::build(&plan, &name, &self.db);
+                plan.prepare_scratch(&self.db, &program)?;
+                self.collector = Some(plan.collector(&name));
                 self.plan = Some(plan);
+                self.program = Some(program);
             }
             self.sql = sql;
         }
@@ -422,7 +431,17 @@ impl Table {
             return Ok(());
         }
         let batch = collector.drain(&self.db)?;
-        let plan = self.plan.as_ref().ok_or_else(|| error("plan missing after bind"))?;
+        let name = self.name()?;
+        let stale = self
+            .program
+            .as_ref()
+            .map(|program| program.name != name)
+            .unwrap_or(true);
+        if stale {
+            let plan = self.plan.as_ref().ok_or_else(|| error("plan missing after bind"))?;
+            let program = Program::build(plan, &name, &self.db);
+            self.program = Some(program);
+        }
         let batch = batch
             .into_iter()
             .map(|change| {
@@ -437,7 +456,12 @@ impl Table {
                 Ok((source, change.values, sign))
             })
             .collect::<Result<Vec<_>>>()?;
-        plan.drain(&self.db, &self.name()?, &batch)
+        let program = self
+            .program
+            .as_ref()
+            .ok_or_else(|| error("program missing after bind"))?;
+        let plan = self.plan.as_ref().ok_or_else(|| error("plan missing after bind"))?;
+        plan.drain(&self.db, program, &batch)
     }
 }
 impl<'vtab> TransactionVTab<'vtab> for Table {
