@@ -403,7 +403,7 @@ fn fixpoint_statements(plan: &Plan, name: &str, id: usize, width: usize) -> Fixp
         seed_work_deleted: format!(
             "INSERT OR IGNORE INTO {work}(__k,{cols}) SELECT __k,{cols} FROM {deleted}"
         ),
-        seed_work_frontier: (1..=BULK_DEPARTURE_SET_ROUND_BUDGET)
+        seed_work_frontier: (0..=BULK_DEPARTURE_SET_ROUND_BUDGET)
             .map(|generation| format!("INSERT OR IGNORE INTO {work}(__k,{cols}) SELECT __k,{cols} FROM {departing} WHERE __g={generation}"))
             .collect(),
         restore_small: format!(

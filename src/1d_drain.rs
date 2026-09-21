@@ -2,9 +2,9 @@ use crate::{
     catalog::error,
     relational::{Kind, Plan},
     relational_maintenance::{
-        BULK_DEPARTURE_ROUND_BUDGET, BULK_DEPARTURE_SET_ROUND_BUDGET,
-        BULK_DEPARTURE_SET_RESTORE_THRESHOLD, BULK_MULTIPLICITY_BUDGET, BULK_ROUND_BUDGET,
-        CachedExecute, Row,
+        BULK_DEPARTURE_FRONTIER_MIN_ROWS, BULK_DEPARTURE_ROUND_BUDGET,
+        BULK_DEPARTURE_SET_RESTORE_THRESHOLD, BULK_DEPARTURE_SET_ROUND_BUDGET,
+        BULK_MULTIPLICITY_BUDGET, BULK_ROUND_BUDGET, CachedExecute, Row,
     },
     relational_program::{
         ArrangementStatements, FixpointSide, FixpointStatements, KindStatements, Program,
@@ -244,26 +244,28 @@ impl Plan {
             db.execute_cached(&statements.seed_departing, [])?;
             let mut settled = false;
             let mut frontier = 0usize;
-            for generation in 0..BULK_DEPARTURE_SET_ROUND_BUDGET {
-                let round = round_span("delete");
-                db.execute_cached(&statements.collect_departing[generation], [])?;
-                db.execute_cached(&statements.drop_departing[generation], [])?;
-                let mut written = 0;
-                for sql in &statements.delete_derives[generation] {
-                    written += db.execute_cached(sql, [])?;
+            if work_rows >= BULK_DEPARTURE_FRONTIER_MIN_ROWS {
+                for generation in 0..BULK_DEPARTURE_SET_ROUND_BUDGET {
+                    let round = round_span("delete");
+                    db.execute_cached(&statements.collect_departing[generation], [])?;
+                    db.execute_cached(&statements.drop_departing[generation], [])?;
+                    let mut written = 0;
+                    for sql in &statements.delete_derives[generation] {
+                        written += db.execute_cached(sql, [])?;
+                    }
+                    work_rows += written;
+                    round.record("rows", written);
+                    if written == 0 {
+                        settled = true;
+                        break;
+                    }
+                    frontier = generation + 1;
                 }
-                work_rows += written;
-                round.record("rows", written);
-                if written == 0 {
-                    settled = true;
-                    break;
-                }
-                frontier = generation + 1;
             }
             if !settled {
                 db.execute_cached(&statements.clear_work, [])?;
                 db.execute_cached(&statements.seed_work_deleted, [])?;
-                db.execute_cached(&statements.seed_work_frontier[frontier - 1], [])?;
+                db.execute_cached(&statements.seed_work_frontier[frontier], [])?;
                 let mut delete_rounds = 0usize;
                 loop {
                     if delete_rounds >= BULK_DEPARTURE_ROUND_BUDGET {
