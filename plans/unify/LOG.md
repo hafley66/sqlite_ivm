@@ -82,3 +82,4 @@ unless the row says otherwise. Executor glm53f unless noted.
 - 13:0x refactor pass 4 PR #31 graded: 68/68 x3, clippy clean, `format!` strings byte-identical, `0b` 696 / `0c_compile_from` 555 / `0d_compile_select` 589 / `0e_compile_recursive` 315 / `0f_columns` 65 lines, one `Field` constructor, release `8_group_limit` 0.78-0.80 s. Merged; main `186d051`. All four refactor passes landed.
 - dispatched docs/failure-ledger-rows (flash-omp, docs only): the six failure-modes rows owed since the 2026-09-19 session. Brief `ledger.brief.md`.
 - 13:2x checkpoint. perf lane clean tree, no new commit in 40 min (profiling the cliff). ledger lane 9 min in. No PRs. 33G free.
+- 13:4x docs PR #32 graded (one file, six rows, two cells `not found` with the search named) and merged; main `a4756c9`. Board: only perf/toward-dd remains live.
