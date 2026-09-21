@@ -4,6 +4,8 @@ pub mod catalog;
 pub mod extension;
 #[path = "0b_relational.rs"]
 pub mod relational;
+#[path = "0c_compile_from.rs"]
+pub mod compile_from;
 #[path = "0f_columns.rs"]
 pub mod columns;
 #[path = "1a_relational.rs"]
