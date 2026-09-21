@@ -55,7 +55,8 @@ Acceptance includes the original 20 circuit families and 51 additional query
 combinations, each with 174 source states. The native extension and independent
 DD graphs are compared with a separate SQLite connection that has no extension.
 Ordinary PostgreSQL queries provide another comparison. Exact results and the
-pg_ivm 1.15 mismatch are recorded in [feature acceptance](bench/46_feature_acceptance.md).
+pg_ivm 1.15 mismatch are recorded in the bench harness receipts
+(`plans/costs/shootout-rust.md`).
 
 Sources must be ordinary `main` tables. Values conform to declared affinities;
 BLOB storage uses columns with BLOB or no declared affinity. Load deterministic
@@ -318,20 +319,16 @@ bash sqlite_ivm/scripts/9_verify.sh
 ```
 
 The base gate runs Rust tests, six native Bash scenarios, and the original circuit
-fixtures. The expanded feature gate and native value/transaction probes run with:
+fixtures. The `sqlite-ivm-bench` binary covers the expanded circuits suite:
 
 ```bash
-bash sqlite_ivm/scripts/12_features.sh /absolute/new/feature-artifacts
-bash sqlite_ivm/scripts/14_native_values.sh /absolute/path/libsqlite_ivm.dylib
-IVM_POSTGRES_PREFIX=/path/to/postgres \
-  bash sqlite_ivm/scripts/13_feature_pg.sh /absolute/new/feature-artifacts
+IVM_POSTGRES_PREFIX=/path/to/postgres target/release/bench shootout smoke
 ```
 
-The raw PostgreSQL comparison returns failure on result mismatches. The separate
-`15_pg_baseline.sh` gate checks the exact recorded pg_ivm 1.15 behavior, including
-its FULL JOIN USING failure, while requiring every ordinary PG query to match.
-The Linux/macOS workflow runs the expanded native/DD tests; a PostgreSQL job
-checks the recorded 1.15 behavior. Remote CI execution has not been performed here.
+Raw PostgreSQL comparisons and the recorded pg_ivm 1.15 behavior are checked by
+the binary's receipts: unsupported definitions report their SQLSTATE, ordinary
+PG queries must match, and the Linux/macOS workflow runs the smoke shootout
+with a PostgreSQL/pg_ivm job. Remote CI execution has not been performed here.
 
 The GitHub workflow builds and tests on Linux and macOS and uploads release
 archives. Local execution is distinct from a remote CI run. Archives include the
@@ -341,10 +338,10 @@ or an external release requires selecting a destination.
 ## Shared benchmark
 
 See [bench/README.md](bench/README.md) for reproducible commands, source provenance,
-timing boundaries, receipts, and measured limits. The native SQLite consumer
-loads the actual extension binary. PostgreSQL/pg_ivm and DD use the preserved
-shared adapters, fixtures, and independent oracle. Unsupported pg_ivm families
-are reported explicitly. SQLite and PostgreSQL are durable; DD is volatile.
+timing boundaries, receipts, and measured limits. The binary runs the circuits
+shootout (`shootout`), the scale sweep (`scale`), and fixture dumps
+(`dump-fixture`) against the built extension. Unsupported pg_ivm families are
+reported explicitly. SQLite and PostgreSQL are durable; DD is volatile.
 
 ## Reading order
 
@@ -365,13 +362,11 @@ layout before upgrading. No C source is required.
 ## Combined engine report
 
 ```bash
-just ivm-shootout
-# Or: bash sqlite_ivm/scripts/16_shootout.sh
+IVM_POSTGRES_PREFIX=<postgres prefix> target/release/bench shootout quick
 ```
 
-Builds and runs semantic and performance comparisons across the native extension,
-DD, Prolog, native PostgreSQL/pg_ivm, SQLite queries, and PGlite. The report includes
-13 DD-specific operator/recursion/time contracts, 20 shared circuits, and 51 typed
-query compositions. Unsupported definitions and result mismatches remain visible.
-See [the command contract](bench/54_shootout.md) for dependencies, profiles,
-artifacts and exit codes.
+Runs the 20 shared circuits across the native extension, PostgreSQL/pg_ivm,
+SQLite queries, and DD, with a per-engine report, JSONL receipts, and explicit
+`n/a (<reason>)` markers for unsupported definitions. See
+[bench/README.md](bench/README.md) for dependencies, profiles, artifacts, and
+exit codes.
