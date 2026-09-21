@@ -259,23 +259,32 @@ Two changes, no commit in `src/`:
 |---|---|---|---|---|
 | `restore` was one statement whose `WHERE` is `EXISTS(r1) OR EXISTS(r2)`; it became one statement whose body is `SELECT .. WHERE EXISTS(r1) UNION ALL SELECT .. WHERE EXISTS(r2)`, one branch per rule | reach fanout 1 n 100000 | 647947.0, 647428.6, 644158.9 | 2141392.0, rep 0 only, killed | 3.3x slower: the compound select materializes |
 | `drop_deleted_range` was `DELETE FROM all WHERE __k IN (SELECT __k FROM work WHERE rowid range)`; it became `DELETE FROM all WHERE rowid IN (SELECT a.rowid FROM work w JOIN all a ON a.__k=w.__k WHERE w.rowid range)` | reach fanout 1 n 40000 | 351.5 delete, 30118.1 wall | 355.9 delete, 30480.4 wall | no change: SQLite already drove the membership test from the range |
+| `derive_sql`'s only-present filter was `WHERE __k IN (SELECT __k FROM all)`; it became `WHERE EXISTS(SELECT 1 FROM all m WHERE m.__k=d.__k)` over an aliased derived table | reach fanout 1 n 40000 | 351.5 delete, 30118.1 wall | 348.5 delete, 29874.9 wall | no change inside the 1.2% run-to-run spread |
 
 ### departure rounds
 
 `RUST_LOG=sqlite_ivm=debug` counts the engine's round spans for the reach
 fanout 1 cell:
 
-| n | delete rounds | derive rounds | wall s |
+| n | delete rounds | derive rounds | wall s (no logging) |
 |---|---|---|---|
 | 10000 | 5795 | 168 | 2 |
+| 16000 | 343027 | 191 | not measured |
+| 32000 | 572824 | 207 | not measured |
 | 40000 | 52236 | 161 | 36 |
 
-The forward closure settles in a flat 161 to 168 derive rounds, as the one-hop
-diameter predicts. The departure loop is the one that grows: 5795 rounds to
-52236 for 4x the rows. The cell runs 40 deletes and 40 updates, so that is
-roughly 72 delete rounds per departure statement at n 10000 and 653 at
-n 40000, each round scanning the member table. Per statement cost is rounds
-times the closure scan, and that is the whole of the superlinear term.
+The forward closure settles in a flat 161 to 207 derive rounds, as the one-hop
+diameter predicts. The departure loop is the one that moves, and it does not
+move smoothly: 5795 rounds at n 10000, 52236 at n 40000, but 343027 at n 16000
+and 572824 at n 32000, so a four-fold change in row count swings the round
+count by more than 100x in both directions. Round counts come from a
+`RUST_LOG=sqlite_ivm=debug` run; the logging inflates the wall, so the wall
+column is from the unlogged sweep.
+
+A round count that is not monotonic in n explains why three changes to the
+shape of the departure SQL did nothing: the cost is not a smooth function of
+the SQL, it is a function of how the work rowid range happens to advance for a
+given size.
 
 ### where this stands
 
