@@ -10,7 +10,7 @@ use crate::{
         SplitStatements, UpsertStatements, CLEAR_TOUCHED,
     },
 };
-use rusqlite::{params, params_from_iter, types::Value, Connection, Result};
+use rusqlite::{params_from_iter, types::Value, Connection, Result};
 
 impl Plan {
     /// The temp scratch every drain writes: one out table and one before table
