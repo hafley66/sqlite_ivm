@@ -1,6 +1,6 @@
 ---
 created: 2026-09-20
-updated: 2026-09-20
+updated: 2026-09-21
 type: bug
 status: fixed
 priority: high
@@ -53,10 +53,10 @@ every scalar class; the divergence is in what reaches them.
 
 ## Acceptance Criteria
 
-- [ ] the bulk and incremental paths key an expression group by the same value
-- [ ] `tests/7_key_agreement.rs:272` asserts one row with `n = 2`, and its name
+- [x] the bulk and incremental paths key an expression group by the same value
+- [x] `tests/7_key_agreement.rs:272` asserts one row with `n = 2`, and its name
       stops saying "diverges"
-- [ ] a `docs/failure-modes.md` row: incident, cause, fail-pre-fix test, rail
+- [x] a `docs/failure-modes.md` row: incident, cause, fail-pre-fix test, rail
 
 ## Resolution
 

@@ -76,6 +76,7 @@ fn cell(name: &str, query: &str, n: i64) -> Result<(f64, f64, f64)> {
 }
 
 #[test]
+#[ignore = "scale sweep, run by name: cargo test --release --test 14_scale -- --ignored"]
 fn per_write_cost_against_recompute() -> Result<()> {
     let sizes: Vec<i64> = match std::env::var("IVM_SCALE_MAX") {
         Ok(max) => SIZES.iter().copied().filter(|n| *n <= max.parse().unwrap_or(i64::MAX)).collect(),
