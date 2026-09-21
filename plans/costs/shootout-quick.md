@@ -1,0 +1,99 @@
+# shootout quick, 19de62f, 2026-09-20
+
+Command: `IVM_POSTGRES_PREFIX=bench/shared/.work/postgres-18.6 node bench/53_shootout.mjs quick --engines sqlite-ivm,pg-ivm,sqlite-query,pg-query,dd`. Integer value domain, 400 rows, batch 10, fanout 10, 13 mutation states, 1 warmup, 3 measured runs. ms = update transaction + maintenance + result read, summed over the 13 states. Peak RSS: adapter process for SQLite and DD, server process group for PostgreSQL. Disk: database plus WAL bytes at the end.
+
+Harness defect, not fixed here: the text_nocase and mixed_int_real value domains fail in every engine (DD panics at `bench/shared/34_circuit_dd.rs:18`, SQLite arms reject the values), so the built-in report prints no rows; this table reads the receipts in `logs/performance.log` directly.
+
+```
+circuit (400 rows, 13 states) engine                 ms median                 ms runs peak RSS MiB disk MiB
+aggregate_churn               sqlite-plugin-delta        17.56          48.7 16.9 17.6          8.7     0.12
+aggregate_churn               native-pg_ivm              93.45          93.4 91.5 95.5         71.0    10.99
+aggregate_churn               sqlite-query                3.41             3.2 3.4 3.8          5.9     0.28
+aggregate_churn               native-query               13.51          14.0 13.5 13.4         67.1     9.71
+aggregate_churn               native-dd                   0.60             0.6 0.6 0.7          5.5     0.00
+antijoin                      sqlite-plugin-delta        73.70          73.7 73.2 73.9         10.7     0.18
+antijoin                      sqlite-query                4.60             4.6 4.6 4.6          6.5     0.28
+antijoin                      native-query               16.80          16.6 16.8 17.2         67.2     9.56
+antijoin                      native-dd                   0.96             0.9 1.0 1.0          6.1     0.00
+chain                         sqlite-plugin-delta       217.51       219.8 217.5 216.6         12.9     0.25
+chain                         native-pg_ivm             126.04       128.8 126.0 126.0         70.3    10.04
+chain                         sqlite-query                4.99             5.0 5.0 5.0          6.4     0.28
+chain                         native-query               17.75          17.9 17.2 17.7         67.2     9.10
+chain                         native-dd                   0.90             0.9 0.9 0.9          6.0     0.00
+count_distinct                sqlite-plugin-delta        40.09          40.3 40.1 39.8          8.9     0.14
+count_distinct                sqlite-query                3.48             3.5 3.5 3.6          5.9     0.28
+count_distinct                native-query               14.17          14.8 14.0 14.2         74.8    10.17
+count_distinct                native-dd                   0.76             0.8 0.8 0.8          5.3     0.00
+cte                           sqlite-plugin-delta         9.04            9.0 8.4 26.4         10.2     0.12
+cte                           native-pg_ivm              88.00          88.0 87.6 88.6         83.1    12.05
+cte                           sqlite-query                3.50             3.5 3.5 3.5          5.9     0.28
+cte                           native-query               16.12          16.3 16.1 15.8         81.0    11.19
+cte                           native-dd                   0.52             0.5 0.5 0.5          5.4     0.00
+diamond                       sqlite-plugin-delta       147.84       148.2 147.3 147.8         13.5     0.27
+diamond                       sqlite-query                5.17             5.4 5.2 5.1          7.4     0.28
+diamond                       native-query               19.77          20.2 19.8 19.4         67.4     9.22
+diamond                       native-dd                   0.92             0.9 0.9 0.9          6.5     0.00
+distinct                      sqlite-plugin-delta        41.86          41.9 42.0 41.8          8.9     0.15
+distinct                      native-pg_ivm             107.39       109.9 107.4 106.3         68.4     9.21
+distinct                      sqlite-query                4.64             4.7 4.6 4.4          6.2     0.28
+distinct                      native-query               15.65          15.7 15.6 15.2         66.5     8.61
+distinct                      native-dd                   0.79             0.8 0.7 0.8          5.9     0.00
+except_set                    sqlite-plugin-delta        42.73          42.9 42.7 42.7         10.8     0.16
+except_set                    sqlite-query                3.81             3.8 3.8 3.8          6.5     0.28
+except_set                    native-query               16.84          16.5 17.3 16.8         76.2    10.46
+except_set                    native-dd                   1.12             1.1 1.2 1.1          6.2     0.00
+fanout_fanin                  sqlite-plugin-delta         9.43             9.1 9.4 9.7          9.3     0.16
+fanout_fanin                  sqlite-query                3.86             3.8 3.9 3.9          5.7     0.28
+fanout_fanin                  native-query               15.89          16.0 15.9 15.6         66.0     8.47
+fanout_fanin                  native-dd                   0.58             0.6 0.6 0.6          5.9     0.00
+intersect_set                 sqlite-plugin-delta        42.85          41.9 44.2 42.8         12.0     0.16
+intersect_set                 sqlite-query                3.54             3.5 3.5 3.7          6.6     0.28
+intersect_set                 native-query               16.02          14.4 19.3 16.0         77.2    10.62
+intersect_set                 native-dd                   0.96             0.9 1.0 1.0          5.7     0.00
+join                          sqlite-plugin-delta        72.33          72.3 72.6 71.3          9.8     0.16
+join                          native-pg_ivm              84.34          84.8 84.3 84.1         68.3     9.47
+join                          sqlite-query                4.36             4.4 4.4 4.3          5.9     0.28
+join                          native-query               14.07          14.1 14.1 14.4         67.1     8.80
+join                          native-dd                   0.59             0.6 0.6 0.6          5.5     0.00
+minmax                        sqlite-plugin-delta        41.40          56.4 41.4 40.3         11.2     0.14
+minmax                        native-pg_ivm             160.12       160.1 146.9 164.4         79.7    11.65
+minmax                        sqlite-query                3.53             3.5 3.5 3.7          7.0     0.28
+minmax                        native-query               15.34          16.0 15.3 15.3         74.5    10.03
+minmax                        native-dd                   0.67             0.7 0.7 0.7          5.3     0.00
+pipeline                      sqlite-plugin-delta         8.87             9.2 8.7 8.9          8.7     0.12
+pipeline                      native-pg_ivm              77.82          76.7 78.1 77.8         68.2     8.79
+pipeline                      sqlite-query                4.51             4.7 4.3 4.5          6.5     0.28
+pipeline                      native-query               14.94          14.9 15.8 14.9         66.0     8.31
+pipeline                      native-dd                   0.53             0.5 0.5 0.5          5.7     0.00
+reach_cycle                   sqlite-plugin-delta       112.80       112.8 111.8 113.6         10.3     0.21
+reach_cycle                   sqlite-query                4.02             4.0 3.9 4.1          5.8     0.28
+reach_cycle                   native-query               16.59          16.6 15.9 17.3         88.9     9.83
+reach_cycle                   native-dd                   1.45             1.4 1.4 1.5          5.7     0.00
+self_join                     sqlite-plugin-delta       157.08       157.8 157.1 155.0         14.6     0.26
+self_join                     native-pg_ivm             268.83       269.4 268.8 263.0         71.0     9.86
+self_join                     sqlite-query                6.36             6.8 6.4 6.3         10.1     0.28
+self_join                     native-query               25.33          25.3 25.4 24.4         66.2     8.96
+self_join                     native-dd                   1.16             1.1 1.3 1.2          9.0     0.00
+semijoin                      sqlite-plugin-delta        71.70          72.5 71.7 71.6          9.7     0.16
+semijoin                      native-pg_ivm              85.73          86.6 85.7 85.7         69.5    10.45
+semijoin                      sqlite-query                4.34             4.3 4.3 4.4          6.1     0.28
+semijoin                      native-query               14.25          14.6 14.2 14.1         67.0     9.41
+semijoin                      native-dd                   0.70             0.8 0.7 0.6          5.9     0.00
+subquery                      sqlite-plugin-delta         8.47             8.5 8.2 8.5          9.0     0.12
+subquery                      native-pg_ivm              83.91          88.6 83.7 83.9         81.7    11.89
+subquery                      sqlite-query                3.33             3.5 3.3 3.3          6.0     0.28
+subquery                      native-query               15.60          15.8 15.6 15.3         97.1    11.18
+subquery                      native-dd                   0.51             0.5 0.5 0.5          5.4     0.00
+topk                          sqlite-plugin-delta        70.92          70.6 70.9 71.2          9.0     0.16
+topk                          sqlite-query                3.22             3.2 3.1 3.2          5.4     0.28
+topk                          native-query               13.62          13.7 13.4 13.6         76.9    10.78
+topk                          native-dd                   0.73             0.7 0.7 0.7          5.3     0.00
+union_set                     sqlite-plugin-delta        42.74          43.4 42.7 42.4         10.8     0.16
+union_set                     sqlite-query                3.89             3.9 3.8 3.9          6.3     0.28
+union_set                     native-query               17.02          17.5 17.0 16.3         75.7    10.33
+union_set                     native-dd                   0.79             0.8 0.8 0.8          5.7     0.00
+window_rank                   sqlite-plugin-delta        73.30          75.6 73.3 73.3         10.8     0.17
+window_rank                   sqlite-query                4.80             5.0 4.7 4.8          6.2     0.28
+window_rank                   native-query               17.45          17.2 17.4 18.1         78.0    10.92
+window_rank                   native-dd                   1.05             1.0 1.0 1.1          6.0     0.00
+```

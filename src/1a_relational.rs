@@ -5,9 +5,7 @@ use crate::{
     relational::{Kind, Occurrence, Plan, Rule},
 };
 use rusqlite::{params_from_iter, types::Value, Connection, Result};
-use std::collections::BTreeMap;
 pub type Row = Vec<Value>;
-type Delta = (Row, i64);
 fn columns(n: usize) -> String {
     (0..n)
         .map(|i| format!("c{i}"))
@@ -17,21 +15,31 @@ fn columns(n: usize) -> String {
 fn table(name: &str, id: usize, side: usize) -> String {
     format!("main.{}", quote(&format!("{name}_op{id}_{side}")))
 }
+/// Upsert scratch: one side's delta summed per identity, the identity and its
+/// hash computed once per row instead of once per comparison.
+fn delta_table(id: usize, side: usize, width: usize) -> String {
+    format!("temp.__ivm_delta_{width}_{id}_{side}")
+}
+fn delta_index(id: usize, side: usize, width: usize) -> String {
+    format!("temp.__ivm_delta_{width}_{id}_{side}_r")
+}
+/// Fixpoint scratch: one side's rows that entered its arrangement this batch.
+fn arrived_table(id: usize, side: usize, width: usize) -> String {
+    format!("temp.__ivm_arrived_{width}_{id}_{side}")
+}
+/// Fixpoint scratch: one side's rows that left its arrangement this batch.
+fn left_table(id: usize, side: usize, width: usize) -> String {
+    format!("temp.__ivm_left_{width}_{id}_{side}")
+}
+/// Fixpoint scratch: members removed by the delete pass, keyed as stored.
+fn deleted_table(id: usize, width: usize) -> String {
+    format!("temp.__ivm_deleted_{width}_{id}")
+}
 fn parameters(n: usize) -> String {
     (1..=n)
         .map(|i| format!("?{i}"))
         .collect::<Vec<_>>()
         .join(",")
-}
-fn rows(db: &Connection, sql: &str, params: &[Value]) -> Result<Vec<Row>> {
-    let mut s = db.prepare_cached(sql)?;
-    let n = s.column_count();
-    let result = s
-        .query_map(params_from_iter(params), |r| {
-            (0..n).map(|i| r.get(i)).collect()
-        })?
-        .collect();
-    result
 }
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -72,96 +80,17 @@ pub fn resolve(db: &Connection, dict: &str, id: i64) -> Result<String> {
     db.prepare_cached(&format!("SELECT __v FROM {dict} WHERE __i=?1"))?
         .query_row([id], |r| r.get(0))
 }
-fn key(db: &Connection, row: &[Value]) -> Result<String> {
-    let normalized = row
-        .iter()
-        .map(|v| match v {
-            Value::Real(n)
-                if n.is_finite()
-                    && *n >= i64::MIN as f64
-                    && *n < (i64::MAX as f64)
-                    && n.fract() == 0.0 =>
-            {
-                Value::Integer(*n as i64)
-            }
-            v => v.clone(),
-        })
-        .collect::<Vec<_>>();
-    identity(db, &normalized)
-}
-fn identity(db: &Connection, row: &[Value]) -> Result<String> {
-    let expressions = row
-        .iter()
-        .enumerate()
-        .map(|(i, v)| match v {
-            Value::Blob(_) => format!("json_object('blob',hex(?{}))", i + 1),
-            Value::Real(_) => format!("json_object('real',?{})", i + 1),
-            _ => format!("?{}", i + 1),
-        })
-        .collect::<Vec<_>>();
-    let values = row
-        .iter()
-        .map(|v| match v {
-            Value::Real(n) => Value::Text(format!("{:016x}", n.to_bits())),
-            v => v.clone(),
-        })
-        .collect::<Vec<_>>();
-    db.prepare_cached(&format!("SELECT json_array({})", expressions.join(",")))?
-        .query_row(params_from_iter(&values), |r| r.get(0))
-}
-fn key_id(db: &Connection, dict: &str, row: &[Value]) -> Result<i64> {
-    let text = key(db, row)?;
-    intern(db, dict, &text)
-}
-fn change(db: &Connection, t: &str, k: Value, row: &Row, d: i64) -> Result<(i64, i64)> {
-    let composite = identity(db, row)?;
-    let r = row_hash(composite.as_bytes());
-    // __r is a hash, so equality on it only narrows. The composite is rebuilt
-    // from the row's own columns on the one hit, so no copy of it is stored.
-    let same = format!("__r=?1 AND {}=?2", identity_sql(row.len()));
-    let old: Option<i64> = db
-        .prepare_cached(&format!("SELECT __n FROM {t} WHERE {same}"))?
-        .query_row(rusqlite::params![r, &composite], |r| r.get(0))
-        .optional()?;
-    let new = old
-        .unwrap_or(0)
-        .checked_add(d)
-        .ok_or_else(|| error("multiplicity overflow"))?;
-    if new < 0 {
-        return Err(error("negative arrangement multiplicity"));
-    }
-    if new == 0 {
-        db.execute_cached(
-            &format!("DELETE FROM {t} WHERE {same}"),
-            rusqlite::params![r, &composite],
-        )?;
-    } else if old.is_some() {
-        db.execute_cached(
-            &format!("UPDATE {t} SET __n=?3 WHERE {same}"),
-            rusqlite::params![r, &composite, new],
-        )?;
-    } else {
-        let mut params = vec![k, Value::Integer(r), Value::Integer(new)];
-        params.extend(row.clone());
-        db.execute_cached(
-            &format!("INSERT INTO {t} VALUES({})", parameters(params.len())),
-            params_from_iter(params),
-        )?;
-    }
-    Ok((old.unwrap_or(0), new))
-}
 fn max_rowid(db: &Connection, t: &str) -> Result<i64> {
     db.prepare_cached(&format!("SELECT coalesce(max(rowid),0) FROM {t}"))?
         .query_row([], |r| r.get(0))
 }
-enum Role<'a> {
+enum Role {
     Table(String),
-    Params(&'a Row),
     Range(String, i64, i64),
 }
 /// Every occurrence becomes a flattenable subquery renaming its columns into
 /// the rule's shared `c{i}` namespace; `?` numbering continues from `params`.
-fn rule_from(rule: &Rule, roles: &[Role<'_>], params: &mut Vec<Value>) -> String {
+fn rule_from(rule: &Rule, roles: &[Role], params: &mut Vec<Value>) -> String {
     let mut offset = 0;
     let mut sources = vec![];
     for (n, ((_, width), role)) in rule.occurrences.iter().zip(roles).enumerate() {
@@ -173,18 +102,6 @@ fn rule_from(rule: &Rule, roles: &[Role<'_>], params: &mut Vec<Value>) -> String
         };
         sources.push(match role {
             Role::Table(t) => format!("(SELECT {} FROM {t}) q{n}", renamed("")),
-            Role::Params(row) => {
-                let values = row
-                    .iter()
-                    .enumerate()
-                    .map(|(i, v)| {
-                        params.push(v.clone());
-                        format!("?{} AS c{}", params.len(), offset + i)
-                    })
-                    .collect::<Vec<_>>()
-                    .join(",");
-                format!("(SELECT {values}) q{n}")
-            }
             Role::Range(t, lo, hi) => {
                 params.push(Value::Integer(*lo));
                 params.push(Value::Integer(*hi));
@@ -200,23 +117,28 @@ fn rule_from(rule: &Rule, roles: &[Role<'_>], params: &mut Vec<Value>) -> String
     }
     format!("FROM {}", sources.join(","))
 }
-fn roles<'a>(
+/// `bound` names the changed side's delta table and which occurrence of that
+/// side reads it; every other occurrence reads the full arrangement, so a rule
+/// that mentions the side twice is driven once per occurrence.
+fn roles(
     name: &str,
     id: usize,
     side: usize,
     rule: &Rule,
-    bound: Option<&'a Row>,
-    member: Role<'a>,
-) -> Vec<Role<'a>> {
+    bound: Option<(usize, &str)>,
+    member: Role,
+) -> Vec<Role> {
     rule.occurrences
         .iter()
-        .map(|(o, _)| match (o, bound) {
-            (Occurrence::Input(s), Some(row)) if *s == side => Role::Params(row),
+        .enumerate()
+        .map(|(n, (o, _))| match (o, bound) {
+            (Occurrence::Input(s), Some((at, delta))) if *s == side && n == at => {
+                Role::Table(delta.to_string())
+            }
             (Occurrence::Input(s), _) => Role::Table(table(name, id, *s)),
             (Occurrence::Member, _) => match &member {
                 Role::Table(t) => Role::Table(t.clone()),
                 Role::Range(t, lo, hi) => Role::Range(t.clone(), *lo, *hi),
-                Role::Params(row) => Role::Params(row),
             },
         })
         .collect()
@@ -229,7 +151,6 @@ fn rule_where(rule: &Rule, extra: Option<&str>) -> String {
         (Some(p), Some(e)) => format!(" WHERE {p} AND {e}"),
     }
 }
-use rusqlite::OptionalExtension;
 trait CachedExecute {
     fn execute_cached<P: rusqlite::Params>(&self, sql: &str, params: P) -> Result<usize>;
 }
@@ -317,8 +238,10 @@ impl Plan {
                 let member = node.inputs.len();
                 for side in [member, member + 1] {
                     let t = format!("{name}_op{id}_{side}");
+                    // AUTOINCREMENT keeps rowids monotone after the delete pass
+                    // removes the newest members, so `rowid>lo` still means new.
                     db.execute_batch(&format!(
-                        "CREATE TABLE main.{}(__k TEXT NOT NULL UNIQUE,{})",
+                        "CREATE TABLE main.{}(__id INTEGER PRIMARY KEY AUTOINCREMENT,__k TEXT NOT NULL UNIQUE,{})",
                         quote(&t),
                         columns(node.fields.len())
                     ))?;
@@ -533,7 +456,7 @@ impl Plan {
         match &node.kind {
             Kind::Input(source) => {
                 let s = &self.sources[*source];
-                db.execute(
+                db.execute_cached(
                     &format!(
                         "INSERT INTO {out}({cols},__m) SELECT {},1 FROM main.{}",
                         s.columns
@@ -551,7 +474,7 @@ impl Plan {
                 predicate,
             } => {
                 let child = out_table(node.inputs[0], self.nodes[node.inputs[0]].fields.len());
-                db.execute(
+                db.execute_cached(
                     &format!(
                         "INSERT INTO {out}({cols},__m) SELECT {},__m FROM {child}{}",
                         expressions.join(","),
@@ -605,7 +528,7 @@ impl Plan {
                         t1.clone()
                     ),
                 };
-                db.execute(&sql, [])?;
+                db.execute_cached(&sql, [])?;
             }
             Kind::Join {
                 left: _,
@@ -706,17 +629,15 @@ impl Plan {
                         restriction("l.__k")
                     ),
                 };
-                db.execute(
+                db.execute_cached(
                     &format!("INSERT INTO {out}({cols},__m) SELECT * FROM ({body})"),
                     [],
                 )?;
-                let bad: bool = db.query_row(
-                    &format!(
+                let bad: bool = db
+                    .prepare_cached(&format!(
                         "SELECT EXISTS(SELECT 1 FROM {out} WHERE typeof(__m)!='integer' OR __m<0)"
-                    ),
-                    [],
-                    |r| r.get(0),
-                )?;
+                    ))?
+                    .query_row([], |r| r.get(0))?;
                 if bad {
                     return Err(error("join multiplicity overflow"));
                 }
@@ -736,14 +657,29 @@ impl Plan {
                     .map(|e| e.replace("__window__", &format!("ORDER BY {}", order.join(","))))
                     .collect::<Vec<_>>()
                     .join(",");
-                if *window || limit.is_some() {
-                    let groups: i64 =
-                        db.query_row(&format!("SELECT count(DISTINCT __k) FROM {t}"), [], |r| {
-                            r.get(0)
-                        })?;
+                if *window {
+                    // Every partition in one statement: the window runs over the
+                    // expanded bag partitioned by key, instead of once per key.
+                    let width = self.nodes[node.inputs[0]].fields.len();
+                    let cols_in = columns(width);
+                    let groups: i64 = db
+                        .prepare_cached(&format!("SELECT count(DISTINCT __k) FROM {t}"))?
+                        .query_row([], |r| r.get(0))?;
                     if groups as usize > BULK_GROUP_BUDGET {
                         return Err(error("bulk group budget exceeded"));
                     }
+                    let partitioned = expressions
+                        .iter()
+                        .map(|e| e.replacen(" OVER(", " OVER(PARTITION BY __k ", 1))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    db.execute_cached(
+                        &format!(
+                            "WITH RECURSIVE candidates(__k,{cols_in},__n) AS (SELECT __k,{cols_in},__n FROM {t}),                              expanded(__k,{cols_in},__copies) AS (SELECT __k,{cols_in},__n FROM candidates UNION ALL SELECT __k,{cols_in},__copies-1 FROM expanded WHERE __copies>1)                              INSERT INTO {out}({cols},__m) SELECT q.*,1 FROM (SELECT {partitioned} FROM expanded) q"
+                        ),
+                        [],
+                    )?;
+                } else if limit.is_some() {
                     let width = self.nodes[node.inputs[0]].fields.len();
                     let cols_in = columns(width);
                     let wanted = limit.filter(|n| *n >= 0).map(|n| n.saturating_add(*offset));
@@ -773,12 +709,17 @@ impl Plan {
                             .map(|n| format!(" LIMIT {n} OFFSET {offset}"))
                             .unwrap_or_default()
                     );
-                    let mut statement = db.prepare(&format!(
+                    let mut statement = db.prepare_cached(&format!(
                         "INSERT INTO {out}({cols},__m) SELECT q.*,1 FROM ({single}) q"
                     ))?;
-                    let mut key_statement = db.prepare(&format!("SELECT DISTINCT __k FROM {t}"))?;
+                    let mut key_statement = db.prepare_cached(&format!("SELECT DISTINCT __k FROM {t}"))?;
                     let mut key_rows = key_statement.query([])?;
+                    let mut groups = 0usize;
                     while let Some(key) = key_rows.next()? {
+                        groups += 1;
+                        if groups > BULK_GROUP_BUDGET {
+                            return Err(error("bulk group budget exceeded"));
+                        }
                         statement.execute([key.get::<_, i64>(0)?])?;
                     }
                 } else {
@@ -790,7 +731,7 @@ impl Plan {
                     if let Some(h) = having {
                         sql.push_str(&format!(" HAVING {h}"));
                     }
-                    db.execute(&sql, [])?;
+                    db.execute_cached(&sql, [])?;
                 }
             }
             Kind::Fixpoint { rules } => {
@@ -911,6 +852,34 @@ impl Plan {
                 out_table(id, width),
                 cols = columns(width)
             ))?;
+            if matches!(node.kind, Kind::Set(_) | Kind::Join { .. } | Kind::Group { .. } | Kind::Fixpoint { .. }) {
+                for side in 0..node.inputs.len() {
+                    let side_width = self.nodes[node.inputs[side]].fields.len();
+                    db.execute_batch(&format!(
+                        "CREATE TABLE IF NOT EXISTS {}(__r INTEGER NOT NULL,__v TEXT NOT NULL,__n INTEGER NOT NULL,{}); CREATE INDEX IF NOT EXISTS {}_r ON {}(__r)",
+                        delta_table(id, side, side_width),
+                        columns(side_width),
+                        delta_index(id, side, side_width),
+                        delta_table(id, side, side_width).trim_start_matches("temp.")
+                    ))?;
+                }
+            }
+            if let Kind::Fixpoint { .. } = node.kind {
+                for side in 0..node.inputs.len() {
+                    let side_width = self.nodes[node.inputs[side]].fields.len();
+                    let side_cols = columns(side_width);
+                    db.execute_batch(&format!(
+                        "CREATE TABLE IF NOT EXISTS {}({side_cols}); CREATE TABLE IF NOT EXISTS {}({side_cols})",
+                        arrived_table(id, side, side_width),
+                        left_table(id, side, side_width)
+                    ))?;
+                }
+                db.execute_batch(&format!(
+                    "CREATE TABLE IF NOT EXISTS {}(__k TEXT PRIMARY KEY,{})",
+                    deleted_table(id, width),
+                    columns(width)
+                ))?;
+            }
         }
         Ok(())
     }
@@ -920,22 +889,22 @@ impl Plan {
     pub fn drain(&self, db: &Connection, name: &str, batch: &[(usize, Row, i64)]) -> Result<()> {
         let _span = tracing::debug_span!("drain", view = name, rows = batch.len()).entered();
         let seed = tracing::debug_span!("node", kind = "seed", id = self.nodes.len()).entered();
+        // One prepared insert per input node; the batch is the only per-row loop.
         for (id, node) in self.nodes.iter().enumerate() {
-            db.execute_batch(&format!("DELETE FROM {}", out_table(id, node.fields.len())))?;
-        }
-        for (source, row, d) in batch {
-            if *d == 0 {
+            let Kind::Input(input) = node.kind else {
                 continue;
-            }
-            for (id, node) in self.nodes.iter().enumerate() {
-                if matches!(node.kind, Kind::Input(s) if s == *source) {
-                    let mut params = row.clone();
-                    params.push(Value::Integer(*d));
-                    db.execute_cached(
-                        &format!("INSERT INTO {} VALUES({})", out_table(id, row.len()), parameters(params.len())),
-                        params_from_iter(params),
-                    )?;
+            };
+            let width = self.sources[input].columns.len();
+            let mut insert = db.prepare_cached(&format!(
+                "INSERT INTO {} VALUES({})",
+                out_table(id, width),
+                parameters(width + 1)
+            ))?;
+            for (source, row, d) in batch {
+                if *source != input || *d == 0 {
+                    continue;
                 }
+                insert.execute(params_from_iter(row.iter().chain(std::iter::once(&Value::Integer(*d)))))?;
             }
         }
         drop(seed);
@@ -972,7 +941,7 @@ impl Plan {
                 }
                 Kind::Set(_) | Kind::Join { .. } | Kind::Group { .. } => {
                     // Touched keys: every key of every input delta row, interned.
-                    db.execute_batch("DELETE FROM temp.__ivm_touched")?;
+                    db.execute_cached("DELETE FROM temp.__ivm_touched", [])?;
                     for side in 0..node.inputs.len() {
                         let child = out_table(node.inputs[side], self.nodes[node.inputs[side]].fields.len());
                         let key = self.key_sql(id, side).ok_or_else(|| error("arrangement node without a key"))?;
@@ -987,11 +956,9 @@ impl Plan {
                     }
                     // Before: the node's output over the touched keys, parked.
                     let before = format!("temp.__ivm_before_{width}_{id}");
-                    db.execute_batch(&format!("DELETE FROM {before}"))?;
                     self.materialize(db, name, id, true)?;
-                    db.execute_batch(&format!(
-                        "INSERT INTO {before} SELECT * FROM {out}; DELETE FROM {out}"
-                    ))?;
+                    db.execute_cached(&format!("INSERT INTO {before} SELECT * FROM {out}"), [])?;
+                    db.execute_cached(&format!("DELETE FROM {out}"), [])?;
                     // Apply every input delta to its side's arrangement.
                     for (side, touched) in touched_inputs.iter().enumerate() {
                         if *touched {
@@ -1001,33 +968,29 @@ impl Plan {
                     // After, then out = after minus before as a bag.
                     self.materialize(db, name, id, true)?;
                     let identity = json_key((0..width).map(|i| plain(&format!("c{i}"))).collect());
-                    db.execute_batch(&format!(
-                        "INSERT INTO {out} SELECT {cols},-__m FROM {before};
-                         DELETE FROM {before};
-                         INSERT INTO {before} SELECT {cols},sum(__m) FROM {out} GROUP BY {identity} HAVING sum(__m)!=0;
-                         DELETE FROM {out};
-                         INSERT INTO {out} SELECT * FROM {before};
-                         DELETE FROM {before}"
-                    ))?;
+                    for sql in [
+                        format!("INSERT INTO {out} SELECT {cols},-__m FROM {before}"),
+                        format!("DELETE FROM {before}"),
+                        format!("INSERT INTO {before} SELECT {cols},sum(__m) FROM {out} GROUP BY {identity} HAVING sum(__m)!=0"),
+                        format!("DELETE FROM {out}"),
+                        format!("INSERT INTO {out} SELECT * FROM {before}"),
+                        format!("DELETE FROM {before}"),
+                    ] {
+                        db.execute_cached(&sql, [])?;
+                    }
                 }
                 Kind::Fixpoint { rules } => {
-                    for side in 0..node.inputs.len() {
-                        let child_width = self.nodes[node.inputs[side]].fields.len();
-                        let child = out_table(node.inputs[side], child_width);
-                        let deltas = rows(db, &format!("SELECT * FROM {child}"), &[])?;
-                        // Bounded by the batch: one entry per input delta row.
-                        for mut delta in deltas {
-                            let Some(Value::Integer(d)) = delta.pop() else {
-                                return Err(error("invalid multiplicity"));
-                            };
-                            for (out_row, diff) in self.fixpoint(db, name, id, side, &delta, d, rules)? {
-                                let mut params = out_row;
-                                params.push(Value::Integer(diff));
-                                db.execute_cached(
-                                    &format!("INSERT INTO {out} VALUES({})", parameters(params.len())),
-                                    params_from_iter(params),
-                                )?;
-                            }
+                    for (side, touched) in touched_inputs.iter().enumerate() {
+                        if *touched {
+                            let child = out_table(node.inputs[side], self.nodes[node.inputs[side]].fields.len());
+                            let key = self.key_sql(id, side).ok_or_else(|| error("arrangement node without a key"))?;
+                            db.execute_cached(
+                                &format!("INSERT OR IGNORE INTO {dict}(__v) SELECT {key} FROM {child}"),
+                                [],
+                            )?;
+                            self.split_side(db, name, id, side)?;
+                            self.upsert(db, name, id, side)?;
+                            self.fixpoint(db, name, id, side, rules)?;
                         }
                     }
                 }
@@ -1037,9 +1000,11 @@ impl Plan {
                 self.apply_state(db, name, id)?;
             }
         }
+        // Sweep is the only clear: seed trusts it, and a failed drain aborts the
+        // enclosing statement, which unwinds the temp writes with it.
         let _sweep = tracing::debug_span!("node", kind = "sweep", id = self.nodes.len()).entered();
         for (id, node) in self.nodes.iter().enumerate() {
-            db.execute_batch(&format!("DELETE FROM {}", out_table(id, node.fields.len())))?;
+            db.execute_cached(&format!("DELETE FROM {}", out_table(id, node.fields.len())), [])?;
         }
         Ok(())
     }
@@ -1056,21 +1021,26 @@ impl Plan {
         let identity_of = |alias: &str| json_key((0..child_width).map(|i| plain(&format!("{alias}.c{i}"))).collect());
         let key = self.key_sql(id, side).ok_or_else(|| error("arrangement node without a key"))?;
         let dict = keys_table(name);
-        let delta_identity = identity_of("o");
+        let delta = delta_table(id, side, child_width);
         let arrangement_identity = identity_of(&t);
+        db.execute_cached(&format!("DELETE FROM {delta}"), [])?;
         db.execute_cached(
             &format!(
-                "UPDATE {t} SET __n=__n+(SELECT sum(o.__m) FROM {child} o WHERE sqlite_ivm_hash({delta_identity})={t}.__r AND {delta_identity}={arrangement_identity}) \
-                 WHERE __r IN (SELECT sqlite_ivm_hash({delta_identity}) FROM {child} o) \
-                   AND EXISTS(SELECT 1 FROM {child} o WHERE sqlite_ivm_hash({delta_identity})={t}.__r AND {delta_identity}={arrangement_identity})"
+                "INSERT INTO {delta}(__r,__v,__n,{cols}) SELECT sqlite_ivm_hash(__ivm_v),__ivm_v,__ivm_n,{cols} \
+                 FROM (SELECT {identity} AS __ivm_v,sum(__m) AS __ivm_n,{cols} FROM {child} GROUP BY {identity}) WHERE __ivm_n!=0"
             ),
             [],
         )?;
         db.execute_cached(
             &format!(
-                "INSERT INTO {t}(__k,__r,__n,{cols}) SELECT (SELECT __i FROM {dict} WHERE __v={key}),sqlite_ivm_hash(__ivm_r),__ivm_n,{cols} \
-                 FROM (SELECT {identity} AS __ivm_r,sum(__m) AS __ivm_n,{cols} FROM {child} GROUP BY {identity}) \
-                 WHERE __ivm_n!=0 AND NOT EXISTS(SELECT 1 FROM {t} a WHERE a.__r=sqlite_ivm_hash(__ivm_r) AND {}=__ivm_r)",
+                "UPDATE {t} SET __n={t}.__n+d.__n FROM {delta} d WHERE d.__r={t}.__r AND d.__v={arrangement_identity}"
+            ),
+            [],
+        )?;
+        db.execute_cached(
+            &format!(
+                "INSERT INTO {t}(__k,__r,__n,{cols}) SELECT (SELECT __i FROM {dict} WHERE __v={key}),d.__r,d.__n,{cols} FROM {delta} d \
+                 WHERE NOT EXISTS(SELECT 1 FROM {t} a WHERE a.__r=d.__r AND {}=d.__v)",
                 identity_of("a")
             ),
             [],
@@ -1126,21 +1096,57 @@ impl Plan {
     /// Delete-and-rederive over one member set. Insertion and rederivation run
     /// semi-naive rounds whose delta is a rowid range of the member table.
     #[allow(clippy::too_many_arguments)]
+    /// Splits one side's delta into the rows entering its arrangement and the
+    /// rows leaving it, by net multiplicity against what is stored.
+    fn split_side(&self, db: &Connection, name: &str, id: usize, side: usize) -> Result<()> {
+        let node = &self.nodes[id];
+        let width = self.nodes[node.inputs[side]].fields.len();
+        let child = out_table(node.inputs[side], width);
+        let t = table(name, id, side);
+        let arrived = arrived_table(id, side, width);
+        let left = left_table(id, side, width);
+        let cols = columns(width);
+        let identity_of = |alias: &str| json_key((0..width).map(|i| plain(&format!("{alias}.c{i}"))).collect());
+        let delta_identity = identity_of("o");
+        let stored_identity = identity_of("a");
+        let net = format!(
+            "(SELECT sum(o.__m) FROM {child} o WHERE sqlite_ivm_hash({delta_identity})=a.__r AND {delta_identity}={stored_identity})"
+        );
+        db.execute_cached(&format!("DELETE FROM {arrived}"), [])?;
+        db.execute_cached(&format!("DELETE FROM {left}"), [])?;
+        db.execute_cached(
+            &format!(
+                "INSERT INTO {left} SELECT {cols} FROM {t} a \
+                 WHERE a.__r IN (SELECT sqlite_ivm_hash({delta_identity}) FROM {child} o) AND a.__n+coalesce({net},0)=0"
+            ),
+            [],
+        )?;
+        db.execute_cached(
+            &format!(
+                "INSERT INTO {arrived} SELECT {cols} FROM (SELECT {identity} AS __ivm_r,sum(__m) AS __ivm_n,{cols} FROM {child} GROUP BY {identity}) o \
+                 WHERE __ivm_n>0 AND NOT EXISTS(SELECT 1 FROM {t} a WHERE a.__r=sqlite_ivm_hash(o.__ivm_r) AND {stored_identity}=o.__ivm_r)",
+                identity = identity_sql(width)
+            ),
+            [],
+        )?;
+        Ok(())
+    }
+    /// Semi-naive closure over one side's arrived and left sets. Arrivals
+    /// derive forward from the new rows; departures delete every member they
+    /// reached, then rederive what survives another way. Deltas land in the
+    /// node's out table.
     fn fixpoint(
         &self,
         db: &Connection,
         name: &str,
         id: usize,
         side: usize,
-        row: &Row,
-        d: i64,
         rules: &[Rule],
-    ) -> Result<Vec<Delta>> {
+    ) -> Result<()> {
         let span = tracing::debug_span!(
             "fixpoint",
             view = name,
             node = id,
-            rows_in = d.abs(),
             rounds = tracing::field::Empty
         )
         .entered();
@@ -1152,24 +1158,18 @@ impl Plan {
             tracing::debug_span!("round", phase, index, rows = tracing::field::Empty).entered()
         };
         let node = &self.nodes[id];
-        let dict = keys_table(name);
-        let (old, new) = change(
-            db,
-            &table(name, id, side),
-            Value::Integer(key_id(db, &dict, row)?),
-            row,
-            d,
-        )?;
-        if (old > 0) == (new > 0) {
-            return Ok(vec![]);
-        }
         let width = node.fields.len();
         let cols = columns(width);
+        let out = out_table(id, width);
         let all = table(name, id, node.inputs.len());
         let work = table(name, id, node.inputs.len() + 1);
+        let side_width = self.nodes[node.inputs[side]].fields.len();
+        let arrived = arrived_table(id, side, side_width);
+        let left = left_table(id, side, side_width);
+        let deleted = deleted_table(id, width);
         let derive = |target: &str,
                       rule: &Rule,
-                      roles: &[Role<'_>],
+                      roles: &[Role],
                       only_present: bool|
          -> Result<usize> {
             let mut params = vec![];
@@ -1190,6 +1190,25 @@ impl Plan {
                 )
             };
             db.execute_cached(&sql, params_from_iter(params))
+        };
+        // One derive per occurrence of the changed side, reading `delta` there.
+        let derive_side = |target: &str, delta: &str, only_present: bool| -> Result<()> {
+            for rule in rules.iter().filter(|r| r.mentions(side)) {
+                for (at, _) in rule
+                    .occurrences
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, (o, _))| *o == Occurrence::Input(side))
+                {
+                    derive(
+                        target,
+                        rule,
+                        &roles(name, id, side, rule, Some((at, delta)), Role::Table(all.clone())),
+                        only_present,
+                    )?;
+                }
+            }
+            Ok(())
         };
         let rounds = |mut lo: i64| -> Result<()> {
             let mut rounds = 0usize;
@@ -1216,144 +1235,128 @@ impl Plan {
                 lo = hi;
             }
         };
-        let read = |sql: &str, params: &[Value], sign: i64| -> Result<Vec<Delta>> {
-            Ok(rows(db, sql, params)?
-                .into_iter()
-                .map(|r| (r, sign))
-                .collect())
-        };
-        if new > 0 {
-            let lo = max_rowid(db, &all)?;
-            for rule in rules.iter().filter(|r| r.mentions(side)) {
-                derive(
-                    &all,
-                    rule,
-                    &roles(name, id, side, rule, Some(row), Role::Table(all.clone())),
-                    false,
-                )?;
-            }
-            rounds(lo)?;
-            return read(
-                &format!("SELECT {cols} FROM {all} WHERE rowid>?1"),
-                &[Value::Integer(lo)],
-                1,
-            );
-        }
-        db.execute_cached(&format!("DELETE FROM {work}"), [])?;
-        for rule in rules.iter().filter(|r| r.mentions(side)) {
-            derive(
-                &work,
-                rule,
-                &roles(name, id, side, rule, Some(row), Role::Table(all.clone())),
-                true,
-            )?;
-        }
-        let mut lo = 0;
-        let mut delete_rounds = 0usize;
-        let mut deleted = BTreeMap::<String, Row>::new();
-        loop {
-            if delete_rounds >= BULK_ROUND_BUDGET {
-                return Err(error("fixpoint closure round budget exceeded"));
-            }
-            delete_rounds += 1;
-            let hi = max_rowid(db, &work)?;
-            if hi == lo {
-                break;
-            }
-            let round = round_span("delete");
-            rows(
-                db,
-                &format!("SELECT __k,{cols} FROM {all} WHERE __k IN (SELECT __k FROM {work} WHERE rowid>?1 AND rowid<=?2)"),
-                &[Value::Integer(lo), Value::Integer(hi)],
-            )?
-            .into_iter()
-            .try_for_each(|mut stored| {
-                let Value::Text(k) = stored.remove(0) else {
-                    return Err(error("invalid fixpoint member key"));
-                };
-                deleted.entry(k).or_insert(stored);
-                Ok(())
-            })?;
-            db.execute_cached(
-                &format!("DELETE FROM {all} WHERE __k IN (SELECT __k FROM {work} WHERE rowid>?1 AND rowid<=?2)"),
-                rusqlite::params![lo, hi],
-            )?;
-            let mut written = 0;
-            for rule in rules.iter().filter(|r| r.member().is_some()) {
-                written += derive(
-                    &work,
-                    rule,
-                    &roles(
-                        name,
-                        id,
-                        side,
-                        rule,
-                        None,
-                        Role::Range(work.clone(), lo, hi),
-                    ),
-                    true,
-                )?;
-            }
-            round.record("rows", written);
-            lo = hi;
-        }
-        let mut params = vec![];
-        let mut derivable = vec![];
-        for rule in rules {
-            let from = rule_from(
-                rule,
-                &roles(name, id, side, rule, None, Role::Table(all.clone())),
-                &mut params,
-            );
-            let matched = rule
-                .head
-                .iter()
-                .zip(&node.fields)
-                .enumerate()
-                .map(|(i, (h, f))| format!("(({h}) COLLATE {}) IS w.c{i}", f.collation))
-                .collect::<Vec<_>>()
-                .join(" AND ");
-            derivable.push(format!(
-                "EXISTS(SELECT 1 {from}{})",
-                rule_where(rule, Some(&matched))
-            ));
-        }
-        let restored = max_rowid(db, &all)?;
-        db.execute_cached(
-            &format!(
-                "INSERT OR IGNORE INTO {all}(__k,{cols}) SELECT w.__k,{} FROM {work} w WHERE {}",
-                (0..width)
-                    .map(|i| format!("w.c{i}"))
-                    .collect::<Vec<_>>()
-                    .join(","),
-                derivable.join(" OR ")
-            ),
-            params_from_iter(params),
-        )?;
-        rounds(restored)?;
-        let removed = deleted.into_iter().try_fold(
-            Vec::new(),
-            |mut deltas, (k, stored)| -> Result<Vec<Delta>> {
-                let current = rows(
-                    db,
-                    &format!("SELECT {cols} FROM {all} WHERE __k=?1"),
-                    &[Value::Text(k)],
-                )?
-                .into_iter()
-                .next();
-                match current {
-                    None => deltas.push((stored, -1)),
-                    Some(current) if identity(db, &stored)? != identity(db, &current)? => {
-                        deltas.push((stored, -1));
-                        deltas.push((current, 1));
-                    }
-                    Some(_) => {}
+
+        // Every member past `lo` at the end is new unless the delete pass stored
+        // it first; rederived rows take fresh rowids, so `lo` precedes that pass.
+        let lo = max_rowid(db, &all)?;
+        // Departures first: delete everything the left rows reached, rederive.
+        let any_left: bool = db
+            .prepare_cached(&format!("SELECT EXISTS(SELECT 1 FROM {left})"))?
+            .query_row([], |r| r.get(0))?;
+        if any_left {
+            db.execute_cached(&format!("DELETE FROM {work}"), [])?;
+            db.execute_cached(&format!("DELETE FROM {deleted}"), [])?;
+            derive_side(&work, &left, true)?;
+            let mut lo = 0;
+            let mut delete_rounds = 0usize;
+            loop {
+                if delete_rounds >= BULK_ROUND_BUDGET {
+                    return Err(error("fixpoint closure round budget exceeded"));
                 }
-                Ok(deltas)
-            },
-        )?;
-        db.execute_cached(&format!("DELETE FROM {work}"), [])?;
-        Ok(removed)
+                delete_rounds += 1;
+                let hi = max_rowid(db, &work)?;
+                if hi == lo {
+                    break;
+                }
+                let round = round_span("delete");
+                db.execute_cached(
+                    &format!("INSERT OR IGNORE INTO {deleted}(__k,{cols}) SELECT __k,{cols} FROM {all} WHERE __k IN (SELECT __k FROM {work} WHERE rowid>?1 AND rowid<=?2)"),
+                    rusqlite::params![lo, hi],
+                )?;
+                db.execute_cached(
+                    &format!("DELETE FROM {all} WHERE __k IN (SELECT __k FROM {work} WHERE rowid>?1 AND rowid<=?2)"),
+                    rusqlite::params![lo, hi],
+                )?;
+                let mut written = 0;
+                for rule in rules.iter().filter(|r| r.member().is_some()) {
+                    written += derive(
+                        &work,
+                        rule,
+                        &roles(name, id, side, rule, None, Role::Range(work.clone(), lo, hi)),
+                        true,
+                    )?;
+                }
+                round.record("rows", written);
+                lo = hi;
+            }
+            let mut params = vec![];
+            let mut derivable = vec![];
+            for rule in rules {
+                let from = rule_from(
+                    rule,
+                    &roles(name, id, side, rule, None, Role::Table(all.clone())),
+                    &mut params,
+                );
+                let matched = rule
+                    .head
+                    .iter()
+                    .zip(&node.fields)
+                    .enumerate()
+                    .map(|(i, (h, f))| format!("(({h}) COLLATE {}) IS w.c{i}", f.collation))
+                    .collect::<Vec<_>>()
+                    .join(" AND ");
+                derivable.push(format!(
+                    "EXISTS(SELECT 1 {from}{})",
+                    rule_where(rule, Some(&matched))
+                ));
+            }
+            let restored = max_rowid(db, &all)?;
+            db.execute_cached(
+                &format!(
+                    "INSERT OR IGNORE INTO {all}(__k,{cols}) SELECT w.__k,{} FROM {work} w WHERE {}",
+                    (0..width)
+                        .map(|i| format!("w.c{i}"))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    derivable.join(" OR ")
+                ),
+                params_from_iter(params),
+            )?;
+            rounds(restored)?;
+            db.execute_cached(&format!("DELETE FROM {work}"), [])?;
+        }
+
+        // Arrivals: derive forward from the new rows, then close.
+        derive_side(&all, &arrived, false)?;
+        rounds(lo)?;
+
+        // Deltas: a deleted member gone for good retracts; one stored again with
+        // another representative retracts the old row and emits the new one;
+        // rows past `lo` that were not deleted this pass are new.
+        if any_left {
+            let d_identity = json_key((0..width).map(|i| plain(&format!("d.c{i}"))).collect());
+            let a_identity = json_key((0..width).map(|i| plain(&format!("a.c{i}"))).collect());
+            let d_cols = (0..width).map(|i| format!("d.c{i}")).collect::<Vec<_>>().join(",");
+            let a_cols = (0..width).map(|i| format!("a.c{i}")).collect::<Vec<_>>().join(",");
+            db.execute_cached(
+                &format!(
+                    "INSERT INTO {out}({cols},__m) SELECT {d_cols},-1 FROM {deleted} d \
+                     WHERE NOT EXISTS(SELECT 1 FROM {all} a WHERE a.__k=d.__k AND {a_identity}={d_identity})"
+                ),
+                [],
+            )?;
+            db.execute_cached(
+                &format!(
+                    "INSERT INTO {out}({cols},__m) SELECT {a_cols},1 FROM {deleted} d JOIN {all} a ON a.__k=d.__k \
+                     WHERE {a_identity}!={d_identity}"
+                ),
+                [],
+            )?;
+            db.execute_cached(
+                &format!(
+                    "INSERT INTO {out}({cols},__m) SELECT {a_cols},1 FROM {all} a WHERE a.rowid>?1 \
+                     AND NOT EXISTS(SELECT 1 FROM {deleted} d WHERE d.__k=a.__k)"
+                ),
+                [lo],
+            )?;
+            db.execute_cached(&format!("DELETE FROM {deleted}"), [])?;
+        } else {
+            db.execute_cached(
+                &format!("INSERT INTO {out}({cols},__m) SELECT {cols},1 FROM {all} WHERE rowid>?1"),
+                [lo],
+            )?;
+        }
+        Ok(())
     }
 }
 
