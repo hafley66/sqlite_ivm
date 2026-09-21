@@ -893,7 +893,7 @@ impl Plan {
                     ))?;
                 }
                 db.execute_batch(&format!(
-                    "CREATE TABLE IF NOT EXISTS {}(__k TEXT PRIMARY KEY,{})",
+                    "CREATE TABLE IF NOT EXISTS {}(__k INTEGER PRIMARY KEY,{})",
                     deleted_table(id, width),
                     columns(width)
                 ))?;
@@ -1195,6 +1195,7 @@ impl Plan {
         let arrived = arrived_table(id, side, side_width);
         let left = left_table(id, side, side_width);
         let deleted = deleted_table(id, width);
+        let dict = keys_table(name);
         let derive = |target: &str,
                       rule: &Rule,
                       roles: &[Role],
@@ -1288,7 +1289,11 @@ impl Plan {
                 }
                 let round = round_span("delete");
                 db.execute_cached(
-                    &format!("INSERT OR IGNORE INTO {deleted}(__k,{cols}) SELECT __k,{cols} FROM {all} WHERE __k IN (SELECT __k FROM {work} WHERE rowid>?1 AND rowid<=?2)"),
+                    &format!("INSERT OR IGNORE INTO {dict}(__v) SELECT a.__k FROM {all} a WHERE a.__k IN (SELECT __k FROM {work} WHERE rowid>?1 AND rowid<=?2)"),
+                    rusqlite::params![lo, hi],
+                )?;
+                db.execute_cached(
+                    &format!("INSERT OR IGNORE INTO {deleted}(__k,{cols}) SELECT (SELECT __i FROM {dict} WHERE __v=a.__k),{cols} FROM {all} a WHERE a.__k IN (SELECT __k FROM {work} WHERE rowid>?1 AND rowid<=?2)"),
                     rusqlite::params![lo, hi],
                 )?;
                 db.execute_cached(
@@ -1358,14 +1363,14 @@ impl Plan {
             let a_cols = (0..width).map(|i| format!("a.c{i}")).collect::<Vec<_>>().join(",");
             db.execute_cached(
                 &format!(
-                    "INSERT INTO {out}({cols},__m) SELECT {d_cols},-1 FROM {deleted} d \
-                     WHERE NOT EXISTS(SELECT 1 FROM {all} a WHERE a.__k=d.__k AND {a_identity}={d_identity})"
+                    "INSERT INTO {out}({cols},__m) SELECT {d_cols},-1 FROM {deleted} d JOIN {dict} k ON k.__i=d.__k \
+                     WHERE NOT EXISTS(SELECT 1 FROM {all} a WHERE a.__k=k.__v AND {a_identity}={d_identity})"
                 ),
                 [],
             )?;
             db.execute_cached(
                 &format!(
-                    "INSERT INTO {out}({cols},__m) SELECT {a_cols},1 FROM {deleted} d JOIN {all} a ON a.__k=d.__k \
+                    "INSERT INTO {out}({cols},__m) SELECT {a_cols},1 FROM {deleted} d JOIN {dict} k ON k.__i=d.__k JOIN {all} a ON a.__k=k.__v \
                      WHERE {a_identity}!={d_identity}"
                 ),
                 [],
@@ -1373,7 +1378,7 @@ impl Plan {
             db.execute_cached(
                 &format!(
                     "INSERT INTO {out}({cols},__m) SELECT {a_cols},1 FROM {all} a WHERE a.rowid>?1 \
-                     AND NOT EXISTS(SELECT 1 FROM {deleted} d WHERE d.__k=a.__k)"
+                     AND NOT EXISTS(SELECT 1 FROM {dict} k JOIN {deleted} d ON d.__k=k.__i WHERE k.__v=a.__k)"
                 ),
                 [lo],
             )?;

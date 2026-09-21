@@ -197,9 +197,31 @@ fn write_path_keys_are_dictionary_ids() -> Result<()> {
         [&delta],
         |row| row.get(0),
     )?;
+    db.execute_batch(
+        "CREATE TABLE edges(a INTEGER,b INTEGER);\
+         CREATE VIRTUAL TABLE reach USING sqlite_ivm(\
+           'WITH RECURSIVE p(x,y) AS (\
+              SELECT a,b FROM edges UNION SELECT p.x,e.b FROM p JOIN edges e ON e.a=p.y\
+            ) SELECT x,y FROM p')",
+    )?;
+    let deleted: String = db.query_row(
+        "SELECT name FROM sqlite_temp_schema WHERE name LIKE '__ivm_deleted_%' LIMIT 1",
+        [],
+        |row| row.get(0),
+    )?;
+    let deleted_type: String = db.query_row(
+        "SELECT type FROM pragma_table_info(?1) WHERE name='__k'",
+        [&deleted],
+        |row| row.get(0),
+    )?;
     assert_eq!(
-        (state_type, missing, delta_type),
-        ("INTEGER".to_string(), 0, "INTEGER".to_string())
+        (state_type, missing, delta_type, deleted_type),
+        (
+            "INTEGER".to_string(),
+            0,
+            "INTEGER".to_string(),
+            "INTEGER".to_string()
+        )
     );
     Ok(())
 }
