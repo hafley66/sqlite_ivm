@@ -1,8 +1,12 @@
 # Overnight herd log, 2026-09-20
 
-Target (user): sqlite_ivm at acceptable perf for codebase querying through
-sprefa-extract, then it carries dl8 eval's retraction and fixpoint in proper
-relational form inside the plugin. Every row below is a receipt or a defect.
+Target (user, 2026-09-21): sqlite_ivm provably as close to DD as the plugin
+can get, on map, filter, join, group, window, distinct, set ops, recursion.
+Every bench reports per arm: wall, peak RSS, bytes read and written to disk,
+RAM. The yardstick column is `sqlite-ivm / dd` per circuit per n. Not every
+SQLite shape, all the juice. Then: sprefa v8 compiler on sqlite_ivm instead of
+DD; sqlite_ivm under ryi / sprefa-extract; dl8 generates parts of ryi.
+Every row below is a receipt or a defect.
 
 Rungs: dispatched, running, reported, verified (named check), merged.
 
@@ -14,7 +18,7 @@ Rungs: dispatched, running, reported, verified (named check), merged.
 | fix/open-bugs | sol-med | 6 items: 14_scale ignore, window LIMIT, growth assert, subtype ledger, TEXT keys, hygiene | running | |
 | chore/archive-labs | sonnet subagent | labs, probes, crud scripts to archive/; lab issues closed | queued | |
 | refactor/bench-rust arc B | glm53f-omp | delete 55 bench files | queued on arc A | |
-| perf/scale | flash-omp-max | scale sweep with RSS, disk, arrangement rows, amplification; chain profile; fixes | queued on arc A + bugs | |
+| perf/toward-dd | flash-omp-max | ivm/dd yardstick per circuit, peak RSS, disk io; profile-driven arcs, one circuit each; brief `perf-dd.brief.md` | queued on bench arc A + bugs | |
 | refactor pass 1..4 | glm53f-omp | see passes | queued on bugs | |
 
 ## Passes (module map 2026-09-21, `src/` 5660 lines, no dead pub items, no >15-line duplicate blocks)
