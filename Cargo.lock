@@ -1036,6 +1036,7 @@ dependencies = [
  "sqlite-bulk-trigger",
  "sqlite3-parser",
  "tracing",
+ "tracing-capture",
  "tracing-subscriber",
 ]
 

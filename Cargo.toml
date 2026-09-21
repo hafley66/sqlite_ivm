@@ -37,6 +37,9 @@ debug = 0
 [dev-dependencies]
 serde_json = "1"
 sha2 = "0.10"
+# The census reads raw statement events (per-call nanos, p99) from the same
+# capture layer hafley-observe's CountRecorder wraps.
+tracing-capture = "0.1.0"
 
 
 
