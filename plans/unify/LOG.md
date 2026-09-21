@@ -66,3 +66,4 @@ unless the row says otherwise. Executor glm53f unless noted.
 - 08:5x bench PR #26 graded: 16 binaries 75/75 x2 (14_scale deleted by plan), dylib rail restored with three tests, script era gone (0 mjs/py/pl on main), five sh scripts remain (build, package, statement-costs, crud and verify kept by #23 for references). Merged; main `00f37b2`. Bench: `bench/` crate `sqlite-ivm-bench`, subcommands `shootout`, `scale`, `dump-fixture`; receipts in `plans/costs/shootout-rust.md`.
 - pass-3 step 1 done (`9aebf80`): every old-path shape binds through the relational plan; proceeding to retire.
 - dispatched perf/toward-dd (flash-omp-max) from `00f37b2`.
+- 09:1x checkpoint. Stray PR #27 (arc B stacked on the old #26 head) closed as superseded by #26. pass-3 retiring (18 min, no second commit yet). perf/toward-dd 8 min in. 34G free.
