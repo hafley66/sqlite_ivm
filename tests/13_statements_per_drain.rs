@@ -62,20 +62,6 @@ fn statements_per_drain(rows: i64) -> Result<Vec<(String, usize)>> {
     Ok(per_view.into_iter().collect())
 }
 
-fn timing_workload(rows: i64) -> Result<()> {
-    let db = Connection::open_in_memory()?;
-    register(&db)?;
-    db.execute_batch(
-        "PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON;\
-         CREATE TABLE a(id INTEGER PRIMARY KEY,v INTEGER);\
-         CREATE TABLE b(k INTEGER);INSERT INTO b VALUES(0),(1)",
-    )?;
-    for (name, sql) in VIEWS {
-        db.execute_batch(&format!("CREATE VIRTUAL TABLE {name} USING sqlite_ivm('{sql}')"))?;
-    }
-    transaction(&db, rows)
-}
-
 #[test]
 fn statements_per_drain_do_not_grow_with_the_batch() -> Result<()> {
     let small = statements_per_drain(SMALL_ROWS)?;
@@ -88,8 +74,5 @@ fn statements_per_drain_do_not_grow_with_the_batch() -> Result<()> {
         }
     }
     assert!(grew.is_empty(), "statements grew with the batch:\n{}", grew.join("\n"));
-    if std::env::var_os("HAFLEY_LOG").is_some() {
-        timing_workload(SMALL_ROWS * SIZE_RATIO)?;
-    }
     Ok(())
 }

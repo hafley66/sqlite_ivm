@@ -171,61 +171,6 @@ fn dropping_the_view_drops_its_dictionary() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn write_path_keys_are_dictionary_ids() -> Result<()> {
-    let db = view_database()?;
-    db.execute_batch(
-        "INSERT INTO intern_source VALUES(1,'north'),(2,'north'),(3,'south')",
-    )?;
-    let state_type: String = db.query_row(
-        "SELECT type FROM pragma_table_info('intern_view_state') WHERE name='__key'",
-        [],
-        |row| row.get(0),
-    )?;
-    let missing: i64 = db.query_row(
-        "SELECT count(*) FROM intern_view_state s LEFT JOIN intern_view_keys k ON k.__i=s.__key WHERE k.__i IS NULL",
-        [],
-        |row| row.get(0),
-    )?;
-    let delta: String = db.query_row(
-        "SELECT name FROM sqlite_temp_schema WHERE name LIKE '__ivm_delta_%' LIMIT 1",
-        [],
-        |row| row.get(0),
-    )?;
-    let delta_type: String = db.query_row(
-        "SELECT type FROM pragma_table_info(?1) WHERE name='__v'",
-        [&delta],
-        |row| row.get(0),
-    )?;
-    db.execute_batch(
-        "CREATE TABLE edges(a INTEGER,b INTEGER);\
-         CREATE VIRTUAL TABLE reach USING sqlite_ivm(\
-           'WITH RECURSIVE p(x,y) AS (\
-              SELECT a,b FROM edges UNION SELECT p.x,e.b FROM p JOIN edges e ON e.a=p.y\
-            ) SELECT x,y FROM p')",
-    )?;
-    let deleted: String = db.query_row(
-        "SELECT name FROM sqlite_temp_schema WHERE name LIKE '__ivm_deleted_%' LIMIT 1",
-        [],
-        |row| row.get(0),
-    )?;
-    let deleted_type: String = db.query_row(
-        "SELECT type FROM pragma_table_info(?1) WHERE name='__k'",
-        [&deleted],
-        |row| row.get(0),
-    )?;
-    assert_eq!(
-        (state_type, missing, delta_type, deleted_type),
-        (
-            "INTEGER".to_string(),
-            0,
-            "INTEGER".to_string(),
-            "INTEGER".to_string()
-        )
-    );
-    Ok(())
-}
-
 /// Every arrangement table for a view, with the width of its `c{i}` columns.
 fn arrangements(db: &Connection, view: &str) -> Result<Vec<(String, usize)>> {
     let names = db

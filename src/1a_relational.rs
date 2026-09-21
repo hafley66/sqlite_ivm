@@ -190,7 +190,7 @@ impl Plan {
         objects.push(("table", dictionary));
         let state = format!("{name}_state");
         db.execute_batch(&format!(
-            "CREATE TABLE main.{}(__key INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__key)",
+            "CREATE TABLE main.{}(__key TEXT NOT NULL,{}); CREATE INDEX main.{} ON {}(__key)",
             quote(&state),
             (0..self.names.len())
                 .map(|i| format!("c{i}"))
@@ -818,12 +818,6 @@ impl Plan {
             return Err(error("result multiplicity expansion exceeds budget"));
         }
         let k = json_key((0..width).map(|i| plain(&format!("o.c{i}"))).collect());
-        let dict = keys_table(name);
-        db.execute(
-            &format!("INSERT OR IGNORE INTO {dict}(__v) SELECT {k} FROM {out} o"),
-            [],
-        )?;
-        let k = format!("(SELECT __i FROM {dict} WHERE __v={k})");
         db.execute(
             &format!(
                 "WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<(SELECT coalesce((SELECT max(__m) FROM {out}),0))) INSERT INTO {state}(__key,{}) SELECT {k},o.c0{} FROM {out} o,seq WHERE seq.n<=o.__m",
@@ -874,7 +868,7 @@ impl Plan {
                 for side in 0..node.inputs.len() {
                     let side_width = self.nodes[node.inputs[side]].fields.len();
                     db.execute_batch(&format!(
-                        "CREATE TABLE IF NOT EXISTS {}(__r INTEGER NOT NULL,__v INTEGER NOT NULL,__n INTEGER NOT NULL,{}); CREATE INDEX IF NOT EXISTS {}_r ON {}(__r)",
+                        "CREATE TABLE IF NOT EXISTS {}(__r INTEGER NOT NULL,__v TEXT NOT NULL,__n INTEGER NOT NULL,{}); CREATE INDEX IF NOT EXISTS {}_r ON {}(__r)",
                         delta_table(id, side, side_width),
                         columns(side_width),
                         delta_index(id, side, side_width),
@@ -893,7 +887,7 @@ impl Plan {
                     ))?;
                 }
                 db.execute_batch(&format!(
-                    "CREATE TABLE IF NOT EXISTS {}(__k INTEGER PRIMARY KEY,{})",
+                    "CREATE TABLE IF NOT EXISTS {}(__k TEXT PRIMARY KEY,{})",
                     deleted_table(id, width),
                     columns(width)
                 ))?;
@@ -1043,26 +1037,22 @@ impl Plan {
         let arrangement_identity = identity_of(&t);
         db.execute_cached(&format!("DELETE FROM {delta}"), [])?;
         db.execute_cached(
-            &format!("INSERT OR IGNORE INTO {dict}(__v) SELECT {identity} FROM {child} GROUP BY {identity}"),
-            [],
-        )?;
-        db.execute_cached(
             &format!(
-                "INSERT INTO {delta}(__r,__v,__n,{cols}) SELECT sqlite_ivm_hash(__ivm_v),(SELECT __i FROM {dict} WHERE __v=__ivm_v),__ivm_n,{cols} \
+                "INSERT INTO {delta}(__r,__v,__n,{cols}) SELECT sqlite_ivm_hash(__ivm_v),__ivm_v,__ivm_n,{cols} \
                  FROM (SELECT {identity} AS __ivm_v,sum(__m) AS __ivm_n,{cols} FROM {child} GROUP BY {identity}) WHERE __ivm_n!=0"
             ),
             [],
         )?;
         db.execute_cached(
             &format!(
-                "UPDATE {t} SET __n={t}.__n+d.__n FROM {delta} d WHERE d.__r={t}.__r AND d.__v=(SELECT __i FROM {dict} WHERE __v={arrangement_identity})"
+                "UPDATE {t} SET __n={t}.__n+d.__n FROM {delta} d WHERE d.__r={t}.__r AND d.__v={arrangement_identity}"
             ),
             [],
         )?;
         db.execute_cached(
             &format!(
                 "INSERT INTO {t}(__k,__r,__n,{cols}) SELECT (SELECT __i FROM {dict} WHERE __v={key}),d.__r,d.__n,{cols} FROM {delta} d \
-                 WHERE NOT EXISTS(SELECT 1 FROM {t} a WHERE a.__r=d.__r AND (SELECT __i FROM {dict} WHERE __v={})=d.__v)",
+                 WHERE NOT EXISTS(SELECT 1 FROM {t} a WHERE a.__r=d.__r AND {}=d.__v)",
                 identity_of("a")
             ),
             [],
@@ -1083,12 +1073,6 @@ impl Plan {
         let out = out_table(id, width);
         let state = format!("main.{}", quote(&format!("{name}_state")));
         let key = json_key((0..width).map(|i| plain(&format!("o.c{i}"))).collect());
-        let dict = keys_table(name);
-        db.execute_cached(
-            &format!("INSERT OR IGNORE INTO {dict}(__v) SELECT {key} FROM {out} o"),
-            [],
-        )?;
-        let key = format!("(SELECT __i FROM {dict} WHERE __v={key})");
         let wanted: i64 = db
             .prepare_cached(&format!("SELECT coalesce(sum(-__m),0) FROM {out} o WHERE __m<0"))?
             .query_row([], |r| r.get(0))?;
@@ -1195,7 +1179,6 @@ impl Plan {
         let arrived = arrived_table(id, side, side_width);
         let left = left_table(id, side, side_width);
         let deleted = deleted_table(id, width);
-        let dict = keys_table(name);
         let derive = |target: &str,
                       rule: &Rule,
                       roles: &[Role],
@@ -1289,11 +1272,7 @@ impl Plan {
                 }
                 let round = round_span("delete");
                 db.execute_cached(
-                    &format!("INSERT OR IGNORE INTO {dict}(__v) SELECT a.__k FROM {all} a WHERE a.__k IN (SELECT __k FROM {work} WHERE rowid>?1 AND rowid<=?2)"),
-                    rusqlite::params![lo, hi],
-                )?;
-                db.execute_cached(
-                    &format!("INSERT OR IGNORE INTO {deleted}(__k,{cols}) SELECT (SELECT __i FROM {dict} WHERE __v=a.__k),{cols} FROM {all} a WHERE a.__k IN (SELECT __k FROM {work} WHERE rowid>?1 AND rowid<=?2)"),
+                    &format!("INSERT OR IGNORE INTO {deleted}(__k,{cols}) SELECT __k,{cols} FROM {all} WHERE __k IN (SELECT __k FROM {work} WHERE rowid>?1 AND rowid<=?2)"),
                     rusqlite::params![lo, hi],
                 )?;
                 db.execute_cached(
@@ -1363,14 +1342,14 @@ impl Plan {
             let a_cols = (0..width).map(|i| format!("a.c{i}")).collect::<Vec<_>>().join(",");
             db.execute_cached(
                 &format!(
-                    "INSERT INTO {out}({cols},__m) SELECT {d_cols},-1 FROM {deleted} d JOIN {dict} k ON k.__i=d.__k \
-                     WHERE NOT EXISTS(SELECT 1 FROM {all} a WHERE a.__k=k.__v AND {a_identity}={d_identity})"
+                    "INSERT INTO {out}({cols},__m) SELECT {d_cols},-1 FROM {deleted} d \
+                     WHERE NOT EXISTS(SELECT 1 FROM {all} a WHERE a.__k=d.__k AND {a_identity}={d_identity})"
                 ),
                 [],
             )?;
             db.execute_cached(
                 &format!(
-                    "INSERT INTO {out}({cols},__m) SELECT {a_cols},1 FROM {deleted} d JOIN {dict} k ON k.__i=d.__k JOIN {all} a ON a.__k=k.__v \
+                    "INSERT INTO {out}({cols},__m) SELECT {a_cols},1 FROM {deleted} d JOIN {all} a ON a.__k=d.__k \
                      WHERE {a_identity}!={d_identity}"
                 ),
                 [],
@@ -1378,7 +1357,7 @@ impl Plan {
             db.execute_cached(
                 &format!(
                     "INSERT INTO {out}({cols},__m) SELECT {a_cols},1 FROM {all} a WHERE a.rowid>?1 \
-                     AND NOT EXISTS(SELECT 1 FROM {dict} k JOIN {deleted} d ON d.__k=k.__i WHERE k.__v=a.__k)"
+                     AND NOT EXISTS(SELECT 1 FROM {deleted} d WHERE d.__k=a.__k)"
                 ),
                 [lo],
             )?;

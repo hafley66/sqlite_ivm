@@ -65,6 +65,36 @@ the dictionary, not a scan.
 
 Measure each step as it lands. No batched rewrite followed by one measurement.
 
+## Remaining write-path sites
+
+### `_state.__key`
+
+This key is written by `write_state` during population and by `apply_state` on
+every drain that reaches the output. Interning it as an INTEGER regressed both
+measured legs, so the TEXT key and its index stay.
+
+| leg | TEXT before, `time.busy` | INTEGER after, `time.busy` | verdict |
+|---|---|---|---|
+| `8_group_limit` | 6.637310 s, 6.541131 s, 6.840447 s | 7.164625 s, 7.496203 s, 7.559668 s | regression; TEXT stays |
+| `13_statements_per_drain` | 0.013132 s, 0.012015 s, 0.011679 s | 0.013246 s, 0.013666 s, 0.013471 s | regression; TEXT stays |
+
+### Delta scratch `__v`
+
+This identity is written by `upsert` on each drain that changes an arrangement.
+The INTEGER experiment was measured on top of the `_state` experiment and
+regressed both measured legs, so the TEXT identity stays.
+
+| leg | TEXT before, `time.busy` | INTEGER after, `time.busy` | verdict |
+|---|---|---|---|
+| `8_group_limit` | 7.164625 s, 7.496203 s, 7.559668 s | 8.475961 s, 8.628358 s, 8.571855 s | regression; TEXT stays |
+| `13_statements_per_drain` | 0.013246 s, 0.013666 s, 0.013471 s | 0.014568 s, 0.014765 s, 0.014472 s | regression; TEXT stays |
+
+### Fixpoint deletion scratch `__k`
+
+The table is created during binding, but `fixpoint` clears and fills it inside
+deletion rounds during a drain. It is a per-drain site, so the INTEGER change is
+skipped and the TEXT key stays.
+
 ## Acceptance Criteria
 
 - [x] a dictionary table with a surrogate INTEGER key, indexed for the lookups
