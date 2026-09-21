@@ -1,6 +1,6 @@
-//! Differential-dataflow arm, the in-process port of
-//! `bench/shared/34_circuit_dd.rs` (circuit graphs, frontier check, observed
-//! input bag) and `37_semantic_graphs.rs` (semantic graphs).
+//! Differential-dataflow arm, the in-process port of the script-era DD host
+//! (git history: circuit graphs, frontier check, observed input bag, semantic
+//! graphs).
 //! `timely::execute_directly` owns a worker thread; per-state jobs cross via
 //! channels so the Arm trait keeps its setup/apply/teardown shape.
 
@@ -139,7 +139,7 @@ fn canonical(prefix: &str, rows: &[Vec<i64>]) -> String {
         .collect()
 }
 
-/// Port of the circuit graph dispatch in `34_circuit_dd.rs`.
+/// Port of the script-era DD host's circuit graph dispatch (git history).
 fn circuit_graph<'s>(
     family: &str,
     ak: VecCollection<'s, u64, (i64, i64)>,
@@ -309,7 +309,7 @@ fn run_case(
     });
 
     // Separate finite frontier check before timed mutations, ported from
-    // `34_circuit_dd.rs`: a retained third input frontier must prevent the
+    // Script-era DD host: a retained third input frontier must prevent the
     // combined probe completing.
     for input in &mut inputs[..2] {
         input.advance_to(1);
@@ -385,7 +385,7 @@ fn apply_job(
     if rows != job.expected_rows {
         bail!("{}: output mismatch", job.name);
     }
-    // Source rows, port of the input check in `34_circuit_dd.rs`.
+    // Source rows, port of the script-era DD host's input check.
     let mut input_text = String::new();
     for (table, name) in ["a", "b", "c"].iter().enumerate() {
         let mut actual: Vec<Vec<i64>> = observed

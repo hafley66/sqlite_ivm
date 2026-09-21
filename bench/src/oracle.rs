@@ -1,6 +1,6 @@
-//! Independent fixture oracle: JS-semantics port of `bench/shared/30_circuit_workload.mjs`
-//! (`circuits`, `valueDomains`, `sortRows`, `outputText`, `inputText`, `circuitOracle`)
-//! and `bench/shared/36_semantic_catalog.mjs` (`semanticOracle`). No SQL executes here.
+//! Independent fixture oracle: JS-semantics port of the script-era workload
+//! modules (git history: `circuits`, `valueDomains`, `sortRows`, `outputText`,
+//! `inputText`, `circuitOracle`, `semanticOracle`). No SQL executes here.
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};

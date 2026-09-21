@@ -1,6 +1,4 @@
 target/
 bench/target/
-bench/shared/node_modules/
-bench/results/
 dist/
 plans/costs/*.json

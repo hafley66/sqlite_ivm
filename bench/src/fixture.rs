@@ -1,7 +1,7 @@
-//! Fixture generation in Rust, byte-compatible with `makeCircuitFixture` /
-//! `makeSemanticFixture` in `bench/shared/30_circuit_workload.mjs` and
-//! `36_semantic_catalog.mjs`, including JSON key order and JS number/string
-//! semantics. Fixtures are generated, never read from JSON files.
+//! Fixture generation in Rust, byte-compatible with the script-era node
+//! builders `makeCircuitFixture` / `makeSemanticFixture` (sources live in git
+//! history, before the script-era removal), including JSON key order and JS
+//! number/string semantics. Fixtures are generated, never read from JSON files.
 
 use crate::oracle::{
     cell_string, circuit_oracle, digest, input_text, semantic_oracle, sort_rows, Cell, Domain,

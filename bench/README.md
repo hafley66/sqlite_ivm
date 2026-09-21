@@ -9,7 +9,7 @@ dumps. Zero shell — the only external programs are `initdb`, `pg_ctl`, and
 
 ### `bench shootout [smoke|quick] [--engines e1,e2] [--out DIR] [--circuits c1,c2] [--pg-prefix DIR]`
 
-Runs every circuit in `bench/shared`-parity fixture space against up to five
+Runs every circuit in the shared-fixture-parity space against up to five
 engines: `sqlite-ivm`, `pg-ivm`, `sqlite-query`, `pg-query`, `dd`.
 
 - Profiles: `smoke` = 24 rows / 3 batch / 4 fanout, 1 rep, 0 warmups;
@@ -33,7 +33,7 @@ For pg engines pass `--pg-prefix` or `IVM_POSTGRES_PREFIX`.
 
 ### `bench scale [--circuits ...] [--n 10,100,...] [--fanout 1,10] [--out DIR]`
 
-Port of `tests/14_scale.rs` as a driver. Circuits: `chain`, `group`,
+Port of the script-era scale driver (git history). Circuits: `chain`, `group`,
 `distinct`, `topk`, `reach`; seed `k=(id*7)%(n/fanout+1)`,
 `v=(id*13)%(n/fanout+1)` into a/b/c in one transaction; WAL/NORMAL pragma set;
 in-process `sqlite_ivm::extension::register`.
@@ -51,7 +51,7 @@ in-process `sqlite_ivm::extension::register`.
 
 ### `bench dump-fixture <circuit|all> [--rows N] [--batch N] [--fanout N] [--domain D]`
 
-Prints the fixture (same JSON shape as `bench/37_fixture_export.mjs`,
+Prints the fixture (same JSON shape as the script-era node exporter,
 including key order) to stdout. Domains: `integers` (default), `text_nocase`,
 `mixed_int_real`. Used for the sha256 parity receipt against the node
 generators.
