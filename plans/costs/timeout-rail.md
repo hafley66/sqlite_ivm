@@ -597,6 +597,11 @@ older than this lane and unchanged by it, and `scripts/[1-6]_*.sh` are not
 touched here. CI sets `SQLITE3` to Homebrew's sqlite3 on macOS and installs the
 distro sqlite3 on Linux, so the scenarios run there.
 
+CI note. The workflow runs the gate, but the verify jobs fail before it, at the
+fetch step, because two dependencies are path dependencies into a local boop
+worktree. R7 carries the log. The rail is proven on this machine; CI cannot
+reach it until that dependency question is settled.
+
 ## R6: the recorded files and their refresh
 
 Two checked-in artifacts carry level 3, one deterministic and one timed.
@@ -663,4 +668,25 @@ in a workflow that never runs on a code change catches nothing, so the paths
 now name the code the gate covers: `src/**`, `tests/**`, `scripts/**`,
 `bench/**`, `Cargo.toml`, `Cargo.lock`, and the workflow file itself. That
 trigger is the one piece of this lane the parent may want to decide again.
+
+Third finding, and it is why CI cannot exercise the rail today. The PR opened
+as https://github.com/hafley66/sqlite_ivm/pull/36. Both verify jobs fail before
+any gate step, at the fetch step that predates this lane:
+
+```
+$ gh run view 35643132647 --log-failed
+verify (ubuntu-latest)  Fetch locked Rust dependencies
+error: failed to load manifest for dependency `hafley-observe`
+Caused by: failed to read `/home/hafley-rs/.boop-worktrees/main/crates/hafley-observe/Cargo.toml`
+Caused by: No such file or directory (os error 2)
+##[error]Process completed with exit code 101.
+verify (macos-latest)   same, with /Users/hafley-rs/...
+```
+
+`hafley-observe` and `sqlite-bulk-trigger` are path dependencies into a local
+boop worktree outside the repository, so a fresh checkout cannot build at all.
+README says as much: remote CI execution has not been performed here. The rail
+is wired into the workflow and proven on this machine, and it cannot run in CI
+until those two dependencies resolve from somewhere a runner can see. That
+choice is the parent's, and it does not fit this lane's owned files.
 
