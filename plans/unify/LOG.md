@@ -96,3 +96,4 @@ unless the row says otherwise. Executor glm53f unless noted.
 - 17:1x perf lane `f337963`: departure rounds are not monotonic in n (5795 at 10000, 343027 at 16000, 572824 at 32000, 52236 at 40000). Round count depends on the seed's graph shape (`(id*7)%(n/10+1)` keys), not n. Set-at-a-time departure still removes the rounds term whatever the shape; arc 3 stands. Third rejected change logged (correlated EXISTS in derive, no change).
 - 17:3x PR #34 (ledger only) merged; main `2e3ae53`. Arc 3 go delivered 12:12; lane on the departure rewrite. 32G free.
 - 17:5x checkpoint. perf lane clean tree, no src edit yet on arc 3 (reading `1d_drain.rs` fixpoint). 6.5 h alive. 32G free.
+- 18:1x checkpoint. perf lane: baseline banked (`5c73317`), src clean, rewrite not yet in the tree. 32G free.
