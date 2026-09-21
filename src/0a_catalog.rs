@@ -1,4 +1,4 @@
-use crate::census::{self, Phase};
+use crate::statements::{self, Phase};
 use rusqlite::{Connection, Error, OptionalExtension, Result};
 
 pub fn error(message: impl Into<String>) -> Error {
@@ -23,7 +23,7 @@ pub fn record_objects(
     columns: &[&Column],
     objects: &[(&str, String)],
 ) -> Result<()> {
-    census::batch(db, Phase::Declare, name, "
+    statements::batch(db, Phase::Declare, name, "
         CREATE TABLE IF NOT EXISTS main.__ivm_views(
             id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE, query_sql TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS main.__ivm_sources(
@@ -42,7 +42,7 @@ pub fn record_objects(
         CREATE INDEX IF NOT EXISTS main.__ivm_objects_by_view ON __ivm_objects(view_name);
         CREATE INDEX IF NOT EXISTS main.__ivm_sources_by_table ON __ivm_sources(table_name);
     ")?;
-    census::exec(
+    statements::exec(
         db,
         Phase::Declare,
         name,
@@ -50,7 +50,7 @@ pub fn record_objects(
         [name, sql],
     )?;
     for (source, table) in tables.iter().enumerate() {
-        census::exec(
+        statements::exec(
             db,
             Phase::Declare,
             name,
@@ -59,7 +59,7 @@ pub fn record_objects(
         )?;
     }
     for column in columns {
-        census::exec(
+        statements::exec(
             db,
             Phase::Declare,
             name,
@@ -68,7 +68,7 @@ pub fn record_objects(
         )?;
     }
     for (kind, object) in objects {
-        let definition: String = census::query(
+        let definition: String = statements::query(
             db,
             Phase::Declare,
             name,
@@ -76,7 +76,7 @@ pub fn record_objects(
             [kind, object.as_str()],
             |r| r.get(0),
         )?;
-        census::exec(
+        statements::exec(
             db,
             Phase::Declare,
             name,
@@ -92,7 +92,7 @@ pub fn manifest(
     name: &str,
     rename: Option<&str>,
 ) -> Result<Vec<(String, String, String)>> {
-    let objects = census::query_map(
+    let objects = statements::query_map(
         db,
         Phase::Declare,
         name,
@@ -105,7 +105,7 @@ pub fn manifest(
         return Err(error("managed view has no object manifest"));
     }
     for (kind, object, definition) in &objects {
-        let actual: Option<String> = census::query(
+        let actual: Option<String> = statements::query(
             db,
             Phase::Declare,
             name,
@@ -141,10 +141,10 @@ pub fn uninstall(db: &Connection, name: &str) -> Result<()> {
             "table" => "TABLE",
             _ => return Err(error("invalid owned object type")),
         };
-        census::batch(db, Phase::Teardown, name, &format!("DROP {keyword} main.{}", quote(&object)))?;
+        statements::batch(db, Phase::Teardown, name, &format!("DROP {keyword} main.{}", quote(&object)))?;
     }
     for table in ["__ivm_objects", "__ivm_columns", "__ivm_sources"] {
-        census::exec(
+        statements::exec(
             db,
             Phase::Teardown,
             name,
@@ -152,14 +152,14 @@ pub fn uninstall(db: &Connection, name: &str) -> Result<()> {
             [name],
         )?;
     }
-    census::exec(
+    statements::exec(
         db,
         Phase::Teardown,
         name,
         "DELETE FROM main.__ivm_schema WHERE id=(SELECT id FROM main.__ivm_views WHERE name=?1)",
         [name],
     )?;
-    census::exec(
+    statements::exec(
         db,
         Phase::Teardown,
         name,

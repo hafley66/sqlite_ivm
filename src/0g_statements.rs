@@ -9,10 +9,10 @@
 //! With `--no-default-features` (extension builds) the spans are compiled out:
 //! `open` returns a disabled span and nothing is recorded. That build is the
 //! one the recipe times wall clock on.
-#![cfg_attr(not(feature = "census"), allow(dead_code))]
+#![cfg_attr(not(feature = "statements"), allow(dead_code))]
 
 use rusqlite::{Connection, Params, Result, Row};
-#[cfg(feature = "census")]
+#[cfg(feature = "statements")]
 use tracing::field;
 
 /// The six points at which the engine hands SQL to SQLite.
@@ -107,7 +107,7 @@ impl Statement {
 /// `kind`, `verb` and `site` are recorded only when a subscriber keeps them.
 #[track_caller]
 pub(crate) fn open(phase: Phase, object: &str, sql: &str, prepared: &'static str) -> Statement {
-    #[cfg(feature = "census")]
+    #[cfg(feature = "statements")]
     {
         let location = std::panic::Location::caller();
         let span = tracing::debug_span!(
@@ -128,7 +128,7 @@ pub(crate) fn open(phase: Phase, object: &str, sql: &str, prepared: &'static str
         }
         Statement { span }
     }
-    #[cfg(not(feature = "census"))]
+    #[cfg(not(feature = "statements"))]
     {
         let _ = (phase, object, sql, prepared);
         Statement {
@@ -226,7 +226,7 @@ pub(crate) fn query_map<T, P: Params, F: FnMut(&Row<'_>) -> Result<T>>(
 }
 
 /// Wraps one call that issues SQL through a bought crate (the collector's
-/// shadow DDL), so its trace events nest under a census span too.
+/// shadow DDL), so its trace events nest under a statement span too.
 #[track_caller]
 pub(crate) fn guard<T, F: FnOnce() -> Result<T>>(
     phase: Phase,

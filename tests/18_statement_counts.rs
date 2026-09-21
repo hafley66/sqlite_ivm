@@ -1,5 +1,5 @@
 // One number on every statement. Five fixed scenarios, each run under the
-// census spans (src/0g_census.rs) and hafley-observe's SQLite trace, then
+// statements spans (src/0g_statements.rs) and hafley-observe's SQLite trace, then
 // reduced per phase, per verb, per site, per object. Pinned counts make a
 // change that doubles the statement count fail here instead of a benchmark.
 //
@@ -8,18 +8,18 @@
 //
 // The tsv on stdout is the receipt; run with --nocapture. With
 // EVERY_STATEMENT_WALL set it times the scenarios with logging off instead,
-// and the recipe runs that in both the census and the spans-compiled-out build.
+// and the recipe runs that in both the statements and the spans-compiled-out build.
 #![cfg(not(feature = "extension"))]
 
 use rusqlite::{Connection, Result};
 use sqlite_ivm::extension::register;
-#[cfg(feature = "census")]
+#[cfg(feature = "statements")]
 use hafley_observe::sqlite::SQLITE_TARGET;
-#[cfg(feature = "census")]
+#[cfg(feature = "statements")]
 use std::collections::BTreeMap;
-#[cfg(feature = "census")]
+#[cfg(feature = "statements")]
 use tracing_capture::{CapturedEvent, CapturedSpan, SharedStorage};
-#[cfg(feature = "census")]
+#[cfg(feature = "statements")]
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 /// The input row count the inserts scenarios and the retraction scenario use.
@@ -127,7 +127,7 @@ fn run(db: &Connection, scenario: fn(&Connection) -> Result<()>) -> Result<()> {
     scenario(db)
 }
 
-#[cfg(feature = "census")]
+#[cfg(feature = "statements")]
 /// Per (phase, verb), the number of statement executions.
 fn counts(storage: &SharedStorage) -> BTreeMap<(String, String), usize> {
     let mut counts = BTreeMap::new();
@@ -149,12 +149,12 @@ fn counts(storage: &SharedStorage) -> BTreeMap<(String, String), usize> {
     counts
 }
 
-#[cfg(feature = "census")]
+#[cfg(feature = "statements")]
 fn is_statement_event(meta: &tracing::Metadata<'_>) -> bool {
     meta.target() == SQLITE_TARGET && *meta.level() == tracing::Level::DEBUG
 }
 
-#[cfg(feature = "census")]
+#[cfg(feature = "statements")]
 fn span_field(span: CapturedSpan<'_>, name: &str) -> String {
     let Some(value) = span.value(name) else {
         return String::new();
@@ -166,7 +166,7 @@ fn span_field(span: CapturedSpan<'_>, name: &str) -> String {
         .unwrap_or_else(|| format!("{value:?}"))
 }
 
-#[cfg(feature = "census")]
+#[cfg(feature = "statements")]
 fn event_int(event: &CapturedEvent<'_>, name: &str) -> i64 {
     let Some(value) = event.value(name) else {
         return 0;
@@ -183,7 +183,7 @@ fn event_int(event: &CapturedEvent<'_>, name: &str) -> i64 {
     0
 }
 
-#[cfg(feature = "census")]
+#[cfg(feature = "statements")]
 #[derive(Default)]
 struct Cell {
     calls: usize,
@@ -192,7 +192,7 @@ struct Cell {
     cached: usize,
 }
 
-#[cfg(feature = "census")]
+#[cfg(feature = "statements")]
 /// Every statement execution, grouped by phase, verb, site and object, read
 /// off the capture layer's raw events so the per-call tail survives.
 fn cells(storage: &SharedStorage) -> BTreeMap<(String, String, String, String), Cell> {
@@ -228,7 +228,7 @@ fn cells(storage: &SharedStorage) -> BTreeMap<(String, String, String, String), 
     cells
 }
 
-#[cfg(feature = "census")]
+#[cfg(feature = "statements")]
 fn p99(nanos: &[i64]) -> f64 {
     if nanos.is_empty() {
         return 0.0;
@@ -241,7 +241,7 @@ fn p99(nanos: &[i64]) -> f64 {
 
 /// The tsv the recipe commits: one row per (phase, verb, site, object), raw
 /// microseconds, sorted by the indictment column (calls per input row).
-#[cfg(feature = "census")]
+#[cfg(feature = "statements")]
 fn print_table(
     scenario: &str,
     input_rows: i64,
@@ -277,7 +277,7 @@ fn print_table(
     }
 }
 
-#[cfg(feature = "census")]
+#[cfg(feature = "statements")]
 /// Counts measured on this tree, per (phase, verb). A change that moves any of
 /// these numbers fails here; the numbers are the measurement, not an aim.
 fn pinned_counts(name: &str) -> Vec<(&'static str, &'static str, usize)> {
@@ -363,17 +363,17 @@ fn pinned_counts(name: &str) -> Vec<(&'static str, &'static str, usize)> {
     }
 }
 
-#[cfg(feature = "census")]
+#[cfg(feature = "statements")]
 fn pinned(name: &str, counts: &BTreeMap<(String, String), usize>) {
     let expected: BTreeMap<(String, String), usize> = pinned_counts(name)
         .into_iter()
         .map(|(phase, verb_name, calls)| ((phase.to_string(), verb_name.to_string()), calls))
         .collect();
-    assert_eq!(*counts, expected, "statement census for {name}");
+    assert_eq!(*counts, expected, "statement counts for {name}");
 }
 
 /// The wall-time pass: logging off, three runs per scenario, the median and
-/// the spread printed. The recipe runs it in the census build and in the
+/// the spread printed. The recipe runs it in the statements build and in the
 /// spans-compiled-out build, so the page names which wall came from which.
 fn wall() -> Result<()> {
     const RUNS: usize = 3;
@@ -398,22 +398,22 @@ fn wall() -> Result<()> {
 }
 
 #[test]
-fn statement_census_matches_pinned_counts() -> Result<()> {
+fn statement_counts_match_pinned() -> Result<()> {
     if std::env::var_os("EVERY_STATEMENT_WALL").is_some() {
         return wall();
     }
-    #[cfg(feature = "census")]
+    #[cfg(feature = "statements")]
     {
-        census_pass()
+        counts_pass()
     }
-    #[cfg(not(feature = "census"))]
+    #[cfg(not(feature = "statements"))]
     {
         Ok(())
     }
 }
 
-#[cfg(feature = "census")]
-fn census_pass() -> Result<()> {
+#[cfg(feature = "statements")]
+fn counts_pass() -> Result<()> {
     for (name, input_rows, scenario) in scenarios() {
         let storage = SharedStorage::default();
         let _guard = tracing_subscriber::registry()

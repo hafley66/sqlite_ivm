@@ -1,7 +1,7 @@
 //! Source DDL coordinated with SQLite's own ALTER TABLE query rewriting.
 use crate::{
     catalog::{self, error, quote},
-    census::{self, Phase},
+    statements::{self, Phase},
 };
 use rusqlite::{functions::FunctionFlags, Connection, Result};
 use sqlite3_parser::{
@@ -14,7 +14,7 @@ use sqlite3_parser::{
 const CATALOG_OBJECT: &str = "catalog";
 
 fn dependents(db: &Connection, source: &str) -> Result<Vec<(String, String)>> {
-    let exists: bool = census::query(
+    let exists: bool = statements::query(
         db,
         Phase::Declare,
         CATALOG_OBJECT,
@@ -25,7 +25,7 @@ fn dependents(db: &Connection, source: &str) -> Result<Vec<(String, String)>> {
     if !exists {
         return Ok(vec![]);
     }
-    census::query_map(
+    statements::query_map(
         db,
         Phase::Declare,
         source,
@@ -35,14 +35,14 @@ fn dependents(db: &Connection, source: &str) -> Result<Vec<(String, String)>> {
     )
 }
 fn atomic<T>(db: &Connection, object: &str, f: impl FnOnce() -> Result<T>) -> Result<T> {
-    census::batch(db, Phase::Declare, object, "SAVEPOINT __ivm_source_ddl")?;
+    statements::batch(db, Phase::Declare, object, "SAVEPOINT __ivm_source_ddl")?;
     match f() {
         Ok(value) => {
-            census::batch(db, Phase::Declare, object, "RELEASE __ivm_source_ddl")?;
+            statements::batch(db, Phase::Declare, object, "RELEASE __ivm_source_ddl")?;
             Ok(value)
         }
         Err(e) => {
-            census::batch(
+            statements::batch(
                 db,
                 Phase::Declare,
                 object,
@@ -56,7 +56,7 @@ fn source(db: &Connection, name: &str) -> Result<String> {
     if name.to_ascii_lowercase().starts_with("__ivm_") {
         return Err(error("reserved source name"));
     }
-    census::query(db,Phase::Declare,name,"SELECT name FROM main.sqlite_schema WHERE name=?1 COLLATE NOCASE AND type='table' AND sql NOT LIKE 'CREATE VIRTUAL TABLE%'",[name],|r|r.get(0)).map_err(|_|error("ordinary main source table required"))
+    statements::query(db,Phase::Declare,name,"SELECT name FROM main.sqlite_schema WHERE name=?1 COLLATE NOCASE AND type='table' AND sql NOT LIKE 'CREATE VIRTUAL TABLE%'",[name],|r|r.get(0)).map_err(|_|error("ordinary main source table required"))
 }
 /// Bumped after every query_sql rewrite. A live table on the same connection
 /// sees the rewrite only through this; another process reconnects through xConnect.
@@ -76,11 +76,11 @@ fn rename(db: &Connection, old: &str, new: &str, column: Option<&str>) -> Result
     for (v, _) in &views {
         catalog::manifest(db, v, None)?;
     }
-    let legacy: bool = census::query(db, Phase::Declare, CATALOG_OBJECT, "PRAGMA legacy_alter_table", [], |r| r.get(0))?;
-    census::pragma(db, Phase::Declare, CATALOG_OBJECT, "legacy_alter_table", false)?;
+    let legacy: bool = statements::query(db, Phase::Declare, CATALOG_OBJECT, "PRAGMA legacy_alter_table", [], |r| r.get(0))?;
+    statements::pragma(db, Phase::Declare, CATALOG_OBJECT, "legacy_alter_table", false)?;
     let result = atomic(db, new, || {
         for (i, (_, sql)) in views.iter().enumerate() {
-            census::batch(
+            statements::batch(
                 db,
                 Phase::Declare,
                 new,
@@ -90,7 +90,7 @@ fn rename(db: &Connection, old: &str, new: &str, column: Option<&str>) -> Result
                 ),
             )?;
         }
-        census::batch(
+        statements::batch(
             db,
             Phase::Declare,
             new,
@@ -107,7 +107,7 @@ fn rename(db: &Connection, old: &str, new: &str, column: Option<&str>) -> Result
         )?;
         for (i, (v, _)) in views.iter().enumerate() {
             let helper = format!("__ivm_ddl_{i}");
-            let ddl: String = census::query(
+            let ddl: String = statements::query(
                 db,
                 Phase::Declare,
                 v,
@@ -126,7 +126,7 @@ fn rename(db: &Connection, old: &str, new: &str, column: Option<&str>) -> Result
             // A renamed column can change payload ordering. Rebind and
             // regenerate the hooks while preserving every state/index B-tree;
             // a legacy row rebuilds its shadows first, against the rewritten SQL.
-            let generic: bool = census::query(db,Phase::Declare,v,"SELECT s.generic FROM main.__ivm_schema s JOIN main.__ivm_views v ON v.id=s.id WHERE v.name=?1",[v],|r|r.get(0))?;
+            let generic: bool = statements::query(db,Phase::Declare,v,"SELECT s.generic FROM main.__ivm_schema s JOIN main.__ivm_views v ON v.id=s.id WHERE v.name=?1",[v],|r|r.get(0))?;
             crate::vtab::drop_triggers(db, v)?;
             let plan = crate::relational::bind(db, &sql)?;
             if generic {
@@ -134,7 +134,7 @@ fn rename(db: &Connection, old: &str, new: &str, column: Option<&str>) -> Result
             } else {
                 crate::vtab::convert(db, v, &plan)?;
             }
-            census::exec(
+            statements::exec(
                 db,
                 Phase::Declare,
                 v,
@@ -142,16 +142,16 @@ fn rename(db: &Connection, old: &str, new: &str, column: Option<&str>) -> Result
                 [&sql, v],
             )?;
             if let Some(column) = column {
-                census::exec(db,Phase::Declare,v,"UPDATE main.__ivm_columns SET column_name=?1 WHERE view_name=?2 AND column_name=?3 AND source_ordinal IN(SELECT source_ordinal FROM main.__ivm_sources WHERE view_name=?2 AND table_name=?4)",rusqlite::params![new,v,column,old])?;
+                statements::exec(db,Phase::Declare,v,"UPDATE main.__ivm_columns SET column_name=?1 WHERE view_name=?2 AND column_name=?3 AND source_ordinal IN(SELECT source_ordinal FROM main.__ivm_sources WHERE view_name=?2 AND table_name=?4)",rusqlite::params![new,v,column,old])?;
             } else {
-                census::exec(db,Phase::Declare,v,"UPDATE main.__ivm_sources SET table_name=?1 WHERE view_name=?2 AND table_name=?3",[new,v,&old])?;
+                statements::exec(db,Phase::Declare,v,"UPDATE main.__ivm_sources SET table_name=?1 WHERE view_name=?2 AND table_name=?3",[new,v,&old])?;
             }
-            census::exec(db,Phase::Declare,v,"UPDATE main.__ivm_objects SET definition=(SELECT sql FROM main.sqlite_schema WHERE type=object_type AND name=object_name) WHERE view_name=?1",[v])?;
-            census::batch(db, Phase::Declare, v, &format!("DROP VIEW temp.{}", quote(&helper)))?;
+            statements::exec(db,Phase::Declare,v,"UPDATE main.__ivm_objects SET definition=(SELECT sql FROM main.sqlite_schema WHERE type=object_type AND name=object_name) WHERE view_name=?1",[v])?;
+            statements::batch(db, Phase::Declare, v, &format!("DROP VIEW temp.{}", quote(&helper)))?;
         }
         Ok(())
     });
-    census::pragma(db, Phase::Declare, CATALOG_OBJECT, "legacy_alter_table", legacy)?;
+    statements::pragma(db, Phase::Declare, CATALOG_OBJECT, "legacy_alter_table", legacy)?;
     result
 }
 pub fn register(db: &Connection) -> Result<()> {
@@ -184,9 +184,9 @@ pub fn register(db: &Connection) -> Result<()> {
         }
         atomic(&db, &table, || {
             for (v, _) in &views {
-                census::batch(&db, Phase::Teardown, v, &format!("DROP TABLE main.{}", quote(v)))?;
+                statements::batch(&db, Phase::Teardown, v, &format!("DROP TABLE main.{}", quote(v)))?;
             }
-            census::batch(&db, Phase::Teardown, &table, &format!("DROP TABLE main.{}", quote(&table)))
+            statements::batch(&db, Phase::Teardown, &table, &format!("DROP TABLE main.{}", quote(&table)))
         })?;
         Ok(table)
     })

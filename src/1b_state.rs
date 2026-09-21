@@ -1,6 +1,6 @@
 use crate::{
     catalog::{error, quote},
-    census::{self, Phase},
+    statements::{self, Phase},
     relational::{Kind, Occurrence, Plan},
     relational_maintenance::{
         columns, folded, json_key, keys_table, out_table, plain, table, BULK_MULTIPLICITY_BUDGET,
@@ -14,7 +14,7 @@ impl Plan {
         // allocate a fresh suffix while the name is recorded for another view.
         fn fresh_index(db: &Connection, name: &str, base: String) -> Result<String> {
             let mut index = base.clone();
-            let recorded: bool = census::query(
+            let recorded: bool = statements::query(
                 db,
                 Phase::Declare,
                 name,
@@ -26,7 +26,7 @@ impl Plan {
                 return Ok(index);
             }
             let mut suffix = 0;
-            while census::query(
+            while statements::query(
                 db,
                 Phase::Declare,
                 name,
@@ -41,7 +41,7 @@ impl Plan {
         }
         let mut objects = vec![];
         let dictionary = format!("{name}_keys");
-        census::batch(
+        statements::batch(
             db,
             Phase::Declare,
             name,
@@ -53,7 +53,7 @@ impl Plan {
         objects.push(("table", dictionary));
         let state = format!("{name}_state");
         let result_key = fresh_index(db, name, format!("__ivm_{name}_result_key"))?;
-        census::batch(
+        statements::batch(
             db,
             Phase::Declare,
             name,
@@ -79,7 +79,7 @@ impl Plan {
                 let n = self.nodes[*input].fields.len();
                 let key = fresh_index(db, name, format!("__ivm_{name}_op{id}_{side}_key"))?;
                 let row = fresh_index(db, name, format!("__ivm_{name}_op{id}_{side}_row"))?;
-                census::batch(db, Phase::Declare, name, &format!("CREATE TABLE main.{}(__k INTEGER NOT NULL,__r INTEGER NOT NULL,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k); CREATE INDEX main.{} ON {}(__r)",quote(&t),columns(n),quote(&key),quote(&t),quote(&row),quote(&t)))?;
+                statements::batch(db, Phase::Declare, name, &format!("CREATE TABLE main.{}(__k INTEGER NOT NULL,__r INTEGER NOT NULL,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k); CREATE INDEX main.{} ON {}(__r)",quote(&t),columns(n),quote(&key),quote(&t),quote(&row),quote(&t)))?;
                 objects.push(("table", t));
                 objects.push(("index", key));
                 objects.push(("index", row));
@@ -92,7 +92,7 @@ impl Plan {
                     if !order.is_empty() {
                         let index =
                             fresh_index(db, name, format!("__ivm_{name}_op{id}_{side}_order"))?;
-                        census::batch(
+                        statements::batch(
                             db,
                             Phase::Declare,
                             name,
@@ -116,7 +116,7 @@ impl Plan {
                 for side in [member, member + 1] {
                     let t = format!("{name}_op{id}x{side}");
                     // removes the newest members, so `rowid>lo` still means new.
-                    census::batch(
+                    statements::batch(
                         db,
                         Phase::Declare,
                         name,
@@ -138,7 +138,7 @@ impl Plan {
                         continue;
                     }
                     let index = fresh_index(db, name, format!("__ivm_{name}_fix{id}_{}", created.len()))?;
-                    census::batch(
+                    statements::batch(
                         db,
                         Phase::Declare,
                         name,
@@ -174,7 +174,7 @@ impl Plan {
             if bad.is_empty() {
                 continue;
             }
-            let invalid: bool = census::query(
+            let invalid: bool = statements::query(
                 db,
                 Phase::Declare,
                 name,
@@ -192,7 +192,7 @@ impl Plan {
         }
         for (id, node) in self.nodes.iter().enumerate() {
             let out = out_table(id, node.fields.len());
-            census::exec(
+            statements::exec(
                 db,
                 Phase::Declare,
                 name,
@@ -202,7 +202,7 @@ impl Plan {
                 ),
                 [],
             )?;
-            census::exec(db, Phase::Declare, name, &format!("DELETE FROM {out}"), [])?;
+            statements::exec(db, Phase::Declare, name, &format!("DELETE FROM {out}"), [])?;
         }
         let mut reads = vec![0usize; self.nodes.len()];
         reads[self.output] += 1;
@@ -246,7 +246,7 @@ impl Plan {
         reads[child] -= 1;
         if reads[child] == 0 {
             let node = &self.nodes[child];
-            census::exec(
+            statements::exec(
                 db,
                 Phase::Materialize,
                 name,
@@ -306,7 +306,7 @@ impl Plan {
             return Ok(());
         };
         let dict = keys_table(name);
-        census::exec(
+        statements::exec(
             db,
             Phase::Materialize,
             name,
@@ -316,7 +316,7 @@ impl Plan {
         let k = format!("(SELECT __i FROM {dict} WHERE __v={k})");
         // No UNIQUE target is left to upsert against. Rows sharing a composite
         // are equal in every column, so the grouped select keeps the same row.
-        census::exec(
+        statements::exec(
             db,
             Phase::Materialize,
             name,
@@ -326,7 +326,7 @@ impl Plan {
             ),
             [],
         )?;
-        let bad: bool = census::query(
+        let bad: bool = statements::query(
             db,
             Phase::Materialize,
             name,
@@ -357,7 +357,7 @@ impl Plan {
         let width = self.nodes[id].fields.len();
         let out = out_table(id, width);
         let state = format!("main.{}", quote(&format!("{name}_state")));
-        let peak: i64 = census::query(
+        let peak: i64 = statements::query(
             db,
             Phase::Materialize,
             name,
@@ -369,7 +369,7 @@ impl Plan {
             return Err(error("result multiplicity expansion exceeds budget"));
         }
         let k = json_key((0..width).map(|i| plain(&format!("o.c{i}"))).collect());
-        census::exec(
+        statements::exec(
             db,
             Phase::Materialize,
             name,

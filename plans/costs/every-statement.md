@@ -1,11 +1,11 @@
-# the statement census, every statement this engine runs
+# the statement counts, every statement this engine runs
 
 One table per scenario: phase, verb, site, object, calls, milliseconds,
 microseconds per call, p99, rows touched, share prepared from the statement
 cache, and calls per input row. Sorted by the last column. The tsv beside this
 page is `plans/costs/every-statement.tsv`.
 
-Command, three runs of the census plus the wall pass in two builds:
+Command, three runs of the statement plus the wall pass in two builds:
 
 ```
 bash scripts/every-statement.sh
@@ -13,11 +13,11 @@ bash scripts/every-statement.sh
 
 Which build each column comes from:
 
-- Calls, rows and the per-statement microseconds are the census build's, read
+- Calls, rows and the per-statement microseconds are the statements build's, read
   off hafley-observe's SQLite trace. The microseconds are SQLite's own profile
-  clock, not the census spans: the spans name the site, they do not wrap the
+  clock, not the statement spans: the spans name the site, they do not wrap the
   clock. The spans-compiled-out build reports the same microseconds.
-- Wall milliseconds are logging-off runs, printed for both the census build and
+- Wall milliseconds are logging-off runs, printed for both the statements build and
   the `--no-default-features --features bundled` build. Three runs, median with
   the min and max beside it. The denominator is the median over three runs.
 - A cell whose median total falls below 1000 us reads "no effect at this
@@ -399,7 +399,7 @@ runs 36 over eight. Both stay flat as the batch grows.
 
 ## wall, logging off, median of three (min..max)
 
-| scenario | census build ms | spans compiled out ms |
+| scenario | statements build ms | spans compiled out ms |
 |---|---:|---:|
 | create_group | 0.977 (0.924..1.325) | 0.981 (0.942..2.603) |
 | inserts_one_txn | 2.153 (2.113..2.220) | 2.287 (2.275..2.414) |
@@ -411,10 +411,10 @@ wrote /Users/chrishafley/projects/sqlite_ivm/.boop-worktrees/feature/every-state
 
 ## every statement site
 
-`src/**` holds 165 census call sites. Each names a phase and an object; the verb,
+`src/**` holds 165 statement sites. Each names a phase and an object; the verb,
 kind and `file:line` come from the SQL and the caller.
 
-| file | census sites | note |
+| file | statement sites | note |
 |---|---:|---|
 | `src/0a_catalog.rs` | 13 | catalog DDL and rows |
 | `src/0b_relational.rs` | 3 | EXPLAIN and the function probe |
@@ -437,14 +437,14 @@ Two sites are not instrumented, with reasons:
   carries no span.
 - `src/2_vtab.rs` savepoint, release and rollback forward to the collector.
   The collector issues no SQL on those calls; its shadow DDL, drain read and
-  stage write each sit under a `census::guard` span at the call.
+  stage write each sit under a `statement::guard` span at the call.
 
 Two calls delegate into instrumented code rather than opening their own span:
 `src/1c_materialize.rs:15` and the three `materialize.execute(db, name)` calls
 in `src/1d_drain.rs` enter `MaterializeStatements::execute`, where every
 statement is instrumented.
 
-Every loop the census touches is bounded by a named constant:
+Every loop the statement touches is bounded by a named constant:
 `CENSUS_SEED_BUDGET` (one million seeded rows, protects the per-row seed),
 `BULK_ROUND_BUDGET` (fixpoint closures), `BULK_GROUP_BUDGET` (group keys),
 `BULK_MULTIPLICITY_BUDGET` (bag expansion). The wall pass runs three times and
@@ -454,15 +454,15 @@ none of the five scenarios reaches ten seconds; the largest median is 9.5 ms.
 
 - R1 site ledger above: 165 sites instrumented, two listed with reasons.
 - R2 `bash scripts/every-statement.sh` writes the tsv and prints the five tables.
-- R3 `cargo test --test 18_statement_census` green three runs, counts pinned per
+- R3 `cargo test --test 18_statement_counts` green three runs, counts pinned per
   phase and verb.
 - R4 `cargo test` green, same set as `origin/main`.
 - R5 `cargo clippy --lib -- -D warnings` clean. `--all-targets` fails on two
   pre-existing lints in `tests/6_extension_load.rs` (an undeclared `bench` cfg
   and a needless borrow); both fail on `origin/main` too.
 - R6 the section above carries a verdict on every row.
-- R7 `git diff --stat origin/main...HEAD` lists `src/`, `tests/18_statement_census.rs`,
+- R7 `git diff --stat origin/main...HEAD` lists `src/`, `tests/18_statement_counts.rs`,
   `plans/costs/`, `scripts/every-statement.sh`, `Cargo.toml`, `Cargo.lock`.
 - R8 no bounded-loop scanner exists in this tree; the budgets above are the
-  bound, and `tests/13_statements_per_drain.rs` and this file's census keep the
+  bound, and `tests/13_statements_per_drain.rs` and this file's statement keep the
   loops honest.

@@ -1,5 +1,5 @@
 use crate::catalog::{error, quote};
-use crate::census::{self, Phase};
+use crate::statements::{self, Phase};
 use hafley_observe::{Config, FormatConfig, OutputFormat};
 use rusqlite::{functions::FunctionFlags, Connection, Result};
 use std::io::IsTerminal;
@@ -67,7 +67,7 @@ pub fn register(db: &Connection) -> Result<()> {
             // Borrow the invoking connection for this callback; SQLite retains ownership.
             let db = unsafe { ctx.get_connection()? };
             let query = sql.replace('\'', "''");
-            census::batch(
+            statements::batch(
                 &db,
                 Phase::Declare,
                 &name,
@@ -98,7 +98,7 @@ pub fn register(db: &Connection) -> Result<()> {
         |ctx| {
             let name: String = ctx.get(0)?;
             let db = unsafe { ctx.get_connection()? };
-            let canonical: String = census::query(
+            let canonical: String = statements::query(
                 &db,
                 Phase::Teardown,
                 &name,
@@ -107,7 +107,7 @@ pub fn register(db: &Connection) -> Result<()> {
                 |r| r.get(0),
             )
             .map_err(|_| error("no managed view with that name"))?;
-            census::batch(
+            statements::batch(
                 &db,
                 Phase::Teardown,
                 &canonical,

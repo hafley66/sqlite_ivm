@@ -2,7 +2,7 @@
 //! Equality keys select membership, while stored row values select emitted identity.
 use crate::{
     catalog::{error, quote},
-    census::{self, Phase},
+    statements::{self, Phase},
     relational::{Occurrence, Plan, Rule},
 };
 use rusqlite::{types::Value, Connection, Result};
@@ -86,7 +86,7 @@ pub fn keys_table(name: &str) -> String {
 pub fn intern(db: &Connection, dict: &str, value: &str) -> Result<i64> {
     // One seek on hit and on miss: the conflict arm updates nothing and still
     // returns the existing id.
-    census::query_cached(
+    statements::query_cached(
         db,
         Phase::Maintain,
         dict,
@@ -98,7 +98,7 @@ pub fn intern(db: &Connection, dict: &str, value: &str) -> Result<i64> {
     )
 }
 pub fn resolve(db: &Connection, dict: &str, id: i64) -> Result<String> {
-    census::query_cached(
+    statements::query_cached(
         db,
         Phase::Maintain,
         dict,
@@ -197,7 +197,7 @@ pub(crate) fn plain(value: &str) -> String {
 
 pub fn install(db: &Connection, name: &str, sql: &str, plan: &Plan) -> Result<()> {
     validate_name(name)?;
-    let settings:bool=census::query(db,Phase::Declare,name,"SELECT (SELECT recursive_triggers FROM pragma_recursive_triggers)=1 AND (SELECT trusted_schema FROM pragma_trusted_schema)=1",[],|r|r.get(0))?;
+    let settings:bool=statements::query(db,Phase::Declare,name,"SELECT (SELECT recursive_triggers FROM pragma_recursive_triggers)=1 AND (SELECT trusted_schema FROM pragma_trusted_schema)=1",[],|r|r.get(0))?;
     if !settings {
         return Err(error(
             "sqlite_ivm requires recursive_triggers=ON and trusted_schema=ON",
@@ -205,7 +205,7 @@ pub fn install(db: &Connection, name: &str, sql: &str, plan: &Plan) -> Result<()
     }
     let mut objects = plan.create_state(db, name)?;
     let collector = plan.collector(name);
-    census::guard(
+    statements::guard(
         Phase::Declare,
         name,
         &format!("CREATE TABLE {}", collector.shadow_table()),
@@ -267,7 +267,7 @@ pub fn hooks(db: &Connection, name: &str, plan: &Plan) -> Result<Vec<(&'static s
             }
             // Arrangements contain the old row independently of the source SQL
             // table. AFTER avoids retracting writes rejected by OR IGNORE.
-            census::batch(
+            statements::batch(
                 db,
                 Phase::Declare,
                 name,

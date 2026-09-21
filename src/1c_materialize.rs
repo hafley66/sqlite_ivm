@@ -1,6 +1,6 @@
 use crate::{
     catalog::{error, quote},
-    census::{self, Phase},
+    statements::{self, Phase},
     relational::{Kind, Plan, Rule},
     relational_maintenance::{
         columns, keys_table, out_table, roles, rule_from, rule_where, table,
@@ -374,19 +374,19 @@ impl MaterializeStatements {
             MaterializeStatements::Input { insert }
             | MaterializeStatements::Map { insert }
             | MaterializeStatements::Set { insert } => {
-                census::exec_cached(db, Phase::Materialize, name, insert, [])?;
+                statements::exec_cached(db, Phase::Materialize, name, insert, [])?;
             }
             MaterializeStatements::Join { insert, bad } => {
-                census::exec_cached(db, Phase::Materialize, name, insert, [])?;
+                statements::exec_cached(db, Phase::Materialize, name, insert, [])?;
                 let bad: bool =
-                    census::query_cached(db, Phase::Materialize, name, bad, [], |r| r.get(0))?;
+                    statements::query_cached(db, Phase::Materialize, name, bad, [], |r| r.get(0))?;
                 if bad {
                     return Err(error("join multiplicity overflow"));
                 }
             }
             MaterializeStatements::Group(g) => {
                 if g.window || g.limit.is_some() {
-                    let peak: i64 = census::query_cached(db, Phase::Materialize, name, &g.peak, [], |r| {
+                    let peak: i64 = statements::query_cached(db, Phase::Materialize, name, &g.peak, [], |r| {
                         r.get(0)
                     })?;
                     let expansion = match g.limit.filter(|n| *n >= 0) {
@@ -398,21 +398,21 @@ impl MaterializeStatements {
                     }
                 }
                 if g.window {
-                    let groups: i64 = census::query_cached(db, Phase::Materialize, name, &g.groups, [], |r| {
+                    let groups: i64 = statements::query_cached(db, Phase::Materialize, name, &g.groups, [], |r| {
                         r.get(0)
                     })?;
                     if groups as usize > BULK_GROUP_BUDGET {
                         return Err(error("bulk group budget exceeded"));
                     }
-                    census::exec_cached(db, Phase::Materialize, name, &g.window_insert, [])?;
+                    statements::exec_cached(db, Phase::Materialize, name, &g.window_insert, [])?;
                 } else if g.limit.is_some() {
                     // One span per key insert, so each execution carries its own
                     // changes() count. The key read loop is bounded below.
-                    let read = census::open(
+                    let read = statements::open(
                         Phase::Materialize,
                         name,
                         &g.limit_keys,
-                        census::CACHED,
+                        statements::CACHED,
                     );
                     let _read = read.enter();
                     let mut key_statement = db.prepare_cached(&g.limit_keys)?;
@@ -423,7 +423,7 @@ impl MaterializeStatements {
                         if groups > BULK_GROUP_BUDGET {
                             return Err(error("bulk group budget exceeded"));
                         }
-                        census::exec_cached(
+                        statements::exec_cached(
                             db,
                             Phase::Materialize,
                             name,
@@ -434,18 +434,18 @@ impl MaterializeStatements {
                     drop(key_rows);
                     read.rows(groups);
                 } else {
-                    census::exec_cached(db, Phase::Materialize, name, &g.plain_insert, [])?;
+                    statements::exec_cached(db, Phase::Materialize, name, &g.plain_insert, [])?;
                 }
             }
             MaterializeStatements::Fixpoint(f) => {
                 let mut rounds = 0usize;
                 let max_rowid = format!("SELECT coalesce(max(rowid),0) FROM {}", f.all);
                 let mut lo =
-                    census::query_cached(db, Phase::Materialize, name, &max_rowid, [], |r| {
+                    statements::query_cached(db, Phase::Materialize, name, &max_rowid, [], |r| {
                         r.get(0)
                     })?;
                 for sql in &f.anchor {
-                    census::exec_cached(db, Phase::Materialize, name, sql, [])?;
+                    statements::exec_cached(db, Phase::Materialize, name, sql, [])?;
                 }
                 loop {
                     if rounds >= BULK_ROUND_BUDGET {
@@ -453,7 +453,7 @@ impl MaterializeStatements {
                     }
                     rounds += 1;
                     let hi =
-                        census::query_cached(db, Phase::Materialize, name, &max_rowid, [], |r| {
+                        statements::query_cached(db, Phase::Materialize, name, &max_rowid, [], |r| {
                             r.get(0)
                         })?;
                     if hi == lo {
@@ -461,7 +461,7 @@ impl MaterializeStatements {
                     }
                     let mut written = 0usize;
                     for sql in &f.rounds {
-                        written += census::exec_cached(
+                        written += statements::exec_cached(
                             db,
                             Phase::Materialize,
                             name,
@@ -474,7 +474,7 @@ impl MaterializeStatements {
                     }
                     lo = hi;
                 }
-                census::exec(db, Phase::Materialize, name, &f.copy, [])?;
+                statements::exec(db, Phase::Materialize, name, &f.copy, [])?;
             }
         }
         Ok(())

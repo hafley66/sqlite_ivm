@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# One recipe prints the statement census. It runs tests/18_statement_census.rs
-# three times under the census spans, then the wall pass in two builds: the
-# census build and the spans-compiled-out build. The tsv lands in
+# One recipe prints the statement counts. It runs tests/18_statement_counts.rs
+# three times under the statement spans, then the wall pass in two builds: the
+# statements build and the spans-compiled-out build. The tsv lands in
 # plans/costs/every-statement.tsv; the markdown table prints on stdout.
 #
-# Counts and per-statement microseconds are the census build's (SQLite's own
+# Counts and per-statement microseconds are the statements build's (SQLite's own
 # profile clock, not our spans). Wall milliseconds are logging-off runs, and
 # the recipe says which build each came from.
 #
@@ -17,24 +17,24 @@ runs=3
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-census_run() {
+statement_run() {
   cargo test --offline --locked --manifest-path "$ivm_dir/Cargo.toml" \
-    --test 18_statement_census -- --nocapture 2>/dev/null \
+    --test 18_statement_counts -- --nocapture 2>/dev/null \
     | awk -F'\t' 'NF>=12'
 }
 wall_run() {
   EVERY_STATEMENT_WALL=1 cargo test --offline --locked --manifest-path "$ivm_dir/Cargo.toml" "$@" \
-    --test 18_statement_census -- --nocapture 2>/dev/null \
+    --test 18_statement_counts -- --nocapture 2>/dev/null \
     | grep -a '^WALL'
 }
 
 for i in $(seq 1 "$runs"); do
-  census_run > "$work/census.$i.tsv"
+  statement_run > "$work/statement.$i.tsv"
 done
-wall_run > "$work/wall.census.tsv"
-wall_run --no-default-features --features bundled > "$work/wall.nocensus.tsv"
+wall_run > "$work/wall.statement.tsv"
+wall_run --no-default-features --features bundled > "$work/wall.nostatement.tsv"
 
-python3 - "$out/every-statement.tsv" "$work"/census.*.tsv "$work"/wall.census.tsv "$work"/wall.nocensus.tsv <<'PY'
+python3 - "$out/every-statement.tsv" "$work"/statement.*.tsv "$work"/wall.statement.tsv "$work"/wall.nostatement.tsv <<'PY'
 import statistics
 import sys
 
@@ -49,11 +49,11 @@ HEADER = [
 ]
 
 out_path = sys.argv[1]
-census_paths = sys.argv[2:-2]
-wall_census, wall_nocensus = sys.argv[-2], sys.argv[-1]
+statement_paths = sys.argv[2:-2]
+wall_statement, wall_nostatement = sys.argv[-2], sys.argv[-1]
 
 runs = []
-for path in census_paths:
+for path in statement_paths:
     rows = {}
     with open(path) as handle:
         for line in handle:
@@ -72,7 +72,7 @@ for path in census_paths:
             }
     runs.append(rows)
 if not runs:
-    sys.exit("census produced no rows")
+    sys.exit("statement produced no rows")
 
 keys = set(runs[0])
 for other in runs[1:]:
@@ -135,16 +135,16 @@ def wall(path):
         }
 
 
-census = wall(wall_census)
-compiled_out = wall(wall_nocensus)
+statement = wall(wall_statement)
+compiled_out = wall(wall_nostatement)
 print("\n## wall, logging off, median of three (min..max)\n")
-print("| scenario | census build ms | spans compiled out ms |")
+print("| scenario | statements build ms | spans compiled out ms |")
 print("|---|---:|---:|")
-for name in census:
+for name in statement:
     if name not in compiled_out:
         continue
     print(
-        f"| {name} | {census[name][1]:.3f} ({census[name][0]:.3f}..{census[name][2]:.3f}) "
+        f"| {name} | {statement[name][1]:.3f} ({statement[name][0]:.3f}..{statement[name][2]:.3f}) "
         f"| {compiled_out[name][1]:.3f} ({compiled_out[name][0]:.3f}..{compiled_out[name][2]:.3f}) |"
     )
 print(f"\nwrote {out_path}")
