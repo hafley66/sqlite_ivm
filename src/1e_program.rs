@@ -19,7 +19,7 @@ pub(crate) struct Program {
     pub(crate) name: String,
     /// Bind-time DDL, one `execute_batch` per entry, in scratch creation order.
     pub(crate) scratch: Vec<String>,
-    pub(crate) nodes: Vec<NodeStatements>,
+    pub(crate) nodes: Vec<std::sync::OnceLock<NodeStatements>>,
     pub(crate) apply_state: ApplyStateStatements,
 }
 
@@ -136,12 +136,19 @@ pub(crate) struct ApplyStateStatements {
 impl Program {
     #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn build(plan: &Plan, name: &str, db: &Connection) -> Program {
-        Program {
+        hafley_observe::sqlite_memory::record_memory(db, "program_build_start");
+        let program = Program {
             name: name.to_string(),
             scratch: scratch_statements(plan),
-            nodes: (0..plan.nodes.len()).map(|id| node_statements(plan, name, db, id)).collect(),
+            nodes: (0..plan.nodes.len()).map(|_| std::sync::OnceLock::new()).collect(),
             apply_state: apply_state_statements(plan, name),
-        }
+        };
+        hafley_observe::sqlite_memory::record_memory(db, "program_build_complete");
+        program
+    }
+
+    pub(crate) fn node<'a>(&'a self, plan: &Plan, db: &Connection, id: usize) -> &'a NodeStatements {
+        self.nodes[id].get_or_init(|| node_statements(plan, &self.name, db, id))
     }
 }
 

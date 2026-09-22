@@ -1,0 +1,220 @@
+{
+  "baseline_plugin_commit": "9856816",
+  "compare_worktree": "/Users/chrishafley/projects/sqlite-ivm-compare-9856816",
+  "compiler_checkout": "/Users/chrishafley/projects/sprefa-wt/sqlite-perf-main",
+  "compiler_fixture": "oracle/eval/c2_partial_3.json",
+  "extension_sha256": {
+    "eager": "e734993cee02d2a81fcb8d5f78ff8c927677a169b8d73ba5bd6b3a0bb67eb1f3",
+    "lazy": "56037256aa9b4411fc810910031bf139d315ec681508019b4ceda71ff51bac75"
+  },
+  "compiler_output_sha256": "e635f295151c51405f23a852e13ef5ca857da1fcb8cf551a064088289fdafd67",
+  "paired_runs": [
+    {
+      "version": "eager",
+      "wall_ms": 2270.0,
+      "peak_rss_bytes": 795246592
+    },
+    {
+      "version": "lazy",
+      "wall_ms": 1841.7,
+      "peak_rss_bytes": 586219520
+    },
+    {
+      "version": "eager",
+      "wall_ms": 2249.5,
+      "peak_rss_bytes": 794673152
+    },
+    {
+      "version": "lazy",
+      "wall_ms": 1889.2,
+      "peak_rss_bytes": 604569600
+    },
+    {
+      "version": "eager",
+      "wall_ms": 2213.2,
+      "peak_rss_bytes": 778665984
+    },
+    {
+      "version": "lazy",
+      "wall_ms": 1879.2,
+      "peak_rss_bytes": 601571328
+    }
+  ],
+  "paired_means": {
+    "eager_wall_ms": 2244.2,
+    "lazy_wall_ms": 1870.0,
+    "eager_peak_rss_bytes": 789528576,
+    "lazy_peak_rss_bytes": 597453483
+  },
+  "compiler_nodes": {
+    "logical": 2491,
+    "compiled_sql_nodes_at_end": 543
+  },
+  "instrumented_phase_memory": {
+    "eager": {
+      "population_complete": {
+        "message": "sqlite memory sample",
+        "phase": "population_complete",
+        "allocator_current_bytes": 165830928,
+        "allocator_peak_bytes": 166226080,
+        "allocator_status_available": true,
+        "connection_cache_bytes": 97899632,
+        "connection_schema_bytes": 4643384,
+        "connection_statement_bytes": 14425264,
+        "process_peak_rss_bytes": 216842240
+      },
+      "program_build_start": {
+        "message": "sqlite memory sample",
+        "phase": "program_build_start",
+        "allocator_current_bytes": 165830928,
+        "allocator_peak_bytes": 166226080,
+        "allocator_status_available": true,
+        "connection_cache_bytes": 97899632,
+        "connection_schema_bytes": 4643384,
+        "connection_statement_bytes": 14425264,
+        "process_peak_rss_bytes": 216842240
+      },
+      "program_build_complete": {
+        "message": "sqlite memory sample",
+        "phase": "program_build_complete",
+        "allocator_current_bytes": 165830928,
+        "allocator_peak_bytes": 166226080,
+        "allocator_status_available": true,
+        "connection_cache_bytes": 97899632,
+        "connection_schema_bytes": 4643384,
+        "connection_statement_bytes": 14425264,
+        "process_peak_rss_bytes": 720191488
+      },
+      "scratch_ready": {
+        "message": "sqlite memory sample",
+        "phase": "scratch_ready",
+        "allocator_current_bytes": 187143312,
+        "allocator_peak_bytes": 187220880,
+        "allocator_status_available": true,
+        "connection_cache_bytes": 112110704,
+        "connection_schema_bytes": 4716280,
+        "connection_statement_bytes": 14425264,
+        "process_peak_rss_bytes": 726532096
+      }
+    },
+    "lazy": {
+      "population_complete": {
+        "message": "sqlite memory sample",
+        "phase": "population_complete",
+        "allocator_current_bytes": 165830928,
+        "allocator_peak_bytes": 166226080,
+        "allocator_status_available": true,
+        "connection_cache_bytes": 97899632,
+        "connection_schema_bytes": 4643384,
+        "connection_statement_bytes": 14425264,
+        "process_peak_rss_bytes": 226295808
+      },
+      "program_build_start": {
+        "message": "sqlite memory sample",
+        "phase": "program_build_start",
+        "allocator_current_bytes": 165830928,
+        "allocator_peak_bytes": 166226080,
+        "allocator_status_available": true,
+        "connection_cache_bytes": 97899632,
+        "connection_schema_bytes": 4643384,
+        "connection_statement_bytes": 14425264,
+        "process_peak_rss_bytes": 226312192
+      },
+      "program_build_complete": {
+        "message": "sqlite memory sample",
+        "phase": "program_build_complete",
+        "allocator_current_bytes": 165830928,
+        "allocator_peak_bytes": 166226080,
+        "allocator_status_available": true,
+        "connection_cache_bytes": 97899632,
+        "connection_schema_bytes": 4643384,
+        "connection_statement_bytes": 14425264,
+        "process_peak_rss_bytes": 228392960
+      },
+      "scratch_ready": {
+        "message": "sqlite memory sample",
+        "phase": "scratch_ready",
+        "allocator_current_bytes": 187143312,
+        "allocator_peak_bytes": 187220880,
+        "allocator_status_available": true,
+        "connection_cache_bytes": 112110704,
+        "connection_schema_bytes": 4716280,
+        "connection_statement_bytes": 14425264,
+        "process_peak_rss_bytes": 246038528
+      },
+      "drain_complete": {
+        "message": "sqlite memory sample",
+        "phase": "drain_complete",
+        "allocator_current_bytes": 220074272,
+        "allocator_peak_bytes": 226541600,
+        "allocator_status_available": true,
+        "connection_cache_bytes": 112176496,
+        "connection_schema_bytes": 4718304,
+        "connection_statement_bytes": 42455760,
+        "process_peak_rss_bytes": 565067776
+      }
+    }
+  },
+  "persistent_crossover": {
+    "fixture": "bench/results/native-rowid-probes-observe/timings/12000-1000-200.json",
+    "eager": {
+      "final_checksum": "37a855bf4e75587e4d18e6426b94e5fcef60be731c273d66e28e6a791690c188",
+      "disk": {
+        "database_bytes": 540672,
+        "main_bytes": 4096,
+        "wal_bytes": 1458512,
+        "shm_bytes": 32768,
+        "temp_bytes": null,
+        "temp_scope": "SQLite temp files not sampled"
+      },
+      "sqlite_pages": {
+        "main": {
+          "page_count": 132,
+          "page_size": 4096
+        },
+        "temp": {
+          "page_count": 105,
+          "page_size": 4096
+        }
+      },
+      "sqlite_allocator": {
+        "current_bytes": 1553536,
+        "peak_bytes": 1932288
+      },
+      "process_peak_rss_platform_units": 53035008
+    },
+    "lazy": {
+      "final_checksum": "37a855bf4e75587e4d18e6426b94e5fcef60be731c273d66e28e6a791690c188",
+      "disk": {
+        "database_bytes": 540672,
+        "main_bytes": 4096,
+        "wal_bytes": 1458512,
+        "shm_bytes": 32768,
+        "temp_bytes": null,
+        "temp_scope": "SQLite temp files not sampled"
+      },
+      "sqlite_pages": {
+        "main": {
+          "page_count": 132,
+          "page_size": 4096
+        },
+        "temp": {
+          "page_count": 105,
+          "page_size": 4096
+        }
+      },
+      "sqlite_allocator": {
+        "current_bytes": 1553536,
+        "peak_bytes": 1932288
+      },
+      "process_peak_rss_platform_units": 53018624
+    }
+  },
+  "memory_scope": "Compiler RSS measures whole dl8 process. SQLite allocator is measured by hafley-observe at program phase boundaries; the residual RSS is not an exact Rust heap measurement. The persistent crossover runs in a separate Python process.",
+  "validation": {
+    "plugin": "84 passed, 2 skipped",
+    "sprefa_sqlite_oracle": "32/32",
+    "native_extension": "4 passed",
+    "shell_scenarios": "6 passed"
+  }
+}

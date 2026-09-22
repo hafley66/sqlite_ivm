@@ -24,7 +24,7 @@
       [
         "declare",
         "SELECT",
-        30
+        29
       ],
       [
         "materialize",
@@ -45,8 +45,8 @@
     "scans": [
       [
         "declare",
-        2525,
-        145
+        2463,
+        135
       ],
       [
         "materialize",

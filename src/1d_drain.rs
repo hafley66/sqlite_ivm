@@ -24,6 +24,7 @@ impl Plan {
             tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             statements::batch(db, Phase::Declare, &program.name, sql)?;
         }
+        hafley_observe::sqlite_memory::record_memory(db, "scratch_ready");
         Ok(())
     }
     /// Set-at-a-time maintenance of one batch. Every node kind runs a constant
@@ -41,7 +42,7 @@ impl Plan {
             let Kind::Input(input) = node.kind else {
                 continue;
             };
-            let KindStatements::Input { seed: insert } = &program.nodes[id].kind else {
+            let KindStatements::Input { seed: insert } = &program.node(self, db, id).kind else {
                 unreachable!()
             };
             // One span per bound execution, so each seed insert carries its own
@@ -69,8 +70,7 @@ impl Plan {
         for id in 0..self.nodes.len() {
             tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             let node = &self.nodes[id];
-            let statements = &program.nodes[id];
-            if matches!(statements.kind, KindStatements::Input { .. }) {
+            if matches!(node.kind, Kind::Input(_)) {
                 continue;
             }
             let touched_inputs = node
@@ -82,6 +82,7 @@ impl Plan {
                 tracing::trace!(id, kind = node.kind.label(), "node_skipped_unchanged_inputs");
                 continue;
             }
+            let statements = program.node(self, db, id);
             let _node = tracing::debug_span!("node", kind = node.kind.label(), id).entered();
             let written = match &statements.kind {
                 KindStatements::Input { .. } => unreachable!(),
@@ -144,7 +145,7 @@ impl Plan {
                         db,
                         Phase::Drain,
                         name,
-                        &program.nodes[*child].sweep,
+                        &program.node(self, db, *child).sweep,
                         [],
                     )?;
                 }
@@ -156,12 +157,14 @@ impl Plan {
         // Long-lived output and aggregate inputs remain until after apply_state.
         // A failed drain aborts the enclosing statement and its temp writes.
         let _sweep = tracing::debug_span!("node", kind = "sweep", id = self.nodes.len()).entered();
-        for (id, (statements, rows)) in program.nodes.iter().zip(out_rows).enumerate() {
+        for (id, rows) in out_rows.into_iter().enumerate() {
             tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             if rows != 0 && self.out_last_reads[id] == self.nodes.len() {
-                statements::exec_cached(db, Phase::Drain, name, &statements.sweep, [])?;
+                statements::exec_cached(db, Phase::Drain, name, &program.node(self, db, id).sweep, [])?;
             }
         }
+        tracing::info!(compiled_sql_nodes = program.nodes.iter().filter(|node| node.get().is_some()).count(), total_nodes = self.nodes.len(), "maintenance_sql_cache");
+        hafley_observe::sqlite_memory::record_memory(db, "drain_complete");
         Ok(())
     }
     #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]

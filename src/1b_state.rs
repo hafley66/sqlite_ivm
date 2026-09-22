@@ -303,6 +303,7 @@ impl Plan {
             ), [])?;
             self.exhaust(db, name, &mut reads, input)?;
         }
+        hafley_observe::sqlite_memory::record_memory(db, "population_complete");
         Ok(())
     }
     #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
