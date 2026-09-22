@@ -7,10 +7,9 @@ use rusqlite::{Connection, Result};
 use sqlite_ivm::extension::register;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-/// Explicit diagnostic run: one changed key, increasing unrelated source rows.
-/// SQL, plans and execution counters come from the existing observe APIs.
+/// One changed key, increasing unrelated source rows. SQL, plans and execution
+/// counters come from the existing observe APIs.
 #[test]
-#[ignore = "maintenance SQL scaling diagnostic; run with --ignored --nocapture"]
 fn maintenance_source_read_costs() -> Result<()> {
     for size in [32, 1024, 8192] {
         for shape in ["join_group", "nested_union"] {
@@ -43,6 +42,12 @@ fn maintenance_source_read_costs() -> Result<()> {
             };
             assert_eq!(read("SELECT * FROM result ORDER BY 1,2")?,read(&format!("{query} ORDER BY 1,2"))?);
             let statements = recorder.event_sums(SQLITE_TARGET,tracing::Level::DEBUG,"drain","view",Some("sql"));
+            if shape == "nested_union" {
+                let vm_steps: f64 = statements.iter().filter(|((view,_),_)|view=="result")
+                    .map(|(_,sums)|sums.sum_of("vm_step")).sum();
+                assert!(vm_steps <= 6500.0,
+                    "one-key UNION work grew with {size} source rows: {vm_steps} VM steps");
+            }
             for ((view,sql),sums) in statements {
                 if view != "result" { continue; }
                 if shape == "join_group" && sql.contains("sum(CASE") {
@@ -66,6 +71,100 @@ fn maintenance_source_read_costs() -> Result<()> {
             }
         }
     }
+    Ok(())
+}
+
+#[test]
+fn union_membership_applies_both_input_deltas_before_emitting() -> Result<()> {
+    let db = Connection::open_in_memory()?;
+    register(&db)?;
+    db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON;
+        CREATE TABLE a(x INTEGER);CREATE TABLE b(x INTEGER);
+        INSERT INTO a VALUES(1),(1),(2);INSERT INTO b VALUES(1),(3)")?;
+    let query = "SELECT x FROM a UNION SELECT x FROM b";
+    db.execute_batch(&format!("CREATE VIRTUAL TABLE result USING sqlite_ivm('{query}')"))?;
+    let rows = |sql: &str| -> Result<Vec<i64>> {
+        db.prepare(sql)?.query_map([],|r|r.get(0))?.collect()
+    };
+    assert_eq!(rows("SELECT x FROM result ORDER BY x")?,rows(&format!("{query} ORDER BY x"))?);
+    for mutation in [
+        "BEGIN;DELETE FROM a WHERE x=1;INSERT INTO b VALUES(2);COMMIT",
+        "BEGIN;DELETE FROM b WHERE x=1;INSERT INTO a VALUES(1);COMMIT",
+        "BEGIN;DELETE FROM a WHERE x=1;DELETE FROM b WHERE x=2;COMMIT",
+        "BEGIN;SAVEPOINT s;INSERT INTO a VALUES(4);INSERT INTO b VALUES(4);ROLLBACK TO s;RELEASE s;COMMIT",
+        "BEGIN;INSERT INTO a VALUES(5);INSERT INTO b VALUES(5);COMMIT",
+        "BEGIN;DELETE FROM a WHERE x=5;DELETE FROM b WHERE x=5;COMMIT",
+    ] {
+        db.execute_batch(mutation)?;
+        assert_eq!(rows("SELECT x FROM result ORDER BY x")?,rows(&format!("{query} ORDER BY x"))?,"{mutation}");
+    }
+    Ok(())
+}
+
+#[test]
+fn distinct_membership_replaces_a_deleted_representative() -> Result<()> {
+    let db = Connection::open_in_memory()?;
+    register(&db)?;
+    db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON;
+        CREATE TABLE a(x TEXT COLLATE NOCASE);INSERT INTO a VALUES('AA'),('aa')")?;
+    db.execute_batch("CREATE VIRTUAL TABLE result USING sqlite_ivm('SELECT DISTINCT x FROM a')")?;
+    let actual = || -> Result<Vec<String>> {
+        db.prepare("SELECT x FROM result")?.query_map([],|r|r.get(0))?.collect()
+    };
+    assert_eq!(actual()?,vec!["AA"]);
+    db.execute_batch("DELETE FROM a WHERE x='AA' COLLATE BINARY")?;
+    assert_eq!(actual()?,vec!["aa"]);
+    db.execute_batch("INSERT INTO a VALUES('Aa')")?;
+    assert_eq!(actual()?,vec!["aa"]);
+    db.execute_batch("DELETE FROM a WHERE x='aa' COLLATE BINARY")?;
+    assert_eq!(actual()?,vec!["Aa"]);
+    Ok(())
+}
+
+#[test]
+fn union_membership_switches_representative_between_inputs() -> Result<()> {
+    let db = Connection::open_in_memory()?;
+    register(&db)?;
+    db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON;
+        CREATE TABLE a(x TEXT COLLATE NOCASE);CREATE TABLE b(x TEXT COLLATE NOCASE);
+        INSERT INTO b VALUES('alpha');
+        CREATE VIRTUAL TABLE result USING sqlite_ivm('SELECT x FROM a UNION SELECT x FROM b')")?;
+    let result = || -> Result<String> { db.query_row("SELECT x FROM result",[],|r|r.get(0)) };
+    assert_eq!(result()?,"alpha");
+    db.execute_batch("INSERT INTO a VALUES('ALPHA')")?;
+    assert_eq!(result()?,"ALPHA");
+    db.execute_batch("DELETE FROM a WHERE x='ALPHA' COLLATE BINARY")?;
+    assert_eq!(result()?,"alpha");
+    Ok(())
+}
+
+#[test]
+fn format_eight_set_view_rebuilds_membership_on_connect() -> Result<()> {
+    let path = std::env::temp_dir().join(format!("ivm-set-format8-{}.db",std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    {
+        let db = Connection::open(&path)?;
+        register(&db)?;
+        db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON;
+            CREATE TABLE a(x INTEGER);INSERT INTO a VALUES(1),(1);
+            CREATE VIRTUAL TABLE result USING sqlite_ivm('SELECT DISTINCT x FROM a')")?;
+        let table: String = db.query_row("SELECT object_name FROM __ivm_objects WHERE view_name='result' AND object_type='table' AND object_name LIKE 'result_op%x0'",[],|r|r.get(0))?;
+        db.execute("DELETE FROM __ivm_objects WHERE object_name=?1",[&table])?;
+        db.execute_batch(&format!("DROP TABLE main.{}",sqlite_ivm::catalog::quote(&table)))?;
+        db.execute_batch("UPDATE __ivm_schema SET format_version=8")?;
+    }
+    {
+        let db = Connection::open(&path)?;
+        register(&db)?;
+        db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON")?;
+        let value: i64 = db.query_row("SELECT x FROM result",[],|r|r.get(0))?;
+        assert_eq!(value,1);
+        let format: i64 = db.query_row("SELECT format_version FROM __ivm_schema",[],|r|r.get(0))?;
+        assert_eq!(format,9);
+        db.execute_batch("INSERT INTO a VALUES(2)")?;
+        assert_eq!(db.query_row("SELECT count(*) FROM result",[],|r|r.get::<_,i64>(0))?,2);
+    }
+    std::fs::remove_file(path).ok();
     Ok(())
 }
 
@@ -298,7 +397,7 @@ fn shared_subqueries_keep_statement_text_bounded() -> Result<()> {
 }
 
 #[test]
-fn set_source_reads_keep_materialized_boundaries_observable() -> Result<()> {
+fn set_source_reads_use_indexed_membership_boundaries() -> Result<()> {
     let db = Connection::open_in_memory()?;
     register(&db)?;
     db.execute_batch(
@@ -328,22 +427,17 @@ fn set_source_reads_keep_materialized_boundaries_observable() -> Result<()> {
         "view",
         Some("sql"),
     );
-    let mut materialized_count = 0;
-    let mut prepared_bytes = 0.0;
+    let mut indexed_membership_count = 0;
     for ((_, sql), sums) in &statements {
-        if !sql.starts_with("INSERT INTO temp.__ivm_out_") || sql.contains('?') {
+        if !sql.contains("result_op") || !sql.contains("__ivm_touched") || sql.contains('?') {
             continue;
         }
         let plan = hafley_observe::sqlite::query_plan(&db, sql)?;
-        if plan
-            .iter()
-            .any(|step| step.starts_with("MATERIALIZE __ivm_read_"))
-        {
-            materialized_count += 1;
-            prepared_bytes += sums.sum_of("mem_used");
-        }
+        assert!(!plan.iter().any(|step| step.starts_with("MATERIALIZE __ivm_read_")), "{plan:?}");
+        assert!(!sql.contains("__ivm_read_"));
+        indexed_membership_count += sums.events;
     }
-    assert!(materialized_count > 0, "set boundary was inlined");
+    assert!(indexed_membership_count > 0, "set state did not probe touched keys");
     // Profile mem_used is summed over repeated executions for each SQL key.
     let total_accumulated_mem_used = statements
         .values()
@@ -353,7 +447,6 @@ fn set_source_reads_keep_materialized_boundaries_observable() -> Result<()> {
         .values()
         .map(|sums| sums.sum_of("mem_used"))
         .fold(0.0, f64::max);
-    assert!(prepared_bytes < 6_000_000.0, "prepared set boundary: {prepared_bytes}");
     assert!(
         total_accumulated_mem_used < 10_000_000.0,
         "all accumulated prepared statements: {total_accumulated_mem_used}"

@@ -102,6 +102,10 @@ impl Plan {
             if matches!(node.kind, Kind::Input(_) | Kind::Map { .. }) {
                 continue;
             }
+            if self.has_set_membership(id) {
+                let state = self.create_set_membership(db,name,id)?;
+                objects.push(("table",state));
+            }
             for (side, input) in node.inputs.iter().enumerate() {
                 tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 let mut expressions = match self.native_key_columns(id,side) {
@@ -265,6 +269,9 @@ impl Plan {
             }
             self.materialize(db, name, id, false)?;
             tracing::debug!("populate_node_materialized");
+            if self.has_set_membership(id) {
+                self.populate_set_membership(db,name,id)?;
+            }
             if direct {
                 for input in &node.inputs {
                     tracing::trace!(id, input, "population_input_consumed");

@@ -2,6 +2,7 @@
 //! connection, keyed by node id and role, so no drain call formats SQL.
 
 use crate::{
+    set_membership::SetMembershipStatements,
     relational::{Kind, Occurrence, Plan, Rule},
     relational_materialize::MaterializeStatements,
     relational_maintenance::{
@@ -36,6 +37,12 @@ pub(crate) enum KindStatements {
     },
     SetAll {
         copies: Vec<String>,
+    },
+    SetMembership {
+        sides: Vec<Option<ArrangementSide>>,
+        statements: SetMembershipStatements,
+        fallback: MaterializeStatements,
+        consolidation: [String; 5],
     },
     Arrangement(ArrangementStatements),
     Fixpoint(FixpointStatements),
@@ -234,6 +241,22 @@ fn node_statements(plan: &Plan, name: &str, db: &Connection, id: usize) -> NodeS
                     })
                     .collect(),
             },
+            Kind::Set("union" | "distinct") => {
+                let before = format!("temp.__ivm_before_{width}_{id}");
+                let cols = columns(width);
+                KindStatements::SetMembership {
+                    sides: (0..node.inputs.len()).map(|side| arrangement_side(plan,name,id,side)).collect(),
+                    statements: plan.set_membership_statements(name,id),
+                    fallback: plan.materialize_statements(db,name,id,true),
+                    consolidation: [
+                        format!("INSERT INTO {out} SELECT {cols},-__m FROM {before}"),
+                        format!("DELETE FROM {before}"),
+                        format!("INSERT INTO {before} SELECT {cols},sum(__m) FROM {out} GROUP BY {} HAVING sum(__m)!=0",crate::native_keys::exact_row_columns(width,"").join(",")),
+                        format!("DELETE FROM {out}"),
+                        format!("INSERT INTO {out} SELECT * FROM {before}"),
+                    ],
+                }
+            }
             Kind::Set(_) | Kind::Join { .. } | Kind::Group { .. } => {
                 KindStatements::Arrangement(arrangement_statements(plan, name, db, id, width))
             }

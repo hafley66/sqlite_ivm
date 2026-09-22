@@ -24,6 +24,8 @@ pub mod relational_state;
 pub mod relational_materialize;
 #[path = "1ca_source_reads.rs"]
 pub(crate) mod source_reads;
+#[path = "1cb_set_membership.rs"]
+pub(crate) mod set_membership;
 #[path = "1d_drain.rs"]
 pub mod relational_drain;
 #[path = "1e_program.rs"]

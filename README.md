@@ -132,10 +132,15 @@ updates. Result insertion/retraction and duplicate consolidation compare native
 values, storage types, and exact REAL bits. An integer checksum supports the
 existing corruption-recovery check; it never selects a row or defines equality.
 Set and recursive membership keys retain their existing encoded representation.
+UNION and DISTINCT keep one representative and signed support counts per
+interned integer key in a persistent operator result table. They update that
+table from child deltas; deleting the current representative while support
+remains re-reads the affected source key. EXCEPT and INTERSECT retain the
+affected-key before/after path. No per-input row copies are stored.
 
 Projection/filtering and inner joins propagate signed deltas. Eligible bounded
 integer COUNT/SUM groups add contributions and maintain non-null support counts.
-Other aggregates, outer joins, sets, windows, and top-k evaluate affected-key
+Other aggregates, outer joins, EXCEPT, INTERSECT, windows, and top-k evaluate affected-key
 before/after results and emit their signed difference. Before-input reads subtract
 the pending delta from current source rows. A recursive CTE retains member/work
 state and uses delete-and-rederive; its work table is cleared after the drain.
@@ -144,7 +149,7 @@ is a transaction/read drain; this API has no dataflow timestamp frontier runtime
 
 `xRename` preserves state and index B-trees; `xDestroy` validates owned DDL before
 cleanup. Shared `__ivm_*` catalogs remain after the last view is dropped. New views
-use storage format 8. Compatible formats 2 through 7 rebuild through the existing
+use storage format 9. Compatible formats 2 through 8 rebuild through the existing
 writable-database migration path, removing copied input tables and installing the
 native-key layout. Pre-5 recursive state still requires its matching older
 extension; format 1 and the original ordinary-view prototypes are not migrated.

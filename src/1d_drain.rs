@@ -94,6 +94,31 @@ impl Plan {
                     }
                     written
                 }
+                KindStatements::SetMembership { sides, statements: state, fallback, consolidation } => {
+                    statements::exec_cached(db,Phase::Maintain,name,CLEAR_TOUCHED,[])?;
+                    for side in sides {
+                        let side = side.as_ref().ok_or_else(||error("set without a key"))?;
+                        statements::exec_cached(db,Phase::Maintain,name,&side.intern,[])?;
+                        statements::exec_cached(db,Phase::Maintain,name,&side.touch,[])?;
+                    }
+                    statements::exec_cached(db,Phase::Maintain,name,&state.before,[])?;
+                    statements::exec_cached(db,Phase::Maintain,name,&state.update,[])?;
+                    self.check_set_membership(db,name,&state.bad)?;
+                    let recalc: bool = statements::query_cached(db,Phase::Maintain,name,&state.representative_removed,[],|r|r.get(0))?;
+                    if recalc {
+                        fallback.execute(db,name)?;
+                        statements::exec_cached(db,Phase::Maintain,name,&state.replace_representatives,[])?;
+                        statements::exec_cached(db,Phase::Maintain,name,&statements.sweep,[])?;
+                    }
+                    statements::exec_cached(db,Phase::Maintain,name,&state.remove_empty,[])?;
+                    statements::exec_cached(db,Phase::Maintain,name,&state.after,[])?;
+                    for sql in &consolidation[..4] {
+                        statements::exec_cached(db,Phase::Maintain,name,sql,[])?;
+                    }
+                    let written = statements::exec_cached(db,Phase::Maintain,name,&consolidation[4],[])?;
+                    statements::exec_cached(db,Phase::Maintain,name,&state.clear_before,[])?;
+                    written
+                }
                 KindStatements::Arrangement(arrangement) => {
                     self.drain_arrangement(db, name, arrangement, &touched_inputs)?
                 }
