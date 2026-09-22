@@ -1,5 +1,8 @@
 # COUNT/SUM recovery, 2026-09-21
 
+[Visual index and DML comparison](https://sqlite-ivm-index-report.hafley66.chatgpt.site)
+and [2026-09-22 index audit](7_index_audit.md).
+
 The recovered performance target remains unmet. Same-machine medians for
 12,000 initial rows, batch 1,000, fanout 200, three repetitions:
 

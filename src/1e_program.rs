@@ -159,6 +159,21 @@ fn scratch_statements(plan: &Plan) -> Vec<String> {
             "CREATE TABLE IF NOT EXISTS {out}({cols},__m); CREATE TABLE IF NOT EXISTS temp.__ivm_before_{width}_{id}({cols},__m)",
             out = out_table(id, width)
         ));
+        // Aggregate deltas join the stored before-image by projected group
+        // columns. The scratch table otherwise requires one scan per group.
+        if id == plan.output && aggregate_sum_inputs(plan).is_some() {
+            if let Kind::Group { keys, expressions, .. } = &node.kind {
+                let columns = keys.iter().map(|key| {
+                    format!("c{}", expressions.iter().position(|e| e == key).expect("projected group key"))
+                }).collect::<Vec<_>>();
+                if !columns.is_empty() {
+                    statements.push(format!(
+                        "CREATE INDEX IF NOT EXISTS temp.__ivm_before_{width}_{id}_group_{} ON __ivm_before_{width}_{id}({})",
+                        columns.join("_"), columns.join(",")
+                    ));
+                }
+            }
+        }
         if matches!(
             node.kind,
             Kind::Set(_) | Kind::Join { .. } | Kind::Group { .. } | Kind::Fixpoint { .. }
@@ -407,7 +422,9 @@ fn aggregate_delta_statements(plan: &Plan, name: &str, db: &Connection, id: usiz
     }).collect::<Vec<_>>().join(",");
     let groups = if keys.is_empty() { String::new() } else { format!(" GROUP BY {}", plan.key_sql(id, 0)?) };
     let joined = if key_positions.is_empty() { "1".to_string() } else {
-        key_positions.iter().map(|i| format!("g.c{i} IS b.c{i}")).collect::<Vec<_>>().join(" AND ")
+        // Both values are projected integer group keys. Remove the computed
+        // expression's affinity so SQLite can probe the untyped scratch index.
+        key_positions.iter().map(|i| format!("+g.c{i} IS b.c{i}")).collect::<Vec<_>>().join(" AND ")
     };
     let nonempty = if keys.is_empty() { String::new() } else { format!(" WHERE ({new_count})>0") };
     let projected = expressions.iter().enumerate().map(|(i, e)|format!("{e} AS c{i}")).collect::<Vec<_>>().join(",");

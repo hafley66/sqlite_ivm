@@ -1,0 +1,583 @@
+{
+  "paired": {
+    "samples_ms": {
+      "baseline": [
+        71.4159559993277,
+        74.18733399754274,
+        73.23479099432006,
+        73.23416699728114,
+        74.21458499811706
+      ],
+      "indexed_before": [
+        72.94241599993256,
+        73.32325099741865,
+        72.64033399951586,
+        75.53995699890947,
+        70.15037500059407
+      ]
+    },
+    "medians_ms": {
+      "baseline": 73.23479099432006,
+      "indexed_before": 72.94241599993256
+    },
+    "sha256": {
+      "baseline": "4c22af1b72a83464db293c5e4e30a4fc42714854e957e9f16cb4d9da1bf36b3a",
+      "indexed_before": "7897eb2c31644c18899702e1d84695cd3eb7672e97bc6f44839fa231f20df5cb"
+    },
+    "fixture_sha256": "03a093bf232f8f34a9f254c0ef128ed5c7b9a2fd220b3164ab0b12d6a74d75e7"
+  },
+  "three_arm_samples": [
+    {
+      "rows": 400,
+      "batch": 10,
+      "fanout": 10,
+      "samples_ms": {
+        "sqlite-ivm": [
+          5.4656669999531005,
+          5.105791000460158,
+          5.223875999945449
+        ],
+        "dd": [
+          0.12312599999999999,
+          0.131667,
+          0.135292
+        ],
+        "historical-counted": [
+          1.6358339998987503,
+          1.634832004128839,
+          1.802206999855116
+        ]
+      },
+      "ivm_over_dd": 39.67490715171948
+    },
+    {
+      "rows": 12000,
+      "batch": 10,
+      "fanout": 10,
+      "samples_ms": {
+        "sqlite-ivm": [
+          8.27724800001306,
+          9.106916999371606,
+          8.15808499828563
+        ],
+        "dd": [
+          0.16387600000000002,
+          0.170083,
+          0.28891700000000003
+        ],
+        "historical-counted": [
+          2.4515010009054095,
+          2.497749001122429,
+          2.501999999367399
+        ]
+      },
+      "ivm_over_dd": 48.66593369127461
+    },
+    {
+      "rows": 400,
+      "batch": 10,
+      "fanout": 200,
+      "samples_ms": {
+        "sqlite-ivm": [
+          7.285917001354392,
+          6.835292999312514,
+          7.025625000096625
+        ],
+        "dd": [
+          0.14983600000000002,
+          0.149874,
+          0.144499
+        ],
+        "historical-counted": [
+          1.6843329976836685,
+          1.766836003298522,
+          1.7748310001479695
+        ]
+      },
+      "ivm_over_dd": 46.88876505043263
+    },
+    {
+      "rows": 1200,
+      "batch": 10,
+      "fanout": 200,
+      "samples_ms": {
+        "sqlite-ivm": [
+          7.965998000145191,
+          7.730206998530775,
+          7.801415003996226
+        ],
+        "dd": [
+          0.15470599999999998,
+          0.15104,
+          0.139293
+        ],
+        "historical-counted": [
+          1.9755829962377902,
+          2.14470700120728,
+          2.424082000288763
+        ]
+      },
+      "ivm_over_dd": 51.65131755823772
+    },
+    {
+      "rows": 4000,
+      "batch": 10,
+      "fanout": 200,
+      "samples_ms": {
+        "sqlite-ivm": [
+          9.183751997625222,
+          11.06324999818753,
+          9.642834000260336
+        ],
+        "dd": [
+          0.164707,
+          0.17608300000000002,
+          0.150792
+        ],
+        "historical-counted": [
+          2.456498999890755,
+          2.2961260001466144,
+          2.1568760021182243
+        ]
+      },
+      "ivm_over_dd": 58.54538058649806
+    },
+    {
+      "rows": 12000,
+      "batch": 10,
+      "fanout": 200,
+      "samples_ms": {
+        "sqlite-ivm": [
+          11.372998998922412,
+          11.135958000522805,
+          11.293126000964548
+        ],
+        "dd": [
+          0.16558099999999998,
+          0.239417,
+          0.254126
+        ],
+        "historical-counted": [
+          2.7303329970891355,
+          2.979996994326939,
+          2.71437600167701
+        ]
+      },
+      "ivm_over_dd": 47.16927369804378
+    },
+    {
+      "rows": 12000,
+      "batch": 1000,
+      "fanout": 200,
+      "samples_ms": {
+        "sqlite-ivm": [
+          73.17487299951608,
+          73.17233400317491,
+          72.12062499820604
+        ],
+        "dd": [
+          1.075751,
+          1.030501,
+          1.0143339999999998
+        ],
+        "historical-counted": [
+          21.217624002019875,
+          21.0946650004189,
+          21.622792000925983
+        ]
+      },
+      "ivm_over_dd": 71.00656283028829
+    },
+    {
+      "rows": 12000,
+      "batch": 1,
+      "fanout": 200,
+      "samples_ms": {
+        "sqlite-ivm": [
+          8.490209000228788,
+          9.064957001100993,
+          8.835126001940807
+        ],
+        "dd": [
+          0.16741499999999998,
+          0.23800000000000002,
+          0.175126
+        ],
+        "historical-counted": [
+          2.3986670003068866,
+          2.360959002544405,
+          2.2954580035730032
+        ]
+      },
+      "ivm_over_dd": 50.45011021744805
+    },
+    {
+      "rows": 12000,
+      "batch": 100,
+      "fanout": 200,
+      "samples_ms": {
+        "sqlite-ivm": [
+          28.479167001933092,
+          27.715249994798796,
+          31.16295800464286
+        ],
+        "dd": [
+          0.315332,
+          0.389915,
+          0.45829099999999995
+        ],
+        "historical-counted": [
+          6.9435829973372165,
+          6.377500998496544,
+          6.796833002226776
+        ]
+      },
+      "ivm_over_dd": 73.03942398197836
+    }
+  ],
+  "source": {
+    "historical_revision": "e2052d5ae",
+    "sha256": {
+      "43_sqlite_competitive/0a_state.h": "d5b7be68b7da63ef9b0b49c0564dc52def498a4b7ba7659f968a8c093a080d2a",
+      "43_sqlite_competitive/0ab_expressions.h": "ac75efedde54f5ccbc960cec588380e9487ce1951a7255b734789ea299de5e32",
+      "43_sqlite_competitive/0b_delta.h": "43ba65dfb91b5dae75e2c42283bc9afded7851c72c1d69f4a13547844b4fcbb9",
+      "43_sqlite_competitive/0bc_nonmonotone.h": "0cf1f30c657bb7c7314083c2d91d95f6f14e9e33596666c35e937665712f30af",
+      "43_sqlite_competitive/0c_batch.h": "544c12a205b02ad98e1810adda2b9c140adedac0de62b2f65cd60a1fb7692215",
+      "43_sqlite_competitive/1_native.c": "9254d680a8caa789780e6b920c0b6214bf5ebf1cf03b251b6a812381188cc388",
+      "43_sqlite_competitive/4_shootout.py": "a3e4a33b990dacdcf3ea2a353b22e18ae28e9d146d9d26d498ac0ef9e27fd9e7",
+      "42_sqlite_native_take2/7_shootout.py": "2dbca6dae896a8933683ddb7c3068c733cac63a5197622d6ef1376b4677c1983"
+    },
+    "command": [
+      "scripts/14_crossover_observe.py",
+      "--out",
+      "bench/results/before-image-index-observe"
+    ],
+    "time_unix": 1790049684.8664541,
+    "current_revision": "39e818c92d7cd230e3dd8afe255f76facb17d790",
+    "current_patch_sha256": "f1b1265df260795935122bdb73133a897ba5b5e4f80715e73b2e0fbceeaac972"
+  },
+  "plans": {
+    "current": [
+      {
+        "state": "insert_batch",
+        "statements": [
+          {
+            "calls": 1,
+            "cumulative_vm_counter_samples_sum": 57107.0,
+            "profile_nanos": 0.0,
+            "query_plan": [
+              "CO-ROUTINE g",
+              "SCAN temp.__ivm_out_3_5",
+              "USE TEMP B-TREE FOR GROUP BY",
+              "CORRELATED SCALAR SUBQUERY 1",
+              "SEARCH main.summary_keys USING COVERING INDEX sqlite_autoindex_summary_keys_1 (__v=?)",
+              "SCAN g",
+              "SEARCH m USING INTEGER PRIMARY KEY (rowid=?)",
+              "SEARCH b USING INDEX __ivm_before_3_6_group (c0=?) LEFT-JOIN"
+            ],
+            "query_plan_error": null,
+            "sql": "INSERT INTO temp.__ivm_out_3_6(c0,c1,c2,__m) SELECT g.c0,coalesce(b.c1,0)+g.c1,CASE WHEN m.nn2=0 THEN NULL ELSE coalesce(b.c2,0)+coalesce(g.c2,0) END,1 FROM (SELECT CAST(c0 AS INTEGER) AS c0,coalesce(sum(__n),0) AS c1,sum(CASE WHEN typeof((CAST(c1 AS INTEGER) * CAST(c2 AS INTEGER)))='integer' AND typeof(((CAST(c1 AS INTEGER) * CAST(c2 AS INTEGER)))*__n)!='integer' THEN abs(-9223372036854775808) ELSE ((CAST(c1 AS INTEGER) * CAST(c2 AS INTEGER)))*__n END) AS c2,(SELECT __i FROM main.\"summary_keys\" WHERE __v=json_array(CASE typeof(CAST(c0 AS INTEGER)) WHEN 'blob' THEN json_object('blob',hex(CAST(c0 AS INTEGER))) WHEN 'real' THEN CASE WHEN CAST(c0 AS INTEGER)=CAST(CAST(c0 AS INTEGER) AS INTEGER) AND typeof(CAST(CAST(c0 AS INTEGER) AS INTEGER))='integer' THEN CAST(CAST(c0 AS INTEGER) AS INTEGER) ELSE json_object('real',sqlite_ivm_real_hex(CAST(c0 AS INTEGER))) END WHEN 'text' THEN CAST(c0 AS INTEGER)||'' ELSE CAST(c0 AS INTEGER) END)) AS __group_key FROM (SELECT *,__m AS __n FROM temp.__ivm_out_3_5) GROUP BY json_array(CASE typeof(CAST(c0 AS INTEGER)) WHEN 'blob' THEN json_object('blob',hex(CAST(c0 AS INTEGER))) WHEN 'real' THEN CASE WHEN CAST(c0 AS INTEGER)=CAST(CAST(c0 AS INTEGER) AS INTEGER) AND typeof(CAST(CAST(c0 AS INTEGER) AS INTEGER))='integer' THEN CAST(CAST(c0 AS INTEGER) AS INTEGER) ELSE json_object('real',sqlite_ivm_real_hex(CAST(c0 AS INTEGER))) END WHEN 'text' THEN CAST(c0 AS INTEGER)||'' ELSE CAST(c0 AS INTEGER) END)) g LEFT JOIN temp.__ivm_before_3_6 b ON +g.c0 IS b.c0 JOIN main.\"summary_op6x1\" m ON m.__k=g.__group_key WHERE (coalesce(b.c1,0)+g.c1)>0"
+          },
+          {
+            "calls": 1,
+            "cumulative_vm_counter_samples_sum": 81014.0,
+            "profile_nanos": 0.0,
+            "query_plan": [
+              "SCAN temp.__ivm_out_3_1",
+              "CORRELATED SCALAR SUBQUERY 4",
+              "SCAN json_each VIRTUAL TABLE INDEX 1:",
+              "CORRELATED SCALAR SUBQUERY 3",
+              "SEARCH main.summary_keys USING INTEGER PRIMARY KEY (rowid=?)",
+              "CORRELATED SCALAR SUBQUERY 1",
+              "SEARCH main.summary_keys USING COVERING INDEX sqlite_autoindex_summary_keys_1 (__v=?)",
+              "SEARCH r USING INDEX __ivm_summary_op4_1_key (__k=?)",
+              "CORRELATED SCALAR SUBQUERY 1",
+              "SEARCH main.summary_keys USING COVERING INDEX sqlite_autoindex_summary_keys_1 (__v=?)"
+            ],
+            "query_plan_error": null,
+            "sql": "INSERT INTO temp.__ivm_out_5_4(c0,c1,c2,c3,c4,__m) SELECT * FROM (SELECT l.c0 AS c0,l.c1 AS c1,l.c2 AS c2,r.c0 AS c3,r.c1 AS c4,l.__m*r.__n AS __m FROM (SELECT *, (SELECT __i FROM main.\"summary_keys\" WHERE __v=json_array(CASE typeof(c1) WHEN 'blob' THEN json_object('blob',hex(c1)) WHEN 'real' THEN CASE WHEN c1=CAST(c1 AS INTEGER) AND typeof(CAST(c1 AS INTEGER))='integer' THEN CAST(c1 AS INTEGER) ELSE json_object('real',sqlite_ivm_real_hex(c1)) END WHEN 'text' THEN c1||'' ELSE c1 END)) AS __k FROM temp.__ivm_out_3_1) l JOIN main.\"summary_op4x1\" r ON l.__k=r.__k AND NOT EXISTS(SELECT 1 FROM json_each((SELECT __v FROM main.\"summary_keys\" WHERE __i=l.__k)) WHERE type='null'))"
+          }
+        ]
+      },
+      {
+        "state": "delete_batch",
+        "statements": [
+          {
+            "calls": 1,
+            "cumulative_vm_counter_samples_sum": 114214.0,
+            "profile_nanos": 1000000.0,
+            "query_plan": [
+              "CO-ROUTINE g",
+              "SCAN temp.__ivm_out_3_5",
+              "USE TEMP B-TREE FOR GROUP BY",
+              "CORRELATED SCALAR SUBQUERY 1",
+              "SEARCH main.summary_keys USING COVERING INDEX sqlite_autoindex_summary_keys_1 (__v=?)",
+              "SCAN g",
+              "SEARCH m USING INTEGER PRIMARY KEY (rowid=?)",
+              "SEARCH b USING INDEX __ivm_before_3_6_group (c0=?) LEFT-JOIN"
+            ],
+            "query_plan_error": null,
+            "sql": "INSERT INTO temp.__ivm_out_3_6(c0,c1,c2,__m) SELECT g.c0,coalesce(b.c1,0)+g.c1,CASE WHEN m.nn2=0 THEN NULL ELSE coalesce(b.c2,0)+coalesce(g.c2,0) END,1 FROM (SELECT CAST(c0 AS INTEGER) AS c0,coalesce(sum(__n),0) AS c1,sum(CASE WHEN typeof((CAST(c1 AS INTEGER) * CAST(c2 AS INTEGER)))='integer' AND typeof(((CAST(c1 AS INTEGER) * CAST(c2 AS INTEGER)))*__n)!='integer' THEN abs(-9223372036854775808) ELSE ((CAST(c1 AS INTEGER) * CAST(c2 AS INTEGER)))*__n END) AS c2,(SELECT __i FROM main.\"summary_keys\" WHERE __v=json_array(CASE typeof(CAST(c0 AS INTEGER)) WHEN 'blob' THEN json_object('blob',hex(CAST(c0 AS INTEGER))) WHEN 'real' THEN CASE WHEN CAST(c0 AS INTEGER)=CAST(CAST(c0 AS INTEGER) AS INTEGER) AND typeof(CAST(CAST(c0 AS INTEGER) AS INTEGER))='integer' THEN CAST(CAST(c0 AS INTEGER) AS INTEGER) ELSE json_object('real',sqlite_ivm_real_hex(CAST(c0 AS INTEGER))) END WHEN 'text' THEN CAST(c0 AS INTEGER)||'' ELSE CAST(c0 AS INTEGER) END)) AS __group_key FROM (SELECT *,__m AS __n FROM temp.__ivm_out_3_5) GROUP BY json_array(CASE typeof(CAST(c0 AS INTEGER)) WHEN 'blob' THEN json_object('blob',hex(CAST(c0 AS INTEGER))) WHEN 'real' THEN CASE WHEN CAST(c0 AS INTEGER)=CAST(CAST(c0 AS INTEGER) AS INTEGER) AND typeof(CAST(CAST(c0 AS INTEGER) AS INTEGER))='integer' THEN CAST(CAST(c0 AS INTEGER) AS INTEGER) ELSE json_object('real',sqlite_ivm_real_hex(CAST(c0 AS INTEGER))) END WHEN 'text' THEN CAST(c0 AS INTEGER)||'' ELSE CAST(c0 AS INTEGER) END)) g LEFT JOIN temp.__ivm_before_3_6 b ON +g.c0 IS b.c0 JOIN main.\"summary_op6x1\" m ON m.__k=g.__group_key WHERE (coalesce(b.c1,0)+g.c1)>0"
+          },
+          {
+            "calls": 1,
+            "cumulative_vm_counter_samples_sum": 162028.0,
+            "profile_nanos": 1000000.0,
+            "query_plan": [
+              "SCAN temp.__ivm_out_3_1",
+              "CORRELATED SCALAR SUBQUERY 4",
+              "SCAN json_each VIRTUAL TABLE INDEX 1:",
+              "CORRELATED SCALAR SUBQUERY 3",
+              "SEARCH main.summary_keys USING INTEGER PRIMARY KEY (rowid=?)",
+              "CORRELATED SCALAR SUBQUERY 1",
+              "SEARCH main.summary_keys USING COVERING INDEX sqlite_autoindex_summary_keys_1 (__v=?)",
+              "SEARCH r USING INDEX __ivm_summary_op4_1_key (__k=?)",
+              "CORRELATED SCALAR SUBQUERY 1",
+              "SEARCH main.summary_keys USING COVERING INDEX sqlite_autoindex_summary_keys_1 (__v=?)"
+            ],
+            "query_plan_error": null,
+            "sql": "INSERT INTO temp.__ivm_out_5_4(c0,c1,c2,c3,c4,__m) SELECT * FROM (SELECT l.c0 AS c0,l.c1 AS c1,l.c2 AS c2,r.c0 AS c3,r.c1 AS c4,l.__m*r.__n AS __m FROM (SELECT *, (SELECT __i FROM main.\"summary_keys\" WHERE __v=json_array(CASE typeof(c1) WHEN 'blob' THEN json_object('blob',hex(c1)) WHEN 'real' THEN CASE WHEN c1=CAST(c1 AS INTEGER) AND typeof(CAST(c1 AS INTEGER))='integer' THEN CAST(c1 AS INTEGER) ELSE json_object('real',sqlite_ivm_real_hex(c1)) END WHEN 'text' THEN c1||'' ELSE c1 END)) AS __k FROM temp.__ivm_out_3_1) l JOIN main.\"summary_op4x1\" r ON l.__k=r.__k AND NOT EXISTS(SELECT 1 FROM json_each((SELECT __v FROM main.\"summary_keys\" WHERE __i=l.__k)) WHERE type='null'))"
+          }
+        ]
+      },
+      {
+        "state": "update_batch",
+        "statements": [
+          {
+            "calls": 1,
+            "cumulative_vm_counter_samples_sum": 220321.0,
+            "profile_nanos": 1000000.0,
+            "query_plan": [
+              "CO-ROUTINE g",
+              "SCAN temp.__ivm_out_3_5",
+              "USE TEMP B-TREE FOR GROUP BY",
+              "CORRELATED SCALAR SUBQUERY 1",
+              "SEARCH main.summary_keys USING COVERING INDEX sqlite_autoindex_summary_keys_1 (__v=?)",
+              "SCAN g",
+              "SEARCH m USING INTEGER PRIMARY KEY (rowid=?)",
+              "SEARCH b USING INDEX __ivm_before_3_6_group (c0=?) LEFT-JOIN"
+            ],
+            "query_plan_error": null,
+            "sql": "INSERT INTO temp.__ivm_out_3_6(c0,c1,c2,__m) SELECT g.c0,coalesce(b.c1,0)+g.c1,CASE WHEN m.nn2=0 THEN NULL ELSE coalesce(b.c2,0)+coalesce(g.c2,0) END,1 FROM (SELECT CAST(c0 AS INTEGER) AS c0,coalesce(sum(__n),0) AS c1,sum(CASE WHEN typeof((CAST(c1 AS INTEGER) * CAST(c2 AS INTEGER)))='integer' AND typeof(((CAST(c1 AS INTEGER) * CAST(c2 AS INTEGER)))*__n)!='integer' THEN abs(-9223372036854775808) ELSE ((CAST(c1 AS INTEGER) * CAST(c2 AS INTEGER)))*__n END) AS c2,(SELECT __i FROM main.\"summary_keys\" WHERE __v=json_array(CASE typeof(CAST(c0 AS INTEGER)) WHEN 'blob' THEN json_object('blob',hex(CAST(c0 AS INTEGER))) WHEN 'real' THEN CASE WHEN CAST(c0 AS INTEGER)=CAST(CAST(c0 AS INTEGER) AS INTEGER) AND typeof(CAST(CAST(c0 AS INTEGER) AS INTEGER))='integer' THEN CAST(CAST(c0 AS INTEGER) AS INTEGER) ELSE json_object('real',sqlite_ivm_real_hex(CAST(c0 AS INTEGER))) END WHEN 'text' THEN CAST(c0 AS INTEGER)||'' ELSE CAST(c0 AS INTEGER) END)) AS __group_key FROM (SELECT *,__m AS __n FROM temp.__ivm_out_3_5) GROUP BY json_array(CASE typeof(CAST(c0 AS INTEGER)) WHEN 'blob' THEN json_object('blob',hex(CAST(c0 AS INTEGER))) WHEN 'real' THEN CASE WHEN CAST(c0 AS INTEGER)=CAST(CAST(c0 AS INTEGER) AS INTEGER) AND typeof(CAST(CAST(c0 AS INTEGER) AS INTEGER))='integer' THEN CAST(CAST(c0 AS INTEGER) AS INTEGER) ELSE json_object('real',sqlite_ivm_real_hex(CAST(c0 AS INTEGER))) END WHEN 'text' THEN CAST(c0 AS INTEGER)||'' ELSE CAST(c0 AS INTEGER) END)) g LEFT JOIN temp.__ivm_before_3_6 b ON +g.c0 IS b.c0 JOIN main.\"summary_op6x1\" m ON m.__k=g.__group_key WHERE (coalesce(b.c1,0)+g.c1)>0"
+          },
+          {
+            "calls": 1,
+            "cumulative_vm_counter_samples_sum": 324033.0,
+            "profile_nanos": 2000000.0,
+            "query_plan": [
+              "SCAN temp.__ivm_out_3_1",
+              "CORRELATED SCALAR SUBQUERY 4",
+              "SCAN json_each VIRTUAL TABLE INDEX 1:",
+              "CORRELATED SCALAR SUBQUERY 3",
+              "SEARCH main.summary_keys USING INTEGER PRIMARY KEY (rowid=?)",
+              "CORRELATED SCALAR SUBQUERY 1",
+              "SEARCH main.summary_keys USING COVERING INDEX sqlite_autoindex_summary_keys_1 (__v=?)",
+              "SEARCH r USING INDEX __ivm_summary_op4_1_key (__k=?)",
+              "CORRELATED SCALAR SUBQUERY 1",
+              "SEARCH main.summary_keys USING COVERING INDEX sqlite_autoindex_summary_keys_1 (__v=?)"
+            ],
+            "query_plan_error": null,
+            "sql": "INSERT INTO temp.__ivm_out_5_4(c0,c1,c2,c3,c4,__m) SELECT * FROM (SELECT l.c0 AS c0,l.c1 AS c1,l.c2 AS c2,r.c0 AS c3,r.c1 AS c4,l.__m*r.__n AS __m FROM (SELECT *, (SELECT __i FROM main.\"summary_keys\" WHERE __v=json_array(CASE typeof(c1) WHEN 'blob' THEN json_object('blob',hex(c1)) WHEN 'real' THEN CASE WHEN c1=CAST(c1 AS INTEGER) AND typeof(CAST(c1 AS INTEGER))='integer' THEN CAST(c1 AS INTEGER) ELSE json_object('real',sqlite_ivm_real_hex(c1)) END WHEN 'text' THEN c1||'' ELSE c1 END)) AS __k FROM temp.__ivm_out_3_1) l JOIN main.\"summary_op4x1\" r ON l.__k=r.__k AND NOT EXISTS(SELECT 1 FROM json_each((SELECT __v FROM main.\"summary_keys\" WHERE __i=l.__k)) WHERE type='null'))"
+          }
+        ]
+      },
+      {
+        "state": "dimension_fanout",
+        "statements": [
+          {
+            "calls": 1,
+            "cumulative_vm_counter_samples_sum": 240036.0,
+            "profile_nanos": 0.0,
+            "query_plan": [
+              "CO-ROUTINE g",
+              "SCAN temp.__ivm_out_3_5",
+              "USE TEMP B-TREE FOR GROUP BY",
+              "CORRELATED SCALAR SUBQUERY 1",
+              "SEARCH main.summary_keys USING COVERING INDEX sqlite_autoindex_summary_keys_1 (__v=?)",
+              "SCAN g",
+              "SEARCH m USING INTEGER PRIMARY KEY (rowid=?)",
+              "SEARCH b USING INDEX __ivm_before_3_6_group (c0=?) LEFT-JOIN"
+            ],
+            "query_plan_error": null,
+            "sql": "INSERT INTO temp.__ivm_out_3_6(c0,c1,c2,__m) SELECT g.c0,coalesce(b.c1,0)+g.c1,CASE WHEN m.nn2=0 THEN NULL ELSE coalesce(b.c2,0)+coalesce(g.c2,0) END,1 FROM (SELECT CAST(c0 AS INTEGER) AS c0,coalesce(sum(__n),0) AS c1,sum(CASE WHEN typeof((CAST(c1 AS INTEGER) * CAST(c2 AS INTEGER)))='integer' AND typeof(((CAST(c1 AS INTEGER) * CAST(c2 AS INTEGER)))*__n)!='integer' THEN abs(-9223372036854775808) ELSE ((CAST(c1 AS INTEGER) * CAST(c2 AS INTEGER)))*__n END) AS c2,(SELECT __i FROM main.\"summary_keys\" WHERE __v=json_array(CASE typeof(CAST(c0 AS INTEGER)) WHEN 'blob' THEN json_object('blob',hex(CAST(c0 AS INTEGER))) WHEN 'real' THEN CASE WHEN CAST(c0 AS INTEGER)=CAST(CAST(c0 AS INTEGER) AS INTEGER) AND typeof(CAST(CAST(c0 AS INTEGER) AS INTEGER))='integer' THEN CAST(CAST(c0 AS INTEGER) AS INTEGER) ELSE json_object('real',sqlite_ivm_real_hex(CAST(c0 AS INTEGER))) END WHEN 'text' THEN CAST(c0 AS INTEGER)||'' ELSE CAST(c0 AS INTEGER) END)) AS __group_key FROM (SELECT *,__m AS __n FROM temp.__ivm_out_3_5) GROUP BY json_array(CASE typeof(CAST(c0 AS INTEGER)) WHEN 'blob' THEN json_object('blob',hex(CAST(c0 AS INTEGER))) WHEN 'real' THEN CASE WHEN CAST(c0 AS INTEGER)=CAST(CAST(c0 AS INTEGER) AS INTEGER) AND typeof(CAST(CAST(c0 AS INTEGER) AS INTEGER))='integer' THEN CAST(CAST(c0 AS INTEGER) AS INTEGER) ELSE json_object('real',sqlite_ivm_real_hex(CAST(c0 AS INTEGER))) END WHEN 'text' THEN CAST(c0 AS INTEGER)||'' ELSE CAST(c0 AS INTEGER) END)) g LEFT JOIN temp.__ivm_before_3_6 b ON +g.c0 IS b.c0 JOIN main.\"summary_op6x1\" m ON m.__k=g.__group_key WHERE (coalesce(b.c1,0)+g.c1)>0"
+          },
+          {
+            "calls": 1,
+            "cumulative_vm_counter_samples_sum": 16067.0,
+            "profile_nanos": 0.0,
+            "query_plan": [
+              "SCAN temp.__ivm_out_2_3",
+              "SEARCH l USING INDEX __ivm_summary_op4_0_key (__k=?)",
+              "CORRELATED SCALAR SUBQUERY 1",
+              "SEARCH main.summary_keys USING COVERING INDEX sqlite_autoindex_summary_keys_1 (__v=?)",
+              "CORRELATED SCALAR SUBQUERY 4",
+              "SCAN json_each VIRTUAL TABLE INDEX 1:",
+              "CORRELATED SCALAR SUBQUERY 3",
+              "SEARCH main.summary_keys USING INTEGER PRIMARY KEY (rowid=?)"
+            ],
+            "query_plan_error": null,
+            "sql": "INSERT INTO temp.__ivm_out_5_4(c0,c1,c2,c3,c4,__m) SELECT * FROM (SELECT l.c0 AS c0,l.c1 AS c1,l.c2 AS c2,r.c0 AS c3,r.c1 AS c4,l.__n*r.__m AS __m FROM main.\"summary_op4x0\" l JOIN (SELECT *, (SELECT __i FROM main.\"summary_keys\" WHERE __v=json_array(CASE typeof(c0) WHEN 'blob' THEN json_object('blob',hex(c0)) WHEN 'real' THEN CASE WHEN c0=CAST(c0 AS INTEGER) AND typeof(CAST(c0 AS INTEGER))='integer' THEN CAST(c0 AS INTEGER) ELSE json_object('real',sqlite_ivm_real_hex(c0)) END WHEN 'text' THEN c0||'' ELSE c0 END)) AS __k FROM temp.__ivm_out_2_3) r ON l.__k=r.__k AND NOT EXISTS(SELECT 1 FROM json_each((SELECT __v FROM main.\"summary_keys\" WHERE __i=l.__k)) WHERE type='null'))"
+          }
+        ]
+      }
+    ],
+    "historical": [
+      {
+        "state": "insert_batch",
+        "statements": [
+          {
+            "calls": 1,
+            "cumulative_vm_counter_samples_sum": 10029.0,
+            "profile_nanos": 0.0,
+            "query_plan": [
+              "SEARCH main.native_result_delta USING INDEX native_result_delta_lookup (side=?)",
+              "SEARCH main.native_result_delta USING INDEX native_result_delta_lookup (side=? AND k=?)"
+            ],
+            "query_plan_error": null,
+            "sql": "INSERT INTO \"main\".\"native_result_result\"(key,k,v,n,s,nn) SELECT json_array(b0.k),(b0.k),(NULL),-1*sum(b0.w*b1.w),-1*sum(coalesce((b0.v*b1.v),0)*b0.w*b1.w),-1*sum(((b0.v*b1.v) IS NOT NULL)*b0.w*b1.w) FROM (SELECT k,v,w FROM \"main\".\"native_result_delta\" WHERE side=0 AND w<>0) b0 JOIN (SELECT k,v,w FROM \"main\".\"native_result_delta\" WHERE side=1 AND w<>0) b1 ON b0.k=b1.k  GROUP BY b0.k ON CONFLICT(key) DO UPDATE SET n=n+excluded.n,s=s+excluded.s,nn=nn+excluded.nn"
+          },
+          {
+            "calls": 1,
+            "cumulative_vm_counter_samples_sum": 28.0,
+            "profile_nanos": 0.0,
+            "query_plan": [
+              "SEARCH main.native_result_delta USING INDEX native_result_delta_lookup (side=?)",
+              "SEARCH fact USING INDEX native_result_live_key_0 (group_id=?)",
+              "USE TEMP B-TREE FOR GROUP BY"
+            ],
+            "query_plan_error": null,
+            "sql": "INSERT INTO \"main\".\"native_result_result\"(key,k,v,n,s,nn) SELECT json_array(b0.k),(b0.k),(NULL),1*sum(b0.w*b1.w),1*sum(coalesce((b0.v*b1.v),0)*b0.w*b1.w),1*sum(((b0.v*b1.v) IS NOT NULL)*b0.w*b1.w) FROM (SELECT k,v,1 AS w FROM \"main\".\"native_result_live_0\") b0 JOIN (SELECT k,v,w FROM \"main\".\"native_result_delta\" WHERE side=1 AND w<>0) b1 ON b0.k=b1.k  GROUP BY b0.k ON CONFLICT(key) DO UPDATE SET n=n+excluded.n,s=s+excluded.s,nn=nn+excluded.nn"
+          },
+          {
+            "calls": 1,
+            "cumulative_vm_counter_samples_sum": 37042.0,
+            "profile_nanos": 0.0,
+            "query_plan": [
+              "SEARCH main.native_result_delta USING INDEX native_result_delta_lookup (side=?)",
+              "SEARCH dimension USING INTEGER PRIMARY KEY (rowid=?)"
+            ],
+            "query_plan_error": null,
+            "sql": "INSERT INTO \"main\".\"native_result_result\"(key,k,v,n,s,nn) SELECT json_array(b0.k),(b0.k),(NULL),1*sum(b0.w*b1.w),1*sum(coalesce((b0.v*b1.v),0)*b0.w*b1.w),1*sum(((b0.v*b1.v) IS NOT NULL)*b0.w*b1.w) FROM (SELECT k,v,w FROM \"main\".\"native_result_delta\" WHERE side=0 AND w<>0) b0 JOIN (SELECT k,v,1 AS w FROM \"main\".\"native_result_live_1\") b1 ON b0.k=b1.k  GROUP BY b0.k ON CONFLICT(key) DO UPDATE SET n=n+excluded.n,s=s+excluded.s,nn=nn+excluded.nn"
+          }
+        ]
+      },
+      {
+        "state": "delete_batch",
+        "statements": [
+          {
+            "calls": 1,
+            "cumulative_vm_counter_samples_sum": 10029.0,
+            "profile_nanos": 0.0,
+            "query_plan": [
+              "SEARCH main.native_result_delta USING INDEX native_result_delta_lookup (side=?)",
+              "SEARCH main.native_result_delta USING INDEX native_result_delta_lookup (side=? AND k=?)"
+            ],
+            "query_plan_error": null,
+            "sql": "INSERT INTO \"main\".\"native_result_result\"(key,k,v,n,s,nn) SELECT json_array(b0.k),(b0.k),(NULL),-1*sum(b0.w*b1.w),-1*sum(coalesce((b0.v*b1.v),0)*b0.w*b1.w),-1*sum(((b0.v*b1.v) IS NOT NULL)*b0.w*b1.w) FROM (SELECT k,v,w FROM \"main\".\"native_result_delta\" WHERE side=0 AND w<>0) b0 JOIN (SELECT k,v,w FROM \"main\".\"native_result_delta\" WHERE side=1 AND w<>0) b1 ON b0.k=b1.k  GROUP BY b0.k ON CONFLICT(key) DO UPDATE SET n=n+excluded.n,s=s+excluded.s,nn=nn+excluded.nn"
+          },
+          {
+            "calls": 1,
+            "cumulative_vm_counter_samples_sum": 28.0,
+            "profile_nanos": 0.0,
+            "query_plan": [
+              "SEARCH main.native_result_delta USING INDEX native_result_delta_lookup (side=?)",
+              "SEARCH fact USING INDEX native_result_live_key_0 (group_id=?)",
+              "USE TEMP B-TREE FOR GROUP BY"
+            ],
+            "query_plan_error": null,
+            "sql": "INSERT INTO \"main\".\"native_result_result\"(key,k,v,n,s,nn) SELECT json_array(b0.k),(b0.k),(NULL),1*sum(b0.w*b1.w),1*sum(coalesce((b0.v*b1.v),0)*b0.w*b1.w),1*sum(((b0.v*b1.v) IS NOT NULL)*b0.w*b1.w) FROM (SELECT k,v,1 AS w FROM \"main\".\"native_result_live_0\") b0 JOIN (SELECT k,v,w FROM \"main\".\"native_result_delta\" WHERE side=1 AND w<>0) b1 ON b0.k=b1.k  GROUP BY b0.k ON CONFLICT(key) DO UPDATE SET n=n+excluded.n,s=s+excluded.s,nn=nn+excluded.nn"
+          },
+          {
+            "calls": 1,
+            "cumulative_vm_counter_samples_sum": 37042.0,
+            "profile_nanos": 0.0,
+            "query_plan": [
+              "SEARCH main.native_result_delta USING INDEX native_result_delta_lookup (side=?)",
+              "SEARCH dimension USING INTEGER PRIMARY KEY (rowid=?)"
+            ],
+            "query_plan_error": null,
+            "sql": "INSERT INTO \"main\".\"native_result_result\"(key,k,v,n,s,nn) SELECT json_array(b0.k),(b0.k),(NULL),1*sum(b0.w*b1.w),1*sum(coalesce((b0.v*b1.v),0)*b0.w*b1.w),1*sum(((b0.v*b1.v) IS NOT NULL)*b0.w*b1.w) FROM (SELECT k,v,w FROM \"main\".\"native_result_delta\" WHERE side=0 AND w<>0) b0 JOIN (SELECT k,v,1 AS w FROM \"main\".\"native_result_live_1\") b1 ON b0.k=b1.k  GROUP BY b0.k ON CONFLICT(key) DO UPDATE SET n=n+excluded.n,s=s+excluded.s,nn=nn+excluded.nn"
+          }
+        ]
+      },
+      {
+        "state": "update_batch",
+        "statements": [
+          {
+            "calls": 1,
+            "cumulative_vm_counter_samples_sum": 20029.0,
+            "profile_nanos": 1000000.0,
+            "query_plan": [
+              "SEARCH main.native_result_delta USING INDEX native_result_delta_lookup (side=?)",
+              "SEARCH main.native_result_delta USING INDEX native_result_delta_lookup (side=? AND k=?)"
+            ],
+            "query_plan_error": null,
+            "sql": "INSERT INTO \"main\".\"native_result_result\"(key,k,v,n,s,nn) SELECT json_array(b0.k),(b0.k),(NULL),-1*sum(b0.w*b1.w),-1*sum(coalesce((b0.v*b1.v),0)*b0.w*b1.w),-1*sum(((b0.v*b1.v) IS NOT NULL)*b0.w*b1.w) FROM (SELECT k,v,w FROM \"main\".\"native_result_delta\" WHERE side=0 AND w<>0) b0 JOIN (SELECT k,v,w FROM \"main\".\"native_result_delta\" WHERE side=1 AND w<>0) b1 ON b0.k=b1.k  GROUP BY b0.k ON CONFLICT(key) DO UPDATE SET n=n+excluded.n,s=s+excluded.s,nn=nn+excluded.nn"
+          },
+          {
+            "calls": 1,
+            "cumulative_vm_counter_samples_sum": 28.0,
+            "profile_nanos": 0.0,
+            "query_plan": [
+              "SEARCH main.native_result_delta USING INDEX native_result_delta_lookup (side=?)",
+              "SEARCH fact USING INDEX native_result_live_key_0 (group_id=?)",
+              "USE TEMP B-TREE FOR GROUP BY"
+            ],
+            "query_plan_error": null,
+            "sql": "INSERT INTO \"main\".\"native_result_result\"(key,k,v,n,s,nn) SELECT json_array(b0.k),(b0.k),(NULL),1*sum(b0.w*b1.w),1*sum(coalesce((b0.v*b1.v),0)*b0.w*b1.w),1*sum(((b0.v*b1.v) IS NOT NULL)*b0.w*b1.w) FROM (SELECT k,v,1 AS w FROM \"main\".\"native_result_live_0\") b0 JOIN (SELECT k,v,w FROM \"main\".\"native_result_delta\" WHERE side=1 AND w<>0) b1 ON b0.k=b1.k  GROUP BY b0.k ON CONFLICT(key) DO UPDATE SET n=n+excluded.n,s=s+excluded.s,nn=nn+excluded.nn"
+          },
+          {
+            "calls": 1,
+            "cumulative_vm_counter_samples_sum": 69042.0,
+            "profile_nanos": 0.0,
+            "query_plan": [
+              "SEARCH main.native_result_delta USING INDEX native_result_delta_lookup (side=?)",
+              "SEARCH dimension USING INTEGER PRIMARY KEY (rowid=?)"
+            ],
+            "query_plan_error": null,
+            "sql": "INSERT INTO \"main\".\"native_result_result\"(key,k,v,n,s,nn) SELECT json_array(b0.k),(b0.k),(NULL),1*sum(b0.w*b1.w),1*sum(coalesce((b0.v*b1.v),0)*b0.w*b1.w),1*sum(((b0.v*b1.v) IS NOT NULL)*b0.w*b1.w) FROM (SELECT k,v,w FROM \"main\".\"native_result_delta\" WHERE side=0 AND w<>0) b0 JOIN (SELECT k,v,1 AS w FROM \"main\".\"native_result_live_1\") b1 ON b0.k=b1.k  GROUP BY b0.k ON CONFLICT(key) DO UPDATE SET n=n+excluded.n,s=s+excluded.s,nn=nn+excluded.nn"
+          }
+        ]
+      },
+      {
+        "state": "dimension_fanout",
+        "statements": [
+          {
+            "calls": 1,
+            "cumulative_vm_counter_samples_sum": 30.0,
+            "profile_nanos": 0.0,
+            "query_plan": [
+              "SEARCH main.native_result_delta USING INDEX native_result_delta_lookup (side=?)",
+              "SEARCH main.native_result_delta USING INDEX native_result_delta_lookup (side=? AND k=?)"
+            ],
+            "query_plan_error": null,
+            "sql": "INSERT INTO \"main\".\"native_result_result\"(key,k,v,n,s,nn) SELECT json_array(b0.k),(b0.k),(NULL),-1*sum(b0.w*b1.w),-1*sum(coalesce((b0.v*b1.v),0)*b0.w*b1.w),-1*sum(((b0.v*b1.v) IS NOT NULL)*b0.w*b1.w) FROM (SELECT k,v,w FROM \"main\".\"native_result_delta\" WHERE side=0 AND w<>0) b0 JOIN (SELECT k,v,w FROM \"main\".\"native_result_delta\" WHERE side=1 AND w<>0) b1 ON b0.k=b1.k  GROUP BY b0.k ON CONFLICT(key) DO UPDATE SET n=n+excluded.n,s=s+excluded.s,nn=nn+excluded.nn"
+          },
+          {
+            "calls": 1,
+            "cumulative_vm_counter_samples_sum": 14495.0,
+            "profile_nanos": 0.0,
+            "query_plan": [
+              "SEARCH main.native_result_delta USING INDEX native_result_delta_lookup (side=?)",
+              "SEARCH fact USING INDEX native_result_live_key_0 (group_id=?)",
+              "USE TEMP B-TREE FOR GROUP BY"
+            ],
+            "query_plan_error": null,
+            "sql": "INSERT INTO \"main\".\"native_result_result\"(key,k,v,n,s,nn) SELECT json_array(b0.k),(b0.k),(NULL),1*sum(b0.w*b1.w),1*sum(coalesce((b0.v*b1.v),0)*b0.w*b1.w),1*sum(((b0.v*b1.v) IS NOT NULL)*b0.w*b1.w) FROM (SELECT k,v,1 AS w FROM \"main\".\"native_result_live_0\") b0 JOIN (SELECT k,v,w FROM \"main\".\"native_result_delta\" WHERE side=1 AND w<>0) b1 ON b0.k=b1.k  GROUP BY b0.k ON CONFLICT(key) DO UPDATE SET n=n+excluded.n,s=s+excluded.s,nn=nn+excluded.nn"
+          },
+          {
+            "calls": 1,
+            "cumulative_vm_counter_samples_sum": 29.0,
+            "profile_nanos": 0.0,
+            "query_plan": [
+              "SEARCH main.native_result_delta USING INDEX native_result_delta_lookup (side=?)",
+              "SEARCH dimension USING INTEGER PRIMARY KEY (rowid=?)"
+            ],
+            "query_plan_error": null,
+            "sql": "INSERT INTO \"main\".\"native_result_result\"(key,k,v,n,s,nn) SELECT json_array(b0.k),(b0.k),(NULL),1*sum(b0.w*b1.w),1*sum(coalesce((b0.v*b1.v),0)*b0.w*b1.w),1*sum(((b0.v*b1.v) IS NOT NULL)*b0.w*b1.w) FROM (SELECT k,v,w FROM \"main\".\"native_result_delta\" WHERE side=0 AND w<>0) b0 JOIN (SELECT k,v,1 AS w FROM \"main\".\"native_result_live_1\") b1 ON b0.k=b1.k  GROUP BY b0.k ON CONFLICT(key) DO UPDATE SET n=n+excluded.n,s=s+excluded.s,nn=nn+excluded.nn"
+          }
+        ]
+      }
+    ]
+  }
+}

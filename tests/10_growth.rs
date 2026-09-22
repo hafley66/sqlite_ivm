@@ -113,6 +113,9 @@ fn count_sum_delta_work_stays_constant_as_the_group_grows() -> Result<()> {
         db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON;CREATE TABLE a(id INTEGER PRIMARY KEY,k INTEGER,v INTEGER)")?;
         db.execute("WITH RECURSIVE r(i) AS(SELECT 1 UNION ALL SELECT i+1 FROM r WHERE i<?1) INSERT INTO a SELECT i,1,i FROM r", [rows])?;
         db.execute_batch("CREATE VIRTUAL TABLE g USING sqlite_ivm('SELECT k,COUNT(*) AS n,SUM(v) AS s FROM a GROUP BY k')")?;
+        // These views share scratch width/node IDs but project their keys in
+        // different columns. Each lookup needs its own matching index.
+        db.execute_batch("CREATE VIRTUAL TABLE h USING sqlite_ivm('SELECT COUNT(*) AS n,k,SUM(v) AS s FROM a GROUP BY k')")?;
         db.flush_prepared_statement_cache();
         let (recorder, capture) = CountRecorder::new();
         let _guard = tracing_subscriber::registry().with(capture).set_default();
@@ -120,8 +123,16 @@ fn count_sum_delta_work_stays_constant_as_the_group_grows() -> Result<()> {
         db.execute_batch("UPDATE a SET v=v+1 WHERE id=1")?;
         hafley_observe::sqlite::silence(&db);
         assert_eq!(db.query_row("SELECT n,s FROM g", [], |r| Ok((r.get::<_, i64>(0)?,r.get::<_, i64>(1)?)))?, (rows, rows*(rows+1)/2+1));
+        assert_eq!(db.query_row("SELECT n,s FROM h", [], |r| Ok((r.get::<_, i64>(0)?,r.get::<_, i64>(1)?)))?, (rows, rows*(rows+1)/2+1));
         let paths = recorder.span_counts_by_field("aggregate_delta", "path");
-        assert_eq!(paths, BTreeMap::from([("integer".into(), 1)]));
+        assert_eq!(paths, BTreeMap::from([("integer".into(), 2)]));
+        let statements = recorder.event_sums(SQLITE_TARGET, tracing::Level::DEBUG, "drain", "view", Some("sql"));
+        let aggregate_sql = statements.keys().filter(|(_, sql)| sql.contains("LEFT JOIN temp.__ivm_before_")).collect::<Vec<_>>();
+        assert_eq!(aggregate_sql.len(), 2);
+        for (_, sql) in aggregate_sql {
+            let plan = hafley_observe::sqlite::query_plan(&db, sql)?;
+            assert!(plan.iter().any(|row| row.contains("SEARCH b USING INDEX __ivm_before_") && row.contains("_group")), "{plan:?}");
+        }
         let sums = recorder.event_sums(SQLITE_TARGET, tracing::Level::DEBUG, "drain", "view", None);
         let mut counts = SpanCounts::default();
         counts.entries.insert("group_vm_steps".into(), sums.values().map(|s| s.sum_of("vm_step") as usize).sum());
