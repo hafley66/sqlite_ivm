@@ -1,0 +1,227 @@
+{
+  "case": "oracle/eval/c2_partial_3.json",
+  "plugin_commit": "a43001b",
+  "instrumentation": "RUST_LOG=sqlite_ivm::statements=debug,sqlite_ivm::relational_drain=info,sqlite=info HAFLEY_LOG_FORMAT=json",
+  "output_sha256": "e635f295151c51405f23a852e13ef5ca857da1fcb8cf551a064088289fdafd67",
+  "trace_bytes": 171389442,
+  "event_counts": {
+    "new": 59963,
+    "prepare_start": 18813,
+    "prepare_end": 18813,
+    "close": 59963,
+    "execute_start": 18813,
+    "execute_end": 18813,
+    "batch_start": 1739,
+    "batch_end": 1739,
+    "guard_start": 17,
+    "guard_end": 17
+  },
+  "stage_elapsed_ms": {
+    "prepare": 949.7,
+    "execute": 384.1,
+    "batch": 115.2
+  },
+  "top_sites": [
+    {
+      "stage": "prepare",
+      "phase": "fixpoint",
+      "site": "src/1d_drain.rs:346",
+      "calls": 10,
+      "elapsed_ms": 166.6,
+      "sql_bytes": 828174
+    },
+    {
+      "stage": "prepare",
+      "phase": "maintain",
+      "site": "src/1d_drain.rs:185",
+      "calls": 13,
+      "elapsed_ms": 150.7,
+      "sql_bytes": 416395
+    },
+    {
+      "stage": "prepare",
+      "phase": "fixpoint",
+      "site": "src/1d_drain.rs:414",
+      "calls": 6,
+      "elapsed_ms": 107.2,
+      "sql_bytes": 287765
+    },
+    {
+      "stage": "prepare",
+      "phase": "materialize",
+      "site": "src/1cb_set_membership.rs:63",
+      "calls": 494,
+      "elapsed_ms": 86.5,
+      "sql_bytes": 2212799
+    },
+    {
+      "stage": "execute",
+      "phase": "materialize",
+      "site": "src/1c_materialize.rs:403",
+      "calls": 2519,
+      "elapsed_ms": 83.2,
+      "sql_bytes": 0
+    },
+    {
+      "stage": "prepare",
+      "phase": "materialize",
+      "site": "src/1c_materialize.rs:403",
+      "calls": 2519,
+      "elapsed_ms": 66.5,
+      "sql_bytes": 2404511
+    },
+    {
+      "stage": "execute",
+      "phase": "materialize",
+      "site": "src/1cb_set_membership.rs:63",
+      "calls": 494,
+      "elapsed_ms": 59.8,
+      "sql_bytes": 0
+    },
+    {
+      "stage": "prepare",
+      "phase": "fixpoint",
+      "site": "src/1d_drain.rs:440",
+      "calls": 6,
+      "elapsed_ms": 53.8,
+      "sql_bytes": 140199
+    },
+    {
+      "stage": "prepare",
+      "phase": "fixpoint",
+      "site": "src/1d_drain.rs:441",
+      "calls": 6,
+      "elapsed_ms": 52.2,
+      "sql_bytes": 140241
+    },
+    {
+      "stage": "prepare",
+      "phase": "declare",
+      "site": "src/0b_relational.rs:657",
+      "calls": 1,
+      "elapsed_ms": 47.9,
+      "sql_bytes": 78175
+    },
+    {
+      "stage": "prepare",
+      "phase": "maintain",
+      "site": "src/1d_drain.rs:106",
+      "calls": 374,
+      "elapsed_ms": 47.2,
+      "sql_bytes": 2615228
+    },
+    {
+      "stage": "execute",
+      "phase": "declare",
+      "site": "src/0a_catalog.rs:77",
+      "calls": 1172,
+      "elapsed_ms": 46.6,
+      "sql_bytes": 0
+    },
+    {
+      "stage": "execute",
+      "phase": "declare",
+      "site": "src/0c_compile_from.rs:38",
+      "calls": 298,
+      "elapsed_ms": 38.4,
+      "sql_bytes": 0
+    },
+    {
+      "stage": "batch",
+      "phase": "declare",
+      "site": "src/1b_state.rs:128",
+      "calls": 249,
+      "elapsed_ms": 33.6,
+      "sql_bytes": 0
+    },
+    {
+      "stage": "batch",
+      "phase": "declare",
+      "site": "src/1cb_set_membership.rs:36",
+      "calls": 494,
+      "elapsed_ms": 33.1,
+      "sql_bytes": 0
+    },
+    {
+      "stage": "batch",
+      "phase": "declare",
+      "site": "src/1a_relational.rs:378",
+      "calls": 402,
+      "elapsed_ms": 29.6,
+      "sql_bytes": 0
+    },
+    {
+      "stage": "prepare",
+      "phase": "materialize",
+      "site": "src/1b_state.rs:356",
+      "calls": 847,
+      "elapsed_ms": 28.7,
+      "sql_bytes": 936208
+    },
+    {
+      "stage": "prepare",
+      "phase": "maintain",
+      "site": "src/1d_drain.rs:108",
+      "calls": 374,
+      "elapsed_ms": 26.8,
+      "sql_bytes": 2651846
+    },
+    {
+      "stage": "execute",
+      "phase": "materialize",
+      "site": "src/1b_state.rs:356",
+      "calls": 847,
+      "elapsed_ms": 20.6,
+      "sql_bytes": 0
+    },
+    {
+      "stage": "batch",
+      "phase": "declare",
+      "site": "src/1d_drain.rs:25",
+      "calls": 567,
+      "elapsed_ms": 16.3,
+      "sql_bytes": 0
+    },
+    {
+      "stage": "prepare",
+      "phase": "materialize",
+      "site": "src/1b_state.rs:318",
+      "calls": 2491,
+      "elapsed_ms": 14.5,
+      "sql_bytes": 79871
+    },
+    {
+      "stage": "execute",
+      "phase": "maintain",
+      "site": "src/1d_drain.rs:106",
+      "calls": 374,
+      "elapsed_ms": 12.1,
+      "sql_bytes": 0
+    },
+    {
+      "stage": "execute",
+      "phase": "materialize",
+      "site": "src/1b_state.rs:318",
+      "calls": 2491,
+      "elapsed_ms": 11.8,
+      "sql_bytes": 0
+    },
+    {
+      "stage": "execute",
+      "phase": "maintain",
+      "site": "src/1d_drain.rs:117",
+      "calls": 1496,
+      "elapsed_ms": 11.4,
+      "sql_bytes": 0
+    },
+    {
+      "stage": "execute",
+      "phase": "declare",
+      "site": "src/1b_state.rs:226",
+      "calls": 342,
+      "elapsed_ms": 10.2,
+      "sql_bytes": 0
+    }
+  ],
+  "scope": "Span durations include JSON subscriber overhead and cannot be compared with uninstrumented wall time. SQL bytes sum prepare_start sql_bytes, including repeated preparations. The raw 171 MB trace remains in /private/tmp and is not committed."
+}
