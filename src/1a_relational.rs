@@ -269,6 +269,9 @@ impl Plan {
             }
         }
         self.out_last_reads = last_reads;
+        for (id, node) in self.nodes.iter().enumerate() {
+            tracing::trace!(id, kind = node.kind.label(), inputs = ?node.inputs, width = node.fields.len(), out_slot = self.out_slots[id], last_read = self.out_last_reads[id], "scratch_output_slot");
+        }
         tracing::info!(nodes = count, out_tables = slots.values().map(Vec::len).sum::<usize>(), "scratch_output_lifetimes");
     }
 

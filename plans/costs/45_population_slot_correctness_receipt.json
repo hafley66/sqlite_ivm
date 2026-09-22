@@ -1,0 +1,102 @@
+{
+  "regression_origin_commit": "9856816",
+  "regression_confirmed_at_commit": "fd75816",
+  "compiler_case": "sqlite_emit_2_mutual",
+  "plugin_test": "unused_recursive_projection_does_not_leak_into_reused_output",
+  "old_extension_rows": [
+    [
+      0
+    ],
+    [
+      1
+    ],
+    [
+      2
+    ],
+    [
+      3
+    ],
+    [
+      4
+    ]
+  ],
+  "fixed_extension_rows": [
+    [
+      1
+    ],
+    [
+      3
+    ]
+  ],
+  "plain_sql_rows": [
+    [
+      1
+    ],
+    [
+      3
+    ]
+  ],
+  "cause": "A materialized node with zero readers retained rows in its scratch slot; the final projection later reused that slot and appended its output.",
+  "change": "Clear a zero-reader output immediately after initial materialization.",
+  "compiler_c2": {
+    "fixture": "oracle/eval/c2_partial_3.json",
+    "runs": [
+      {
+        "wall_ms": 1869.3,
+        "peak_rss_bytes": 594149376,
+        "output_sha256": "e635f295151c51405f23a852e13ef5ca857da1fcb8cf551a064088289fdafd67",
+        "exit_code": 0
+      },
+      {
+        "wall_ms": 1817.2,
+        "peak_rss_bytes": 594149376,
+        "output_sha256": "e635f295151c51405f23a852e13ef5ca857da1fcb8cf551a064088289fdafd67",
+        "exit_code": 0
+      },
+      {
+        "wall_ms": 1870.1,
+        "peak_rss_bytes": 603996160,
+        "output_sha256": "e635f295151c51405f23a852e13ef5ca857da1fcb8cf551a064088289fdafd67",
+        "exit_code": 0
+      }
+    ],
+    "mean_wall_ms": 1852.2,
+    "output_sha256": "e635f295151c51405f23a852e13ef5ca857da1fcb8cf551a064088289fdafd67",
+    "rss_scope": "ru_maxrss from RUSAGE_CHILDREN is cumulative maximum across the three child processes; first run is exact, subsequent figures are upper bounds for each run."
+  },
+  "persistent_12k": {
+    "fixture": "bench/results/native-rowid-probes-observe/timings/12000-1000-200.json",
+    "final_checksum": "37a855bf4e75587e4d18e6426b94e5fcef60be731c273d66e28e6a791690c188",
+    "update_plus_query_ms": 26.39408499817364,
+    "disk": {
+      "database_bytes": 540672,
+      "main_bytes": 4096,
+      "wal_bytes": 1458512,
+      "shm_bytes": 32768,
+      "temp_bytes": null,
+      "temp_scope": "SQLite temp files not sampled"
+    },
+    "sqlite_pages": {
+      "main": {
+        "page_count": 132,
+        "page_size": 4096
+      },
+      "temp": {
+        "page_count": 105,
+        "page_size": 4096
+      }
+    },
+    "sqlite_allocator": {
+      "current_bytes": 1553584,
+      "peak_bytes": 1932336
+    },
+    "process_peak_rss_bytes": 50003968
+  },
+  "validation": {
+    "plugin": "85 passed, 2 ignored",
+    "compiler_emitted_views": "17 passed",
+    "compiler_sqlite_eval_oracle": "32-case gate passed",
+    "compiler_sqlite_contract": "8 passed"
+  },
+  "space_scope": "c2 RSS covers the Rust compiler, extension, and SQLite in one process. The 12k SQLite allocator and disk measurements are from a separate Python process; temp page count excludes unmeasured temp-file size."
+}

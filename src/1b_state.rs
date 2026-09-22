@@ -287,6 +287,16 @@ impl Plan {
             if id == self.output {
                 self.write_state(db, name, id)?;
                 self.exhaust(db, name, &mut reads, id)?;
+            } else if reads[id] == 0 {
+                // A later node may reuse this physical output slot.
+                tracing::debug!(id, out_slot = self.out_slots[id], "population_unused_output_cleared");
+                statements::exec(
+                    db,
+                    Phase::Materialize,
+                    name,
+                    &format!("DELETE FROM {}", self.out_table(id, node.fields.len())),
+                    [],
+                )?;
             }
         }
         if let Some(sums) = aggregate_sums {

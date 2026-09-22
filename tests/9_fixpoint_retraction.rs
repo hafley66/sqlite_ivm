@@ -85,3 +85,28 @@ fn fixpoint_retraction_emits_the_stored_representative() -> Result<()> {
     .expect("integral real case");
     Ok(())
 }
+
+#[test]
+fn unused_recursive_projection_does_not_leak_into_reused_output() -> Result<()> {
+    let db = Connection::open_in_memory()?;
+    register(&db)?;
+    db.execute_batch(
+        "PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON;
+         CREATE TABLE starts(n INTEGER);
+         CREATE TABLE edges(a INTEGER,b INTEGER);
+         INSERT INTO starts VALUES(0);
+         INSERT INTO edges VALUES(0,1),(1,2),(2,3),(3,4);",
+    )?;
+    let query = "WITH RECURSIVE parity(side,n) AS (
+        SELECT 0,n FROM starts
+        UNION SELECT 0,e.b FROM parity p JOIN edges e ON p.n=e.a WHERE p.side=1
+        UNION SELECT 1,e.b FROM parity p JOIN edges e ON p.n=e.a WHERE p.side=0
+    ), even(n) AS (SELECT n FROM parity WHERE side=0),
+       odd(n) AS (SELECT n FROM parity WHERE side=1)
+    SELECT n FROM odd";
+    db.execute_batch(&format!("CREATE VIRTUAL TABLE odd_view USING sqlite_ivm('{query}')"))?;
+    assert_eq!(rows(&db, "SELECT n FROM odd_view ORDER BY n")?, rows(&db, query)?);
+    db.execute("DELETE FROM edges WHERE a=2", [])?;
+    assert_eq!(rows(&db, "SELECT n FROM odd_view ORDER BY n")?, rows(&db, query)?);
+    Ok(())
+}

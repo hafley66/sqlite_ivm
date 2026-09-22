@@ -216,5 +216,11 @@
     "sprefa_sqlite_oracle": "32/32",
     "native_extension": "4 passed",
     "shell_scenarios": "6 passed"
+  },
+  "later_regression_audit": {
+    "emitted_view_case": "sqlite_emit_2_mutual",
+    "result_at_recorded_commit": "failed: Odd projection retained rows from an unused branch in a reused scratch output slot",
+    "cause": "populate did not clear materialized nodes with zero readers before physical slot reuse",
+    "fixed_in": "subsequent zero-reader output cleanup; see 45_population_slot_correctness_receipt.json"
   }
 }
