@@ -1,0 +1,104 @@
+{
+  "case": "one UPDATE of key 1; join/group and three shared UNION levels; 32,1024,8192 source rows",
+  "telemetry": "existing hafley-observe CountRecorder, SQLite profile events and query_plan",
+  "counter_caveat": "Profile statement counters accumulate over cached executions. Only rows with executions=1 and run=1 support per-execution work claims. Summed lifetime counters are retained as raw evidence, not attributed to this mutation.",
+  "plans": "EXPLAIN QUERY PLAN after mutation; parameterized SQL omitted and annotated.",
+  "group_recompute": [
+    {
+      "source_rows": 32,
+      "before": {
+        "vm_step": 254.0,
+        "plan": [
+          "SEARCH main.result_keys USING COVERING INDEX __ivm_result_native_keys (__node=?)",
+          "USING ROWID SEARCH ON TABLE __ivm_touched FOR IN-OPERATOR",
+          "SEARCH main.source_rows USING INDEX __ivm_result_source_6_0_0 (<expr>=?)",
+          "SEARCH main.dimension_rows USING INTEGER PRIMARY KEY (rowid=?)",
+          "USE TEMP B-TREE FOR GROUP BY"
+        ]
+      },
+      "after": {
+        "vm_step": 100.0,
+        "plan": [
+          "SCAN changed",
+          "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)",
+          "SEARCH main.source_rows USING INDEX __ivm_result_source_6_0_0 (<expr>=?)",
+          "SEARCH main.dimension_rows USING INTEGER PRIMARY KEY (rowid=?)",
+          "USE TEMP B-TREE FOR GROUP BY"
+        ]
+      }
+    },
+    {
+      "source_rows": 1024,
+      "before": {
+        "vm_step": 5214.0,
+        "plan": [
+          "SEARCH main.result_keys USING COVERING INDEX __ivm_result_native_keys (__node=?)",
+          "USING ROWID SEARCH ON TABLE __ivm_touched FOR IN-OPERATOR",
+          "SEARCH main.source_rows USING INDEX __ivm_result_source_6_0_0 (<expr>=?)",
+          "SEARCH main.dimension_rows USING INTEGER PRIMARY KEY (rowid=?)",
+          "USE TEMP B-TREE FOR GROUP BY"
+        ]
+      },
+      "after": {
+        "vm_step": 100.0,
+        "plan": [
+          "SCAN changed",
+          "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)",
+          "SEARCH main.source_rows USING INDEX __ivm_result_source_6_0_0 (<expr>=?)",
+          "SEARCH main.dimension_rows USING INTEGER PRIMARY KEY (rowid=?)",
+          "USE TEMP B-TREE FOR GROUP BY"
+        ]
+      }
+    },
+    {
+      "source_rows": 8192,
+      "before": {
+        "vm_step": 41054.0,
+        "plan": [
+          "SEARCH main.result_keys USING COVERING INDEX __ivm_result_native_keys (__node=?)",
+          "USING ROWID SEARCH ON TABLE __ivm_touched FOR IN-OPERATOR",
+          "SEARCH main.source_rows USING INDEX __ivm_result_source_6_0_0 (<expr>=?)",
+          "SEARCH main.dimension_rows USING INTEGER PRIMARY KEY (rowid=?)",
+          "USE TEMP B-TREE FOR GROUP BY"
+        ]
+      },
+      "after": {
+        "vm_step": 100.0,
+        "plan": [
+          "SCAN changed",
+          "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)",
+          "SEARCH main.source_rows USING INDEX __ivm_result_source_6_0_0 (<expr>=?)",
+          "SEARCH main.dimension_rows USING INTEGER PRIMARY KEY (rowid=?)",
+          "USE TEMP B-TREE FOR GROUP BY"
+        ]
+      }
+    }
+  ],
+  "nested_union_worst_single_execution": [
+    {
+      "source_rows": 32,
+      "vm_step": 41962.0,
+      "fullscan_step": 312.0,
+      "sort": 20.0
+    },
+    {
+      "source_rows": 1024,
+      "vm_step": 1305770.0,
+      "fullscan_step": 10232.0,
+      "sort": 20.0
+    },
+    {
+      "source_rows": 8192,
+      "vm_step": 10437802.0,
+      "fullscan_step": 81912.0,
+      "sort": 20.0
+    }
+  ],
+  "validation": {
+    "plugin": "79 passed, 3 skipped",
+    "diagnostic": "passed, both query shapes at three sizes match ordinary SELECT",
+    "native": "4 passed after rebuilding release extension",
+    "compiler_gate": "not rerun for this maintenance-only change"
+  },
+  "extension_sha256": "8c97f1b7537567b265fd1272d56e0eb6e02c67ea827ba63aabd45ec22a977503"
+}

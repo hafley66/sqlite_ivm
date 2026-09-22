@@ -1,0 +1,17 @@
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8): No such file or directory
+   Compiling sqlite-ivm v0.3.0 (/Users/chrishafley/projects/sqlite_ivm)
+    Finished `release` profile [optimized] target(s) in 6.32s
+/Users/chrishafley/projects/sqlite_ivm/target/extension/release/libsqlite_ivm.dylib
+   Compiling sqlite-ivm v0.3.0 (/Users/chrishafley/projects/sqlite_ivm)
+   Compiling sqlite-ivm-bench v0.1.0 (/Users/chrishafley/projects/sqlite_ivm/bench)
+    Finished `release` profile [optimized + debuginfo] target(s) in 32.48s
+     Running tests/6_extension_load.rs (target/release/build/sqlite-ivm-bench/883a34fc2b5b2fd9/out/6_extension_load-883a34fc2b5b2fd9)
+
+running 4 tests
+test extension_loads_through_its_entry_point ... ok
+test loaded_extension_registers_the_create_function ... ok
+test loaded_extension_maintains_a_view_end_to_end ... ok
+test loaded_extension_retains_preparation_and_execution_events ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.08s
+

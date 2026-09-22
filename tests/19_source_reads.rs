@@ -7,6 +7,68 @@ use rusqlite::{Connection, Result};
 use sqlite_ivm::extension::register;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+/// Explicit diagnostic run: one changed key, increasing unrelated source rows.
+/// SQL, plans and execution counters come from the existing observe APIs.
+#[test]
+#[ignore = "maintenance SQL scaling diagnostic; run with --ignored --nocapture"]
+fn maintenance_source_read_costs() -> Result<()> {
+    for size in [32, 1024, 8192] {
+        for shape in ["join_group", "nested_union"] {
+            let db = Connection::open_in_memory()?;
+            register(&db)?;
+            db.execute_batch(&format!("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON;
+                CREATE TABLE source_rows(k INTEGER PRIMARY KEY,v INTEGER);
+                CREATE TABLE dimension_rows(k INTEGER PRIMARY KEY);
+                WITH RECURSIVE r(i) AS(SELECT 1 UNION ALL SELECT i+1 FROM r WHERE i<{size})
+                INSERT INTO source_rows SELECT i,i FROM r;
+                INSERT INTO dimension_rows SELECT k FROM source_rows"))?;
+            let query = if shape == "join_group" {
+                "SELECT s.k,sum(s.v) AS v FROM source_rows s JOIN dimension_rows d ON s.k=d.k GROUP BY s.k".to_owned()
+            } else {
+                let mut definitions = vec!["r0 AS (SELECT k,v FROM source_rows)".to_owned()];
+                for depth in 1..4 {
+                    definitions.push(format!("r{depth} AS (SELECT k,v FROM r{} UNION SELECT k,v FROM r{})",depth-1,depth-1));
+                }
+                format!("WITH {} SELECT k,v FROM r3", definitions.join(","))
+            };
+            db.execute_batch(&format!("CREATE VIRTUAL TABLE result USING sqlite_ivm('{query}')"))?;
+            let (recorder, layer) = CountRecorder::new();
+            let guard = tracing_subscriber::registry().with(layer).set_default();
+            instrument(&db);
+            db.execute_batch("UPDATE source_rows SET v=v+1 WHERE k=1")?;
+            silence(&db);
+            drop(guard);
+            let read = |sql: &str| -> Result<Vec<(i64,i64)>> {
+                db.prepare(sql)?.query_map([], |row| Ok((row.get(0)?,row.get(1)?)))?.collect()
+            };
+            assert_eq!(read("SELECT * FROM result ORDER BY 1,2")?,read(&format!("{query} ORDER BY 1,2"))?);
+            let statements = recorder.event_sums(SQLITE_TARGET,tracing::Level::DEBUG,"drain","view",Some("sql"));
+            for ((view,sql),sums) in statements {
+                if view != "result" { continue; }
+                if shape == "join_group" && sql.contains("sum(CASE") {
+                    assert_eq!(sums.events,1);
+                    assert_eq!(sums.sum_of("run"),1.0);
+                    assert!(sums.sum_of("vm_step") <= 150.0,
+                        "one touched group scanned unrelated keys at size {size}: {sums:?}");
+                }
+                let parameter_count = db.prepare(&sql)?.parameter_count();
+                let plan = if parameter_count == 0 {
+                    hafley_observe::sqlite::query_plan(&db,&sql)?
+                } else { Vec::new() };
+                println!("MAINTENANCE_AUDIT {}",serde_json::json!({
+                    "source_rows":size,"shape":shape,
+                    "counter_scope":"statement lifetime; sums can include earlier cached executions",
+                    "single_execution_counters":sums.events == 1 && sums.sum_of("run") == 1.0,
+                    "mutation":"UPDATE source_rows SET v=v+1 WHERE k=1",
+                    "query":query,"sql":sql,"plan":plan,"plan_skipped_parameters":parameter_count,
+                    "executions":sums.events,"counters":sums.sums
+                }));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[test]
 fn join_deltas_probe_sources_and_never_write_input_copies() -> Result<()> {
     let db = Connection::open_in_memory()?;
@@ -94,6 +156,9 @@ fn join_deltas_probe_sources_and_never_write_input_copies() -> Result<()> {
             "{source}: {plans:#?}"
         );
     }
+    assert!(plans.iter().any(|step| step == "SCAN changed"), "{plans:#?}");
+    assert!(plans.iter().any(|step| step == "SEARCH d USING INTEGER PRIMARY KEY (rowid=?)"), "{plans:#?}");
+    assert!(!plans.iter().any(|step| step.starts_with("SEARCH main.result_keys USING") && step.ends_with("(__node=?)")), "{plans:#?}");
     Ok(())
 }
 

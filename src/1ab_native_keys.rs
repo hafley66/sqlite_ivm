@@ -68,7 +68,9 @@ impl Plan {
             let key = substitute_columns(key, |c|format!("s.c{c}"));
             format!("({key}) IS (+t.k{i})")
         }).collect::<Vec<_>>().join(" AND ");
-        format!("(SELECT * FROM {dict} WHERE __node={id} AND __i IN (SELECT __k FROM temp.__ivm_touched)) t CROSS JOIN {source} s ON {predicate}")
+        // Drive the integer primary-key lookup from the changed keys. An IN
+        // predicate lets SQLite scan every dictionary key for this node first.
+        format!("(SELECT d.* FROM temp.__ivm_touched changed CROSS JOIN {dict} d ON d.__i=changed.__k WHERE d.__node={id}) t CROSS JOIN {source} s ON {predicate}")
     }
 
     #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
