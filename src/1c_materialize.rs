@@ -90,13 +90,13 @@ impl Plan {
                     ("distinct", _) | (_, 1) => {
                         format!("INSERT INTO {out}({cols},__m) {}", reps(&t0))
                     }
-                    ("union", _) => format!(
-                        "INSERT INTO {out}({cols},__m) {} UNION ALL SELECT a.c0{},1 FROM (SELECT *,min(rowid) FROM {} GROUP BY __k) a WHERE a.__k NOT IN(SELECT __k FROM {})",
-                        reps(&t0),
-                        (1..width).map(|i| format!(",a.c{i}")).collect::<String>(),
-                        t1.clone(),
-                        t0
-                    ),
+                    ("union", _) => {
+                        // Read each input once, keeping the same representative:
+                        // the left side wins, then its smallest exact row identity.
+                        format!(
+                            "INSERT INTO {out}({cols},__m) SELECT {cols},1 FROM (SELECT {cols},row_number() OVER (PARTITION BY __k ORDER BY __side,__row_identity) AS __representative FROM (SELECT {cols},__k,rowid AS __row_identity,0 AS __side FROM {t0} UNION ALL SELECT {cols},__k,rowid AS __row_identity,1 AS __side FROM {t1})) WHERE __representative=1"
+                        )
+                    },
                     ("except", _) => format!(
                         "INSERT INTO {out}({cols},__m) {} AND a.__k NOT IN(SELECT __k FROM {})",
                         reps(&t0),

@@ -1,0 +1,160 @@
+{
+  "case": "oracle/eval/c0_minimal_0.json",
+  "cause": "Nested generated set-input SQL causes SQLite statement preparation amplification",
+  "maintenance_samples": 2922,
+  "maintenance_prepare_samples": 2891,
+  "sample_window": "5 seconds, begun 2 seconds after process launch; statistical samples, not exact exclusive timings",
+  "sample_sha256": "500c60bd0ed5b90d4f6691f3581a8f750dc0bcd5c9c8d8684356419ff5835249",
+  "nodes": [
+    {
+      "node": 70,
+      "busy": "6.14ms",
+      "statements": [
+        {
+          "sql_bytes": 31674,
+          "profile_ns": 0,
+          "vm_step": 41497
+        },
+        {
+          "sql_bytes": 25578,
+          "profile_ns": 1000000,
+          "vm_step": 37792
+        }
+      ]
+    },
+    {
+      "node": 74,
+      "busy": "16.0ms",
+      "statements": [
+        {
+          "sql_bytes": 66044,
+          "profile_ns": 1000000,
+          "vm_step": 66855
+        },
+        {
+          "sql_bytes": 59948,
+          "profile_ns": 1000000,
+          "vm_step": 64109
+        }
+      ]
+    },
+    {
+      "node": 78,
+      "busy": "35.5ms",
+      "statements": [
+        {
+          "sql_bytes": 100371,
+          "profile_ns": 1000000,
+          "vm_step": 95314
+        },
+        {
+          "sql_bytes": 94275,
+          "profile_ns": 1000000,
+          "vm_step": 92566
+        }
+      ]
+    },
+    {
+      "node": 82,
+      "busy": "73.7ms",
+      "statements": [
+        {
+          "sql_bytes": 134698,
+          "profile_ns": 2000000,
+          "vm_step": 123769
+        },
+        {
+          "sql_bytes": 128602,
+          "profile_ns": 2000000,
+          "vm_step": 121023
+        }
+      ]
+    },
+    {
+      "node": 86,
+      "busy": "149ms",
+      "statements": [
+        {
+          "sql_bytes": 169068,
+          "profile_ns": 2000000,
+          "vm_step": 152228
+        },
+        {
+          "sql_bytes": 162972,
+          "profile_ns": 2000000,
+          "vm_step": 149482
+        }
+      ]
+    },
+    {
+      "node": 89,
+      "busy": "321ms",
+      "statements": [
+        {
+          "sql_bytes": 223498,
+          "profile_ns": 2000000,
+          "vm_step": 181096
+        },
+        {
+          "sql_bytes": 217402,
+          "profile_ns": 2000000,
+          "vm_step": 178352
+        }
+      ]
+    },
+    {
+      "node": 92,
+      "busy": "660ms",
+      "statements": [
+        {
+          "sql_bytes": 285676,
+          "profile_ns": 2000000,
+          "vm_step": 219140
+        },
+        {
+          "sql_bytes": 279580,
+          "profile_ns": 3000000,
+          "vm_step": 216392
+        }
+      ]
+    },
+    {
+      "node": 95,
+      "busy": "1.30s",
+      "statements": [
+        {
+          "sql_bytes": 333959,
+          "profile_ns": 3000000,
+          "vm_step": 273961
+        },
+        {
+          "sql_bytes": 327863,
+          "profile_ns": 3000000,
+          "vm_step": 271228
+        }
+      ]
+    },
+    {
+      "node": 102,
+      "busy": "3.14s",
+      "statements": [
+        {
+          "sql_bytes": 382322,
+          "profile_ns": 4000000,
+          "vm_step": 314570
+        },
+        {
+          "sql_bytes": 376225,
+          "profile_ns": 6000000,
+          "vm_step": 311839
+        }
+      ]
+    }
+  ],
+  "source": [
+    "src/1ca_source_reads.rs:51",
+    "src/1c_materialize.rs:70",
+    "src/1d_drain.rs:121",
+    "src/0g_statements.rs:186"
+  ]
+}

@@ -303,5 +303,23 @@ fn set_source_reads_keep_materialized_boundaries_observable() -> Result<()> {
             .collect::<Result<Vec<_>>>()?,
         vec![1, 2, 3, 4]
     );
+    // Every source edit reaches both branches of each nested union.
+    for mutation in [
+        "BEGIN;INSERT INTO source_rows VALUES(4),(NULL),(5)",
+        "UPDATE source_rows SET k=6 WHERE k=2",
+        "SAVEPOINT nested_union;DELETE FROM source_rows WHERE k=4",
+        "ROLLBACK TO nested_union;RELEASE nested_union",
+        "DELETE FROM source_rows WHERE k=1;COMMIT",
+    ] {
+        db.execute_batch(mutation)?;
+        let read = |sql: &str| -> Result<Vec<rusqlite::types::Value>> {
+            db.prepare(sql)?.query_map([], |row| row.get(0))?.collect()
+        };
+        assert_eq!(
+            read("SELECT k FROM result ORDER BY k")?,
+            read(&format!("SELECT k FROM ({query}) ORDER BY k"))?,
+            "{mutation}"
+        );
+    }
     Ok(())
 }

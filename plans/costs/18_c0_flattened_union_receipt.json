@@ -1,0 +1,196 @@
+{
+  "case": "oracle/eval/c0_minimal_0.json",
+  "before_instrumented_seconds": 8.66,
+  "after_uninstrumented_seconds": [
+    0.47678570900461636,
+    0.25676199999725213,
+    0.25877475000015693
+  ],
+  "comparison": "Separate diagnostic and uninstrumented runs, not a paired benchmark",
+  "all_three_output_bytes_equal": true,
+  "output_sha256": "5d9101de793ba72827c4b7df77e011224a35d6074a81acf65b47b34037065674",
+  "change": "UNION representative selection reads each input once using row_number partitioned by membership key, ordered by side and exact row identity",
+  "phases": [
+    {
+      "name": "declare_view",
+      "rows": 0,
+      "ms": "133.9",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 82,
+      "ms": "277.7",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.2",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.2",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.2",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.2",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    },
+    {
+      "name": "nonlinear_round",
+      "rows": 0,
+      "ms": "0.1",
+      "error": ""
+    }
+  ],
+  "checks": {
+    "plugin_tests": "77 pass, 2 skipped",
+    "source_read_tests": "4 pass including new nested union mutations and rollback",
+    "native": "extension load and six shell scenarios pass",
+    "timing_ledger": "missing entries cause verify script to stop",
+    "compiler_gate": "fold timeouts remain"
+  }
+}
