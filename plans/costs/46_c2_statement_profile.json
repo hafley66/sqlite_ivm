@@ -223,5 +223,39 @@
       "sql_bytes": 0
     }
   ],
-  "scope": "Span durations include JSON subscriber overhead and cannot be compared with uninstrumented wall time. SQL bytes sum prepare_start sql_bytes, including repeated preparations. The raw 171 MB trace remains in /private/tmp and is not committed."
+  "scope": "Span durations include JSON subscriber overhead and cannot be compared with uninstrumented wall time. SQL bytes sum prepare_start sql_bytes, including repeated preparations. The raw 171 MB trace remains in /private/tmp and is not committed.",
+  "sql_shapes": {
+    "src/1cb_set_membership.rs:63": {
+      "calls": 494,
+      "unique_sql": 494,
+      "min_sql_bytes": 1298,
+      "max_sql_bytes": 8669,
+      "median_sql_bytes": 3411,
+      "first_sql_prefix": "WITH input_rows AS (SELECT (SELECT __i FROM main.\"program_keys\" WHERE __v=json_array(CASE typeof(c0) WHEN 'blob' THEN json_object('blob',hex(c0)) WHEN 'real' THEN CASE WHEN c0=CAST(c0 AS INTEGER) AND typeof(CAST(c0 AS INTEGER))='integer' THEN CAST(c0 AS INTEGER) ELSE json_object('real',sqlite_ivm_re"
+    },
+    "src/1d_drain.rs:185": {
+      "calls": 13,
+      "unique_sql": 13,
+      "min_sql_bytes": 469,
+      "max_sql_bytes": 126632,
+      "median_sql_bytes": 7583,
+      "first_sql_prefix": "INSERT INTO temp.__ivm_out_6_377(c0,c1,c2,c3,c4,c5,__m) SELECT * FROM (SELECT l.c0 AS c0,l.c1 AS c1,l.c2 AS c2,r.c0 AS c3,r.c1 AS c4,r.c2 AS c5,l.__n*r.__m AS __m FROM temp.__ivm_out_3_793 r CROSS JOIN (SELECT 0 AS __k,c0,c1,c2,__n FROM (SELECT c0,c1,c2,__n FROM (WITH __ivm_read_1332 AS (SELECT \"c0_"
+    },
+    "src/1d_drain.rs:414": {
+      "calls": 6,
+      "unique_sql": 6,
+      "min_sql_bytes": 3529,
+      "max_sql_bytes": 133434,
+      "median_sql_bytes": 5990,
+      "first_sql_prefix": "INSERT OR IGNORE INTO main.\"program_op1413x5\"(__k,c0,c1,c2,c3,c4) SELECT json_array(CASE typeof((0)) WHEN 'blob' THEN json_object('blob',hex((0))) WHEN 'real' THEN CASE WHEN (0)=CAST((0) AS INTEGER) THEN CAST((0) AS INTEGER) ELSE json_object('real',printf('%!.17g',(0))) END WHEN 'text' THEN (0)||'' "
+    },
+    "src/1d_drain.rs:346": {
+      "calls": 10,
+      "unique_sql": 5,
+      "min_sql_bytes": 6846,
+      "max_sql_bytes": 135047,
+      "median_sql_bytes": 130301,
+      "first_sql_prefix": "INSERT OR IGNORE INTO main.\"program_op1720x22\"(__k,c0,c1,c2,c3,c4,c5) SELECT json_array(CASE typeof((0)) WHEN 'blob' THEN json_object('blob',hex((0))) WHEN 'real' THEN CASE WHEN (0)=CAST((0) AS INTEGER) THEN CAST((0) AS INTEGER) ELSE json_object('real',printf('%!.17g',(0))) END WHEN 'text' THEN (0)|"
+    }
+  }
 }
