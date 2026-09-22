@@ -11,7 +11,7 @@ use tracing_subscriber::{
 
 static OBSERVE: std::sync::Once = std::sync::Once::new();
 
-// Maintenance logs no events, so spans report on close with their busy/idle time.
+// Log entry before work starts and elapsed span time on close, including native builds.
 // A host process that already owns a global subscriber keeps it; try_init fails quietly.
 fn observe() {
     OBSERVE.call_once(|| {
@@ -25,7 +25,7 @@ fn observe() {
             ansi,
         });
         let format = FormatConfig {
-            span_events: FmtSpan::CLOSE,
+            span_events: FmtSpan::NEW | FmtSpan::CLOSE,
             ..FormatConfig::standard(config.format, config.ansi)
         };
         // chrome_layer is None unless the trace path variable is set, so an unasked-for
@@ -44,6 +44,7 @@ fn observe() {
     });
 }
 
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub fn register(db: &Connection) -> Result<()> {
     observe();
     // Counters are read per statement: 8_group_limit runs 2.1s without them, 10.7s with.
@@ -62,6 +63,7 @@ pub fn register(db: &Connection) -> Result<()> {
         2,
         FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DIRECTONLY,
         |ctx| {
+            let _callback = tracing::trace_span!("sqlite_ivm_create").entered();
             let name: String = ctx.get(0)?;
             let sql: String = ctx.get(1)?;
             // Borrow the invoking connection for this callback; SQLite retains ownership.
@@ -84,6 +86,7 @@ pub fn register(db: &Connection) -> Result<()> {
         1,
         FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DIRECTONLY,
         |ctx| {
+            let _callback = tracing::trace_span!("sqlite_ivm_drop").entered();
             let name: String = ctx.get(0)?;
             let db = unsafe { ctx.get_connection()? };
             let canonical: String = statements::query(
@@ -108,6 +111,7 @@ pub fn register(db: &Connection) -> Result<()> {
 
 #[cfg(feature = "extension")]
 #[no_mangle]
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub unsafe extern "C" fn sqlite3_extension_init(
     db: *mut rusqlite::ffi::sqlite3,
     error: *mut *mut std::os::raw::c_char,

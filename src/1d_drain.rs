@@ -18,8 +18,10 @@ impl Plan {
     /// The temp scratch every drain writes: one out table and one before table
     /// per node, plus the touched-key set. Runs at bind time, outside any
     /// trigger program, because DDL inside a trigger aborts the statement.
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn prepare_scratch(&self, db: &Connection, program: &Program) -> Result<()> {
         for sql in &program.scratch {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             statements::batch(db, Phase::Declare, &program.name, sql)?;
         }
         Ok(())
@@ -27,6 +29,7 @@ impl Plan {
     /// Set-at-a-time maintenance of one batch. Every node kind runs a constant
     /// number of statements per batch; row counts live inside SQLite. Node ids
     /// are topological because `push` appends after its inputs.
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn drain(&self, db: &Connection, program: &Program, batch: &[(usize, Row, i64)]) -> Result<()> {
         let name = program.name.as_str();
         let _span = tracing::debug_span!("drain", view = name, rows = batch.len()).entered();
@@ -34,6 +37,7 @@ impl Plan {
         let seed = tracing::debug_span!("node", kind = "seed", id = self.nodes.len()).entered();
         // One prepared insert per input node; the batch is the only per-row loop.
         for (id, node) in self.nodes.iter().enumerate() {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             let Kind::Input(input) = node.kind else {
                 continue;
             };
@@ -44,6 +48,7 @@ impl Plan {
             // site, prepared flag and changes() count.
             let mut bound = 0usize;
             for (source, row, d) in batch {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 if *source != input || *d == 0 {
                     continue;
                 }
@@ -62,6 +67,7 @@ impl Plan {
         }
         drop(seed);
         for id in 0..self.nodes.len() {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             let node = &self.nodes[id];
             let statements = &program.nodes[id];
             if matches!(statements.kind, KindStatements::Input { .. }) {
@@ -73,6 +79,7 @@ impl Plan {
                 .map(|input| out_rows[*input] != 0)
                 .collect::<Vec<_>>();
             if !touched_inputs.iter().any(|t| *t) {
+                tracing::trace!(id, kind = node.kind.label(), "node_skipped_unchanged_inputs");
                 continue;
             }
             let _node = tracing::debug_span!("node", kind = node.kind.label(), id).entered();
@@ -82,6 +89,7 @@ impl Plan {
                 KindStatements::SetAll { copies } => {
                     let mut written = 0usize;
                     for sql in copies {
+                        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                         written += statements::exec_cached(db, Phase::Maintain, name, sql, [])?;
                     }
                     written
@@ -96,6 +104,7 @@ impl Plan {
                     self.drain_fixpoint(db, name, id, fixpoint, &touched_inputs)?
                 }
             };
+            tracing::debug!(id, written, inputs = ?touched_inputs, "node_delta_emitted");
             out_rows[id] = written;
             if id == self.output && written != 0 {
                 let _apply = tracing::debug_span!("node", kind = "apply_state", id).entered();
@@ -106,12 +115,14 @@ impl Plan {
         // enclosing statement, which unwinds the temp writes with it.
         let _sweep = tracing::debug_span!("node", kind = "sweep", id = self.nodes.len()).entered();
         for (statements, rows) in program.nodes.iter().zip(out_rows) {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             if rows != 0 {
                 statements::exec_cached(db, Phase::Drain, name, &statements.sweep, [])?;
             }
         }
         Ok(())
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn drain_arrangement(
         &self,
         db: &Connection,
@@ -122,6 +133,7 @@ impl Plan {
         if let Some(join) = &statements.join_delta {
             let mut written = 0;
             for (side, touched) in touched_inputs.iter().enumerate() {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 if !touched {
                     continue;
                 }
@@ -142,6 +154,7 @@ impl Plan {
             // Touched keys: every key of every input delta row, interned.
             statements::exec_cached(db, Phase::Maintain, name, CLEAR_TOUCHED, [])?;
             for side in &statements.sides {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 let side = side
                     .as_ref()
                     .ok_or_else(|| error("arrangement node without a key"))?;
@@ -177,6 +190,7 @@ impl Plan {
                 statements.materialize.execute(db, name)?;
             }
             for sql in &statements.diff {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 statements::exec_cached(db, Phase::Maintain, name, sql, [])?;
             }
         }
@@ -186,6 +200,7 @@ impl Plan {
         statements::exec_cached(db, Phase::Maintain, name, &statements.clear_before, [])?;
         Ok(written)
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn drain_fixpoint(
         &self,
         db: &Connection,
@@ -196,6 +211,7 @@ impl Plan {
     ) -> Result<usize> {
         let mut written = 0usize;
         for (side, touched) in touched_inputs.iter().enumerate() {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             if *touched {
                 let statements_side = statements.sides[side]
                     .as_ref()
@@ -210,6 +226,7 @@ impl Plan {
     }
     /// Applies the output node's delta to the result rows: retractions delete
     /// that many copies by key, additions insert that many copies.
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn apply_state(&self, db: &Connection, program: &Program) -> Result<()> {
         let name = program.name.as_str();
         let statements = &program.apply_state;
@@ -239,6 +256,7 @@ impl Plan {
     /// derive forward from the new rows; departures delete every member they
     /// reached, then rederive what survives another way. Deltas land in the
     /// node's out table.
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn fixpoint(
         &self,
         db: &Connection,
@@ -267,6 +285,7 @@ impl Plan {
         let rounds = |mut lo: i64| -> Result<()> {
             let mut rounds = 0usize;
             loop {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 if rounds >= BULK_ROUND_BUDGET {
                     return Err(error("fixpoint closure round budget exceeded"));
                 }
@@ -278,6 +297,7 @@ impl Plan {
                 let round = round_span("derive");
                 let mut written = 0;
                 for sql in &statements.round_derives {
+                    tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                     written += statements::exec_cached(
                         db,
                         Phase::Fixpoint,
@@ -301,13 +321,16 @@ impl Plan {
             statements::exec_cached(db, Phase::Fixpoint, name, &statements.clear_work, [])?;
             statements::exec_cached(db, Phase::Fixpoint, name, &statements.clear_deleted, [])?;
             for sqls in &side.left_derives {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 for sql in sqls {
+                    tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                     statements::exec_cached(db, Phase::Fixpoint, name, sql, [])?;
                 }
             }
             let mut lo = 0;
             let mut delete_rounds = 0usize;
             loop {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 if delete_rounds >= BULK_ROUND_BUDGET {
                     return Err(error("fixpoint closure round budget exceeded"));
                 }
@@ -321,6 +344,7 @@ impl Plan {
                 statements::exec_cached(db, Phase::Fixpoint, name, &statements.drop_deleted_range, params![lo, hi])?;
                 let mut written = 0;
                 for sql in &statements.delete_derives {
+                    tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                     written += statements::exec_cached(
                         db,
                         Phase::Fixpoint,
@@ -339,7 +363,9 @@ impl Plan {
         }
         // Arrivals: derive forward from the new rows, then close.
         for sqls in &side.arrive_derives {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             for sql in sqls {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 statements::exec_cached(db, Phase::Fixpoint, name, sql, [])?;
             }
         }
@@ -362,6 +388,7 @@ impl Plan {
 }
 
 /// Identify input identities whose support crosses zero in this batch.
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn split_side(db: &Connection, name: &str, statements: &SplitStatements) -> Result<()> {
     statements::exec_cached(db, Phase::Fixpoint, name, &statements.clear_arrived, [])?;
     statements::exec_cached(db, Phase::Fixpoint, name, &statements.clear_left, [])?;

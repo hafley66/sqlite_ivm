@@ -10,6 +10,7 @@ use crate::{
 use rusqlite::{params_from_iter, types::Value, Connection, Result};
 
 impl Plan {
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn materialize(&self, db: &Connection, name: &str, id: usize, restricted: bool) -> Result<()> {
         self.materialize_statements(db, name, id, restricted)
             .execute(db, name)
@@ -17,6 +18,7 @@ impl Plan {
     }
     /// Every SQL string materializing this node issues, built once and reused by
     /// both the populate path and the per-view drain program.
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn materialize_statements(
         &self,
         db: &Connection,
@@ -26,6 +28,7 @@ impl Plan {
     ) -> MaterializeStatements {
         self.materialize_from_sources(db, name, id, restricted, None)
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn materialize_from_sources(
         &self, db: &Connection, name: &str, id: usize, restricted: bool,
         sources: Option<&[String]>,
@@ -324,6 +327,7 @@ impl Plan {
 
 /// The fixpoint member derive: the rowid range rides in `?1` and `?2` when the
 /// rule's member occurrence scans one.
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn fixpoint_derive(target: &str, cols: &str, rule: &Rule, from: &str) -> String {
     format!(
         "INSERT OR IGNORE INTO {target}(__k,{cols}) SELECT {},{} {from}{}",
@@ -364,6 +368,7 @@ pub(crate) struct FixpointMaterializeStatements {
 impl MaterializeStatements {
     /// Executes this node and returns the number of rows written to its out
     /// table. The drain carries that count forward instead of probing the table.
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn execute(&self, db: &Connection, name: &str) -> Result<usize> {
         let written = match self {
             MaterializeStatements::Input { insert }
@@ -411,11 +416,20 @@ impl MaterializeStatements {
                         statements::CACHED,
                     );
                     let _read = read.enter();
-                    let mut key_statement = db.prepare_cached(&g.limit_keys)?;
+                    let mut key_statement = {
+                        let _prepare = tracing::debug_span!("prepare", sql = %g.limit_keys, sql_bytes = g.limit_keys.len(), cached = true).entered();
+                        tracing::debug!("prepare_start");
+                        let result = db.prepare_cached(&g.limit_keys);
+                        tracing::debug!(success = result.is_ok(), error = ?result.as_ref().err(), "prepare_end");
+                        result?
+                    };
+                    let _execute = tracing::debug_span!("execute", operation = "limit_keys").entered();
+                    tracing::debug!("execute_start");
                     let mut key_rows = key_statement.query([])?;
                     let mut groups = 0usize;
                     let mut written = 0usize;
                     while let Some(key) = key_rows.next()? {
+                        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                         groups += 1;
                         if groups > BULK_GROUP_BUDGET {
                             return Err(error("bulk group budget exceeded"));
@@ -430,6 +444,7 @@ impl MaterializeStatements {
                     }
                     drop(key_rows);
                     read.rows(groups);
+                    tracing::debug!(rows = groups, "execute_end");
                     written
                 } else {
                     statements::exec_cached(db, Phase::Materialize, name, &g.plain_insert, [])?
@@ -443,9 +458,11 @@ impl MaterializeStatements {
                         r.get(0)
                     })?;
                 for sql in &f.anchor {
+                    tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                     statements::exec_cached(db, Phase::Materialize, name, sql, [])?;
                 }
                 loop {
+                    tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                     if rounds >= BULK_ROUND_BUDGET {
                         return Err(error("fixpoint closure round budget exceeded"));
                     }
@@ -459,6 +476,7 @@ impl MaterializeStatements {
                     }
                     let mut written = 0usize;
                     for sql in &f.rounds {
+                        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                         written += statements::exec_cached(
                             db,
                             Phase::Materialize,

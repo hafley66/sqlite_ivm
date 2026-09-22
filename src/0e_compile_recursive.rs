@@ -9,6 +9,7 @@ use crate::relational::{
 use rusqlite::Result;
 use sqlite3_parser::ast::*;
 impl Compiler<'_> {
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn recursive(&mut self, cte: &CommonTableExpr<'_>) -> Result<usize> {
         if cte.select.order_by.is_some() || cte.select.limit.is_some() {
             return Err(error("recursive ordering and LIMIT unsupported"));
@@ -40,6 +41,7 @@ impl Compiler<'_> {
             .partition(|part| part_mentions(part, &member));
         let mut inputs = vec![];
         for anchor in &anchors {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             inputs.push(self.core(anchor, None, None)?);
         }
         let width = self.plan.nodes[inputs[0]].fields.len();
@@ -55,10 +57,12 @@ impl Compiler<'_> {
                 return Err(error("CTE column count mismatch"));
             }
             for (f, c) in member_fields.iter_mut().zip(columns) {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 f.name = name(c.col_name.0);
             }
         }
         for (i, f) in member_fields.iter_mut().enumerate() {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             f.qualifier = member.clone();
             f.visible = true;
             f.unqualified = true;
@@ -73,6 +77,7 @@ impl Compiler<'_> {
         };
         let mut rules = vec![];
         for side in 0..inputs.len() {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             let head = (0..width).map(|i| format!("c{i}")).collect::<Vec<_>>();
             rules.push(Rule {
                 occurrences: vec![(Occurrence::Input(side), width)],
@@ -83,6 +88,7 @@ impl Compiler<'_> {
             });
         }
         for step in steps {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             let OneSelect::Select {
                 columns,
                 from: Some(from),
@@ -101,6 +107,7 @@ impl Compiler<'_> {
                 None,
             )];
             for join in from.joins.as_ref().map(|j| j.as_slice()).unwrap_or(&[]) {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 let inner = match join.operator {
                     JoinOperator::Comma | JoinOperator::TypedJoin(None) => true,
                     JoinOperator::TypedJoin(Some(t)) => {
@@ -123,6 +130,7 @@ impl Compiler<'_> {
             let mut fields = vec![];
             let mut conjuncts = vec![];
             for (item, on) in items {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 match item {
                     SelectTable::Table(n, a, _)
                         if n.db_name.is_none() && name(n.name.0).eq_ignore_ascii_case(&member) =>
@@ -171,6 +179,7 @@ impl Compiler<'_> {
             };
             let mut head = vec![];
             for column in columns.iter() {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 match column {
                     ResultColumn::Star | ResultColumn::TableStar(_) => {
                         for (i, f) in fields.iter().enumerate().filter(|(_, f)| match column {
@@ -200,6 +209,7 @@ impl Compiler<'_> {
                 return Err(error("compound column count mismatch"));
             }
             for ((_, affinity, coll), f) in head.iter().zip(&member_fields) {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 if !affinity.is_empty() && !f.affinity.is_empty() && *affinity != f.affinity {
                     return Err(error("recursive key affinities must match"));
                 }
@@ -211,11 +221,14 @@ impl Compiler<'_> {
             let mut indexes = vec![];
             let mut equal = vec![];
             for e in &conjuncts {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 equalities(e, &fields, &mut equal);
             }
             for (field, coll) in equal {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 let (mut local, mut occurrence) = (field, 0);
                 while local >= occurrences[occurrence].1 {
+                    tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                     local -= occurrences[occurrence].1;
                     occurrence += 1;
                 }
@@ -245,6 +258,7 @@ impl Compiler<'_> {
 /// Positions of conjuncts that are an equality between one column of the
 /// already-joined left fields and one column of the incoming right table.
 /// Those conjuncts become the step's ON; the rest stay in WHERE.
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn where_keys_for_step(keys: &[&Expr<'_>], fields: &[Field], split: usize) -> Vec<usize> {
     keys.iter()
         .enumerate()
@@ -255,15 +269,18 @@ pub(crate) fn where_keys_for_step(keys: &[&Expr<'_>], fields: &[Field], split: u
 
 /// Named errors for recursion shapes SQLite itself rejects during prepare, so
 /// the reason surfaces before SQLite's own message.
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn recursion_shape(s: &Select<'_>) -> Result<()> {
     if let Some(with) = &s.with {
         for cte in with.ctes {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             recursion_shape(cte.select)?;
             if !with.recursive {
                 continue;
             }
             let member = name(cte.tbl_name.0);
             for part in cte.select.body.compounds.iter().flatten() {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 let step = part_mentions(&part.select, &member)
                     || part_expressions_mention(&part.select, &member);
                 if !step {

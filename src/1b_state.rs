@@ -11,6 +11,7 @@ use rusqlite::{types::Value, Connection, Result};
 impl Plan {
     /// When every grouping key is projected unchanged, stored output rows can
     /// supply the before-image without aggregating source inputs again.
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn stored_group_key(&self) -> Option<String> {
         let node = &self.nodes[self.output];
         let Kind::Group { keys, expressions, window: false, .. } = &node.kind else {
@@ -20,9 +21,11 @@ impl Plan {
             .collect::<Option<Vec<_>>>()?;
         Some(positions.iter().map(|i| format!("c{i}")).collect::<Vec<_>>().join(","))
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub fn create_state(&self, db: &Connection, name: &str) -> Result<Vec<(&'static str, String)>> {
         // A recreated view must not collide with index names a rename retained:
         // allocate a fresh suffix while the name is recorded for another view.
+        #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
         fn fresh_index(db: &Connection, name: &str, base: String) -> Result<String> {
             let mut index = base.clone();
             let recorded: bool = statements::query(
@@ -95,10 +98,12 @@ impl Plan {
             objects.push(("table", metadata));
         }
         for (id, node) in self.nodes.iter().enumerate() {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             if matches!(node.kind, Kind::Input(_) | Kind::Map { .. }) {
                 continue;
             }
             for (side, input) in node.inputs.iter().enumerate() {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 let mut expressions = match self.native_key_columns(id,side) {
                     Some(keys) if keys.is_empty() => vec![],
                     Some(keys) => vec![keys.join(",")],
@@ -113,6 +118,7 @@ impl Plan {
                     }));
                 }
                 for (position, expression) in expressions.iter().enumerate() {
+                    tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                     if let Some((source, expression)) = self.source_expression(*input, expression) {
                         let index = fresh_index(db, name, format!("__ivm_{name}_source_{id}_{side}_{position}"))?;
                         statements::batch(db, Phase::Declare, name, &format!(
@@ -125,6 +131,7 @@ impl Plan {
             if let Kind::Fixpoint { rules } = &node.kind {
                 let member = node.inputs.len();
                 for side in [member, member + 1] {
+                    tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                     let t = format!("{name}_op{id}x{side}");
                     // removes the newest members, so `rowid>lo` still means new.
                     statements::batch(
@@ -141,6 +148,7 @@ impl Plan {
                 }
                 let mut created = vec![];
                 for (occurrence, expression) in rules.iter().flat_map(|r| &r.indexes) {
+                    tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                     let side = match occurrence {
                         Occurrence::Input(_) => continue,
                         Occurrence::Member => member,
@@ -166,8 +174,11 @@ impl Plan {
         }
         Ok(objects)
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub fn populate(&self, db: &Connection, name: &str) -> Result<()> {
+        tracing::debug!(view = name, nodes = self.nodes.len(), sources = self.sources.len(), output = self.output, "populate_start");
         for source in &self.sources {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             let bad = source
                 .columns
                 .iter()
@@ -202,6 +213,7 @@ impl Plan {
             }
         }
         for (id, node) in self.nodes.iter().enumerate() {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             let out = out_table(id, node.fields.len());
             statements::exec(
                 db,
@@ -218,19 +230,24 @@ impl Plan {
         let mut reads = vec![0usize; self.nodes.len()];
         reads[self.output] += 1;
         for node in &self.nodes {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             match &node.kind {
                 Kind::Input(_) => {}
                 Kind::Map { .. } => reads[node.inputs[0]] += 1,
                 Kind::Set(op) if *op == "all" => reads[node.inputs[0]] += 1,
                 _ => {
                     for side in 0..node.inputs.len() {
+                        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                         reads[node.inputs[side]] += 1;
                     }
                 }
             }
         }
         for id in 0..self.nodes.len() {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             let node = &self.nodes[id];
+            let _node = tracing::debug_span!("populate_node", view = name, id, kind = node.kind.label(), inputs = ?node.inputs, columns = node.fields.len()).entered();
+            tracing::debug!("populate_node_start");
             let direct = match &node.kind {
                 Kind::Map { .. } => false,
                 Kind::Set(op) if *op == "all" => false,
@@ -238,11 +255,13 @@ impl Plan {
             };
             if direct {
                 for side in 0..node.inputs.len() {
+                    tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                     self.fill(db, name, id, side)?;
                     self.exhaust(db, name, &mut reads, node.inputs[side])?;
                 }
             }
             self.materialize(db, name, id, false)?;
+            tracing::debug!("populate_node_materialized");
             if !direct {
                 self.exhaust(db, name, &mut reads, node.inputs[0])?;
             }
@@ -262,6 +281,7 @@ impl Plan {
         }
         Ok(())
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn exhaust(&self, db: &Connection, name: &str, reads: &mut [usize], child: usize) -> Result<()> {
         reads[child] -= 1;
         if reads[child] == 0 {
@@ -278,6 +298,7 @@ impl Plan {
     }
     /// Encoded membership keys for sets and recursion. Join/group keys use
     /// native_key_columns and cannot take this encoding path.
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn key_sql(&self, id: usize, side: usize) -> Option<String> {
         let node = &self.nodes[id];
         let child_node = &self.nodes[node.inputs[side]];
@@ -299,6 +320,7 @@ impl Plan {
             _ => return None,
         })
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn fill(&self, db: &Connection, name: &str, id: usize, side: usize) -> Result<()> {
         let node = &self.nodes[id];
         if matches!(node.kind, Kind::Join { mode: "inner", .. } | Kind::Fixpoint { .. }) { return Ok(()); }
@@ -307,10 +329,12 @@ impl Plan {
     }
     /// Read current source rows, optionally restricted to touched keys.
     /// No DDL here: a drain may run inside a trigger program.
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn source_table(&self, db: &Connection, name: &str, id: usize, side: usize, restricted: bool) -> Result<String> {
         Ok(self.live_input(db, name, id, side, restricted, false))
     }
 
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn write_state(&self, db: &Connection, name: &str, id: usize) -> Result<()> {
         let width = self.nodes[id].fields.len();
         let out = out_table(id, width);
@@ -343,8 +367,10 @@ impl Plan {
     /// Rejects a source row whose values do not fit its declared affinities.
     /// Runs at the trigger, before staging, so the statement fails, not the
     /// commit.
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub fn validate(&self, source: usize, row: &[Value]) -> Result<()> {
         for (value, affinity) in row.iter().zip(&self.sources[source].affinities) {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             let valid = match value {
                 Value::Null => true,
                 Value::Blob(_) => affinity.is_empty(),
@@ -360,6 +386,7 @@ impl Plan {
     }
     /// The collector that stages this view's source rows between a trigger
     /// firing and the drain. Its shadow table is one of the view's objects.
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub fn collector(&self, name: &str) -> sqlite_bulk_trigger::Collector {
         let width = self.sources.iter().map(|s| s.columns.len()).max().unwrap_or(0);
         sqlite_bulk_trigger::Collector::new(name, width)

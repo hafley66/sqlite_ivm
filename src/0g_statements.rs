@@ -6,15 +6,10 @@
 //! nanoseconds. Every helper here is `#[track_caller]`, so the span's `site`
 //! names the real issuance site, never this file.
 //!
-//! The default feature set (the rlib and every test target) carries these
-//! spans, so `cargo test` exercises them. `--no-default-features` is the
-//! extension build alone, and there the spans compile out: `open` returns a
-//! disabled span and nothing is recorded. That build is the one the recipe
-//! times wall clock on.
-#![cfg_attr(not(feature = "statements"), allow(dead_code))]
+//! Statement spans remain available in both linked and native-extension builds.
+//! Runtime filters select their output through the existing hafley-observe layers.
 
 use rusqlite::{Connection, Params, Result, Row};
-#[cfg(feature = "statements")]
 use tracing::field;
 
 /// The six points at which the engine hands SQL to SQLite.
@@ -121,7 +116,6 @@ impl Statement {
 /// `kind`, `verb` and `site` are recorded only when a subscriber keeps them.
 #[track_caller]
 pub(crate) fn open(phase: Phase, object: &str, sql: &str, prepared: &'static str) -> Statement {
-    #[cfg(feature = "statements")]
     {
         let location = std::panic::Location::caller();
         let span = tracing::debug_span!(
@@ -142,20 +136,19 @@ pub(crate) fn open(phase: Phase, object: &str, sql: &str, prepared: &'static str
         }
         Statement { span }
     }
-    #[cfg(not(feature = "statements"))]
-    {
-        let _ = (phase, object, sql, prepared);
-        Statement {
-            span: tracing::Span::none(),
-        }
-    }
+
 }
 
 #[track_caller]
 pub(crate) fn batch(db: &Connection, phase: Phase, object: &str, sql: &str) -> Result<()> {
     let statement = open(phase, object, sql, FRESH);
     let _entered = statement.enter();
-    db.execute_batch(sql)
+    let operation = tracing::debug_span!("execute_batch", sql, sql_bytes = sql.len());
+    let _operation = operation.enter();
+    tracing::debug!("batch_start");
+    let result = db.execute_batch(sql);
+    tracing::debug!(success = result.is_ok(), error = ?result.as_ref().err(), "batch_end");
+    result
 }
 
 #[track_caller]
@@ -168,7 +161,18 @@ pub(crate) fn exec<P: Params>(
 ) -> Result<usize> {
     let statement = open(phase, object, sql, FRESH);
     let _entered = statement.enter();
-    let rows = db.execute(sql, params)?;
+    let mut prepared = {
+        let _prepare = tracing::debug_span!("prepare", sql, sql_bytes = sql.len(), cached = false).entered();
+        tracing::debug!("prepare_start");
+        let result = db.prepare(sql);
+        tracing::debug!(success = result.is_ok(), error = ?result.as_ref().err(), "prepare_end");
+        result?
+    };
+    let _execute = tracing::debug_span!("execute").entered();
+    tracing::debug!("execute_start");
+    let result = prepared.execute(params);
+    tracing::debug!(rows = ?result.as_ref().ok(), error = ?result.as_ref().err(), "execute_end");
+    let rows = result?;
     statement.rows(rows);
     Ok(rows)
 }
@@ -183,7 +187,18 @@ pub(crate) fn exec_cached<P: Params>(
 ) -> Result<usize> {
     let statement = open(phase, object, sql, CACHED);
     let _entered = statement.enter();
-    let rows = db.prepare_cached(sql)?.execute(params)?;
+    let mut prepared = {
+        let _prepare = tracing::debug_span!("prepare", sql, sql_bytes = sql.len(), cached = true).entered();
+        tracing::debug!("prepare_start");
+        let result = db.prepare_cached(sql);
+        tracing::debug!(success = result.is_ok(), error = ?result.as_ref().err(), "prepare_end");
+        result?
+    };
+    let _execute = tracing::debug_span!("execute").entered();
+    tracing::debug!("execute_start");
+    let result = prepared.execute(params);
+    tracing::debug!(rows = ?result.as_ref().ok(), error = ?result.as_ref().err(), "execute_end");
+    let rows = result?;
     statement.rows(rows);
     Ok(rows)
 }
@@ -199,7 +214,18 @@ pub(crate) fn query<T, P: Params, F: FnOnce(&Row<'_>) -> Result<T>>(
 ) -> Result<T> {
     let statement = open(phase, object, sql, FRESH);
     let _entered = statement.enter();
-    let value = db.query_row(sql, params, f)?;
+    let mut prepared = {
+        let _prepare = tracing::debug_span!("prepare", sql, sql_bytes = sql.len(), cached = false).entered();
+        tracing::debug!("prepare_start");
+        let result = db.prepare(sql);
+        tracing::debug!(success = result.is_ok(), error = ?result.as_ref().err(), "prepare_end");
+        result?
+    };
+    let _execute = tracing::debug_span!("execute").entered();
+    tracing::debug!("execute_start");
+    let result = prepared.query_row(params, f);
+    tracing::debug!(success = result.is_ok(), error = ?result.as_ref().err(), "execute_end");
+    let value = result?;
     statement.rows(1);
     Ok(value)
 }
@@ -215,7 +241,18 @@ pub(crate) fn query_cached<T, P: Params, F: FnOnce(&Row<'_>) -> Result<T>>(
 ) -> Result<T> {
     let statement = open(phase, object, sql, CACHED);
     let _entered = statement.enter();
-    let value = db.prepare_cached(sql)?.query_row(params, f)?;
+    let mut prepared = {
+        let _prepare = tracing::debug_span!("prepare", sql, sql_bytes = sql.len(), cached = true).entered();
+        tracing::debug!("prepare_start");
+        let result = db.prepare_cached(sql);
+        tracing::debug!(success = result.is_ok(), error = ?result.as_ref().err(), "prepare_end");
+        result?
+    };
+    let _execute = tracing::debug_span!("execute").entered();
+    tracing::debug!("execute_start");
+    let result = prepared.query_row(params, f);
+    tracing::debug!(success = result.is_ok(), error = ?result.as_ref().err(), "execute_end");
+    let value = result?;
     statement.rows(1);
     Ok(value)
 }
@@ -231,8 +268,18 @@ pub(crate) fn query_map<T, P: Params, F: FnMut(&Row<'_>) -> Result<T>>(
 ) -> Result<Vec<T>> {
     let statement = open(phase, object, sql, FRESH);
     let _entered = statement.enter();
-    let mut prepared = db.prepare(sql)?;
-    let rows = prepared.query_map(params, f)?.collect::<Result<Vec<T>>>()?;
+    let mut prepared = {
+        let _prepare = tracing::debug_span!("prepare", sql, sql_bytes = sql.len(), cached = false).entered();
+        tracing::debug!("prepare_start");
+        let result = db.prepare(sql);
+        tracing::debug!(success = result.is_ok(), error = ?result.as_ref().err(), "prepare_end");
+        result?
+    };
+    let _execute = tracing::debug_span!("execute").entered();
+    tracing::debug!("execute_start");
+    let result = prepared.query_map(params, f).and_then(|rows| rows.collect::<Result<Vec<T>>>());
+    tracing::debug!(rows = ?result.as_ref().ok().map(Vec::len), error = ?result.as_ref().err(), "execute_end");
+    let rows = result?;
     statement.rows(rows.len());
     Ok(rows)
 }
@@ -248,7 +295,10 @@ pub(crate) fn guard<T, F: FnOnce() -> Result<T>>(
 ) -> Result<T> {
     let statement = open(phase, object, sql, FRESH);
     let _entered = statement.enter();
-    f()
+    tracing::debug!(sql, "guard_start");
+    let result = f();
+    tracing::debug!(success = result.is_ok(), error = ?result.as_ref().err(), "guard_end");
+    result
 }
 
 #[track_caller]
@@ -261,5 +311,42 @@ pub(crate) fn pragma<V: rusqlite::ToSql>(
 ) -> Result<()> {
     let statement = open(phase, object, &format!("PRAGMA {name}"), FRESH);
     let _entered = statement.enter();
-    db.pragma_update(None, name, value)
+    tracing::debug!(name, "pragma_start");
+    let result = db.pragma_update(None, name, value);
+    tracing::debug!(success = result.is_ok(), error = ?result.as_ref().err(), "pragma_end");
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hafley_observe::CountRecorder;
+    use tracing_subscriber::prelude::*;
+
+    #[test]
+    fn preparation_and_execution_report_success_and_failure_separately() -> Result<()> {
+        let (recorder, layer) = CountRecorder::new();
+        let _guard = tracing_subscriber::registry().with(layer).set_default();
+        let db = Connection::open_in_memory()?;
+        exec(&db, Phase::Declare, "telemetry", "CREATE TABLE t(x UNIQUE)", [])?;
+        exec_cached(&db, Phase::Maintain, "telemetry", "INSERT INTO t VALUES(?1)", [7])?;
+        assert!(exec_cached(&db, Phase::Maintain, "telemetry", "INSERT INTO t VALUES(?1)", [7]).is_err());
+        assert!(exec(&db, Phase::Maintain, "telemetry", "INSERT INTO missing VALUES(1)", []).is_err());
+        assert_eq!(query(&db, Phase::Maintain, "telemetry", "SELECT x FROM t", [], |r| r.get::<_, i64>(0))?, 7);
+        assert_eq!(query_cached(&db, Phase::Maintain, "telemetry", "SELECT count(*) FROM t", [], |r| r.get::<_, i64>(0))?, 1);
+        assert_eq!(query_map(&db, Phase::Maintain, "telemetry", "SELECT x FROM t", [], |r| r.get::<_, i64>(0))?, vec![7]);
+        let events = recorder.event_sums("sqlite_ivm::statements", tracing::Level::DEBUG, "stmt", "object", Some("message"));
+        let counts = events.into_iter().map(|((object, message), sums)| {
+            assert_eq!(object, "telemetry");
+            (message, sums.events)
+        }).collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(counts, std::collections::BTreeMap::from([
+            ("execute_end".into(), 6), ("execute_start".into(), 6),
+            ("prepare_end".into(), 7), ("prepare_start".into(), 7),
+        ]));
+        let spans = recorder.counts();
+        assert_eq!(spans.instances["prepare"], 7);
+        assert_eq!(spans.instances["execute"], 6);
+        Ok(())
+    }
 }

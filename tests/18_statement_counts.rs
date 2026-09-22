@@ -8,7 +8,7 @@
 //
 // The tsv on stdout is the receipt; run with --nocapture. With
 // EVERY_STATEMENT_WALL set it times the scenarios with logging off instead,
-// and the recipe runs that in both the statements and the spans-compiled-out build.
+// and the recipe runs that in both the statements and the compatibility-feature-disabled build.
 #![cfg(not(feature = "extension"))]
 
 use rusqlite::{Connection, Result};
@@ -244,7 +244,7 @@ fn record(scenario: fn(&Connection) -> Result<()>) -> Result<CountRecorder> {
 
 /// The wall-time pass: logging off, three runs per scenario, the median and
 /// the spread printed. The recipe runs it in the statements build and in the
-/// spans-compiled-out build, so the page names which wall came from which.
+/// compatibility-feature-disabled build, so the page names which wall came from which.
 fn wall() -> Result<()> {
     const RUNS: usize = 3;
     for (name, _input_rows, scenario) in scenarios() {

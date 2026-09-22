@@ -13,6 +13,7 @@ use sqlite3_parser::{
 /// Names the catalog probes on this path; none touch a source row.
 const CATALOG_OBJECT: &str = "catalog";
 
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn dependents(db: &Connection, source: &str) -> Result<Vec<(String, String)>> {
     let exists: bool = statements::query(
         db,
@@ -34,6 +35,7 @@ fn dependents(db: &Connection, source: &str) -> Result<Vec<(String, String)>> {
         |r| Ok((r.get(0)?, r.get(1)?)),
     )
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn atomic<T>(db: &Connection, object: &str, f: impl FnOnce() -> Result<T>) -> Result<T> {
     statements::batch(db, Phase::Declare, object, "SAVEPOINT __ivm_source_ddl")?;
     match f() {
@@ -52,6 +54,7 @@ fn atomic<T>(db: &Connection, object: &str, f: impl FnOnce() -> Result<T>) -> Re
         }
     }
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn source(db: &Connection, name: &str) -> Result<String> {
     if name.to_ascii_lowercase().starts_with("__ivm_") {
         return Err(error("reserved source name"));
@@ -62,10 +65,12 @@ fn source(db: &Connection, name: &str) -> Result<String> {
 /// sees the rewrite only through this; another process reconnects through xConnect.
 static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub fn generation() -> u64 {
     GENERATION.load(std::sync::atomic::Ordering::Acquire)
 }
 
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn rename(db: &Connection, old: &str, new: &str, column: Option<&str>) -> Result<()> {
     GENERATION.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     let old = source(db, old)?;
@@ -74,12 +79,14 @@ fn rename(db: &Connection, old: &str, new: &str, column: Option<&str>) -> Result
     }
     let views = dependents(db, &old)?;
     for (v, _) in &views {
+        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
         catalog::manifest(db, v, None)?;
     }
     let legacy: bool = statements::query(db, Phase::Declare, CATALOG_OBJECT, "PRAGMA legacy_alter_table", [], |r| r.get(0))?;
     statements::pragma(db, Phase::Declare, CATALOG_OBJECT, "legacy_alter_table", false)?;
     let result = atomic(db, new, || {
         for (i, (_, sql)) in views.iter().enumerate() {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             statements::batch(
                 db,
                 Phase::Declare,
@@ -106,6 +113,7 @@ fn rename(db: &Connection, old: &str, new: &str, column: Option<&str>) -> Result
             },
         )?;
         for (i, (v, _)) in views.iter().enumerate() {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             let helper = format!("__ivm_ddl_{i}");
             let ddl: String = statements::query(
                 db,
@@ -154,9 +162,11 @@ fn rename(db: &Connection, old: &str, new: &str, column: Option<&str>) -> Result
     statements::pragma(db, Phase::Declare, CATALOG_OBJECT, "legacy_alter_table", legacy)?;
     result
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub fn register(db: &Connection) -> Result<()> {
     let flags = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DIRECTONLY;
     db.create_scalar_function(c"sqlite_ivm_rename_source", 2, flags, |ctx| {
+        let _callback = tracing::trace_span!("sqlite_ivm_rename_source").entered();
         let old: String = ctx.get(0)?;
         let new: String = ctx.get(1)?;
         let db = unsafe { ctx.get_connection()? };
@@ -164,6 +174,7 @@ pub fn register(db: &Connection) -> Result<()> {
         Ok(new)
     })?;
     db.create_scalar_function(c"sqlite_ivm_rename_column", 3, flags, |ctx| {
+        let _callback = tracing::trace_span!("sqlite_ivm_rename_column").entered();
         let table: String = ctx.get(0)?;
         let old: String = ctx.get(1)?;
         let new: String = ctx.get(2)?;
@@ -172,6 +183,7 @@ pub fn register(db: &Connection) -> Result<()> {
         Ok(new)
     })?;
     db.create_scalar_function(c"sqlite_ivm_drop_source", 2, flags, |ctx| {
+        let _callback = tracing::trace_span!("sqlite_ivm_drop_source").entered();
         let table: String = ctx.get(0)?;
         let cascade: bool = ctx.get(1)?;
         let db = unsafe { ctx.get_connection()? };
@@ -184,6 +196,7 @@ pub fn register(db: &Connection) -> Result<()> {
         }
         atomic(&db, &table, || {
             for (v, _) in &views {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 statements::batch(&db, Phase::Teardown, v, &format!("DROP TABLE main.{}", quote(v)))?;
             }
             statements::batch(&db, Phase::Teardown, &table, &format!("DROP TABLE main.{}", quote(&table)))

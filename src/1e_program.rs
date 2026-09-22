@@ -127,6 +127,7 @@ pub(crate) struct ApplyStateStatements {
 }
 
 impl Program {
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn build(plan: &Plan, name: &str, db: &Connection) -> Program {
         Program {
             name: name.to_string(),
@@ -137,11 +138,13 @@ impl Program {
     }
 }
 
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn scratch_statements(plan: &Plan) -> Vec<String> {
     let mut statements = vec![String::from(
         "CREATE TEMP TABLE IF NOT EXISTS __ivm_touched(__k INTEGER PRIMARY KEY)",
     )];
     for (id, node) in plan.nodes.iter().enumerate() {
+        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
         let width = node.fields.len();
         let cols = columns(width);
         statements.push(format!(
@@ -171,6 +174,7 @@ fn scratch_statements(plan: &Plan) -> Vec<String> {
         }
         if matches!(node.kind,Kind::Join { .. } | Kind::Group { .. }) {
             for (side, input) in node.inputs.iter().enumerate() {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 let child_width = plan.nodes[*input].fields.len();
                 let child = out_table(*input, child_width);
                 let key = plan.native_key_columns(id,side).expect("join key").join(",");
@@ -181,6 +185,7 @@ fn scratch_statements(plan: &Plan) -> Vec<String> {
         }
         if let Kind::Fixpoint { .. } = node.kind {
             for side in 0..node.inputs.len() {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 let side_width = plan.nodes[node.inputs[side]].fields.len();
                 let side_cols = columns(side_width);
                 statements.push(format!(
@@ -198,8 +203,10 @@ fn scratch_statements(plan: &Plan) -> Vec<String> {
     statements
 }
 
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn node_statements(plan: &Plan, name: &str, db: &Connection, id: usize) -> NodeStatements {
     let node = &plan.nodes[id];
+    tracing::debug!(view = name, id, kind = node.kind.label(), inputs = ?node.inputs, columns = node.fields.len(), "compile_node_statements");
     let width = node.fields.len();
     let out = out_table(id, width);
     NodeStatements {
@@ -237,6 +244,7 @@ fn node_statements(plan: &Plan, name: &str, db: &Connection, id: usize) -> NodeS
     }
 }
 
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn arrangement_statements(
     plan: &Plan,
     name: &str,
@@ -283,6 +291,7 @@ fn arrangement_statements(
     }
 }
 
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn join_delta_statements(plan: &Plan, name: &str, db: &Connection, id: usize) -> Option<JoinDeltaStatements> {
     let node = &plan.nodes[id];
     let Kind::Join { mode: "inner", predicate, .. } = &node.kind else {
@@ -321,6 +330,7 @@ fn join_delta_statements(plan: &Plan, name: &str, db: &Connection, id: usize) ->
 /// A group consolidates its input before applying multiplicities. Plain column
 /// projections between the join and group preserve signed bags and cannot raise
 /// a scalar error on a row that would otherwise cancel at the join.
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn group_consumers_consolidate(plan: &Plan, id: usize) -> bool {
     if id == plan.output {
         return false;
@@ -338,8 +348,10 @@ fn group_consumers_consolidate(plan: &Plan, id: usize) -> bool {
 
 /// Recover the scalar input of the compiler's weighted SUM through the same
 /// SQLite parser. This accepts its generated CASE/weight form only.
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn weighted_sum_value(expression: &str) -> Option<String> {
     use sqlite3_parser::{ast::*, lexer::sql::Parser, Bump, FallibleIterator};
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn unwrap<'a>(value: &'a Expr<'a>) -> &'a Expr<'a> {
         match value {
             Expr::Parenthesized(values) if values.len() == 1 => unwrap(&values[0]),
@@ -361,6 +373,7 @@ fn weighted_sum_value(expression: &str) -> Option<String> {
 
 /// Classify the existing compiler output, leaving all other aggregate shapes
 /// on their general arrangement path.
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn aggregate_sum_inputs(plan: &Plan) -> Option<Vec<(usize, String)>> {
     let node = &plan.nodes[plan.output];
     let Kind::Group { keys, expressions, window: false, limit: None, having: None, .. } = &node.kind else { return None };
@@ -370,6 +383,7 @@ pub(crate) fn aggregate_sum_inputs(plan: &Plan) -> Option<Vec<(usize, String)>> 
     expressions.iter().position(|e| e == "coalesce(sum(__n),0)")?;
     let mut sums = vec![];
     for (i, expression) in expressions.iter().enumerate() {
+        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
         if key_positions.contains(&i) || expression == "coalesce(sum(__n),0)" { continue; }
         sums.push((i, weighted_sum_value(expression)?));
     }
@@ -379,6 +393,7 @@ pub(crate) fn aggregate_sum_inputs(plan: &Plan) -> Option<Vec<(usize, String)>> 
 /// Safe integer groups add signed contributions to their stored before-image.
 /// Nullable sums carry non-null support counts. Groups leaving the bounded
 /// domain recompute affected groups from authoritative source reads.
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn aggregate_delta_statements(plan: &Plan, name: &str, db: &Connection, id: usize) -> Option<AggregateDeltaStatements> {
     if id != plan.output { return None; }
     let sums = aggregate_sum_inputs(plan)?;
@@ -393,7 +408,7 @@ fn aggregate_delta_statements(plan: &Plan, name: &str, db: &Connection, id: usiz
     let child = out_table(node.inputs[0], plan.nodes[node.inputs[0]].fields.len());
     let metadata = table(name, id, 1);
     let metadata_name = format!("{name}_op{id}x1");
-    let present = db.query_row("SELECT EXISTS(SELECT 1 FROM main.sqlite_schema WHERE type='table' AND name=?1)", [&metadata_name], |row| row.get::<_, bool>(0)).unwrap_or(false);
+    let present = crate::statements::query(db, crate::statements::Phase::Declare, name, "SELECT EXISTS(SELECT 1 FROM main.sqlite_schema WHERE type='table' AND name=?1)", [&metadata_name], |row| row.get::<_, bool>(0)).unwrap_or(false);
     if !present { return None; }
     let delta = format!("(SELECT *,__m AS __n FROM {child})");
     let mut checks = vec![
@@ -401,6 +416,7 @@ fn aggregate_delta_statements(plan: &Plan, name: &str, db: &Connection, id: usiz
         format!("(SELECT coalesce(max(c{count}),0) FROM {before})+(SELECT total(abs(CAST(__n AS REAL))) FROM {delta})<=1000000"),
     ];
     for (_, value) in &sums {
+        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
         checks.push(format!("(SELECT coalesce(min(typeof({value}) IN ('integer','null') AND coalesce(abs(CAST(({value}) AS REAL)),0)<=1000000),1) FROM {delta})"));
     }
     let new_count = format!("coalesce(b.c{count},0)+g.c{count}");
@@ -430,6 +446,7 @@ fn aggregate_delta_statements(plan: &Plan, name: &str, db: &Connection, id: usiz
     })
 }
 
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn arrangement_side(plan: &Plan, name: &str, id: usize, side: usize) -> Option<ArrangementSide> {
     let node = &plan.nodes[id];
     let child = out_table(node.inputs[side], plan.nodes[node.inputs[side]].fields.len());
@@ -445,6 +462,7 @@ fn arrangement_side(plan: &Plan, name: &str, id: usize, side: usize) -> Option<A
     })
 }
 
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn split_statements(plan: &Plan, name: &str, db: &Connection, id: usize, side: usize) -> SplitStatements {
     let node = &plan.nodes[id];
     let width = plan.nodes[node.inputs[side]].fields.len();
@@ -464,6 +482,7 @@ fn split_statements(plan: &Plan, name: &str, db: &Connection, id: usize, side: u
     }
 }
 
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn fixpoint_statements(plan: &Plan, name: &str, db: &Connection, id: usize, width: usize) -> FixpointStatements {
     let node = &plan.nodes[id];
     let Kind::Fixpoint { rules } = &node.kind else {
@@ -569,6 +588,7 @@ fn fixpoint_statements(plan: &Plan, name: &str, db: &Connection, id: usize, widt
     }
 }
 
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn fixpoint_side(
     plan: &Plan,
     name: &str,
@@ -653,6 +673,7 @@ fn fixpoint_side(
 
 /// The drain's derive: the only-present shape filters members already in the
 /// set, the plain shape trusts the caller's range.
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn derive_sql(
     target: &str,
     members: &str,
@@ -683,6 +704,7 @@ fn derive_sql(
     }
 }
 
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn apply_state_statements(plan: &Plan, name: &str) -> ApplyStateStatements {
     let node = &plan.nodes[plan.output];
     let width = node.fields.len();

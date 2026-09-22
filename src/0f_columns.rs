@@ -1,15 +1,18 @@
 /// Walks an internal SQL fragment and visits every bare `c<digits>` column
 /// reference outside quoted strings and identifiers.
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn visit_columns(sql: &str, mut visit: impl FnMut(&str, usize)) {
     let bytes = sql.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
+        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
         let b = bytes[i];
         if b == b'\'' || b == b'"' || b == b'`' || b == b'[' {
             let close = if b == b'[' { b']' } else { b };
             let start = i;
             i += 1;
             while i < bytes.len() {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 if bytes[i] == close {
                     if close != b']' && bytes.get(i + 1) == Some(&close) {
                         i += 2;
@@ -28,6 +31,7 @@ fn visit_columns(sql: &str, mut visit: impl FnMut(&str, usize)) {
         if word {
             let start = i;
             while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 i += 1;
             }
             let token = &sql[start..i];
@@ -43,6 +47,7 @@ fn visit_columns(sql: &str, mut visit: impl FnMut(&str, usize)) {
         i += 1;
     }
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn column_references(sql: &str) -> Vec<usize> {
     let mut out = vec![];
     visit_columns(sql, |_, c| {
@@ -52,6 +57,7 @@ pub(crate) fn column_references(sql: &str) -> Vec<usize> {
     });
     out
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn substitute_columns(sql: &str, expression: impl Fn(usize) -> String) -> String {
     let mut out = String::with_capacity(sql.len());
     visit_columns(sql, |token, c| {
@@ -60,6 +66,7 @@ pub(crate) fn substitute_columns(sql: &str, expression: impl Fn(usize) -> String
     });
     out
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn renumber_columns(sql: &str, map: impl Fn(usize) -> usize) -> String {
     let mut out = String::with_capacity(sql.len());
     visit_columns(sql, |token, c| {

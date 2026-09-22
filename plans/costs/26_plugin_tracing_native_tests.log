@@ -1,0 +1,99 @@
+   Compiling sqlite-ivm v0.3.0 (/Users/chrishafley/projects/sqlite_ivm)
+   Compiling sqlite-ivm-bench v0.1.0 (/Users/chrishafley/projects/sqlite_ivm/bench)
+    Finished `release` profile [optimized + debuginfo] target(s) in 35.70s
+     Running tests/6_extension_load.rs (target/release/build/sqlite-ivm-bench/883a34fc2b5b2fd9/out/6_extension_load-883a34fc2b5b2fd9)
+
+running 4 tests
+test extension_loads_through_its_entry_point ... ok
+test loaded_extension_registers_the_create_function ... ok
+test loaded_extension_maintains_a_view_end_to_end ... ok
+test loaded_extension_retains_preparation_and_execution_events ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8): No such file or directory
+╭───────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ load_extension('/Users/chrishafley/projects/sqlite_ivm/target/extension/release/libsqlite_ivm.dylib') │
+╞═══════════════════════════════════════════════════════════════════════════════════════════════════════╡
+│                                                                                                       │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────────────────────────────────────────────────╮
+│                     sqlite_ivm_create('totals', '                      │
+│   SELECT group_id, COUNT(*) AS item_count, SUM(amount) AS total_amount │
+│                                FROM items                              │
+│                            GROUP BY group_id                           │
+│                                   ')                                   │
+╞════════════════════════════════════════════════════════════════════════╡
+│ totals                                                                 │
+╰────────────────────────────────────────────────────────────────────────╯
+EMPTY: expect no groups
+INSERT: expect (4,2,10), (9,1,-2), (12,1,0)
+╭──────────┬────────────┬──────────────╮
+│ group_id │ item_count │ total_amount │
+╞══════════╪════════════╪══════════════╡
+│        4 │          2 │           10 │
+│        9 │          1 │           -2 │
+│       12 │          1 │            0 │
+╰──────────┴────────────┴──────────────╯
+UPDATE AMOUNT: group 4 sum becomes 14
+╭──────────┬────────────┬──────────────╮
+│ group_id │ item_count │ total_amount │
+╞══════════╪════════════╪══════════════╡
+│        4 │          2 │           14 │
+│        9 │          1 │           -2 │
+│       12 │          1 │            0 │
+╰──────────┴────────────┴──────────────╯
+MOVE GROUP + CHANGE AMOUNT: expect (4,1,3), (9,2,5), (12,1,0)
+╭──────────┬────────────┬──────────────╮
+│ group_id │ item_count │ total_amount │
+╞══════════╪════════════╪══════════════╡
+│        4 │          1 │            3 │
+│        9 │          2 │            5 │
+│       12 │          1 │            0 │
+╰──────────┴────────────┴──────────────╯
+MULTIROW UPDATE: group 9 sum becomes 7
+╭──────────┬────────────┬──────────────╮
+│ group_id │ item_count │ total_amount │
+╞══════════╪════════════╪══════════════╡
+│        4 │          1 │            3 │
+│        9 │          2 │            7 │
+│       12 │          1 │            0 │
+╰──────────┴────────────┴──────────────╯
+DELETE NEGATIVE ROW: group 9 becomes (9,1,8)
+╭──────────┬────────────┬──────────────╮
+│ group_id │ item_count │ total_amount │
+╞══════════╪════════════╪══════════════╡
+│        4 │          1 │            3 │
+│        9 │          1 │            8 │
+│       12 │          1 │            0 │
+╰──────────┴────────────┴──────────────╯
+DELETE LAST ROW IN GROUP: group 4 disappears
+╭──────────┬────────────┬──────────────╮
+│ group_id │ item_count │ total_amount │
+╞══════════╪════════════╪══════════════╡
+│        9 │          1 │            8 │
+│       12 │          1 │            0 │
+╰──────────┴────────────┴──────────────╯
+DELETE INSIDE TRANSACTION: expect no groups
+ROLLBACK: expect (9,1,8), (12,1,0)
+╭──────────┬────────────┬──────────────╮
+│ group_id │ item_count │ total_amount │
+╞══════════╪════════════╪══════════════╡
+│        9 │          1 │            8 │
+│       12 │          1 │            0 │
+╰──────────┴────────────┴──────────────╯
+DELETE ALL: expect no groups
+PASS: all CRUD and rollback assertions passed
+╭──────────────────────────────┬────╮
+│             step             │ ok │
+╞══════════════════════════════╪════╡
+│ empty                        │  1 │
+│ insert                       │  1 │
+│ update amount                │  1 │
+│ move group and change amount │  1 │
+│ multirow update              │  1 │
+│ delete negative row          │  1 │
+│ delete last row in group     │  1 │
+│ rollback restores groups     │  1 │
+│ delete all                   │  1 │
+╰──────────────────────────────┴────╯

@@ -6,6 +6,7 @@ use crate::{
 };
 
 impl Plan {
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn native_key_columns(&self, id: usize, side: usize) -> Option<Vec<String>> {
         let node = &self.nodes[id];
         Some(match &node.kind {
@@ -20,6 +21,7 @@ impl Plan {
         })
     }
 
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn native_key_values(&self, id: usize, side: usize) -> Option<Vec<String>> {
         self.native_key_columns(id, side).map(|keys| {
             if keys.is_empty() { vec!["0".into()] } else { keys }
@@ -28,11 +30,13 @@ impl Plan {
 
     /// Dictionary columns have no affinity. Unary plus prevents the input
     /// expression from imposing its affinity on an already stored key.
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn native_key_match(keys: &[String], alias: &str) -> String {
         keys.iter().enumerate().map(|(i,key)| format!("{alias}.k{i} IS (+({key}))"))
             .collect::<Vec<_>>().join(" AND ")
     }
 
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn key_lookup(&self, name: &str, id: usize, side: usize) -> String {
         let dict = keys_table(name);
         if let Some(keys) = self.native_key_values(id,side) {
@@ -42,6 +46,7 @@ impl Plan {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn insert_keys(&self, name: &str, id: usize, side: usize) -> String {
         let input = self.nodes[id].inputs[side];
         let child = out_table(input,self.nodes[input].fields.len());
@@ -56,6 +61,7 @@ impl Plan {
 
     /// Drive a source/index probe from each distinct touched key. IS includes
     /// NULL groups; the join operator separately applies SQL '=' semantics.
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn touched_source(&self, name: &str, id: usize, keys: &[String], source: &str) -> String {
         let dict = keys_table(name);
         let predicate = keys.iter().enumerate().map(|(i,key)| {
@@ -65,6 +71,7 @@ impl Plan {
         format!("(SELECT * FROM {dict} WHERE __node={id} AND __i IN (SELECT __k FROM temp.__ivm_touched)) t CROSS JOIN {source} s ON {predicate}")
     }
 
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn native_join_match(&self, id: usize) -> String {
         let left = self.native_key_columns(id,0).expect("join keys");
         let right = self.native_key_columns(id,1).expect("join keys");
@@ -78,6 +85,7 @@ impl Plan {
 
 /// Exact bag equality uses separate SQLite values. REAL bits distinguish
 /// representations such as negative zero without serializing a whole row.
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn exact_row_columns(width: usize, alias: &str) -> Vec<String> {
     (0..width).flat_map(|i| {
         let c = format!("{alias}c{i}");
@@ -86,6 +94,7 @@ pub(crate) fn exact_row_columns(width: usize, alias: &str) -> Vec<String> {
     }).collect()
 }
 
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn exact_row_match(width: usize, left: &str, right: &str) -> String {
     exact_row_columns(width,left).iter().zip(exact_row_columns(width,right))
         .map(|(l,r)|format!("({l}) IS ({r})")).collect::<Vec<_>>().join(" AND ")

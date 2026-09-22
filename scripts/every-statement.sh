@@ -2,7 +2,7 @@
 set -euo pipefail
 # One recipe prints the statement counts. It runs tests/18_statement_counts.rs
 # three times under the statement spans, then the wall pass in two builds: the
-# statements build and the spans-compiled-out build. The tsv lands in
+# statements build and the compatibility-feature-disabled build. The tsv lands in
 # plans/costs/every-statement.tsv; the markdown table prints on stdout.
 #
 # Counts and per-statement microseconds are the statements build's (SQLite's own
@@ -140,7 +140,7 @@ def wall(path):
 statement = wall(wall_statement)
 compiled_out = wall(wall_nostatement)
 print("\n## wall, logging off, median of three (min..max)\n")
-print("| scenario | statements build ms | spans compiled out ms |")
+print("| scenario | statements build ms | compatibility feature disabled ms |")
 print("|---|---:|---:|")
 if not statement or statement.keys() != compiled_out.keys():
     sys.exit("wall scenario sets differ or are empty")

@@ -8,6 +8,7 @@ use crate::relational::{
 use rusqlite::Result;
 use sqlite3_parser::ast::*;
 impl Compiler<'_> {
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn table(&mut self, t: &SelectTable<'_>) -> Result<usize> {
         if let SelectTable::Sub(from, None) = t {
             return self.from(from, &mut vec![]);
@@ -48,6 +49,7 @@ impl Compiler<'_> {
                         let affinities=statements::query_map(self.db,Phase::Declare,&actual,"SELECT type FROM pragma_table_xinfo(?1,'main') WHERE hidden<>1 ORDER BY cid",[&actual],|r|r.get::<_,String>(0))?.iter().map(|s|affinity(s)).collect();
                         let mut collations = vec![];
                         for column in &columns {
+                            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                             let table_c = std::ffi::CString::new(actual.as_str())
                                 .map_err(|e| error(e.to_string()))?;
                             let column_c = std::ffi::CString::new(column.as_str())
@@ -117,6 +119,7 @@ impl Compiler<'_> {
             .map(|i| self.plan.nodes[id].fields[*i].clone())
             .collect::<Vec<_>>();
         for (i, f) in fields.iter_mut().enumerate() {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             f.qualifier = q.clone();
             f.unqualified = true;
             f.position = i;
@@ -133,6 +136,7 @@ impl Compiler<'_> {
             fields,
         ))
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn joined(
         &mut self,
         left: usize,
@@ -145,6 +149,7 @@ impl Compiler<'_> {
         fields.extend(self.plan.nodes[right].fields.clone());
         let (mut l, mut r) = (vec![], vec![]);
         for on in ons {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             index_pairs(on, &fields, split, &mut l, &mut r);
         }
         let (mut strict_l, mut strict_r) = (vec![], vec![]);
@@ -185,6 +190,7 @@ impl Compiler<'_> {
             fields,
         ))
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn from<'a>(
         &mut self,
         from: &FromClause<'a>,
@@ -193,6 +199,7 @@ impl Compiler<'_> {
         let mut id = self.table(from.select.ok_or_else(|| error("source required"))?)?;
         if let Some(joins) = &from.joins {
             for join in joins {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 let right = self.table(&join.table)?;
                 let typ = match join.operator {
                     JoinOperator::TypedJoin(Some(t)) => t,
@@ -222,6 +229,7 @@ impl Compiler<'_> {
                             .map(|&i| where_keys[i] as &'a Expr<'a>)
                             .collect::<Vec<_>>();
                         for i in taken.into_iter().rev() {
+                            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                             where_keys.remove(i);
                         }
                         id = self.joined(id, right, &taken_ons, mode)?;
@@ -253,6 +261,7 @@ impl Compiler<'_> {
                 };
                 let (mut l, mut r) = (vec![], vec![]);
                 for n in using {
+                    tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                     let find = |fs: &[Field]| -> Result<usize> {
                         let ids = fs
                             .iter()
@@ -314,6 +323,7 @@ impl Compiler<'_> {
                 // Keep each original qualified key, and expose the SQL USING key
                 // separately. FULL JOIN selects the non-NULL side of that key.
                 for (a, b) in l.iter().zip(&r) {
+                    tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                     let mut merged = fields[*a].clone();
                     merged.qualifier.clear();
                     merged.visible = true;
@@ -366,6 +376,7 @@ impl Compiler<'_> {
     }
 }
 
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn pairs(
     e: &Expr<'_>,
     fields: &[Field],
@@ -395,6 +406,7 @@ fn pairs(
         _ => Err(error("join requires column equality conjunctions")),
     }
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn index_pairs(
     e: &Expr<'_>,
     fields: &[Field],
@@ -426,6 +438,7 @@ fn index_pairs(
         _ => {}
     }
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn table_mentions(t: &SelectTable<'_>, member: &str) -> bool {
     match t {
         SelectTable::Table(n, _, _) => {
@@ -437,6 +450,7 @@ pub(crate) fn table_mentions(t: &SelectTable<'_>, member: &str) -> bool {
     }
 }
 /// Flattens an AND chain into its equality and filter leaves.
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn conjuncts<'a>(e: &'a Expr<'a>, out: &mut Vec<&'a Expr<'a>>) {
     if let Expr::Binary(a, Operator::And, b) = e {
         conjuncts(a, out);
@@ -445,6 +459,7 @@ pub(crate) fn conjuncts<'a>(e: &'a Expr<'a>, out: &mut Vec<&'a Expr<'a>>) {
         out.push(e);
     }
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn column_pair<'a>(e: &'a Expr<'a>, fields: &[Field], split: usize) -> Option<(usize, usize)> {
     let inner = |e: &'a Expr<'a>| match e {
         Expr::Parenthesized(es) if es.len() == 1 => &es[0],
@@ -462,6 +477,7 @@ pub(crate) fn column_pair<'a>(e: &'a Expr<'a>, fields: &[Field], split: usize) -
         None
     }
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn from_mentions(from: &FromClause<'_>, member: &str) -> bool {
     from.select.is_some_and(|t| table_mentions(t, member))
         || from
@@ -469,6 +485,7 @@ fn from_mentions(from: &FromClause<'_>, member: &str) -> bool {
             .as_ref()
             .is_some_and(|joins| joins.iter().any(|j| table_mentions(&j.table, member)))
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn part_mentions(part: &OneSelect<'_>, member: &str) -> bool {
     match part {
         OneSelect::Select {
@@ -477,6 +494,7 @@ pub(crate) fn part_mentions(part: &OneSelect<'_>, member: &str) -> bool {
         _ => false,
     }
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn select_mentions(s: &Select<'_>, member: &str) -> bool {
     s.with
         .as_ref()
@@ -485,6 +503,7 @@ fn select_mentions(s: &Select<'_>, member: &str) -> bool {
             .chain(s.body.compounds.iter().flatten().map(|c| &c.select))
             .any(|part| part_mentions(part, member) || part_expressions_mention(part, member))
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn part_expressions_mention(part: &OneSelect<'_>, member: &str) -> bool {
     let OneSelect::Select {
         columns,
@@ -501,6 +520,7 @@ pub(crate) fn part_expressions_mention(part: &OneSelect<'_>, member: &str) -> bo
         || where_clause.is_some_and(|e| expr_mentions(e, member))
         || having.is_some_and(|e| expr_mentions(e, member))
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn expr_mentions(e: &Expr<'_>, member: &str) -> bool {
     let sub = |e: &Expr<'_>| expr_mentions(e, member);
     match e {
@@ -533,6 +553,7 @@ fn expr_mentions(e: &Expr<'_>, member: &str) -> bool {
         _ => false,
     }
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn equalities(e: &Expr<'_>, fields: &[Field], out: &mut Vec<(usize, String)>) {
     match e {
         Expr::Parenthesized(es) if es.len() == 1 => equalities(&es[0], fields, out),

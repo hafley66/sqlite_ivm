@@ -8,6 +8,7 @@ use crate::relational::{
 use rusqlite::Result;
 use sqlite3_parser::ast::*;
 impl Compiler<'_> {
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn push(&mut self, kind: Kind, inputs: Vec<usize>, fields: Vec<Field>) -> usize {
         let (kind, inputs) = self.project_group_input(kind, inputs);
         let id = self.plan.nodes.len();
@@ -21,6 +22,7 @@ impl Compiler<'_> {
     /// A group arrangement stores every column of its input row, so a group
     /// over a join would keep the whole join product. A Map in front keeps
     /// only the columns the group reads, renumbered from c0.
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn project_group_input(&mut self, kind: Kind, inputs: Vec<usize>) -> (Kind, Vec<usize>) {
         let Kind::Group {
             keys,
@@ -38,6 +40,7 @@ impl Compiler<'_> {
         let width = self.plan.nodes[input].fields.len();
         let mut used = std::collections::BTreeSet::new();
         for sql in keys.iter().chain(&expressions).chain(&order).chain(&having) {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             used.extend(column_references(sql));
         }
         let kind = |keys, expressions, order, having| Kind::Group {
@@ -80,6 +83,7 @@ impl Compiler<'_> {
         );
         (projected, vec![map])
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn predicate(&mut self, id: usize, e: &Expr<'_>) -> Result<usize> {
         if let Expr::Binary(a, Operator::And, b) = e {
             let a = self.predicate(id, a)?;
@@ -112,6 +116,7 @@ impl Compiler<'_> {
                 let mut fields = self.plan.nodes[id].fields.clone();
                 fields.extend(self.plan.nodes[right].fields.clone());
                 for c in *columns {
+                    tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                     if let ResultColumn::Expr(e, _) = c {
                         if has_aggregate(e) {
                             return Err(error(
@@ -136,6 +141,7 @@ impl Compiler<'_> {
             fields,
         ))
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn core(
         &mut self,
         s: &OneSelect<'_>,
@@ -160,6 +166,7 @@ impl Compiler<'_> {
         }
         let mut id = self.from(from, &mut where_keys)?;
         for e in where_keys {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             id = self.predicate(id, e)?;
         }
         let mut fields = self.plan.nodes[id].fields.clone();
@@ -171,6 +178,7 @@ impl Compiler<'_> {
         let mut expressions = vec![];
         let mut output_fields = vec![];
         for column in *columns {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             match column {
                 ResultColumn::Star | ResultColumn::TableStar(_) => {
                     let mut selected = fields
@@ -187,6 +195,7 @@ impl Compiler<'_> {
                         selected.sort_by_key(|(_, f)| f.position);
                     }
                     for (i, f) in selected {
+                        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                         let i = if matches!(column, ResultColumn::TableStar(_)) && f.merged_star {
                             fields
                                 .iter()
@@ -397,6 +406,7 @@ impl Compiler<'_> {
         let mut ordering = vec![];
         if limit.is_some() {
             for s in order.unwrap_or(&[]) {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 let existing = ordinal(&s.expr, output_width)?
                     .or_else(|| resolve(&s.expr, &output_fields).ok())
                     .or_else(|| {
@@ -481,10 +491,12 @@ impl Compiler<'_> {
         }
         Ok(id)
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn select(&mut self, s: &Select<'_>) -> Result<usize> {
         let mark = self.ctes.len();
         if let Some(with) = &s.with {
             for cte in with.ctes {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 let member = name(cte.tbl_name.0);
                 let recursive = with.recursive
                     && cte.select.body.compounds.as_ref().is_some_and(|parts| {
@@ -503,6 +515,7 @@ impl Compiler<'_> {
                         return Err(error("CTE column count mismatch"));
                     }
                     for (f, c) in fields.iter_mut().zip(columns) {
+                        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                         f.name = name(c.col_name.0);
                     }
                     let expressions = (0..fields.len()).map(|i| format!("c{i}")).collect();
@@ -529,6 +542,7 @@ impl Compiler<'_> {
         )?;
         if let Some(compounds) = &s.body.compounds {
             for c in compounds {
+                tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 let right = self.core(&c.select, None, None)?;
                 let fields = self.plan.nodes[id].fields.clone();
                 if fields.len() != self.plan.nodes[right].fields.len() {

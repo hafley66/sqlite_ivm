@@ -10,6 +10,7 @@ use crate::{
 use rusqlite::Connection;
 
 impl Plan {
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn source_expression(&self, id: usize, expression: &str) -> Option<(usize, String)> {
         if column_references(expression).is_empty() {
             return None;
@@ -47,7 +48,9 @@ impl Plan {
 
     /// Full current bag, generated from the same materialization expressions.
     /// Recursive members are derived results, never copies of operator inputs.
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn live_rows(&self, db: &Connection, name: &str, id: usize) -> String {
+        #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
         fn visit(
             plan: &Plan,
             id: usize,
@@ -59,6 +62,7 @@ impl Plan {
             }
             if !matches!(plan.nodes[id].kind, Kind::Fixpoint { .. }) {
                 for input in &plan.nodes[id].inputs {
+                    tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                     visit(plan, *input, seen, order);
                 }
             }
@@ -88,6 +92,7 @@ impl Plan {
     // SQL text. Set CTEs are statement-local fences against preparation growth;
     // other nodes stay planner-visible for indexed pushdown and cell affinity.
     // A broader Join/Group fence changed Integer(1) into Real(1.0).
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn live_rows_definition(&self, db: &Connection, name: &str, id: usize) -> String {
         let node = &self.nodes[id];
         let width = node.fields.len();
@@ -169,6 +174,7 @@ impl Plan {
         }
     }
 
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn live_input(
         &self,
         db: &Connection,
@@ -189,6 +195,7 @@ impl Plan {
         )
     }
 
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn live_input_from_rows(
         &self,
         name: &str,

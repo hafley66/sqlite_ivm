@@ -16,6 +16,7 @@ use std::{
 // rusqlite 0.40.2 documents Module as repr(transparent) over sqlite3_module.
 // Keep its allocation, cursor, update and error adapters; fill the two missing
 // SQLite callbacks in the ABI descriptor. No C source or replacement binding.
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub fn register(db: &Connection) -> Result<()> {
     const MODULE: Module<Table> = unsafe {
         let mut raw: ffi::sqlite3_module =
@@ -56,11 +57,13 @@ struct Table {
     changes: Arc<ViewChanges>,
 }
 
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn recursive(plan: &crate::relational::Plan) -> bool {
     plan.nodes
         .iter()
         .any(|n| matches!(n.kind, crate::relational::Kind::Fixpoint { .. }))
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn declaration(plan: &crate::relational::Plan) -> String {
     let arity = plan.sources.iter().map(|s| s.columns.len()).max().unwrap_or(0);
     let hidden = (0..arity)
@@ -76,6 +79,7 @@ fn declaration(plan: &crate::relational::Plan) -> String {
 // fixpoint members; `generic=0` rows carry the retired per-row engine's
 // `_state(g,n,s)`/`_delta` tables and source key indexes. Both rebind here,
 // inside xConnect, before any trigger of the stored hooks can run.
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn migrate(
     conn: &Connection,
     name: &str,
@@ -118,6 +122,7 @@ pub(crate) fn migrate(
 // A `generic=0` row stores the retired engine's shadows. Every entry that can
 // meet one rebuilds it as a relational arrangement: xConnect through `migrate`,
 // source DDL directly, with the already-rewritten SQL.
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn convert(
     conn: &Connection,
     name: &str,
@@ -132,6 +137,7 @@ pub(crate) fn convert(
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
     for (kind, object) in &retired {
+        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
         statements::batch(conn, Phase::Declare, name, &format!("DROP {kind} main.{}", quote(object)))?;
     }
     let mut objects = plan.create_state(conn, name)?;
@@ -152,6 +158,7 @@ pub(crate) fn convert(
         [name],
     )?;
     for (kind, object) in &objects {
+        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
         let definition: String = statements::query(
             conn,
             Phase::Declare,
@@ -172,6 +179,7 @@ pub(crate) fn convert(
     set_schema(conn, name, plan)?;
     Ok(())
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn drop_triggers(conn: &Connection, name: &str) -> Result<()> {
     let triggers: Vec<String> = statements::query_map(
         conn,
@@ -182,6 +190,7 @@ pub(crate) fn drop_triggers(conn: &Connection, name: &str) -> Result<()> {
         |r| r.get(0),
     )?;
     for trigger in &triggers {
+        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
         statements::batch(
             conn,
             Phase::Teardown,
@@ -191,6 +200,7 @@ pub(crate) fn drop_triggers(conn: &Connection, name: &str) -> Result<()> {
     }
     Ok(())
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn set_schema(conn: &Connection, name: &str, plan: &crate::relational::Plan) -> Result<()> {
     let roles = (1..=plan.names.len())
         .map(|i| i.to_string())
@@ -205,9 +215,11 @@ fn set_schema(conn: &Connection, name: &str, plan: &crate::relational::Plan) -> 
     )?;
     Ok(())
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn text(bytes: &[u8]) -> Result<&str> {
     std::str::from_utf8(bytes).map_err(|e| error(e.to_string()))
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn query_argument(args: &[&[u8]]) -> Result<String> {
     if args.len() != 1 {
         return Err(error(
@@ -225,6 +237,7 @@ fn query_argument(args: &[&[u8]]) -> Result<String> {
     let mut chars = inner.chars();
     let mut result = String::new();
     while let Some(ch) = chars.next() {
+        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
         if ch == '\'' && chars.next() != Some('\'') {
             return Err(error("invalid quoted query"));
         }
@@ -233,6 +246,7 @@ fn query_argument(args: &[&[u8]]) -> Result<String> {
     Ok(result)
 }
 impl Table {
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn name(&self) -> Result<String> {
         statements::query_cached(
             &self.db,
@@ -243,6 +257,7 @@ impl Table {
             |r| r.get(0),
         )
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn attach(
         db: &mut VTabConnection,
         schema: &[u8],
@@ -410,6 +425,7 @@ impl Table {
             },
         ))
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn refresh(&mut self) -> Result<()> {
         let generation = crate::source_ddl::generation();
         if generation == self.generation {
@@ -454,6 +470,7 @@ impl Table {
         self.generation = generation;
         Ok(())
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn rename_to(&self, new: &str) -> Result<()> {
         relational_maintenance::validate_name(new)?;
         let old = self.name()?;
@@ -463,6 +480,7 @@ impl Table {
         // SQLite disallows DROP INDEX while the outer ALTER statement is active.
         // SQLite calls xRename with legacy_alter_table enabled.
         for (kind, name, _) in &objects {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             if kind == "index" {
                 renamed.push(("index", name.clone()));
             }
@@ -477,6 +495,7 @@ impl Table {
             }
         }
         for (kind, name, _) in &objects {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             if kind == "table" {
                 let suffix = name
                     .strip_prefix(&format!("{old}_"))
@@ -509,6 +528,7 @@ impl Table {
             [&old],
         )?;
         for table in ["__ivm_sources", "__ivm_columns"] {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             statements::exec(
                 &self.db,
                 Phase::Declare,
@@ -525,6 +545,7 @@ impl Table {
             rusqlite::params![new, self.id],
         )?;
         for (kind, name) in renamed {
+            tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             let ddl: String = statements::query(
                 &self.db,
                 Phase::Declare,
@@ -546,6 +567,7 @@ impl Table {
 }
 impl Table {
     /// Hands every staged source row to the plan in one batch.
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn drain(&mut self) -> Result<()> {
         let name = self.name()?;
         let Some(collector) = self.collector.as_mut() else {
@@ -598,15 +620,18 @@ impl Table {
     }
 }
 impl<'vtab> TransactionVTab<'vtab> for Table {
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn begin(&mut self) -> Result<()> {
         if let Some(collector) = self.collector.as_mut() {
             if self.changes.transactions.lock().expect("view changes lock").insert(self.id) { collector.lock().expect("view changes lock").begin(); }
         }
         Ok(())
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn sync(&mut self) -> Result<()> {
         self.drain()
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn commit(&mut self) -> Result<()> {
         if let Some(collector) = self.collector.as_mut() {
             collector.lock().expect("view changes lock").commit();
@@ -614,6 +639,7 @@ impl<'vtab> TransactionVTab<'vtab> for Table {
         }
         Ok(())
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn rollback(&mut self) -> Result<()> {
         if let Some(collector) = self.collector.as_mut() {
             collector.lock().expect("view changes lock").rollback();
@@ -622,6 +648,7 @@ impl<'vtab> TransactionVTab<'vtab> for Table {
         Ok(())
     }
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn dispatch(raw: *mut ffi::sqlite3_vtab, body: impl FnOnce(&mut Table)) -> c_int {
     // Never unwind into C.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -638,6 +665,7 @@ fn dispatch(raw: *mut ffi::sqlite3_vtab, body: impl FnOnce(&mut Table)) -> c_int
         },
     }
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 unsafe extern "C" fn savepoint(raw: *mut ffi::sqlite3_vtab, index: c_int) -> c_int {
     dispatch(raw, |table| {
         if let Some(collector) = table.collector.as_mut() {
@@ -645,6 +673,7 @@ unsafe extern "C" fn savepoint(raw: *mut ffi::sqlite3_vtab, index: c_int) -> c_i
         }
     })
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 unsafe extern "C" fn release(raw: *mut ffi::sqlite3_vtab, index: c_int) -> c_int {
     dispatch(raw, |table| {
         if let Some(collector) = table.collector.as_mut() {
@@ -652,6 +681,7 @@ unsafe extern "C" fn release(raw: *mut ffi::sqlite3_vtab, index: c_int) -> c_int
         }
     })
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 unsafe extern "C" fn rollback_to(raw: *mut ffi::sqlite3_vtab, index: c_int) -> c_int {
     dispatch(raw, |table| {
         if let Some(collector) = table.collector.as_mut() {
@@ -662,6 +692,7 @@ unsafe extern "C" fn rollback_to(raw: *mut ffi::sqlite3_vtab, index: c_int) -> c
 unsafe impl<'vtab> VTab<'vtab> for Table {
     type Aux = Arc<ViewChanges>;
     type Cursor = Cursor;
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn connect(
         db: &mut VTabConnection,
         changes: Option<&Self::Aux>,
@@ -672,10 +703,12 @@ unsafe impl<'vtab> VTab<'vtab> for Table {
     ) -> Result<(Cow<'static, CStr>, Self)> {
         Self::attach(db, schema, name, args, false, changes.expect("connection batch registry").clone())
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn best_index(&self, info: &mut IndexInfo) -> Result<bool> {
         info.set_estimated_cost(1_000_000.0);
         Ok(true)
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn open(&'vtab mut self) -> Result<Cursor> {
         // Read-your-writes: a read inside the transaction drains first.
         self.drain()?;
@@ -692,6 +725,7 @@ unsafe impl<'vtab> VTab<'vtab> for Table {
 }
 impl<'vtab> CreateVTab<'vtab> for Table {
     const KIND: VTabKind = VTabKind::Default;
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn create(
         db: &mut VTabConnection,
         changes: Option<&Self::Aux>,
@@ -702,17 +736,21 @@ impl<'vtab> CreateVTab<'vtab> for Table {
     ) -> Result<(Cow<'static, CStr>, Self)> {
         Self::attach(db, schema, name, args, true, changes.expect("connection batch registry").clone())
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn destroy(&self) -> Result<()> {
         catalog::uninstall(&self.db, &self.name()?)
     }
 }
 impl<'vtab> UpdateVTab<'vtab> for Table {
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn delete(&mut self, _: ValueRef<'_>) -> Result<()> {
         Err(error("managed results are read-only"))
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn update(&mut self, _: &Updates<'_>) -> Result<()> {
         Err(error("managed results are read-only"))
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn insert(&mut self, args: &Inserts<'_>) -> Result<i64> {
         self.refresh()?;
         let count = self.roles.len();
@@ -789,6 +827,7 @@ struct Cursor {
     done: bool,
 }
 impl Cursor {
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn check(&self, rc: c_int) -> Result<()> {
         if rc == ffi::SQLITE_OK {
             return Ok(());
@@ -804,6 +843,7 @@ impl Cursor {
     }
 }
 impl Drop for Cursor {
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn drop(&mut self) {
         unsafe {
             ffi::sqlite3_finalize(self.statement);
@@ -811,6 +851,7 @@ impl Drop for Cursor {
     }
 }
 unsafe impl VTabCursor for Cursor {
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn filter(&mut self, _: c_int, _: Option<&str>, _: &Filters<'_>) -> Result<()> {
         unsafe {
             ffi::sqlite3_finalize(self.statement);
@@ -831,6 +872,9 @@ unsafe impl VTabCursor for Cursor {
             &select,
             statements::FRESH,
         ));
+        let _statements = self.statements.as_ref().map(|statement| statement.enter());
+        let _prepare = tracing::debug_span!("prepare", sql = %select, sql_bytes = select.len(), operation = "cursor").entered();
+        tracing::debug!("prepare_start");
         let sql = CString::new(select).map_err(|e| error(e.to_string()))?;
         let rc = unsafe {
             ffi::sqlite3_prepare_v2(
@@ -841,12 +885,19 @@ unsafe impl VTabCursor for Cursor {
                 ptr::null_mut(),
             )
         };
+        tracing::debug!(rc, success = rc == ffi::SQLITE_OK, "prepare_end");
         self.check(rc)?;
+        drop(_prepare);
+        drop(_statements);
         self.next()
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn next(&mut self) -> Result<()> {
         let _statements = self.statements.as_ref().map(|statement| statement.enter());
+        let _execute = tracing::debug_span!("execute", operation = "cursor_step").entered();
+        tracing::debug!("execute_start");
         let rc = unsafe { ffi::sqlite3_step(self.statement) };
+        tracing::debug!(rc, row = rc == ffi::SQLITE_ROW, done = rc == ffi::SQLITE_DONE, "execute_end");
         self.done = rc != ffi::SQLITE_ROW;
         if rc == ffi::SQLITE_ROW || rc == ffi::SQLITE_DONE {
             Ok(())
@@ -854,9 +905,11 @@ unsafe impl VTabCursor for Cursor {
             self.check(rc)
         }
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn eof(&self) -> bool {
         self.done
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn column(&self, ctx: &mut Context, i: c_int) -> Result<()> {
         if let Some(role) = self.roles.get(i as usize) {
             let value = unsafe {
@@ -898,11 +951,13 @@ unsafe impl VTabCursor for Cursor {
             ctx.set_result(&rusqlite::types::Null)
         }
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn rowid(&self) -> Result<i64> {
         Ok(unsafe { ffi::sqlite3_column_int64(self.statement, 0) })
     }
 }
 
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 unsafe extern "C" fn rename(raw: *mut ffi::sqlite3_vtab, new: *const c_char) -> c_int {
     // The adapter is the only custom callback with fallible work. Never unwind into C.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -919,6 +974,7 @@ unsafe extern "C" fn rename(raw: *mut ffi::sqlite3_vtab, new: *const c_char) -> 
         Err(e) => unsafe { rusqlite::to_sqlite_error(&e, &mut (*raw).zErrMsg) },
     }
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 unsafe extern "C" fn shadow_name(name: *const c_char) -> c_int {
     let suffix = unsafe { CStr::from_ptr(name) }.to_bytes();
     i32::from(

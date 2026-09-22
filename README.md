@@ -248,3 +248,35 @@ SQLite queries, and DD, with a per-engine report, JSONL receipts, and explicit
 `n/a (<reason>)` markers for unsupported definitions. See
 [bench/README.md](bench/README.md) for dependencies, profiles, artifacts, and
 exit codes.
+
+## Native plugin tracing
+
+The native extension and linked library retain the same statement instrumentation.
+Use the existing hafley-observe JSON formatter and runtime filter:
+
+```bash
+cd /Users/chrishafley/projects/sprefa-wt/sqlite-perf-main
+RUST_LOG='dl8=debug,sqlite_ivm=trace,sqlite=trace' HAFLEY_LOG_FORMAT=json HAFLEY_TRACE='' DL8_ENGINE=sqlite SQLITE_IVM_LIB=/Users/chrishafley/projects/sqlite_ivm/target/extension/release/libsqlite_ivm.dylib target/debug/dl8 compile fixtures/aggregates/0_sum.dl7 > /private/tmp/ivm-compile.stdout 2> /private/tmp/ivm-compile.jsonl
+```
+
+`prepare_start` records the full SQL before preparation. Its `prepare` span
+carries SQL bytes and cache API path; `prepare_end` records success or error.
+The separate `execute` span records start, completion, returned row count when
+known, and errors. A native regression test checks that preparation events are
+present in the loaded release extension. `cached=true` means `prepare_cached`
+was called; it does not assert that the cache contained that statement.
+
+Function entry/exit spans include source file and line at TRACE level. Explicit
+loop events and operator spans expose population, maintenance, unchanged-input
+skips, and emitted delta counts. Population records the operator ID, kind, input
+IDs and width. Cursor prepare/step calls are also recorded. Batch execution,
+pragma updates and collector guards expose combined start/end events because
+those library APIs own their internal preparation. Tracing does not separately
+record every physical source line or iterator-adapter invocation.
+
+`RUST_LOG` takes precedence over `HAFLEY_LOG`. Full TRACE includes expanded SQL
+and can generate large files. `sqlite_ivm=debug,sqlite=debug` retains statement
+preparation and operator attribution without function and loop TRACE events.
+The `statements` Cargo feature remains accepted for existing recipes; removing
+it no longer compiles native observability away. Set `RUST_LOG=off` for timings
+without tracing. Diagnostic log intervals include recording overhead.

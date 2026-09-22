@@ -24,7 +24,7 @@
       [
         "declare",
         "SELECT",
-        29
+        30
       ],
       [
         "materialize",
@@ -45,8 +45,8 @@
     "scans": [
       [
         "declare",
-        2557,
-        135
+        2619,
+        145
       ],
       [
         "materialize",
@@ -80,7 +80,7 @@
       [
         "declare",
         "SELECT",
-        329
+        330
       ],
       [
         "drain",
@@ -131,8 +131,8 @@
     "scans": [
       [
         "declare",
-        366157,
-        135
+        366219,
+        145
       ],
       [
         "drain",
@@ -176,7 +176,7 @@
       [
         "declare",
         "SELECT",
-        131
+        132
       ],
       [
         "drain",
@@ -227,8 +227,8 @@
     "scans": [
       [
         "declare",
-        45397,
-        135
+        45459,
+        145
       ],
       [
         "drain",

@@ -1,0 +1,328 @@
+{
+  "completed_preparations": 19324,
+  "summed_prepare_seconds": 24.515070999999818,
+  "largest": [
+    {
+      "seconds": 1.229194,
+      "node": {
+        "columns": 6,
+        "id": 1629,
+        "inputs": "[1565, 1578, 1582, 1585, 1593, 1600, 1607, 1610, 1613, 1615, 1617, 1619, 1621, 1622, 1624, 1625, 1627, 1628]",
+        "kind": "fixpoint",
+        "view": "program",
+        "name": "populate_node"
+      },
+      "sql_bytes": 180764,
+      "start": "2026-09-22T13:47:48.209876Z",
+      "sql_file": "220_aggregate_prepare_node_1629.sql"
+    },
+    {
+      "seconds": 1.02084,
+      "node": {
+        "columns": 14,
+        "id": 1563,
+        "inputs": "[1561, 1562]",
+        "kind": "join",
+        "view": "program",
+        "name": "populate_node"
+      },
+      "sql_bytes": 260933,
+      "start": "2026-09-22T13:47:46.971973Z",
+      "sql_file": "221_aggregate_prepare_node_1563.sql"
+    },
+    {
+      "seconds": 0.723626,
+      "node": {
+        "columns": 5,
+        "id": 421,
+        "inputs": "[416, 420]",
+        "kind": "set",
+        "view": "program",
+        "name": "populate_node"
+      },
+      "sql_bytes": 271020,
+      "start": "2026-09-22T13:47:38.391384Z",
+      "sql_file": "222_aggregate_prepare_node_421.sql"
+    },
+    {
+      "seconds": 0.670776,
+      "node": {
+        "columns": 5,
+        "id": 425,
+        "inputs": "[421, 424]",
+        "kind": "set",
+        "view": "program",
+        "name": "populate_node"
+      },
+      "sql_bytes": 153004,
+      "start": "2026-09-22T13:47:39.118765Z"
+    },
+    {
+      "seconds": 0.530859,
+      "node": {
+        "columns": 6,
+        "id": 1629,
+        "inputs": "[1565, 1578, 1582, 1585, 1593, 1600, 1607, 1610, 1613, 1615, 1617, 1619, 1621, 1622, 1624, 1625, 1627, 1628]",
+        "kind": "fixpoint",
+        "view": "program",
+        "name": "populate_node"
+      },
+      "sql_bytes": 177798,
+      "start": "2026-09-22T13:47:50.186755Z"
+    },
+    {
+      "seconds": 0.384594,
+      "node": {
+        "columns": 6,
+        "id": 1629,
+        "inputs": "[1565, 1578, 1582, 1585, 1593, 1600, 1607, 1610, 1613, 1615, 1617, 1619, 1621, 1622, 1624, 1625, 1627, 1628]",
+        "kind": "fixpoint",
+        "view": "program",
+        "name": "populate_node"
+      },
+      "sql_bytes": 87798,
+      "start": "2026-09-22T13:47:49.646171Z"
+    },
+    {
+      "seconds": 0.381721,
+      "node": {
+        "columns": 6,
+        "id": 414,
+        "inputs": "[412, 413]",
+        "kind": "join",
+        "view": "program",
+        "name": "populate_node"
+      },
+      "sql_bytes": 219887,
+      "start": "2026-09-22T13:47:37.401253Z"
+    },
+    {
+      "seconds": 0.378159,
+      "node": {
+        "columns": 6,
+        "id": 1629,
+        "inputs": "[1565, 1578, 1582, 1585, 1593, 1600, 1607, 1610, 1613, 1615, 1617, 1619, 1621, 1622, 1624, 1625, 1627, 1628]",
+        "kind": "fixpoint",
+        "view": "program",
+        "name": "populate_node"
+      },
+      "sql_bytes": 177270,
+      "start": "2026-09-22T13:47:50.720275Z"
+    },
+    {
+      "seconds": 0.358114,
+      "node": {
+        "columns": 5,
+        "id": 416,
+        "inputs": "[415]",
+        "kind": "set",
+        "view": "program",
+        "name": "populate_node"
+      },
+      "sql_bytes": 138431,
+      "start": "2026-09-22T13:47:37.786609Z"
+    },
+    {
+      "seconds": 0.302928,
+      "node": {
+        "columns": 3,
+        "id": 1705,
+        "inputs": "[1692, 1704]",
+        "kind": "set",
+        "view": "program",
+        "name": "populate_node"
+      },
+      "sql_bytes": 332682,
+      "start": "2026-09-22T13:47:53.167645Z"
+    }
+  ],
+  "capture_first": "2026-09-22 13:47:26.748322+00:00",
+  "capture_last": "2026-09-22 13:47:56.638995+00:00",
+  "inflight": {
+    "timestamp": "2026-09-22T13:47:56.638995Z",
+    "level": "DEBUG",
+    "fields": {
+      "message": "prepare_start"
+    },
+    "target": "sqlite_ivm::statements",
+    "operator": {
+      "columns": 7,
+      "id": 1895,
+      "inputs": "[1892, 1894]",
+      "kind": "set",
+      "view": "program",
+      "name": "populate_node"
+    },
+    "sql_bytes": 332567,
+    "sql_file": "223_aggregate_inflight_node_1895.sql"
+  },
+  "timing_caveat": "Timestamp intervals include logging overhead. Heavy diagnostic capture, not benchmark timing. The last unfinished prepare is the operation active at termination, not proof it alone caused the timeout.",
+  "source_coverage": [
+    {
+      "file": "src/0c_compile_from.rs",
+      "functions": 14,
+      "function_spans": 14,
+      "loop_events": 7
+    },
+    {
+      "file": "src/2a_source_ddl.rs",
+      "functions": 6,
+      "function_spans": 6,
+      "loop_events": 4
+    },
+    {
+      "file": "src/0b_relational.rs",
+      "functions": 25,
+      "function_spans": 24,
+      "loop_events": 1
+    },
+    {
+      "file": "src/1d_drain.rs",
+      "functions": 7,
+      "function_spans": 7,
+      "loop_events": 18
+    },
+    {
+      "file": "src/1a_relational.rs",
+      "functions": 22,
+      "function_spans": 22,
+      "loop_events": 5
+    },
+    {
+      "file": "src/1c_materialize.rs",
+      "functions": 5,
+      "function_spans": 5,
+      "loop_events": 4
+    },
+    {
+      "file": "src/0a_catalog.rs",
+      "functions": 5,
+      "function_spans": 5,
+      "loop_events": 6
+    },
+    {
+      "file": "src/lib.rs",
+      "functions": 0,
+      "function_spans": 0,
+      "loop_events": 0
+    },
+    {
+      "file": "src/0d_compile_select.rs",
+      "functions": 5,
+      "function_spans": 5,
+      "loop_events": 9
+    },
+    {
+      "file": "src/1ab_native_keys.rs",
+      "functions": 9,
+      "function_spans": 9,
+      "loop_events": 0
+    },
+    {
+      "file": "src/1b_state.rs",
+      "functions": 11,
+      "function_spans": 11,
+      "loop_events": 12
+    },
+    {
+      "file": "src/0g_statements.rs",
+      "functions": 16,
+      "function_spans": 0,
+      "loop_events": 0
+    },
+    {
+      "file": "src/2_vtab.rs",
+      "functions": 39,
+      "function_spans": 39,
+      "loop_events": 8
+    },
+    {
+      "file": "src/0f_columns.rs",
+      "functions": 4,
+      "function_spans": 4,
+      "loop_events": 3
+    },
+    {
+      "file": "src/1ca_source_reads.rs",
+      "functions": 6,
+      "function_spans": 6,
+      "loop_events": 1
+    },
+    {
+      "file": "src/0e_compile_recursive.rs",
+      "functions": 3,
+      "function_spans": 3,
+      "loop_events": 14
+    },
+    {
+      "file": "src/1e_program.rs",
+      "functions": 16,
+      "function_spans": 16,
+      "loop_events": 5
+    },
+    {
+      "file": "src/3_extension.rs",
+      "functions": 3,
+      "function_spans": 2,
+      "loop_events": 0
+    }
+  ],
+  "limitations": [
+    "Function spans use skip_all; arguments are recorded explicitly at SQL/operator boundaries.",
+    "Loop events cover annotated loop sites; iterator adapters and each physical source line are not individually logged.",
+    "execute_batch, pragma_update, and collector guard internals expose combined start/end rather than a fabricated prepare/execute split.",
+    "Cached means the prepare_cached API path, not a measured cache hit.",
+    "Observer initialization and formatting helpers are not recursively instrumented."
+  ],
+  "capture_command": "cd /Users/chrishafley/projects/sprefa-wt/sqlite-perf-main && RUST_LOG='dl8=debug,sqlite_ivm=debug,sqlite=debug' HAFLEY_LOG_FORMAT=json HAFLEY_TRACE='' DL8_ENGINE=sqlite SQLITE_IVM_LIB=/Users/chrishafley/projects/sqlite_ivm/target/extension/release/libsqlite_ivm.dylib target/debug/dl8 compile fixtures/aggregates/0_sum.dl7",
+  "capture_timeout_seconds": 30,
+  "evaluator_invocations": [
+    {
+      "rules": 76,
+      "seeds": 422,
+      "populate_started": 274,
+      "populate_completed": 274
+    },
+    {
+      "rules": 76,
+      "seeds": 155,
+      "populate_started": 274,
+      "populate_completed": 274
+    },
+    {
+      "rules": 129,
+      "seeds": 1304,
+      "populate_started": 1896,
+      "populate_completed": 1895
+    }
+  ],
+  "tests": {
+    "plugin": "78 passed, 2 helper tests skipped",
+    "native": "4 passed, including a subprocess that loads the release dylib and asserts full SQL is present at prepare_start; six native shell scenarios passed",
+    "statement_count_snapshot": "three group scenarios each gained attribution for one already-existing metadata SELECT: +1 statement, +62 VM steps, +10 scan steps; query workload unchanged"
+  },
+  "capture_revision_note": "Diagnostic capture preceded the final addition of source_file/source_line fields to function spans, scalar callback spans, and compile_node_statements events. Prepare/execute and populate_node instrumentation was already active.",
+  "native_transaction_probe": {
+    "json_records": 9615,
+    "prepare_start": 152,
+    "prepare_end": 152,
+    "execute_start": 157,
+    "execute_end": 157,
+    "loop_iteration": 5754,
+    "result_before_and_after_rollback": [
+      1,
+      2,
+      3
+    ],
+    "lifecycle_entries": [
+      "attach",
+      "populate",
+      "insert",
+      "sync",
+      "savepoint",
+      "rollback_to",
+      "rollback",
+      "destroy"
+    ]
+  }
+}

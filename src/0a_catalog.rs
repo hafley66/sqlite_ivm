@@ -1,10 +1,12 @@
 use crate::statements::{self, Phase};
 use rusqlite::{Connection, Error, OptionalExtension, Result};
 
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub fn error(message: impl Into<String>) -> Error {
     Error::UserFunctionError(Box::new(std::io::Error::other(message.into())))
 }
 
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub fn quote(name: &str) -> String {
     format!("\"{}\"", name.replace('"', "\"\""))
 }
@@ -15,6 +17,7 @@ pub struct Column {
     pub name: String,
 }
 
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub fn record_objects(
     db: &Connection,
     name: &str,
@@ -50,6 +53,7 @@ pub fn record_objects(
         [name, sql],
     )?;
     for (source, table) in tables.iter().enumerate() {
+        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
         statements::exec(
             db,
             Phase::Declare,
@@ -59,6 +63,7 @@ pub fn record_objects(
         )?;
     }
     for column in columns {
+        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
         statements::exec(
             db,
             Phase::Declare,
@@ -68,6 +73,7 @@ pub fn record_objects(
         )?;
     }
     for (kind, object) in objects {
+        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
         let definition: String = statements::query(
             db,
             Phase::Declare,
@@ -87,6 +93,7 @@ pub fn record_objects(
     Ok(())
 }
 
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub fn manifest(
     db: &Connection,
     name: &str,
@@ -105,6 +112,7 @@ pub fn manifest(
         return Err(error("managed view has no object manifest"));
     }
     for (kind, object, definition) in &objects {
+        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
         let actual: Option<String> = statements::query(
             db,
             Phase::Declare,
@@ -133,8 +141,10 @@ pub fn manifest(
 }
 
 // xDestroy owns the DDL transaction and removes the virtual table itself.
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub fn uninstall(db: &Connection, name: &str) -> Result<()> {
     for (kind, object, _) in manifest(db, name, None)? {
+        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
         let keyword = match kind.as_str() {
             "trigger" => "TRIGGER",
             "index" => "INDEX",
@@ -144,6 +154,7 @@ pub fn uninstall(db: &Connection, name: &str) -> Result<()> {
         statements::batch(db, Phase::Teardown, name, &format!("DROP {keyword} main.{}", quote(&object)))?;
     }
     for table in ["__ivm_objects", "__ivm_columns", "__ivm_sources"] {
+        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
         statements::exec(
             db,
             Phase::Teardown,

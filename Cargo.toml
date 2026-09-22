@@ -19,8 +19,8 @@ crate-type = ["cdylib", "rlib"]
 default = ["bundled", "statements"]
 bundled = ["rusqlite/bundled"]
 extension = ["rusqlite/loadable_extension"]
-# One span per statement site (src/0g_statements.rs). Off, the spans compile out and
-# a run pays nothing; that build is the one the recipe times wall clock on.
+# Compatibility feature for existing test/benchmark recipes. Native and linked
+# builds both retain statement spans; runtime filters control recording.
 statements = []
 
 [dependencies]

@@ -86,3 +86,34 @@ fn loaded_extension_maintains_a_view_end_to_end() -> Result<()> {
     assert_eq!(view, (2, 10));
     Ok(())
 }
+
+#[test]
+fn loaded_extension_retains_preparation_and_execution_events() {
+    // A separate process lets the actual dylib install its hafley-observe layer.
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "loaded_extension_maintains_a_view_end_to_end", "--nocapture"])
+        .env("IVM_EXTENSION", artifact())
+        .env("RUST_LOG", "sqlite_ivm=trace,sqlite=trace")
+        .env("HAFLEY_LOG_FORMAT", "json")
+        .env("HAFLEY_TRACE", "")
+        .output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let records = String::from_utf8(output.stderr).unwrap().lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    let count = |message: &str| records.iter().filter(|r| r["fields"]["message"] == message).count();
+    assert!(count("prepare_start") > 0);
+    assert_eq!(count("prepare_start"), count("prepare_end"));
+    assert_eq!(count("execute_start"), count("execute_end"));
+    assert!(count("loop_iteration") > 0);
+    for record in records.iter().filter(|r| r["fields"]["message"] == "prepare_start") {
+        let span = &record["span"];
+        assert_eq!(span["name"], "prepare");
+        let sql = span["sql"].as_str().expect("SQL must precede preparation");
+        assert!(!sql.is_empty());
+        assert_eq!(span["sql_bytes"].as_u64(), Some(sql.len() as u64));
+    }
+    for name in ["attach", "populate", "populate_node", "insert", "sync", "prepare", "execute"] {
+        assert!(records.iter().any(|r| r["fields"]["message"] == "new" && r["span"]["name"] == name), "missing native entry {name}");
+    }
+}

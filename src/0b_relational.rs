@@ -7,6 +7,7 @@ use sqlite3_parser::{ast::*, lexer::sql::Parser, Bump, FallibleIterator};
 
 /// Names the catalog probes and the plan queries, none of which touch a source.
 const BIND_OBJECT: &str = "catalog";
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn sql<T: fmt::ToTokens>(value: &T) -> String {
     struct Sql<'a, T>(&'a T);
     impl<T: fmt::ToTokens> std::fmt::Display for Sql<'_, T> {
@@ -28,6 +29,7 @@ pub struct Field {
     pub merged_star: bool,
     pub collation: String,
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn field(
     qualifier: String,
     name: String,
@@ -76,6 +78,7 @@ pub enum Kind {
 }
 impl Kind {
     /// The label a `node` span carries, one per variant plus the set operator.
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub fn label(&self) -> &'static str {
         match self {
             Kind::Input(_) => "input",
@@ -106,11 +109,13 @@ pub struct Rule {
     pub indexes: Vec<(Occurrence, String)>,
 }
 impl Rule {
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub fn member(&self) -> Option<usize> {
         self.occurrences
             .iter()
             .position(|(o, _)| *o == Occurrence::Member)
     }
+    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub fn mentions(&self, side: usize) -> bool {
         self.occurrences
             .iter()
@@ -137,6 +142,7 @@ pub struct Plan {
     pub output: usize,
     pub names: Vec<String>,
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn name(n: &str) -> String {
     if n.starts_with('"') && n.ends_with('"') {
         n[1..n.len() - 1].replace("\"\"", "\"")
@@ -148,11 +154,13 @@ pub(crate) fn name(n: &str) -> String {
         n.into()
     }
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn alias(a: &Option<As<'_>>) -> Option<String> {
     a.as_ref().map(|a| match a {
         As::As(n) | As::Elided(n) => name(n.0),
     })
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn resolve(e: &Expr<'_>, fields: &[Field]) -> Result<usize> {
     let (q, n) = match e {
         Expr::Id(n) => (None, name(n.0)),
@@ -175,6 +183,7 @@ pub(crate) fn resolve(e: &Expr<'_>, fields: &[Field]) -> Result<usize> {
     }
     Ok(found[0])
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn explicit_collation(e: &Expr<'_>) -> Option<String> {
     match e {
         Expr::Collate(_, n) => Some(name(n).to_ascii_uppercase()),
@@ -184,6 +193,7 @@ pub(crate) fn explicit_collation(e: &Expr<'_>) -> Option<String> {
         _ => None,
     }
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn implicit_collation(e: &Expr<'_>, fields: &[Field]) -> Option<String> {
     if let Ok(i) = resolve(e, fields) {
         return Some(fields[i].collation.clone());
@@ -196,11 +206,13 @@ pub(crate) fn implicit_collation(e: &Expr<'_>, fields: &[Field]) -> Option<Strin
         _ => None,
     }
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn collation(e: &Expr<'_>, fields: &[Field]) -> String {
     explicit_collation(e)
         .or_else(|| implicit_collation(e, fields))
         .unwrap_or("BINARY".into())
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub fn key_expression(value: &str, collation: &str) -> String {
     match collation {
         "NOCASE" => {
@@ -214,6 +226,7 @@ pub fn key_expression(value: &str, collation: &str) -> String {
 }
 /// UNION distinct identity in SQL: integral reals fold to integers, other reals
 /// and blobs are tagged objects, text is collation-normalized, NULL equals NULL.
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub fn key_sql(parts: &[(String, String)]) -> String {
     let normalized = parts
         .iter()
@@ -224,6 +237,7 @@ pub fn key_sql(parts: &[(String, String)]) -> String {
         .collect::<Vec<_>>();
     format!("json_array({})", normalized.join(","))
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub fn column_reference(index: usize, affinity: &str) -> String {
     if affinity.is_empty() {
         format!("c{index}")
@@ -231,9 +245,11 @@ pub fn column_reference(index: usize, affinity: &str) -> String {
         format!("CAST(c{index} AS {affinity})")
     }
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub fn expression(e: &Expr<'_>, fields: &[Field], aggregate: bool) -> Result<String> {
     expression_aliases(e, fields, aggregate, &[])
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn expression_aliases(
     e: &Expr<'_>,
     fields: &[Field],
@@ -479,6 +495,7 @@ pub(crate) fn expression_aliases(
         _ => return Err(error(format!("unsupported expression {e}"))),
     })
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn affinity(declared: &str) -> String {
     let declared = declared.to_ascii_uppercase();
     if declared.contains("INT") {
@@ -500,6 +517,7 @@ pub(crate) fn affinity(declared: &str) -> String {
     }
     .into()
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn expression_affinity(e: &Expr<'_>, fields: &[Field]) -> String {
     if let Ok(i) = resolve(e, fields) {
         return fields[i].affinity.clone();
@@ -514,6 +532,7 @@ pub(crate) fn expression_affinity(e: &Expr<'_>, fields: &[Field]) -> String {
         _ => String::new(),
     }
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn has_aggregate(e: &Expr<'_>) -> bool {
     match e {
         Expr::FunctionCall {
@@ -562,6 +581,7 @@ pub(crate) fn has_aggregate(e: &Expr<'_>) -> bool {
         _ => false,
     }
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn ordinal(e: &Expr<'_>, width: usize) -> Result<Option<usize>> {
     if let Expr::Literal(Literal::Numeric(n)) = e {
         if let Ok(n) = n.parse::<usize>() {
@@ -573,12 +593,14 @@ pub(crate) fn ordinal(e: &Expr<'_>, width: usize) -> Result<Option<usize>> {
     }
     Ok(None)
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn integer_limit(e: &Expr<'_>) -> Result<i64> {
     e.to_string()
         .replace(' ', "")
         .parse()
         .map_err(|_| error("LIMIT/OFFSET requires an integer literal"))
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn direction(s: &SortedColumn<'_>) -> &'static str {
     if s.order == Some(SortOrder::Desc) {
         "DESC"
@@ -586,6 +608,7 @@ pub(crate) fn direction(s: &SortedColumn<'_>) -> &'static str {
         "ASC"
     }
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn nulls(s: &SortedColumn<'_>) -> &'static str {
     match s.nulls {
         Some(NullsOrder::First) => " NULLS FIRST",
@@ -598,6 +621,7 @@ pub(crate) struct Compiler<'a> {
     pub(crate) plan: Plan,
     pub(crate) ctes: Vec<(String, usize)>,
 }
+#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub fn bind(db: &Connection, sql: &str) -> Result<Plan> {
     let arena = Bump::new();
     let mut parser = Parser::new(&arena, sql.as_bytes());
@@ -612,9 +636,14 @@ pub fn bind(db: &Connection, sql: &str) -> Result<Plan> {
         return Err(error("one SELECT required"));
     }
     recursion_shape(select)?;
-    // Prepare-only: reads column names and the parameter count, steps nothing,
-    // so it issues no statement to SQLite and carries no statement span.
-    let statement = db.prepare(sql)?;
+    // This prepare never executes, so SQLite's execution profile cannot report it.
+    let statement = {
+        let _prepare = tracing::debug_span!("prepare", sql, sql_bytes = sql.len(), phase = "bind").entered();
+        tracing::debug!("prepare_start");
+        let result = db.prepare(sql);
+        tracing::debug!(success = result.is_ok(), error = ?result.as_ref().err(), "prepare_end");
+        result?
+    };
     if statement.parameter_count() != 0 {
         return Err(error("persistent queries cannot contain bind parameters"));
     }
@@ -632,6 +661,7 @@ pub fn bind(db: &Connection, sql: &str) -> Result<Plan> {
         |r| Ok((r.get::<_, String>(1)?, r.get::<_, Option<String>>(5)?)),
     )?;
     for (opcode, function) in functions {
+        tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
         if ![
             "Function", "PureFunc", "AggStep", "AggStep1", "AggValue", "AggFinal",
         ]
