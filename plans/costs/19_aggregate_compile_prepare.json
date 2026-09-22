@@ -1,0 +1,25 @@
+{
+  "case": "fixtures/aggregates/0_sum.dl7",
+  "timeout_seconds": 35,
+  "evaluator_invocations": [
+    {
+      "rules": 76,
+      "seeds": 422,
+      "declare_view_ms": 626.8
+    },
+    {
+      "rules": 76,
+      "seeds": 155,
+      "declare_view_ms": 609.5
+    },
+    {
+      "rules": 129,
+      "seeds": 1304,
+      "declare_view_completed": false
+    }
+  ],
+  "samples_under_view_create": 2294,
+  "samples_in_prepare": 2194,
+  "path": "compile/comptime rounds/evaluate_sqlite/fresh_engine/declare/xCreate/install/populate/materialize/prepare_cached",
+  "limitation": "Exact generated operator not yet isolated; other timed-out fixtures not individually attributed"
+}
