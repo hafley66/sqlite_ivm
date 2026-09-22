@@ -62,7 +62,119 @@
     ],
     "mean_wall_ms": 1852.2,
     "output_sha256": "e635f295151c51405f23a852e13ef5ca857da1fcb8cf551a064088289fdafd67",
-    "rss_scope": "ru_maxrss from RUSAGE_CHILDREN is cumulative maximum across the three child processes; first run is exact, subsequent figures are upper bounds for each run."
+    "rss_scope": "ru_maxrss from RUSAGE_CHILDREN is cumulative maximum across the three child processes; first run is exact, subsequent figures are upper bounds for each run.",
+    "instrumented_sqlite_and_process_memory": [
+      {
+        "phase": "population_complete",
+        "allocator_current_bytes": 165830928,
+        "allocator_peak_bytes": 166226080,
+        "connection_cache_bytes": 97899632,
+        "connection_schema_bytes": 4643384,
+        "connection_statement_bytes": 14425264,
+        "process_peak_rss_bytes": 223969280
+      },
+      {
+        "phase": "program_build_start",
+        "allocator_current_bytes": 165830928,
+        "allocator_peak_bytes": 166226080,
+        "connection_cache_bytes": 97899632,
+        "connection_schema_bytes": 4643384,
+        "connection_statement_bytes": 14425264,
+        "process_peak_rss_bytes": 223969280
+      },
+      {
+        "phase": "program_build_complete",
+        "allocator_current_bytes": 165830928,
+        "allocator_peak_bytes": 166226080,
+        "connection_cache_bytes": 97899632,
+        "connection_schema_bytes": 4643384,
+        "connection_statement_bytes": 14425264,
+        "process_peak_rss_bytes": 226033664
+      },
+      {
+        "phase": "scratch_ready",
+        "allocator_current_bytes": 187143312,
+        "allocator_peak_bytes": 187220880,
+        "connection_cache_bytes": 112110704,
+        "connection_schema_bytes": 4716280,
+        "connection_statement_bytes": 14425264,
+        "process_peak_rss_bytes": 243761152
+      },
+      {
+        "phase": "drain_complete",
+        "allocator_current_bytes": 205008016,
+        "allocator_peak_bytes": 205069104,
+        "connection_cache_bytes": 112176496,
+        "connection_schema_bytes": 4717280,
+        "connection_statement_bytes": 25751616,
+        "process_peak_rss_bytes": 518602752
+      },
+      {
+        "phase": "drain_complete",
+        "allocator_current_bytes": 211032544,
+        "allocator_peak_bytes": 211052400,
+        "connection_cache_bytes": 112176496,
+        "connection_schema_bytes": 4717616,
+        "connection_statement_bytes": 27649616,
+        "process_peak_rss_bytes": 524337152
+      },
+      {
+        "phase": "drain_complete",
+        "allocator_current_bytes": 205759008,
+        "allocator_peak_bytes": 211052400,
+        "connection_cache_bytes": 112176496,
+        "connection_schema_bytes": 4717840,
+        "connection_statement_bytes": 27724576,
+        "process_peak_rss_bytes": 524369920
+      },
+      {
+        "phase": "drain_complete",
+        "allocator_current_bytes": 211502720,
+        "allocator_peak_bytes": 214897680,
+        "connection_cache_bytes": 112176496,
+        "connection_schema_bytes": 4718032,
+        "connection_statement_bytes": 30918176,
+        "process_peak_rss_bytes": 530153472
+      },
+      {
+        "phase": "drain_complete",
+        "allocator_current_bytes": 208870240,
+        "allocator_peak_bytes": 214897680,
+        "connection_cache_bytes": 112176496,
+        "connection_schema_bytes": 4718048,
+        "connection_statement_bytes": 30994160,
+        "process_peak_rss_bytes": 530153472
+      },
+      {
+        "phase": "drain_complete",
+        "allocator_current_bytes": 225706592,
+        "allocator_peak_bytes": 226541600,
+        "connection_cache_bytes": 112176496,
+        "connection_schema_bytes": 4718272,
+        "connection_statement_bytes": 42406592,
+        "process_peak_rss_bytes": 538312704
+      },
+      {
+        "phase": "drain_complete",
+        "allocator_current_bytes": 220074272,
+        "allocator_peak_bytes": 226541600,
+        "connection_cache_bytes": 112176496,
+        "connection_schema_bytes": 4718288,
+        "connection_statement_bytes": 42455760,
+        "process_peak_rss_bytes": 540688384
+      },
+      {
+        "phase": "drain_complete",
+        "allocator_current_bytes": 220074272,
+        "allocator_peak_bytes": 226541600,
+        "connection_cache_bytes": 112176496,
+        "connection_schema_bytes": 4718304,
+        "connection_statement_bytes": 42455760,
+        "process_peak_rss_bytes": 540688384
+      }
+    ],
+    "compiled_sql_nodes_at_end": 543,
+    "scratch_output_tables": 342
   },
   "persistent_12k": {
     "fixture": "bench/results/native-rowid-probes-observe/timings/12000-1000-200.json",
@@ -96,7 +208,9 @@
     "plugin": "85 passed, 2 ignored",
     "compiler_emitted_views": "17 passed",
     "compiler_sqlite_eval_oracle": "32-case gate passed",
-    "compiler_sqlite_contract": "8 passed"
+    "compiler_sqlite_contract": "8 passed",
+    "native_loaded_extension": "4 passed",
+    "sqlite3_crud_rollback": "passed"
   },
   "space_scope": "c2 RSS covers the Rust compiler, extension, and SQLite in one process. The 12k SQLite allocator and disk measurements are from a separate Python process; temp page count excludes unmeasured temp-file size."
 }
