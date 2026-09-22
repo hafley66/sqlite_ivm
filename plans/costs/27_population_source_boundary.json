@@ -1,0 +1,90 @@
+{
+  "historical_reference": {
+    "repository": "sqlite_ivm",
+    "revision": "1a93386",
+    "file": "src/1b_state.rs",
+    "source_table": "    pub(crate) fn source_table(&self, db: &Connection, name: &str, id: usize, side: usize, restricted: bool) -> Result<String> {\n        let full = table(name, id, side);\n        if !restricted {\n            return Ok(full);\n        }\n        let _ = db;\n        Ok(format!(\n            \"(SELECT rowid AS rowid,* FROM {full} WHERE __k IN (SELECT __k FROM temp.__ivm_touched))\"\n        ))\n    }"
+  },
+  "change": "Initial population reads completed weighted child outputs from existing scratch tables. Clear after the final consuming operator; retain one additional read for aggregate metadata initialization. Fixpoint rule inputs use the same bounded sources.",
+  "persistent_input_copies_added": false,
+  "maintenance_source_reads_changed": false,
+  "before_sum_compile": {
+    "timeout_seconds": 35,
+    "receipt": "19_aggregate_compile_prepare.json"
+  },
+  "after_sum_compile": {
+    "diagnostic_seconds": 8.552087707999817,
+    "exit": 0,
+    "diagnostics": [],
+    "rust_reference_comparison": {
+      "compiler_rows": 1306,
+      "compiler_rows_set_equal": true,
+      "program_equal": true,
+      "runtime_program_equal": true
+    }
+  },
+  "after_population_preparation": {
+    "input": {
+      "statements": 378,
+      "sql_bytes_max": 177,
+      "prepare_seconds": 0.005268000000000002,
+      "upstream_reads": 0
+    },
+    "map": {
+      "statements": 3311,
+      "sql_bytes_max": 377,
+      "prepare_seconds": 0.03350600000000041,
+      "upstream_reads": 0
+    },
+    "set": {
+      "statements": 2456,
+      "sql_bytes_max": 11485,
+      "prepare_seconds": 0.19706300000000032,
+      "upstream_reads": 0
+    },
+    "join": {
+      "statements": 624,
+      "sql_bytes_max": 1641,
+      "prepare_seconds": 0.014315000000000017,
+      "upstream_reads": 0
+    },
+    "fixpoint": {
+      "statements": 151,
+      "sql_bytes_max": 7073,
+      "prepare_seconds": 0.010643999999999997,
+      "upstream_reads": 0
+    },
+    "group": {
+      "statements": 21,
+      "sql_bytes_max": 496,
+      "prepare_seconds": 0.0004329999999999999,
+      "upstream_reads": 0
+    }
+  },
+  "timing_caveat": "Diagnostic timestamp intervals include logging overhead; compilation ran alongside compiler correctness tests. Prior timeout is censored, not a paired speedup ratio.",
+  "tests": {
+    "plugin": "79 passed, 2 helper tests skipped. One nextest LEAK classification; isolated rerun passed without that classification. Cause not established.",
+    "regression": "shared join/union graph creation, BLOB mutation, two changing inputs, rollback, exact row comparison and scratch cleared after population",
+    "native": "4 tests plus six shell scenarios pass",
+    "sum_end_to_end_seconds": 14.282,
+    "broader_compiler_gate": {
+      "passed": 20,
+      "failed": 5,
+      "timed_out": 5,
+      "log": "32_population_compiler_gate.log",
+      "failures": [
+        "two programmable-fold assertions",
+        "missing effect result: a_relation_with_no_executor_is_never_asked",
+        "two compile-time effect timing assertions"
+      ],
+      "timeouts": [
+        "sqlite_emit_4_outside",
+        "sqlite_engine_matches_v7_oracles",
+        "dl8_round_counts_match_v7",
+        "every_comptime_case_matches_v7",
+        "every_committed_case_matches_v7"
+      ]
+    }
+  },
+  "extension_sha256": "6e3c0ddee6f0223fe7c66d990bcdb1cce28d787eb0a4807c523a2486d18ce5be"
+}

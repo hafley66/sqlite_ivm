@@ -229,6 +229,10 @@ impl Plan {
         }
         let mut reads = vec![0usize; self.nodes.len()];
         reads[self.output] += 1;
+        let aggregate_sums = crate::relational_program::aggregate_sum_inputs(self);
+        if aggregate_sums.is_some() {
+            reads[self.nodes[self.output].inputs[0]] += 1;
+        }
         for node in &self.nodes {
             tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             match &node.kind {
@@ -257,12 +261,16 @@ impl Plan {
                 for side in 0..node.inputs.len() {
                     tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                     self.fill(db, name, id, side)?;
-                    self.exhaust(db, name, &mut reads, node.inputs[side])?;
                 }
             }
             self.materialize(db, name, id, false)?;
             tracing::debug!("populate_node_materialized");
-            if !direct {
+            if direct {
+                for input in &node.inputs {
+                    tracing::trace!(id, input, "population_input_consumed");
+                    self.exhaust(db, name, &mut reads, *input)?;
+                }
+            } else {
                 self.exhaust(db, name, &mut reads, node.inputs[0])?;
             }
             if id == self.output {
@@ -270,14 +278,19 @@ impl Plan {
                 self.exhaust(db, name, &mut reads, id)?;
             }
         }
-        if let Some(sums) = crate::relational_program::aggregate_sum_inputs(self) {
+        if let Some(sums) = aggregate_sums {
+            let input = self.nodes[self.output].inputs[0];
+            let width = self.nodes[input].fields.len();
+            let source = self.live_input_from_rows(name, self.output, 0, false, false,
+                format!("SELECT {},__m AS __n FROM {}", columns(width), out_table(input, width)));
             let columns = sums.iter().map(|(i,_)|format!("nn{i}")).collect::<Vec<_>>().join(",");
             let values = sums.iter().map(|(_,v)|format!("sum(CASE WHEN ({v}) IS NULL THEN 0 ELSE __n END)")).collect::<Vec<_>>().join(",");
             let safe = sums.iter().map(|(_,v)|format!("min(typeof({v}) IN ('integer','null') AND coalesce(abs(CAST(({v}) AS REAL)),0)<=1000000)")).collect::<Vec<_>>().join(" AND ");
             statements::exec(db, Phase::Materialize, name, &format!(
                 "INSERT INTO {}(__k,__safe,{columns}) SELECT __k,sum(__n)<=1000000 AND {safe},{values} FROM {} GROUP BY __k",
-                table(name, self.output, 1), self.live_input(db, name, self.output, 0, false, false)
+                table(name, self.output, 1), source
             ), [])?;
+            self.exhaust(db, name, &mut reads, input)?;
         }
         Ok(())
     }

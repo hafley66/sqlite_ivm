@@ -1,0 +1,267 @@
+warning: unused variable: `rule`
+    --> src/_5_reify/_7_sqlite.rs:1389:9
+     |
+1389 |         rule: &Rule,
+     |         ^^^^ help: if this is intentional, prefix it with an underscore: `_rule`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> src/_6_eval/_7_sqlite_eval.rs:749:21
+    |
+749 |                 let mut fresh = |u: &mut Universe, vars: &mut Vec<TermId>, label: &str| {
+    |                     ----^^^^^
+    |                     |
+    |                     help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `bound_cell` is never used
+    --> src/_5_reify/_7_sqlite.rs:1423:8
+     |
+ 818 | impl<'a> Lowering<'a> {
+     | --------------------- method in this implementation
+...
+1423 |     fn bound_cell(
+     |        ^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `failures` is never used
+    --> src/_5_reify/_7_sqlite.rs:2136:19
+     |
+2129 | impl<'a> ProgramPlan<'a> {
+     | ------------------------ method in this implementation
+...
+2136 |     pub(crate) fn failures(&self) -> Vec<(String, String)> {
+     |                   ^^^^^^^^
+
+warning: function `not_built_yet` is never used
+    --> src/_5_reify/_7_sqlite.rs:2390:15
+     |
+2390 | pub(crate) fn not_built_yet(u: &mut Universe, failures: &[(String, String)]) -> Vec<Diagnostic> {
+     |               ^^^^^^^^^^^^^
+
+warning: `dl8` (lib) generated 5 warnings (run `cargo fix --lib -p dl8` to apply 2 suggestions)
+    Finished `test` profile [optimized + debuginfo] target(s) in 0.14s
+────────────
+ Nextest run ID fcf5cfd8-df21-40c2-b259-a1a5943399ad with nextest profile: default
+    Starting 30 tests across 6 binaries
+        SLOW [> 20.000s] (─────) dl8::_15_fold every_fold_fixture_matches_expected
+        SLOW [> 20.000s] (─────) dl8::_15_fold every_fold_fixture_carries_its_written_answer
+        FAIL [  22.795s] ( 1/30) dl8::_15_fold every_fold_fixture_carries_its_written_answer
+  stdout ───
+
+    running 1 test
+    test every_fold_fixture_carries_its_written_answer ... FAILED
+
+    failures:
+
+    failures:
+        every_fold_fixture_carries_its_written_answer
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 22.79s
+
+  stderr ───
+
+    thread 'every_fold_fixture_carries_its_written_answer' (71514) panicked at tests/_15_fold.rs:161:5:
+    1_program_step: 284 absent from the rows
+    2_order_matters: 12 absent from the rows
+    3_step_no_row: fold_step_no_row absent
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        FAIL [  22.878s] ( 2/30) dl8::_15_fold every_fold_fixture_matches_expected
+  stdout ───
+
+    running 1 test
+    test every_fold_fixture_matches_expected ... FAILED
+
+    failures:
+
+    failures:
+        every_fold_fixture_matches_expected
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1 filtered out; finished in 22.87s
+
+  stderr ───
+
+    thread 'every_fold_fixture_matches_expected' (71513) panicked at tests/_15_fold.rs:123:5:
+    1_program_step: rows differ
+      want: [{"args":[{"args":[7],"f":"const"}],"rel":{"args":[{"args":[{"args":[{"a":"<fixture>"}],"f":"file"},{"args":[{"a":"<fixture>"},3],"f":"reader_node"}],"f":"owner"}],"f":"ref"}},{"args":[{"args":[35],"f":"const"}],"rel":{"args":[{"args":[{"args":[{"a":"<fixture>"}],"f":"file"},{"args":[{"a":"<fixture>"},3],"f":"reader_node"}],"f":"owner"}],"f":"ref"}},{"args":[{"args":[100],"f":"const"}],"rel":{"args":[{"args":[{"args":[{"a":"<fixture>"}],"f":"file"},{"args":[{"a":"<fixture>"},3],"f":"reader_node"}],"f":"owner"}],"f":"ref"}},{"args":[{"args":[284],"f":"const"}],"rel":{"args":[{"args":[{"args":[{"a":"<fixture>"}],"f":"file"},{"args":[{"a":"<fixture>"},61],"f":"reader_node"}],"f":"owner"}],"f":"ref"}}]
+      got:  []
+    2_order_matters: rows differ
+      want: [{"args":[{"args":[1],"f":"const"}],"rel":{"args":[{"args":[{"args":[{"a":"<fixture>"}],"f":"file"},{"args":[{"a":"<fixture>"},3],"f":"reader_node"}],"f":"owner"}],"f":"ref"}},{"args":[{"args":[2],"f":"const"}],"rel":{"args":[{"args":[{"args":[{"a":"<fixture>"}],"f":"file"},{"args":[{"a":"<fixture>"},3],"f":"reader_node"}],"f":"owner"}],"f":"ref"}},{"args":[{"args":[4],"f":"const"}],"rel":{"args":[{"args":[{"args":[{"a":"<fixture>"}],"f":"file"},{"args":[{"a":"<fixture>"},3],"f":"reader_node"}],"f":"owner"}],"f":"ref"}},{"args":[{"args":[12],"f":"const"}],"rel":{"args":[{"args":[{"args":[{"a":"<fixture>"}],"f":"file"},{"args":[{"a":"<fixture>"},61],"f":"reader_node"}],"f":"owner"}],"f":"ref"}}]
+      got:  []
+    3_step_no_row: diagnostics differ
+      want: [{"args":[{"a":"evaluate"},{"a":"none"},{"args":[{"args":[{"args":[{"args":[{"a":"<fixture>"}],"f":"file"},{"args":[{"a":"<fixture>"},18],"f":"reader_node"}],"f":"owner"}],"f":"ref"},{"args":[7],"f":"const"},{"args":[35],"f":"const"}],"f":"fold_step_no_row"}],"f":"diagnostic"}]
+      got:  [{"args":[{"a":"emit"},{"a":"none"},{"args":[{"a":"fold"}],"f":"not_built_yet"}],"f":"diagnostic"}]
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        PASS [  13.450s] ( 3/30) dl8::_18_sqlite_emit aggregates_0_sum
+        PASS [  14.587s] ( 4/30) dl8::_18_sqlite_emit aggregates_1_min_max
+        PASS [  13.446s] ( 5/30) dl8::_18_sqlite_emit aggregates_2_grouped
+        PASS [  13.665s] ( 6/30) dl8::_18_sqlite_emit fold_0_kernel_step
+        PASS [   5.600s] ( 7/30) dl8::_18_sqlite_emit fold_1_program_step
+        PASS [   5.619s] ( 8/30) dl8::_18_sqlite_emit fold_2_order_matters
+        PASS [   5.476s] ( 9/30) dl8::_18_sqlite_emit fold_3_step_no_row
+        PASS [  13.367s] (10/30) dl8::_18_sqlite_emit literals_0_float
+        PASS [  13.392s] (11/30) dl8::_18_sqlite_emit literals_1_bool
+        PASS [  13.389s] (12/30) dl8::_18_sqlite_emit literals_2_int_add
+        PASS [  14.530s] (13/30) dl8::_18_sqlite_emit sqlite_emit_0_union_filter
+        PASS [  13.702s] (14/30) dl8::_18_sqlite_emit sqlite_emit_1_transitive
+        PASS [  13.966s] (15/30) dl8::_18_sqlite_emit sqlite_emit_2_mutual
+        PASS [  14.798s] (16/30) dl8::_18_sqlite_emit sqlite_emit_3_consumers
+        SLOW [> 20.000s] (─────) dl8::_18_sqlite_emit sqlite_emit_4_outside
+        PASS [  13.523s] (17/30) dl8::_18_sqlite_emit term_lt_0_mixed_kinds
+        PASS [  15.397s] (18/30) dl8::_18_sqlite_emit term_lt_1_top
+        SLOW [> 40.000s] (─────) dl8::_18_sqlite_emit sqlite_emit_4_outside
+        PASS [   7.664s] (19/30) dl8::_23_comptime_effect a_continuing_executor_waits_for_the_runtime
+        FAIL [  10.615s] (20/30) dl8::_23_comptime_effect a_once_executor_answers_its_effect_row_at_comptime
+  stdout ───
+
+    running 1 test
+    test a_once_executor_answers_its_effect_row_at_comptime ... FAILED
+
+    failures:
+
+    failures:
+        a_once_executor_answers_its_effect_row_at_comptime
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 10.61s
+
+  stderr ───
+
+    thread 'a_once_executor_answers_its_effect_row_at_comptime' (76172) panicked at tests/_23_comptime_effect.rs:35:5:
+    0_fs_json: compile took 10.607872125s
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+ TERMINATING [> 60.000s] (─────) dl8::_18_sqlite_emit sqlite_emit_4_outside
+     TIMEOUT [  60.006s] (21/30) dl8::_18_sqlite_emit sqlite_emit_4_outside
+  stdout ───
+
+    running 1 test
+
+    (test timed out)
+
+        FAIL [   5.775s] (22/30) dl8::_23_comptime_effect a_relation_with_no_executor_is_never_asked
+  stdout ───
+
+    running 1 test
+    test a_relation_with_no_executor_is_never_asked ... FAILED
+
+    failures:
+
+    failures:
+        a_relation_with_no_executor_is_never_asked
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 5.77s
+
+  stderr ───
+
+    thread 'a_relation_with_no_executor_is_never_asked' (76568) panicked at tests/_23_comptime_effect.rs:106:5:
+    assertion `left == right` failed
+      left: None
+     right: Some(1)
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        FAIL [  11.221s] (23/30) dl8::_23_comptime_effect answered_rows_feed_a_rule_that_mints_an_edge
+  stdout ───
+
+    running 1 test
+    test answered_rows_feed_a_rule_that_mints_an_edge ... FAILED
+
+    failures:
+
+    failures:
+        answered_rows_feed_a_rule_that_mints_an_edge
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 11.22s
+
+  stderr ───
+
+    thread 'answered_rows_feed_a_rule_that_mints_an_edge' (77577) panicked at tests/_23_comptime_effect.rs:35:5:
+    3_two_rounds: compile took 11.215721834s
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+        SLOW [> 20.000s] (─────) dl8::_27_eval_sqlite sqlite_engine_matches_v7_oracles
+        SLOW [> 20.000s] (─────) dl8::_6_comptime_oracle dl8_round_counts_match_v7
+        SLOW [> 40.000s] (─────) dl8::_27_eval_sqlite sqlite_engine_matches_v7_oracles
+        SLOW [> 40.000s] (─────) dl8::_6_comptime_oracle dl8_round_counts_match_v7
+ TERMINATING [> 60.000s] (─────) dl8::_27_eval_sqlite sqlite_engine_matches_v7_oracles
+     TIMEOUT [  60.008s] (24/30) dl8::_27_eval_sqlite sqlite_engine_matches_v7_oracles
+  stdout ───
+
+    running 1 test
+    sqlite oracle: 0_transitive.json
+    sqlite oracle: 10_empty.json
+    sqlite oracle: 11_nonground_negation.json
+    sqlite oracle: 12_repeated_vars_and_arity.json
+    sqlite oracle: 13_deep_terms_order.json
+    sqlite oracle: 14_demand_recursion.json
+    sqlite oracle: 15_aggregate_tables_only.json
+    sqlite oracle: 16_intern_row_reuse.json
+    sqlite oracle: 1_negation_cons_intern.json
+    sqlite oracle: 2_strict_cycle.json
+    sqlite oracle: 3_count.json
+    sqlite oracle: 4_cons_lists.json
+    sqlite oracle: 5_int_compare.json
+    sqlite oracle: 6_malformed_aggregate.json
+    sqlite oracle: 7_aggregate_cycle.json
+    sqlite oracle: 8_mixed_lower_recursion.json
+    sqlite oracle: 9_edge_ref.json
+    sqlite oracle: c0_minimal_0.json
+    sqlite oracle: c14_syntax_macros_0.json
+    sqlite oracle: c14_syntax_macros_1.json
+    sqlite oracle: c15_standard_plus_0.json
+    sqlite oracle: c15_standard_plus_1.json
+    sqlite oracle: c15_standard_plus_2.json
+    sqlite oracle: c15_standard_plus_3.json
+    sqlite oracle: c2_partial_0.json
+    sqlite oracle: c2_partial_1.json
+
+    (test timed out)
+
+ TERMINATING [> 60.000s] (─────) dl8::_6_comptime_oracle dl8_round_counts_match_v7
+     TIMEOUT [  60.007s] (25/30) dl8::_6_comptime_oracle dl8_round_counts_match_v7
+  stdout ───
+
+    running 1 test
+
+    (test timed out)
+
+        PASS [   0.008s] (26/30) dl8::_6_comptime_oracle every_status_number_is_present
+        PASS [   0.009s] (27/30) dl8::_8_compile_oracle every_committed_case_file_exists_and_every_case_is_indexed
+        SLOW [> 20.000s] (─────) dl8::_6_comptime_oracle every_comptime_case_matches_v7
+        SLOW [> 20.000s] (─────) dl8::_8_compile_oracle every_committed_case_matches_v7
+        SLOW [> 40.000s] (─────) dl8::_6_comptime_oracle every_comptime_case_matches_v7
+        SLOW [> 40.000s] (─────) dl8::_8_compile_oracle every_committed_case_matches_v7
+ TERMINATING [> 60.000s] (─────) dl8::_6_comptime_oracle every_comptime_case_matches_v7
+     TIMEOUT [  60.006s] (28/30) dl8::_6_comptime_oracle every_comptime_case_matches_v7
+  stdout ───
+
+    running 1 test
+
+    (test timed out)
+
+        PASS [   0.006s] (29/30) dl8::_8_compile_oracle the_curry_limit_is_a_case_not_a_skip
+ TERMINATING [> 60.000s] (─────) dl8::_8_compile_oracle every_committed_case_matches_v7
+     TIMEOUT [  60.007s] (30/30) dl8::_8_compile_oracle every_committed_case_matches_v7
+  stdout ───
+
+    running 1 test
+
+    (test timed out)
+
+────────────
+     Summary [ 293.917s] 30 tests run: 20 passed, 5 failed, 5 timed out, 0 skipped
+        FAIL [  22.795s] ( 1/30) dl8::_15_fold every_fold_fixture_carries_its_written_answer
+        FAIL [  22.878s] ( 2/30) dl8::_15_fold every_fold_fixture_matches_expected
+        FAIL [  10.615s] (20/30) dl8::_23_comptime_effect a_once_executor_answers_its_effect_row_at_comptime
+     TIMEOUT [  60.006s] (21/30) dl8::_18_sqlite_emit sqlite_emit_4_outside
+        FAIL [   5.775s] (22/30) dl8::_23_comptime_effect a_relation_with_no_executor_is_never_asked
+        FAIL [  11.221s] (23/30) dl8::_23_comptime_effect answered_rows_feed_a_rule_that_mints_an_edge
+     TIMEOUT [  60.008s] (24/30) dl8::_27_eval_sqlite sqlite_engine_matches_v7_oracles
+     TIMEOUT [  60.007s] (25/30) dl8::_6_comptime_oracle dl8_round_counts_match_v7
+     TIMEOUT [  60.006s] (28/30) dl8::_6_comptime_oracle every_comptime_case_matches_v7
+     TIMEOUT [  60.007s] (30/30) dl8::_8_compile_oracle every_committed_case_matches_v7
+error: test run failed

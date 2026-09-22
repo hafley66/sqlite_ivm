@@ -1,0 +1,9 @@
+   Compiling sqlite-ivm v0.3.0 (/Users/chrishafley/projects/sqlite_ivm)
+    Finished `test` profile [unoptimized] target(s) in 2.01s
+     Running tests/19_source_reads.rs (target/debug/build/sqlite-ivm/6fae73082b94c7e3/out/19_source_reads-6fae73082b94c7e3)
+
+running 1 test
+test population_reuses_completed_operator_results ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out; finished in 0.43s
+

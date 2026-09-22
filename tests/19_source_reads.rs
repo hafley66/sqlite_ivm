@@ -323,3 +323,51 @@ fn set_source_reads_keep_materialized_boundaries_observable() -> Result<()> {
     }
     Ok(())
 }
+
+#[test]
+fn population_reuses_completed_operator_results() -> Result<()> {
+    let db = Connection::open_in_memory()?;
+    register(&db)?;
+    db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON;
+        CREATE TABLE a(k INTEGER,v);CREATE TABLE b(k INTEGER);
+        INSERT INTO a VALUES(1,7),(2,9);INSERT INTO b VALUES(1),(2)")?;
+    let mut definitions = vec!["r0 AS (SELECT k,v FROM a)".to_owned()];
+    for depth in 1..7 {
+        definitions.push(format!("r{depth} AS (SELECT l.k,l.v FROM r{} l JOIN r{} r ON l.k=r.k UNION SELECT a.k,a.v FROM a JOIN b ON a.k=b.k)", depth-1, depth-1));
+    }
+    let query = format!("WITH {} SELECT k,v FROM r6", definitions.join(","));
+    let (recorder, layer) = CountRecorder::new();
+    let guard = tracing_subscriber::registry().with(layer).set_default();
+    instrument(&db);
+    db.execute_batch(&format!("CREATE VIRTUAL TABLE result USING sqlite_ivm('{query}')"))?;
+    silence(&db);
+    drop(guard);
+    let issued = recorder.event_sums(SQLITE_TARGET, tracing::Level::DEBUG, "populate_node", "view", Some("sql"));
+    let population = issued.keys().filter(|(view, _)| view == "result").map(|(_, sql)| sql).collect::<Vec<_>>();
+    assert!(!population.is_empty());
+    let largest = population.iter().map(|sql| sql.len()).max().unwrap();
+    assert!(largest < 12_000, "population statement expanded to {largest} bytes");
+    for sql in population {
+        assert!(!sql.contains("__ivm_read_"), "population traversed upstream graph: {sql}");
+    }
+    let scratch = db.prepare("SELECT name FROM temp.sqlite_schema WHERE type='table' AND name GLOB '__ivm_out_*'")?
+        .query_map([], |row| row.get::<_, String>(0))?.collect::<Result<Vec<_>>>()?;
+    for table in scratch {
+        let remaining: i64 = db.query_row(&format!("SELECT count(*) FROM temp.{}", sqlite_ivm::catalog::quote(&table)), [], |row| row.get(0))?;
+        assert_eq!(remaining, 0, "population retained completed rows in {table}");
+    }
+    let read = |sql: &str| -> Result<Vec<(rusqlite::types::Value,rusqlite::types::Value)>> {
+        db.prepare(sql)?.query_map([], |r| Ok((r.get(0)?,r.get(1)?)))?.collect()
+    };
+    assert_eq!(read("SELECT * FROM result ORDER BY 1,2")?, read(&format!("{query} ORDER BY 1,2"))?);
+    // Both inputs change at one transaction boundary, then rollback restores them.
+    for mutation in [
+        "BEGIN;INSERT INTO a VALUES(3,x'00');INSERT INTO b VALUES(3);COMMIT",
+        "BEGIN;SAVEPOINT s;DELETE FROM a WHERE k=1;DELETE FROM b WHERE k=1;RELEASE s;ROLLBACK",
+        "BEGIN;UPDATE a SET v=11 WHERE k=2;DELETE FROM b WHERE k=2;COMMIT",
+    ] {
+        db.execute_batch(mutation)?;
+        assert_eq!(read("SELECT * FROM result ORDER BY 1,2")?,read(&format!("{query} ORDER BY 1,2"))?,"{mutation}");
+    }
+    Ok(())
+}

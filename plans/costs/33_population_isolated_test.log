@@ -1,0 +1,8 @@
+   Compiling sqlite-ivm v0.3.0 (/Users/chrishafley/projects/sqlite_ivm)
+    Finished `test` profile [unoptimized] target(s) in 0.80s
+────────────
+ Nextest run ID 537f7113-7465-4816-baa6-0dcf6fed6dac with nextest profile: default
+    Starting 1 test across 1 binary (5 tests skipped)
+        PASS [   0.024s] (1/1) sqlite-ivm::10_growth count_sum_delta_work_stays_constant_as_the_group_grows
+────────────
+     Summary [   0.024s] 1 test run: 1 passed, 5 skipped

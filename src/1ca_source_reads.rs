@@ -196,7 +196,7 @@ impl Plan {
     }
 
     #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
-    fn live_input_from_rows(
+    pub(crate) fn live_input_from_rows(
         &self,
         name: &str,
         id: usize,

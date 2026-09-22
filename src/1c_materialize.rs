@@ -10,9 +10,21 @@ use crate::{
 use rusqlite::{params_from_iter, types::Value, Connection, Result};
 
 impl Plan {
+    /// Initial population only. Maintenance uses materialize_statements with
+    /// authoritative live inputs and signed deltas instead of this scratch bag.
     #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn materialize(&self, db: &Connection, name: &str, id: usize, restricted: bool) -> Result<()> {
-        self.materialize_statements(db, name, id, restricted)
+        // Population walks topologically: each child already has a complete
+        // weighted result in scratch. Read that boundary once instead of
+        // compiling its entire upstream graph for every downstream operator.
+        let sources = if matches!(self.nodes[id].kind, Kind::Input(_) | Kind::Map { .. } | Kind::Set("all")) {
+            Vec::new()
+        } else { self.nodes[id].inputs.iter().enumerate().map(|(side, input)| {
+            let width = self.nodes[*input].fields.len();
+            self.live_input_from_rows(name, id, side, restricted, false,
+                format!("SELECT {},__m AS __n FROM {}", columns(width), out_table(*input, width)))
+        }).collect::<Vec<_>>() };
+        self.materialize_from_sources(db, name, id, restricted, Some(&sources))
             .execute(db, name)
             .map(|_| ())
     }
@@ -71,6 +83,12 @@ impl Plan {
                 ),
             },
             Kind::Set(op) => {
+                if *op == "all" {
+                    let child = out_table(node.inputs[0], self.nodes[node.inputs[0]].fields.len());
+                    return MaterializeStatements::Set {
+                        insert: format!("INSERT INTO {out}({cols},__m) SELECT {cols},__m FROM {child}"),
+                    };
+                }
                 let width = node.fields.len();
                 let reps = |t: &str| {
                     format!(
@@ -85,11 +103,6 @@ impl Plan {
                     String::new()
                 };
                 let insert = match (*op, node.inputs.len()) {
-                    ("all", _) => {
-                        let child =
-                            out_table(node.inputs[0], self.nodes[node.inputs[0]].fields.len());
-                        format!("INSERT INTO {out}({cols},__m) SELECT {cols},__m FROM {child}")
-                    }
                     ("distinct", _) | (_, 1) => {
                         format!("INSERT INTO {out}({cols},__m) {}", reps(&t0))
                     }
@@ -286,6 +299,19 @@ impl Plan {
                 MaterializeStatements::Group(statements)
             }
             Kind::Fixpoint { rules } => {
+                let rule_roles = |rule: &Rule, member: Role| {
+                    if let Some(sources) = sources {
+                        rule.occurrences.iter().map(|(occurrence, _)| match occurrence {
+                            crate::relational::Occurrence::Input(side) => Role::Table(sources[*side].clone()),
+                            crate::relational::Occurrence::Member => match &member {
+                                Role::Table(t) => Role::Table(t.clone()),
+                                Role::Range(t, lo, hi) => Role::Range(t.clone(), *lo, *hi),
+                            },
+                        }).collect()
+                    } else {
+                        roles(self, db, false, name, id, 0, rule, None, member)
+                    }
+                };
                 let member = node.inputs.len();
                 let all = table(name, id, member);
                 let anchor = rules
@@ -294,7 +320,7 @@ impl Plan {
                         let mut params: Vec<Value> = vec![];
                         let from = rule_from(
                             rule,
-                            &roles(self, db, false, name, id, 0, rule, None, Role::Table(all.clone())),
+                            &rule_roles(rule, Role::Table(all.clone())),
                             &mut params,
                         );
                         fixpoint_derive(&all, &cols, rule, &from)
@@ -307,7 +333,7 @@ impl Plan {
                         let mut params: Vec<Value> = vec![];
                         let from = rule_from(
                             rule,
-                            &roles(self, db, false, name, id, 0, rule, None, Role::Range(all.clone(), 0, 0)),
+                            &rule_roles(rule, Role::Range(all.clone(), 0, 0)),
                             &mut params,
                         );
                         fixpoint_derive(&all, &cols, rule, &from)

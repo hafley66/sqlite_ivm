@@ -141,4 +141,26 @@ HEN c2||&#x27;&#x27; ELSE c2 END,CASE typeof(c3) WHEN &#x27;blob&#x27; THEN json
 (: Total (* (: sum int)))
 (&lt;- (Total (sum ?Value)) (Input ?Value))</pre><pre>compile → comptime Rounds::reduce → evaluate_sqlite → fresh_engine
         → CREATE VIRTUAL TABLE → install → Plan::populate
-        → materialize → prepare_cached → SQLite SELECT compilation</pre><table><tr><th>Evaluator invocation</th><th>Rules</th><th>Seeds including nil</th><th>View creation</th></tr><tr><td>1</td><td>76</td><td>422</td><td>626.8 ms</td></tr><tr><td>2</td><td>76</td><td>155</td><td>609.5 ms</td></tr><tr><td>3</td><td>129</td><td>1,304</td><td>Did not return before 35-second process timeout</td></tr></table><p>The third invocation also flushes 98,292 arena terms and 205,383 argument rows, taking 63.1 and 137.3 ms respectively. Those dictionary sizes include compiler interned terms; they are not 98,292 user facts.</p><p>Fresh stack sample: 2,194 of 2,294 samples under view creation are in SQLite preparation (95.6%). This identifies residual preparation expansion during initial population of the larger compiler graph. It does not yet identify the exact offending generated operator. The UNION rewrite fixed c0; broader upstream expansion remains. The fold and min/max timeouts have not been individually attributed.</p></section></body></html>
+        → materialize → prepare_cached → SQLite SELECT compilation</pre><table><tr><th>Evaluator invocation</th><th>Rules</th><th>Seeds including nil</th><th>View creation</th></tr><tr><td>1</td><td>76</td><td>422</td><td>626.8 ms</td></tr><tr><td>2</td><td>76</td><td>155</td><td>609.5 ms</td></tr><tr><td>3</td><td>129</td><td>1,304</td><td>Did not return before 35-second process timeout</td></tr></table><p>The third invocation also flushes 98,292 arena terms and 205,383 argument rows, taking 63.1 and 137.3 ms respectively. Those dictionary sizes include compiler interned terms; they are not 98,292 user facts.</p><p>Fresh stack sample: 2,194 of 2,294 samples under view creation are in SQLite preparation (95.6%). This identifies residual preparation expansion during initial population of the larger compiler graph. It does not yet identify the exact offending generated operator. The UNION rewrite fixed c0; broader upstream expansion remains. The fold and min/max timeouts have not been individually attributed.</p></section><section class="panel"><h2>Population source boundary restored</h2>
+<p>The historical plugin at <code>1a93386</code> read named operator input tables. Initial population now reads each child's existing completed scratch output and retains it until its last consumer finishes. Aggregate metadata holds one additional read reference. This adds no persistent per-input row copies. Maintenance continues through the existing live-input and signed-delta paths.</p>
+<pre>INITIAL POPULATION, topological order
+[source rows] → [child operator] → [completed temporary output]
+                                         │             │
+                                         ▼             ▼
+                                    [consumer A]  [consumer B]
+                                         │             │
+                                         └──────┬──────┘
+                                                ▼
+                                   [last read: clear rows]
+
+Generated source shape (width and child ID substituted):
+SELECT c0,...,__m AS __n FROM temp.__ivm_out_&lt;width&gt;_&lt;child&gt;
+    → existing native key/row identity wrapper
+    → consumer operator SQL
+</pre>
+<p>Case: the same <code>fixtures/aggregates/0_sum.dl7</code> shown above. The previous direct compile reached its 35-second timeout. The new diagnostic compile completed in 8.552 seconds. Its 1,306 compiler rows match the Rust evaluator as a set; program and runtime_program match exactly, with no diagnostics. Logging and concurrent test load prevent a paired speedup claim.</p>
+<table><tr><th>Population operator</th><th>Largest captured SQL, bytes</th><th>Preparation total, seconds</th></tr><tr><td>Join</td><td>1,641</td><td>0.014315</td></tr><tr><td>Fixpoint</td><td>7,073</td><td>0.010644</td></tr><tr><td>Set</td><td>11,485</td><td>0.197063</td></tr><tr><td>All population operators</td><td>6,941 completed preparations</td><td>0.261229</td></tr></table>
+<p>No captured population statement contains upstream <code>__ivm_read_</code> expansion. Preparation intervals include logging overhead.</p>
+<p>Validation: 79 plugin tests passed, four native tests and six shell scenarios passed. The new regression checks shared consumers, empty scratch tables after population, both inputs changing together, BLOB values, rollback, update/delete, and exact equality with ordinary SELECT. One test had a nextest LEAK classification; its isolated rerun passed without that classification. The SUM emitted-view test passed in 14.282 seconds.</p>
+<p>The broader compiler gate remains red: 20 passed, five failed, five timed out. Failures comprise two programmable-fold assertions, one missing effect result, and two effect timing assertions. Timeouts cover the outside emitted-view case and four oracle suites. The population fix does not establish subsecond compiler performance.</p>
+<p><a href="27_population_source_boundary.json">Detailed receipt</a> · <a href="31_population_sum_trace.jsonl.gz">Full hafley-observe capture</a> · <a href="32_population_compiler_gate.log">Compiler gate failures</a></p></section></body></html>

@@ -1,0 +1,52 @@
+warning: unused variable: `rule`
+    --> src/_5_reify/_7_sqlite.rs:1389:9
+     |
+1389 |         rule: &Rule,
+     |         ^^^^ help: if this is intentional, prefix it with an underscore: `_rule`
+     |
+     = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> src/_6_eval/_7_sqlite_eval.rs:749:21
+    |
+749 |                 let mut fresh = |u: &mut Universe, vars: &mut Vec<TermId>, label: &str| {
+    |                     ----^^^^^
+    |                     |
+    |                     help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `bound_cell` is never used
+    --> src/_5_reify/_7_sqlite.rs:1423:8
+     |
+ 818 | impl<'a> Lowering<'a> {
+     | --------------------- method in this implementation
+...
+1423 |     fn bound_cell(
+     |        ^^^^^^^^^^
+     |
+     = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: method `failures` is never used
+    --> src/_5_reify/_7_sqlite.rs:2136:19
+     |
+2129 | impl<'a> ProgramPlan<'a> {
+     | ------------------------ method in this implementation
+...
+2136 |     pub(crate) fn failures(&self) -> Vec<(String, String)> {
+     |                   ^^^^^^^^
+
+warning: function `not_built_yet` is never used
+    --> src/_5_reify/_7_sqlite.rs:2390:15
+     |
+2390 | pub(crate) fn not_built_yet(u: &mut Universe, failures: &[(String, String)]) -> Vec<Diagnostic> {
+     |               ^^^^^^^^^^^^^
+
+warning: `dl8` (lib) generated 5 warnings (run `cargo fix --lib -p dl8` to apply 2 suggestions)
+    Finished `test` profile [optimized + debuginfo] target(s) in 0.19s
+────────────
+ Nextest run ID 34a2ae1e-d76a-4720-a821-1d1e12ce0bd0 with nextest profile: default
+    Starting 1 test across 1 binary (16 tests skipped)
+        PASS [  14.282s] (1/1) dl8::_18_sqlite_emit aggregates_0_sum
+────────────
+     Summary [  14.283s] 1 test run: 1 passed, 16 skipped
