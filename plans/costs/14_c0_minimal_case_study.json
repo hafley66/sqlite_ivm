@@ -1,0 +1,209 @@
+{
+  "status": "case-study measurement",
+  "case": "c0_minimal_0",
+  "command": "RUST_LOG=dl8=debug HAFLEY_TRACE='' HAFLEY_LOG='sqlite=debug' HAFLEY_LOG_FORMAT=json DL8_ENGINE=sqlite SQLITE_IVM_LIB=/Users/chrishafley/projects/sqlite_ivm/target/extension/release/libsqlite_ivm.dylib target/debug/dl8 eval plans/v8/receipts/2026-09-22-native-keys/input-c0_minimal_0.json",
+  "cwd": "/Users/chrishafley/projects/sprefa-wt/sqlite-perf-main",
+  "exit_code": 0,
+  "timing_seconds": {
+    "real": 8.66,
+    "user": 7.05,
+    "sys": 1.27
+  },
+  "input": {
+    "path": "/Users/chrishafley/projects/sprefa-wt/sqlite-perf-main/plans/v8/receipts/2026-09-22-native-keys/input-c0_minimal_0.json",
+    "rules": 12,
+    "seeds": 231
+  },
+  "oracle": {
+    "path": "/Users/chrishafley/projects/sprefa-wt/sqlite-perf-main/oracle/eval/c0_minimal_0.json",
+    "closure": 232,
+    "diagnostics": 0,
+    "expected_minus_input_seeds": [
+      {
+        "args": [
+          {
+            "args": [
+              []
+            ],
+            "f": "const"
+          }
+        ],
+        "rel": {
+          "args": [
+            {
+              "args": [
+                {
+                  "a": "nil"
+                }
+              ],
+              "f": "kernel"
+            }
+          ],
+          "f": "ref"
+        }
+      }
+    ]
+  },
+  "actual": {
+    "stdout": "/private/tmp/sqlite-v8-case-c0-json10.stdout",
+    "closure": 232,
+    "diagnostics": 0,
+    "stdout_sha256": "5d9101de793ba72827c4b7df77e011224a35d6074a81acf65b47b34037065674",
+    "actual_minus_input_seeds": [
+      {
+        "args": [
+          {
+            "args": [
+              []
+            ],
+            "f": "const"
+          }
+        ],
+        "rel": {
+          "args": [
+            {
+              "args": [
+                {
+                  "a": "nil"
+                }
+              ],
+              "f": "kernel"
+            }
+          ],
+          "f": "ref"
+        }
+      }
+    ]
+  },
+  "trace": {
+    "stderr": "/private/tmp/sqlite-v8-case-c0-json10.stderr",
+    "stderr_sha256": "a51b77930d147fe7af98a83b459684b3150f86ce1155b58f70db57f9ccba590f",
+    "jsonl_records": 96,
+    "compiler_targets": {
+      "dl8::eval": 35,
+      "dl8::sql": 61
+    },
+    "sqlite_profile_events": "present in second bounded capture; 1618 statement-finished records and 17 relational_drain close records; sums include nested work",
+    "plugin_capture": {
+      "stderr": "/private/tmp/sqlite-v8-case-c0-plugin.stderr",
+      "stderr_sha256": "b33c1b76ce13536f4e169fbe22f85afee7287c38d01b46a27efaef6ea1685b74",
+      "jsonl_records": 1980,
+      "statement_finished": 1618,
+      "statement_nanos_sum": 8526000000,
+      "statement_vm_step_sum": 3594728,
+      "statement_fullscan_step_sum": 18639,
+      "statement_sort_sum": 977,
+      "statement_reprepare_count": 4,
+      "statement_mem_used_sum": 80988704,
+      "hot_statement": {
+        "nanos": 5721000000,
+        "vm_step": 9586,
+        "fullscan_step": 81,
+        "sort": 0,
+        "sql": "INSERT OR IGNORE INTO \"main.kernel_m4\"(\"c0_term\", \"c1_term\", \"c2_term\", \"c3_term\") SELECT \"c0_term\", \"c1_term\", \"c2_term\", \"c3_term\" FROM \"main.kernel_a4\""
+      },
+      "drain_close": {
+        "calls": 17,
+        "busy_ms_sum_including_nested": 11436.5647,
+        "max_busy_ms": 5720.0
+      }
+    }
+  },
+  "phases": {
+    "declare_view": {
+      "calls": 1,
+      "ms": 2867.8,
+      "generated_sql_bytes": 4195
+    },
+    "nonlinear_round": {
+      "calls": 28,
+      "changed_calls": 1,
+      "changed_rows_total": 82,
+      "first_changed_rows": 82,
+      "first_changed_ms": 5629.7,
+      "zero_row_calls": 27,
+      "zero_row_ms_total": 3.2,
+      "rows": [
+        82,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "ms": [
+        5629.7,
+        0.2,
+        0.1,
+        0.1,
+        0.2,
+        0.2,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.2,
+        0.2,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1
+      ]
+    },
+    "read_view": {
+      "calls": 1,
+      "rows": 117,
+      "ms": 0.8
+    },
+    "minted": {
+      "calls": 0
+    }
+  },
+  "source_order": {
+    "connect": "src/_6_eval/_7_sqlite_eval.rs:94-111",
+    "declare": "src/_6_eval/_7_sqlite_eval.rs:197-378",
+    "declare_view_before_rounds": "src/_6_eval/_7_sqlite_eval.rs:360-374",
+    "run_rounds": "src/_6_eval/_7_sqlite_eval.rs:128-150",
+    "evaluate_sqlite": "src/_6_eval/_7_sqlite_eval.rs:1152-1163"
+  },
+  "interpretation": {
+    "direct_eval": "The command invokes dl8 eval and exercises evaluate_sqlite directly. It does not exercise the outer comptime Rounds::reduce loop.",
+    "suspect_1": "Measured order is declare_view before run_rounds. The declare_view wall span is 2867.8 ms. The first changed nonlinear round is 5629.7 ms for 82 rows. The current capture does not split preparation from nested plugin execution.",
+    "suspect_2": "The 28 calls include one changed call and 27 zero-row calls. Source shows every round statement is executed in each pass; the 27 no-op calls are not the measured dominant span.",
+    "suspect_3": "rules_fingerprint and seed-retraction rebuild guard are source evidence. This isolated direct case does not exercise a repeated cache rebuild."
+  }
+}
