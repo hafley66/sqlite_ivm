@@ -1,0 +1,125 @@
+{
+  "date": "2026-09-22",
+  "candidate": "source-read CTEs use AS MATERIALIZED only when their input node is Kind::Set; Input, Map, Join, Group, Fixpoint stay planner-visible",
+  "source_files": [
+    "src/1ca_source_reads.rs",
+    "tests/19_source_reads.rs"
+  ],
+  "baseline_commit": "ded249db7b978b67d52f53edbafef30750db3015",
+  "nested_union_fixture": {
+    "test": "set_source_reads_keep_materialized_boundaries_observable",
+    "measurement": "hafley-observe sqlite Profile mem_used summed per SQL event key; total is accumulated prepared-byte counter across repeated executions",
+    "baseline": {
+      "materialized_plan_events": 0,
+      "materialized_mem_used_sum": 0,
+      "all_statement_mem_used_sum": 22090304,
+      "largest_per_sql_accumulated_mem_used": 4348400,
+      "largest_sql_bytes": 39851,
+      "final_test": "fails: set boundary was inlined"
+    },
+    "current": {
+      "materialized_plan_events": 12,
+      "materialized_mem_used_sum": 5723760,
+      "all_statement_mem_used_sum": 7023984,
+      "largest_per_sql_accumulated_mem_used": 829968,
+      "largest_sql_bytes": 40007,
+      "bounds": {
+        "materialized_mem_used_sum_lt": 6000000,
+        "all_statement_mem_used_sum_lt": 10000000,
+        "largest_per_sql_accumulated_mem_used_lt": 1500000
+      },
+      "final_test": "passes"
+    },
+    "plan_signal": "EXPLAIN QUERY PLAN contains MATERIALIZE __ivm_read_ on temp output statements; base source plan remains SCAN main.source_rows in this fixture",
+    "test_command": "cargo test --locked --test 19_source_reads set_source_reads_keep_materialized_boundaries_observable -- --nocapture"
+  },
+  "prelude_command": "env RUST_LOG=off HAFLEY_TRACE='' HAFLEY_LOG=off DL8_ENGINE=sqlite SQLITE_IVM_LIB=<binary> target/debug/dl8 comptime oracle/comptime/prelude_evaluate_checked.json",
+  "prelude_pairs": [
+    {
+      "pair": 1,
+      "baseline": {
+        "real": 14.61,
+        "user": 13.08,
+        "sys": 1.47
+      },
+      "current": {
+        "real": 7.44,
+        "user": 6.61,
+        "sys": 0.79
+      }
+    },
+    {
+      "pair": 2,
+      "baseline": {
+        "real": 14.88,
+        "user": 13.41,
+        "sys": 1.43
+      },
+      "current": {
+        "real": 7.31,
+        "user": 6.5,
+        "sys": 0.78
+      }
+    },
+    {
+      "pair": 3,
+      "baseline": {
+        "real": 14.51,
+        "user": 13.08,
+        "sys": 1.37
+      },
+      "current": {
+        "real": 7.42,
+        "user": 6.6,
+        "sys": 0.79
+      }
+    }
+  ],
+  "output_sha256": "35039ceaeee3584b2e32e403d1b364174a774ad4e421edb9366a10b2c3ddc83b",
+  "eval_oracles": {
+    "baseline": "17 equal, 15 timeout, 0 differs",
+    "current": "17 equal, 15 timeout, 0 differs",
+    "per_case_timeout_seconds": 5
+  },
+  "gates": {
+    "source_reads": "cargo test --locked --test 19_source_reads --no-fail-fast: 4 passed",
+    "just_verify": "just verify: 77 passed, 2 skipped; timeout rail passed on second run; extension-load and compass passed",
+    "compiler_ivm_cases": "just ivm-cases: 29 passed, 0 skipped",
+    "final_regression": "cargo test --locked --test 19_source_reads set_source_reads_keep_materialized_boundaries_observable -- --nocapture: 1 passed after plan/memory-bound rewrite"
+  },
+  "evidence_paths": {
+    "receipt": "plans/costs/2026-09-22-v8-set-fence.json",
+    "html": "plans/costs/8_index_audit.html",
+    "paired_outputs": "/private/tmp/sprefa-v8-pair{1,2,3}-{baseline,current}.*",
+    "hafley_observe_baseline_jsonl": "plans/costs/11_v8_before_observe.jsonl.gz",
+    "independent_native_verify": "plans/costs/12_v8_set_fence_verify.log"
+  },
+  "paired_command_explicit": "cd /Users/chrishafley/projects/sprefa-wt/sqlite-perf-main && env RUST_LOG=off HAFLEY_TRACE='' HAFLEY_LOG=off DL8_ENGINE=sqlite SQLITE_IVM_LIB=<baseline-or-current-dylib> target/debug/dl8 comptime oracle/comptime/prelude_evaluate_checked.json",
+  "status": "candidate at measurement; parent review pending",
+  "observe_json_audit": {
+    "path": "/private/tmp/sprefa-v8-sqlite-observe-json.stderr",
+    "valid_statement_finished_events": 1618,
+    "statement_nanos_sum_ns": 14635000000,
+    "statement_nanos_sum_seconds": 14.635,
+    "statement_vm_step_sum": 3995788,
+    "largest_outer_statement_nanos": 9751000000,
+    "largest_outer_statement_vm_step": 9586,
+    "interpretation": "Profile nanos are inclusive across nested statements and do not provide exclusive VM-versus-prepare time. The root-cause evidence used here is the deterministic nested-set EXPLAIN QUERY PLAN and mem_used reduction plus paired wall timing.",
+    "invalid_trace": "/private/tmp/sprefa-v8-sqlite-observe.trace.json is not used because valid JSON ends before a stale SQL tail."
+  },
+  "baseline_observe_jsonl_sha256": "e059b2cd3143aac9dde528ec655645cf47957395898a00c97d71341c7956147d",
+  "baseline_observe_jsonl_events": 1946,
+  "measured_extension_sha256": "fee5ae9c36edf181abecca9462dbb464786489f94c23f5dc979c4bbd729ec279",
+  "final_artifact_check": {
+    "command": [
+      "/Users/chrishafley/projects/sprefa-wt/sqlite-perf-main/target/debug/dl8",
+      "comptime",
+      "oracle/comptime/prelude_evaluate_checked.json"
+    ],
+    "seconds": 7.732292832999519,
+    "exit_code": 0,
+    "extension_sha256": "aaf16766453f257d4a62ed09c43826364ab47dccbebd01fbf66dd0e602969b8d",
+    "output_sha256": "35039ceaeee3584b2e32e403d1b364174a774ad4e421edb9366a10b2c3ddc83b",
+    "stderr_bytes": 0
+  }
+}
