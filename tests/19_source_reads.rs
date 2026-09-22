@@ -231,3 +231,77 @@ fn shared_subqueries_keep_statement_text_bounded() -> Result<()> {
     );
     Ok(())
 }
+
+#[test]
+fn set_source_reads_keep_materialized_boundaries_observable() -> Result<()> {
+    let db = Connection::open_in_memory()?;
+    register(&db)?;
+    db.execute_batch(
+        "PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON;
+        CREATE TABLE source_rows(k INTEGER);INSERT INTO source_rows VALUES(1),(2),(3);",
+    )?;
+    let mut definitions = vec!["r0 AS (SELECT k FROM source_rows)".to_string()];
+    for depth in 1..6 {
+        definitions.push(format!(
+            "r{depth} AS (SELECT k FROM r{} UNION SELECT k FROM r{})",
+            depth - 1,
+            depth - 1
+        ));
+    }
+    let query = format!("WITH {} SELECT k FROM r5", definitions.join(","));
+    let (recorder, layer) = CountRecorder::new();
+    let guard = tracing_subscriber::registry().with(layer).set_default();
+    instrument(&db);
+    db.execute_batch(&format!("CREATE VIRTUAL TABLE result USING sqlite_ivm('{query}')"))?;
+    db.execute_batch("INSERT INTO source_rows VALUES(4)")?;
+    silence(&db);
+    drop(guard);
+    let statements = recorder.event_sums(
+        SQLITE_TARGET,
+        tracing::Level::DEBUG,
+        "drain",
+        "view",
+        Some("sql"),
+    );
+    let mut materialized_count = 0;
+    let mut prepared_bytes = 0.0;
+    for ((_, sql), sums) in &statements {
+        if !sql.starts_with("INSERT INTO temp.__ivm_out_") || sql.contains('?') {
+            continue;
+        }
+        let plan = hafley_observe::sqlite::query_plan(&db, sql)?;
+        if plan
+            .iter()
+            .any(|step| step.starts_with("MATERIALIZE __ivm_read_"))
+        {
+            materialized_count += 1;
+            prepared_bytes += sums.sum_of("mem_used");
+        }
+    }
+    assert!(materialized_count > 0, "set boundary was inlined");
+    // Profile mem_used is summed over repeated executions for each SQL key.
+    let total_accumulated_mem_used = statements
+        .values()
+        .map(|sums| sums.sum_of("mem_used"))
+        .sum::<f64>();
+    let max_accumulated_mem_used = statements
+        .values()
+        .map(|sums| sums.sum_of("mem_used"))
+        .fold(0.0, f64::max);
+    assert!(prepared_bytes < 6_000_000.0, "prepared set boundary: {prepared_bytes}");
+    assert!(
+        total_accumulated_mem_used < 10_000_000.0,
+        "all accumulated prepared statements: {total_accumulated_mem_used}"
+    );
+    assert!(
+        max_accumulated_mem_used < 1_500_000.0,
+        "largest accumulated prepared SQL key: {max_accumulated_mem_used}"
+    );
+    assert_eq!(
+        db.prepare("SELECT k FROM result ORDER BY k")?
+            .query_map([], |row| row.get::<_, i64>(0))?
+            .collect::<Result<Vec<_>>>()?,
+        vec![1, 2, 3, 4]
+    );
+    Ok(())
+}

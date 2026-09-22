@@ -70,7 +70,12 @@ impl Plan {
             .into_iter()
             .map(|input| {
                 format!(
-                    "__ivm_read_{input} AS ({})",
+                    "__ivm_read_{input} {} ({})",
+                    if matches!(self.nodes[input].kind, Kind::Set(_)) {
+                        "AS MATERIALIZED"
+                    } else {
+                        "AS"
+                    },
                     self.live_rows_definition(db, name, input)
                 )
             })
@@ -80,8 +85,9 @@ impl Plan {
     }
 
     // References keep shared relational subgraphs from expanding into repeated
-    // SQL text. SQLite chooses each CTE's execution strategy; no persistent
-    // operator-input tables are introduced.
+    // SQL text. Set CTEs are statement-local fences against preparation growth;
+    // other nodes stay planner-visible for indexed pushdown and cell affinity.
+    // A broader Join/Group fence changed Integer(1) into Real(1.0).
     fn live_rows_definition(&self, db: &Connection, name: &str, id: usize) -> String {
         let node = &self.nodes[id];
         let width = node.fields.len();

@@ -1,0 +1,208 @@
+bash scripts/9_verify.sh
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8): No such file or directory
+warning: ignoring --test-threads because --no-run is specified
+   Compiling sqlite-ivm v0.3.0 (/Users/chrishafley/projects/sqlite_ivm)
+    Finished `test` profile [unoptimized] target(s) in 1.91s
+    Finished `test` profile [unoptimized] target(s) in 0.06s
+────────────
+ Nextest run ID 6df06152-ef2f-450f-af4e-3d1b02c540b7 with nextest profile: default
+    Starting 77 tests across 15 binaries (2 tests skipped)
+        PASS [   0.019s] ( 1/77) sqlite-ivm::10_growth count_sum_delta_work_stays_constant_as_the_group_grows
+        PASS [   0.042s] ( 2/77) sqlite-ivm::10_growth drain_statement_costs_match_the_pinned_counts
+        PASS [   0.021s] ( 3/77) sqlite-ivm::10_growth group_limit_entries_stay_constant_in_input_multiplicity
+        PASS [   0.083s] ( 4/77) sqlite-ivm::10_growth drain_spans_stay_linear_in_changed_rows
+        PASS [   0.009s] ( 5/77) sqlite-ivm::11_intern dropping_the_view_drops_its_dictionary
+        PASS [   0.010s] ( 6/77) sqlite-ivm::11_intern hashing_the_identity_keeps_one_arrangement_row_per_composite
+        PASS [   0.007s] ( 7/77) sqlite-ivm::11_intern interning_is_injective_and_resolve_round_trips_the_corpus
+        PASS [   0.007s] ( 8/77) sqlite-ivm::11_intern re_interning_adds_no_row_and_moves_no_id
+        PASS [   0.027s] ( 9/77) sqlite-ivm::11_intern source_reads_survive_hash_collisions_and_migrate_copied_inputs
+        PASS [   0.008s] (10/77) sqlite-ivm::11_intern the_identity_splits_where_the_key_folds_and_joins_where_unique_would_split
+        PASS [   0.005s] (11/77) sqlite-ivm::11_intern the_row_hash_is_the_published_fnv1a_64_vector
+        PASS [   0.065s] (12/77) sqlite-ivm::12_compass compass_passes_in_process
+        PASS [   0.144s] (13/77) sqlite-ivm::10_growth phase_and_cost_growth_classes_hold
+        PASS [   0.005s] (14/77) sqlite-ivm::12_compass compass_passes_through_the_cli
+        PASS [   0.141s] (15/77) sqlite-ivm::13_statements_per_drain statements_per_drain_do_not_grow_with_the_batch
+        PASS [   0.157s] (16/77) sqlite-ivm::18_statement_counts statement_counts_match_pinned
+        PASS [   0.027s] (17/77) sqlite-ivm::19_source_reads composite_keys_use_native_cells_and_group_rowids_survive_updates
+        PASS [   0.011s] (18/77) sqlite-ivm::19_source_reads join_deltas_probe_sources_and_never_write_input_copies
+        PASS [   0.047s] (19/77) sqlite-ivm::19_source_reads shared_subqueries_keep_statement_text_bounded
+        PASS [   0.014s] (20/77) sqlite-ivm::1_maintenance columns_used_only_by_filters_are_checked_at_install_and_on_writes
+        PASS [   0.029s] (21/77) sqlite-ivm::1_maintenance composite_keys_isolate_partial_matches_and_maintain_moves_on_both_sides
+        PASS [   0.238s] (22/77) sqlite-ivm::1_maintenance deterministic_mutations_match_original_join_after_every_statement
+        PASS [   0.012s] (23/77) sqlite-ivm::1_maintenance drop_uses_exact_catalog_ownership_and_rejects_missing_or_changed_objects
+        PASS [   0.012s] (24/77) sqlite-ivm::1_maintenance failed_drop_restores_objects_metadata_and_caller_transaction
+        PASS [   0.012s] (25/77) sqlite-ivm::1_maintenance filters_cover_all_four_update_transitions_from_both_join_sides
+        PASS [   0.014s] (26/77) sqlite-ivm::1_maintenance install_failure_rolls_back_created_objects_and_preserves_caller_transaction
+        PASS [   0.018s] (27/77) sqlite-ivm::1_maintenance joins_maintain_both_sides_duplicates_moves_conflicts_and_rollback
+        PASS [   0.019s] (28/77) sqlite-ivm::1_maintenance managed_drop_preserves_sources_and_other_views_and_rolls_back
+        PASS [   0.418s] (29/77) sqlite-ivm::19_source_reads set_source_reads_keep_materialized_boundaries_observable
+        PASS [   0.009s] (30/77) sqlite-ivm::1_maintenance rejected_values_overflow_and_writer_settings_preserve_state
+        PASS [   0.008s] (31/77) sqlite-ivm::1_maintenance single_table_integer_boundaries_and_public_view_are_enforced
+        PASS [   0.024s] (32/77) sqlite-ivm::1_maintenance single_table_filters_boolean_precedence_integer_limits_and_rollback
+        PASS [   0.019s] (33/77) sqlite-ivm::2_vtab catalog_identity_survives_vacuum_and_rename_rejects_modified_hooks
+        PASS [   0.017s] (34/77) sqlite-ivm::2_vtab ddl_rename_preserves_state_without_writes_and_drop_preserves_sources
+        PASS [   0.013s] (35/77) sqlite-ivm::2_vtab defensive_shadow_protection_allows_source_dml_and_native_lifecycle
+        PASS [   0.029s] (36/77) sqlite-ivm::2_vtab ddl_rename_rollback_savepoints_and_failure_restore_usable_names
+        PASS [   0.010s] (37/77) sqlite-ivm::2_vtab indexed_cursors_preserve_output_order_affinity_and_simultaneous_reads
+        PASS [   0.009s] (38/77) sqlite-ivm::3_relational comma_joins_take_equality_keys_from_where
+        PASS [   0.033s] (39/77) sqlite-ivm::3_relational count_sum_delta_and_recompute_paths_match_sqlite
+        PASS [   0.025s] (40/77) sqlite-ivm::3_relational global_empty_aggregates_and_source_ddl
+        PASS [   0.008s] (41/77) sqlite-ivm::3_relational ignored_and_replaced_source_updates_preserve_arrangements
+        PASS [   0.015s] (42/77) sqlite-ivm::3_relational narrow_source_column_order_changes_are_transactional
+        PASS [   0.010s] (43/77) sqlite-ivm::3_relational null_recursive_keys_weighted_overflow_and_aggregate_exists
+        PASS [   0.011s] (44/77) sqlite-ivm::3_relational nullable_text_composite_groups_outer_join_and_rollback
+        PASS [   0.007s] (45/77) sqlite-ivm::3_relational recursive_shapes_bind_to_one_fixpoint_node_or_name_their_rejection
+        PASS [   0.011s] (46/77) sqlite-ivm::3_relational relational_group_locality_and_ddl_preserve_btrees
+        PASS [   0.155s] (47/77) sqlite-ivm::3_relational deterministic_relational_mutations_and_type_contract
+        PASS [   0.014s] (48/77) sqlite-ivm::3_relational signed_join_deltas_match_bags_when_both_sides_change
+        PASS [   0.006s] (49/77) sqlite-ivm::3_relational unsupported_clause_combinations_fail_before_install
+        PASS [   0.022s] (50/77) sqlite-ivm::4_features blobs_and_adjacent_floats_survive_trigger_transport
+        PASS [   0.041s] (51/77) sqlite-ivm::4_features collations_control_group_distinct_join_and_outer_predicates
+        PASS [   0.159s] (52/77) sqlite-ivm::3_relational shared_circuit_states
+        PASS [   0.053s] (53/77) sqlite-ivm::4_features comma_join_star_predicate_matches_plain_query
+        PASS [   0.022s] (54/77) sqlite-ivm::4_features comma_joins_keep_no_persistent_input_rows
+        PASS [   0.007s] (55/77) sqlite-ivm::4_features materialized_output_affinity_matches_ordinary_view_consumers
+        PASS [   0.013s] (56/77) sqlite-ivm::4_features parenthesized_join_scopes_and_nonrecursive_union_cte
+        PASS [   1.143s] (57/77) sqlite-ivm::4_features feature_compositions_against_sqlite
+        PASS [   0.012s] (58/77) sqlite-ivm::4_features recursive_delete_preserves_alternate_null_support_and_collated_roots
+        PASS [   0.018s] (59/77) sqlite-ivm::4_features row1_binary_closure_with_cycles
+        PASS [   0.017s] (60/77) sqlite-ivm::4_features row2_parity_over_roots
+        PASS [   0.033s] (61/77) sqlite-ivm::4_features row3_filtered_step_with_two_joins_and_distinct
+        PASS [   0.021s] (62/77) sqlite-ivm::4_features row4_min_distance_aggregate_after_bounded_recursion
+        PASS [   0.037s] (63/77) sqlite-ivm::4_features row5_antijoin_and_exists_after_recursion
+        PASS [   0.044s] (64/77) sqlite-ivm::4_features row6_sequential_fixpoints_and_two_step_rules
+        PASS [   0.006s] (65/77) sqlite-ivm::4_features rows7_and_8_named_rejections_leave_no_state
+        PASS [   0.020s] (66/77) sqlite-ivm::5_transactions cascades_generated_values_and_user_trigger_writes_compose
+        PASS [   0.008s] (67/77) sqlite-ivm::5_transactions deterministic_registered_scalars_and_rejected_volatile_functions
+        PASS [   0.017s] (68/77) sqlite-ivm::5_transactions nullable_sum_support_survives_failure_snapshots_and_reopen
+        PASS [   0.011s] (69/77) sqlite-ivm::5_transactions recursive_member_tables_follow_savepoints_and_rollback
+        PASS [   0.022s] (70/77) sqlite-ivm::5_transactions wal_snapshots_writer_contention_and_failed_maintenance_are_atomic
+        PASS [   0.011s] (71/77) sqlite-ivm::7_key_agreement identity_round_trips_the_corpus
+        PASS [   0.007s] (72/77) sqlite-ivm::7_key_agreement json_subtype_group_key_agrees_between_bulk_and_incremental_paths
+        PASS [   0.016s] (73/77) sqlite-ivm::7_key_agreement rust_key_after_expression_agrees_with_sql_key_sql
+        PASS [   1.224s] (74/77) sqlite-ivm::8_group_limit group_limit_matches_plain_sql_across_multiplicity_limit_and_offset
+        PASS [   0.104s] (75/77) sqlite-ivm::8_group_limit window_with_limit_reads_every_copy
+        PASS [   0.026s] (76/77) sqlite-ivm::9_fixpoint_retraction fixpoint_retraction_emits_the_stored_representative
+        PASS [   9.606s] (77/77) sqlite-ivm::4_features recursion_statement_count_is_linear_in_new_closure_rows
+────────────
+     Summary [  10.805s] 77 tests run: 77 passed, 2 skipped
+timeout rail: no recorded number for sqlite-ivm::10_growth::count_sum_delta_work_stays_constant_as_the_group_grows at 0.019s
+timeout rail: no recorded number for sqlite-ivm::11_intern::source_reads_survive_hash_collisions_and_migrate_copied_inputs at 0.027s
+timeout rail: no recorded number for sqlite-ivm::18_statement_counts::statement_counts_match_pinned at 0.157s
+timeout rail: no recorded number for sqlite-ivm::19_source_reads::composite_keys_use_native_cells_and_group_rowids_survive_updates at 0.027s
+timeout rail: no recorded number for sqlite-ivm::19_source_reads::join_deltas_probe_sources_and_never_write_input_copies at 0.011s
+timeout rail: no recorded number for sqlite-ivm::19_source_reads::set_source_reads_keep_materialized_boundaries_observable at 0.418s
+timeout rail: no recorded number for sqlite-ivm::19_source_reads::shared_subqueries_keep_statement_text_bounded at 0.047s
+timeout rail: no recorded number for sqlite-ivm::3_relational::count_sum_delta_and_recompute_paths_match_sqlite at 0.033s
+timeout rail: no recorded number for sqlite-ivm::3_relational::signed_join_deltas_match_bags_when_both_sides_change at 0.014s
+timeout rail: no recorded number for sqlite-ivm::5_transactions::nullable_sum_support_survives_failure_snapshots_and_reopen at 0.017s
+timeout rail: 77 tests and the battery within tolerance for Darwin arm64
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8): No such file or directory
+   Compiling sqlite-ivm v0.3.0 (/Users/chrishafley/projects/sqlite_ivm)
+    Finished `dev` profile [unoptimized] target(s) in 1.08s
+   Compiling sqlite-ivm v0.3.0 (/Users/chrishafley/projects/sqlite_ivm)
+   Compiling sqlite-ivm-bench v0.1.0 (/Users/chrishafley/projects/sqlite_ivm/bench)
+    Finished `release` profile [optimized + debuginfo] target(s) in 31.25s
+     Running tests/6_extension_load.rs (target/release/build/sqlite-ivm-bench/883a34fc2b5b2fd9/out/6_extension_load-883a34fc2b5b2fd9)
+
+running 3 tests
+test extension_loads_through_its_entry_point ... ok
+test loaded_extension_registers_the_create_function ... ok
+test loaded_extension_maintains_a_view_end_to_end ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s
+
+bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8): No such file or directory
+╭─────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ load_extension('/Users/chrishafley/projects/sqlite_ivm/target/extension/debug/libsqlite_ivm.dylib') │
+╞═════════════════════════════════════════════════════════════════════════════════════════════════════╡
+│                                                                                                     │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭────────────────────────────────────────────────────────────────────────╮
+│                     sqlite_ivm_create('totals', '                      │
+│   SELECT group_id, COUNT(*) AS item_count, SUM(amount) AS total_amount │
+│                                FROM items                              │
+│                            GROUP BY group_id                           │
+│                                   ')                                   │
+╞════════════════════════════════════════════════════════════════════════╡
+│ totals                                                                 │
+╰────────────────────────────────────────────────────────────────────────╯
+EMPTY: expect no groups
+INSERT: expect (4,2,10), (9,1,-2), (12,1,0)
+╭──────────┬────────────┬──────────────╮
+│ group_id │ item_count │ total_amount │
+╞══════════╪════════════╪══════════════╡
+│        4 │          2 │           10 │
+│        9 │          1 │           -2 │
+│       12 │          1 │            0 │
+╰──────────┴────────────┴──────────────╯
+UPDATE AMOUNT: group 4 sum becomes 14
+╭──────────┬────────────┬──────────────╮
+│ group_id │ item_count │ total_amount │
+╞══════════╪════════════╪══════════════╡
+│        4 │          2 │           14 │
+│        9 │          1 │           -2 │
+│       12 │          1 │            0 │
+╰──────────┴────────────┴──────────────╯
+MOVE GROUP + CHANGE AMOUNT: expect (4,1,3), (9,2,5), (12,1,0)
+╭──────────┬────────────┬──────────────╮
+│ group_id │ item_count │ total_amount │
+╞══════════╪════════════╪══════════════╡
+│        4 │          1 │            3 │
+│        9 │          2 │            5 │
+│       12 │          1 │            0 │
+╰──────────┴────────────┴──────────────╯
+MULTIROW UPDATE: group 9 sum becomes 7
+╭──────────┬────────────┬──────────────╮
+│ group_id │ item_count │ total_amount │
+╞══════════╪════════════╪══════════════╡
+│        4 │          1 │            3 │
+│        9 │          2 │            7 │
+│       12 │          1 │            0 │
+╰──────────┴────────────┴──────────────╯
+DELETE NEGATIVE ROW: group 9 becomes (9,1,8)
+╭──────────┬────────────┬──────────────╮
+│ group_id │ item_count │ total_amount │
+╞══════════╪════════════╪══════════════╡
+│        4 │          1 │            3 │
+│        9 │          1 │            8 │
+│       12 │          1 │            0 │
+╰──────────┴────────────┴──────────────╯
+DELETE LAST ROW IN GROUP: group 4 disappears
+╭──────────┬────────────┬──────────────╮
+│ group_id │ item_count │ total_amount │
+╞══════════╪════════════╪══════════════╡
+│        9 │          1 │            8 │
+│       12 │          1 │            0 │
+╰──────────┴────────────┴──────────────╯
+DELETE INSIDE TRANSACTION: expect no groups
+ROLLBACK: expect (9,1,8), (12,1,0)
+╭──────────┬────────────┬──────────────╮
+│ group_id │ item_count │ total_amount │
+╞══════════╪════════════╪══════════════╡
+│        9 │          1 │            8 │
+│       12 │          1 │            0 │
+╰──────────┴────────────┴──────────────╯
+DELETE ALL: expect no groups
+PASS: all CRUD and rollback assertions passed
+╭──────────────────────────────┬────╮
+│             step             │ ok │
+╞══════════════════════════════╪════╡
+│ empty                        │  1 │
+│ insert                       │  1 │
+│ update amount                │  1 │
+│ move group and change amount │  1 │
+│ multirow update              │  1 │
+│ delete negative row          │  1 │
+│ delete last row in group     │  1 │
+│ rollback restores groups     │  1 │
+│ delete all                   │  1 │
+╰──────────────────────────────┴────╯
+   Compiling sqlite-ivm v0.3.0 (/Users/chrishafley/projects/sqlite_ivm)
+    Finished `test` profile [unoptimized] target(s) in 1.30s
+     Running tests/12_compass.rs (target/debug/build/sqlite-ivm/8aaa11d72a932e66/out/12_compass-8aaa11d72a932e66)
+
+running 1 test
+test compass_passes_through_the_cli ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.07s
