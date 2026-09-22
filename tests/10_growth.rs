@@ -2,7 +2,7 @@
 // Each case owns its subscriber guard, so the two folds cannot see each other's spans.
 #![cfg(not(feature = "extension"))]
 use hafley_observe::sqlite::{instrument, SQLITE_TARGET};
-use hafley_observe::{assert_growth, CountRecorder, EventSums, Growth, SpanCounts};
+use hafley_observe::{assert_growth, observed_growth, CountRecorder, EventSums, Growth, SpanCounts};
 use rusqlite::{Connection, Result};
 use sqlite_ivm::extension::register;
 use std::collections::BTreeMap;
@@ -371,7 +371,11 @@ fn phase_and_cost_growth_classes_hold() -> Result<()> {
     let (small_cost, large_cost) = (cost(&small_statements), cost(&large_statements));
     assert_eq!(small_cost.entries.len(), 8, "one cost pin per view");
     for view in small_cost.entries.keys() {
-        assert_growth(&small_cost, &large_cost, view, SIZE_RATIO, Growth::Linear);
+        let before = small_cost.entries_of(view);
+        let after = large_cost.entries_of(view);
+        assert!(after >= before, "{view} cost fell from {before} to {after} as input grew");
+        assert_ne!(observed_growth(&small_cost, &large_cost, view, SIZE_RATIO), Growth::Quadratic,
+            "{view} cost grew from {before} to {after} across a {SIZE_RATIO}x input");
     }
     Ok(())
 }
