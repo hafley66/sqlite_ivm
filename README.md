@@ -137,6 +137,8 @@ interned integer key in a persistent operator result table. They update that
 table from child deltas; deleting the current representative while support
 remains re-reads the affected source key. EXCEPT and INTERSECT retain the
 affected-key before/after path. No per-input row copies are stored.
+Temporary before-images share one table per row width and are cleared after
+each operator, so view installation does not create one before table per node.
 
 Projection/filtering and inner joins propagate signed deltas. Eligible bounded
 integer COUNT/SUM groups add contributions and maintain non-null support counts.

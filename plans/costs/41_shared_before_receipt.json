@@ -1,0 +1,89 @@
+{
+  "compiler_checkout": "/Users/chrishafley/projects/sprefa-wt/sqlite-perf-main",
+  "compiler_head": "acb2bd94d",
+  "plugin_baseline_commit": "6bbad2a",
+  "dependency_checkout": "/Users/chrishafley/projects/hafley-rs",
+  "extension_sha256": {
+    "before": "9ebdeaf7f8ccdb13625b428d2c5371565f68d48528c0f98c351e5bc2a82f0281",
+    "after": "f70637acfb0bfed1d1f887cf3c65ee2b3c225eee7a165edb7b1cee9cfb0f80e2"
+  },
+  "fixture": "oracle/eval/c2_partial_3.json",
+  "paired_runs": [
+    {
+      "version": "before",
+      "wall_ms": 3054.1,
+      "equal": true,
+      "declare_view_ms": 2226.2,
+      "nonlinear_round_ms": 695.6,
+      "round_statements": 128
+    },
+    {
+      "version": "after",
+      "wall_ms": 2571.4,
+      "equal": true,
+      "declare_view_ms": 1775.8,
+      "nonlinear_round_ms": 685.9,
+      "round_statements": 128
+    },
+    {
+      "version": "before",
+      "wall_ms": 3085.2,
+      "equal": true,
+      "declare_view_ms": 2279.4,
+      "nonlinear_round_ms": 682.1,
+      "round_statements": 128
+    },
+    {
+      "version": "after",
+      "wall_ms": 2538.7,
+      "equal": true,
+      "declare_view_ms": 1737.0,
+      "nonlinear_round_ms": 687.2,
+      "round_statements": 128
+    },
+    {
+      "version": "before",
+      "wall_ms": 3048.3,
+      "equal": true,
+      "declare_view_ms": 2241.4,
+      "nonlinear_round_ms": 675.4,
+      "round_statements": 128
+    },
+    {
+      "version": "after",
+      "wall_ms": 2550.3,
+      "equal": true,
+      "declare_view_ms": 1758.6,
+      "nonlinear_round_ms": 680.7,
+      "round_statements": 128
+    }
+  ],
+  "paired_mean_ms": {
+    "before": {
+      "wall_ms": 3062.5,
+      "declare_view_ms": 2249.0,
+      "nonlinear_round_ms": 684.4
+    },
+    "after": {
+      "wall_ms": 2553.5,
+      "declare_view_ms": 1757.1,
+      "nonlinear_round_ms": 684.6
+    }
+  },
+  "whole_oracle_gate_seconds": {
+    "before": 28.545,
+    "after": 23.869
+  },
+  "function_catalog_profile": {
+    "before_probes": 649,
+    "after_probes": 6,
+    "before_vm_steps": 2173490,
+    "after_vm_steps": 19610
+  },
+  "validation": {
+    "plugin_linked": "84 passed, 2 skipped",
+    "native_extension": "4 passed",
+    "sprefa_oracle": "32/32 before and after",
+    "emitted_sql": "17/17 passed"
+  }
+}

@@ -660,6 +660,9 @@ pub fn bind(db: &Connection, sql: &str) -> Result<Plan> {
         [],
         |r| Ok((r.get::<_, String>(1)?, r.get::<_, Option<String>>(5)?)),
     )?;
+    // EXPLAIN can mention the same scalar at many call sites. The catalog
+    // decision depends on its name for this bind, so inspect that name once.
+    let mut checked_scalars = std::collections::HashSet::new();
     for (opcode, function) in functions {
         tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
         if ![
@@ -697,6 +700,9 @@ pub fn bind(db: &Connection, sql: &str) -> Result<Plan> {
                 return Err(error(format!("unsupported aggregate {name}")));
             }
         } else {
+            if !checked_scalars.insert(name.clone()) {
+                continue;
+            }
             let deterministic:bool=statements::query(db,Phase::Declare,BIND_OBJECT,"SELECT EXISTS(SELECT 1 FROM pragma_function_list WHERE name=?1 COLLATE NOCASE AND type='s' AND flags & 2048 != 0) AND NOT EXISTS(SELECT 1 FROM pragma_function_list WHERE name=?1 COLLATE NOCASE AND type='s' AND builtin=0 AND flags & 2048 = 0)",[&name],|r|r.get(0))?;
             if !deterministic
                 || [

@@ -150,14 +150,17 @@ fn scratch_statements(plan: &Plan) -> Vec<String> {
     let mut statements = vec![String::from(
         "CREATE TEMP TABLE IF NOT EXISTS __ivm_touched(__k INTEGER PRIMARY KEY)",
     )];
+    // Nodes drain in topological order and clear their before-image before the
+    // next node runs. Scratch before-images therefore need one table per width.
+    let mut before_widths = std::collections::HashSet::new();
     for (id, node) in plan.nodes.iter().enumerate() {
         tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
         let width = node.fields.len();
         let cols = columns(width);
-        statements.push(format!(
-            "CREATE TABLE IF NOT EXISTS {out}({cols},__m); CREATE TABLE IF NOT EXISTS temp.__ivm_before_{width}_{id}({cols},__m)",
-            out = out_table(id, width)
-        ));
+        statements.push(format!("CREATE TABLE IF NOT EXISTS {}({cols},__m)", out_table(id, width)));
+        if before_widths.insert(width) {
+            statements.push(format!("CREATE TABLE IF NOT EXISTS temp.__ivm_before_{width}({cols},__m)"));
+        }
         if id == plan.output {
             if let Some(keys) = plan.stored_group_key().filter(|k| !k.is_empty()) {
                 let signature = crate::relational_maintenance::row_hash(keys.as_bytes()) as u64;
@@ -173,7 +176,7 @@ fn scratch_statements(plan: &Plan) -> Vec<String> {
                 }).collect::<Vec<_>>();
                 if !columns.is_empty() {
                     statements.push(format!(
-                        "CREATE INDEX IF NOT EXISTS temp.__ivm_before_{width}_{id}_group_{} ON __ivm_before_{width}_{id}({})",
+                        "CREATE INDEX IF NOT EXISTS temp.__ivm_before_{width}_group_{} ON __ivm_before_{width}({})",
                         columns.join("_"), columns.join(",")
                     ));
                 }
@@ -242,7 +245,7 @@ fn node_statements(plan: &Plan, name: &str, db: &Connection, id: usize) -> NodeS
                     .collect(),
             },
             Kind::Set("union" | "distinct") => {
-                let before = format!("temp.__ivm_before_{width}_{id}");
+                let before = format!("temp.__ivm_before_{width}");
                 let cols = columns(width);
                 KindStatements::SetMembership {
                     sides: (0..node.inputs.len()).map(|side| arrangement_side(plan,name,id,side)).collect(),
@@ -278,7 +281,7 @@ fn arrangement_statements(
     let node = &plan.nodes[id];
     let out = out_table(id, width);
     let cols = columns(width);
-    let before = format!("temp.__ivm_before_{width}_{id}");
+    let before = format!("temp.__ivm_before_{width}");
     ArrangementStatements {
         park: format!("INSERT INTO {before} SELECT * FROM {out}"),
         clear_out: format!("DELETE FROM {out}"),
@@ -427,7 +430,7 @@ fn aggregate_delta_statements(plan: &Plan, name: &str, db: &Connection, id: usiz
     let width = node.fields.len();
     let cols = columns(width);
     let out = out_table(id, width);
-    let before = format!("temp.__ivm_before_{width}_{id}");
+    let before = format!("temp.__ivm_before_{width}");
     let child = out_table(node.inputs[0], plan.nodes[node.inputs[0]].fields.len());
     let metadata = table(name, id, 1);
     let metadata_name = format!("{name}_op{id}x1");

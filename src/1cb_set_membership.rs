@@ -76,7 +76,7 @@ impl Plan {
         let cols = columns(width);
         let state = set_membership_table(name,id);
         let out = out_table(id,width);
-        let before = format!("temp.__ivm_before_{width}_{id}");
+        let before = format!("temp.__ivm_before_{width}");
         let inputs = self.set_membership_inputs(name,id,false);
         let negative = self.set_membership_inputs(name,id,true);
         let candidate_columns = (0..width).map(|i|format!("c{i}")).collect::<Vec<_>>().join(",");
@@ -108,7 +108,7 @@ impl Plan {
             replace_representatives: format!("UPDATE {state} SET {assignments} WHERE __n>0 AND __k IN (SELECT __k FROM temp.__ivm_touched)"),
             remove_empty: format!("DELETE FROM {state} WHERE __n=0 AND __k IN (SELECT __k FROM temp.__ivm_touched)"),
             after: format!("INSERT INTO {out}({cols},__m) SELECT {cols},1 FROM {state} WHERE __n>0 AND __k IN (SELECT __k FROM temp.__ivm_touched)"),
-            clear_before: format!("DELETE FROM temp.__ivm_before_{width}_{id}"),
+            clear_before: format!("DELETE FROM temp.__ivm_before_{width}"),
         }
     }
 
