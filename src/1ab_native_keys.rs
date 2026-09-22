@@ -2,7 +2,7 @@
 use crate::{
     columns::substitute_columns,
     relational::{key_expression, Kind, Plan},
-    relational_maintenance::{keys_table, out_table},
+    relational_maintenance::keys_table,
 };
 
 impl Plan {
@@ -49,7 +49,7 @@ impl Plan {
     #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn insert_keys(&self, name: &str, id: usize, side: usize) -> String {
         let input = self.nodes[id].inputs[side];
-        let child = out_table(input,self.nodes[input].fields.len());
+        let child = self.out_table(input,self.nodes[input].fields.len());
         let dict = keys_table(name);
         if let Some(keys) = self.native_key_values(id,side) {
             let columns = (0..keys.len()).map(|i|format!("k{i}")).collect::<Vec<_>>().join(",");

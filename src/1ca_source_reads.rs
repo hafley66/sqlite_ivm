@@ -4,7 +4,7 @@ use crate::{
     catalog::quote,
     columns::{column_references, substitute_columns},
     relational::{Kind, Plan},
-    relational_maintenance::{columns, identity_sql, keys_table, out_table, table},
+    relational_maintenance::{columns, identity_sql, keys_table, table},
     relational_materialize::MaterializeStatements,
 };
 use rusqlite::Connection;
@@ -160,7 +160,7 @@ impl Plan {
                     MaterializeStatements::Group(g) => g.plain_insert,
                     _ => unreachable!(),
                 };
-                let target = format!("INSERT INTO {}({cols},__m) ", out_table(id, width));
+                let target = format!("INSERT INTO {}({cols},__m) ", self.out_table(id, width));
                 // Remove this compiler's exact destination, preserving WITH
                 // clauses and all scalar/aggregate expressions verbatim.
                 let query = insert.replacen(&target, "", 1);
@@ -237,7 +237,7 @@ impl Plan {
         };
         let current = read(format!("({source_rows})"), "__n");
         let rows = if before {
-            let delta = read(out_table(input, width), "__m");
+            let delta = read(self.out_table(input, width), "__m");
             let exact = crate::native_keys::exact_row_columns(width, "").join(",");
             format!("SELECT {cols},sum(__n) AS __n FROM ({current} UNION ALL SELECT {cols},-__m AS __n FROM ({delta})) GROUP BY {exact} HAVING sum(__n)>0")
         } else if matches!(self.nodes[id].kind, Kind::Set(_)) {

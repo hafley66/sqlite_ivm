@@ -3,7 +3,7 @@ use crate::{
     statements::{self, Phase},
     relational::{Kind, Occurrence, Plan},
     relational_maintenance::{
-        columns, folded, json_key, out_table, table, BULK_MULTIPLICITY_BUDGET,
+        columns, folded, json_key, table, BULK_MULTIPLICITY_BUDGET,
     },
 };
 use rusqlite::{types::Value, Connection, Result};
@@ -216,9 +216,13 @@ impl Plan {
                 return Err(error("source value does not conform to declared affinity"));
             }
         }
+        let mut initialized_slots = std::collections::HashSet::new();
         for (id, node) in self.nodes.iter().enumerate() {
+            if !initialized_slots.insert(self.out_slots[id]) {
+                continue;
+            }
             tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
-            let out = out_table(id, node.fields.len());
+            let out = self.out_table(id, node.fields.len());
             statements::exec(
                 db,
                 Phase::Declare,
@@ -289,7 +293,7 @@ impl Plan {
             let input = self.nodes[self.output].inputs[0];
             let width = self.nodes[input].fields.len();
             let source = self.live_input_from_rows(name, self.output, 0, false, false,
-                format!("SELECT {},__m AS __n FROM {}", columns(width), out_table(input, width)));
+                format!("SELECT {},__m AS __n FROM {}", columns(width), self.out_table(input, width)));
             let columns = sums.iter().map(|(i,_)|format!("nn{i}")).collect::<Vec<_>>().join(",");
             let values = sums.iter().map(|(_,v)|format!("sum(CASE WHEN ({v}) IS NULL THEN 0 ELSE __n END)")).collect::<Vec<_>>().join(",");
             let safe = sums.iter().map(|(_,v)|format!("min(typeof({v}) IN ('integer','null') AND coalesce(abs(CAST(({v}) AS REAL)),0)<=1000000)")).collect::<Vec<_>>().join(" AND ");
@@ -310,7 +314,7 @@ impl Plan {
                 db,
                 Phase::Materialize,
                 name,
-                &format!("DELETE FROM {}", out_table(child, node.fields.len())),
+                &format!("DELETE FROM {}", self.out_table(child, node.fields.len())),
                 [],
             )?;
         }
@@ -357,7 +361,7 @@ impl Plan {
     #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn write_state(&self, db: &Connection, name: &str, id: usize) -> Result<()> {
         let width = self.nodes[id].fields.len();
-        let out = out_table(id, width);
+        let out = self.out_table(id, width);
         let state = format!("main.{}", quote(&format!("{name}_state")));
         let peak: i64 = statements::query(
             db,

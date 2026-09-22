@@ -4,12 +4,12 @@
       [
         "declare",
         "CREATE",
-        32
+        30
       ],
       [
         "declare",
         "DELETE",
-        4
+        3
       ],
       [
         "declare",
@@ -45,7 +45,7 @@
     "scans": [
       [
         "declare",
-        2563,
+        2525,
         145
       ],
       [
@@ -60,12 +60,12 @@
       [
         "declare",
         "CREATE",
-        32
+        30
       ],
       [
         "declare",
         "DELETE",
-        4
+        3
       ],
       [
         "declare",
@@ -131,12 +131,12 @@
     "scans": [
       [
         "declare",
-        4963,
+        4925,
         145
       ],
       [
         "drain",
-        3400,
+        4100,
         0
       ],
       [
@@ -156,12 +156,12 @@
       [
         "declare",
         "CREATE",
-        32
+        30
       ],
       [
         "declare",
         "DELETE",
-        4
+        3
       ],
       [
         "declare",
@@ -227,12 +227,12 @@
     "scans": [
       [
         "declare",
-        3379,
+        3341,
         145
       ],
       [
         "drain",
-        1222,
+        1823,
         0
       ],
       [
@@ -252,12 +252,12 @@
       [
         "declare",
         "CREATE",
-        50
+        42
       ],
       [
         "declare",
         "DELETE",
-        9
+        5
       ],
       [
         "declare",
@@ -328,7 +328,7 @@
     "scans": [
       [
         "declare",
-        4308,
+        4156,
         287
       ],
       [
@@ -358,12 +358,12 @@
       [
         "declare",
         "CREATE",
-        50
+        42
       ],
       [
         "declare",
         "DELETE",
-        9
+        5
       ],
       [
         "declare",
@@ -434,7 +434,7 @@
     "scans": [
       [
         "declare",
-        5804,
+        5652,
         287
       ],
       [

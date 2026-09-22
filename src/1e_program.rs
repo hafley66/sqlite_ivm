@@ -7,7 +7,7 @@ use crate::{
     relational_materialize::MaterializeStatements,
     relational_maintenance::{
         arrived_table, columns, deleted_table, identity_sql, json_key,
-        keys_table, left_table, out_table, parameters, plain, roles, rule_from, rule_where, table,
+        keys_table, left_table, parameters, plain, roles, rule_from, rule_where, table,
         Role,
     },
 };
@@ -153,18 +153,22 @@ fn scratch_statements(plan: &Plan) -> Vec<String> {
     // Nodes drain in topological order and clear their before-image before the
     // next node runs. Scratch before-images therefore need one table per width.
     let mut before_widths = std::collections::HashSet::new();
+    let mut out_slots = std::collections::HashSet::new();
     for (id, node) in plan.nodes.iter().enumerate() {
         tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
         let width = node.fields.len();
         let cols = columns(width);
-        statements.push(format!("CREATE TABLE IF NOT EXISTS {}({cols},__m)", out_table(id, width)));
+        if out_slots.insert(plan.out_slots[id]) {
+            statements.push(format!("CREATE TABLE IF NOT EXISTS {}({cols},__m)", plan.out_table(id, width)));
+        }
         if before_widths.insert(width) {
             statements.push(format!("CREATE TABLE IF NOT EXISTS temp.__ivm_before_{width}({cols},__m)"));
         }
         if id == plan.output {
             if let Some(keys) = plan.stored_group_key().filter(|k| !k.is_empty()) {
                 let signature = crate::relational_maintenance::row_hash(keys.as_bytes()) as u64;
-                statements.push(format!("CREATE INDEX IF NOT EXISTS temp.__ivm_out_{width}_{id}_group_{signature:x} ON __ivm_out_{width}_{id}({keys},__m)"));
+                let slot = plan.out_slots[id];
+                statements.push(format!("CREATE INDEX IF NOT EXISTS temp.__ivm_out_{width}_{slot}_group_{signature:x} ON __ivm_out_{width}_{slot}({keys},__m)"));
             }
         }
         // Aggregate deltas join the stored before-image by projected group
@@ -186,11 +190,12 @@ fn scratch_statements(plan: &Plan) -> Vec<String> {
             for (side, input) in node.inputs.iter().enumerate() {
                 tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                 let child_width = plan.nodes[*input].fields.len();
-                let child = out_table(*input, child_width);
+                let child = plan.out_table(*input, child_width);
                 let key = plan.native_key_columns(id,side).expect("join key").join(",");
                 if key.is_empty() { continue; }
                 let signature = crate::relational_maintenance::row_hash(key.as_bytes()) as u64;
-                statements.push(format!("CREATE INDEX IF NOT EXISTS temp.__ivm_out_{child_width}_{input}_key_{signature:x} ON {}({key})",child.trim_start_matches("temp.")));
+                let slot = plan.out_slots[*input];
+                statements.push(format!("CREATE INDEX IF NOT EXISTS temp.__ivm_out_{child_width}_{slot}_key_{signature:x} ON {}({key})",child.trim_start_matches("temp.")));
             }
         }
         if let Kind::Fixpoint { .. } = node.kind {
@@ -218,7 +223,7 @@ fn node_statements(plan: &Plan, name: &str, db: &Connection, id: usize) -> NodeS
     let node = &plan.nodes[id];
     tracing::debug!(view = name, id, kind = node.kind.label(), inputs = ?node.inputs, columns = node.fields.len(), "compile_node_statements");
     let width = node.fields.len();
-    let out = out_table(id, width);
+    let out = plan.out_table(id, width);
     NodeStatements {
         sweep: format!("DELETE FROM {out}"),
         kind: match &node.kind {
@@ -236,7 +241,7 @@ fn node_statements(plan: &Plan, name: &str, db: &Connection, id: usize) -> NodeS
                     .inputs
                     .iter()
                     .map(|input| {
-                        let child = out_table(*input, plan.nodes[*input].fields.len());
+                        let child = plan.out_table(*input, plan.nodes[*input].fields.len());
                         format!(
                             "INSERT INTO {out}({cols},__m) SELECT {cols},__m FROM {child}",
                             cols = columns(width)
@@ -279,7 +284,7 @@ fn arrangement_statements(
     width: usize,
 ) -> ArrangementStatements {
     let node = &plan.nodes[id];
-    let out = out_table(id, width);
+    let out = plan.out_table(id, width);
     let cols = columns(width);
     let before = format!("temp.__ivm_before_{width}");
     ArrangementStatements {
@@ -326,12 +331,12 @@ fn join_delta_statements(plan: &Plan, name: &str, db: &Connection, id: usize) ->
     let left_width = plan.nodes[node.inputs[0]].fields.len();
     let right_width = plan.nodes[node.inputs[1]].fields.len();
     let cols = columns(node.fields.len());
-    let out = out_table(id, node.fields.len());
+    let out = plan.out_table(id, node.fields.len());
     let projection = (0..left_width).map(|i| format!("l.c{i} AS c{i}"))
         .chain((0..right_width).map(|i| format!("r.c{i} AS c{}", left_width + i)))
         .collect::<Vec<_>>().join(",");
     let delta = |side: usize| {
-        let child = out_table(node.inputs[side], plan.nodes[node.inputs[side]].fields.len());
+        let child = plan.out_table(node.inputs[side], plan.nodes[node.inputs[side]].fields.len());
         child
     };
     let matched = plan.native_join_match(id);
@@ -429,9 +434,9 @@ fn aggregate_delta_statements(plan: &Plan, name: &str, db: &Connection, id: usiz
     let count = expressions.iter().position(|e| e == "coalesce(sum(__n),0)")?;
     let width = node.fields.len();
     let cols = columns(width);
-    let out = out_table(id, width);
+    let out = plan.out_table(id, width);
     let before = format!("temp.__ivm_before_{width}");
-    let child = out_table(node.inputs[0], plan.nodes[node.inputs[0]].fields.len());
+    let child = plan.out_table(node.inputs[0], plan.nodes[node.inputs[0]].fields.len());
     let metadata = table(name, id, 1);
     let metadata_name = format!("{name}_op{id}x1");
     let present = crate::statements::query(db, crate::statements::Phase::Declare, name, "SELECT EXISTS(SELECT 1 FROM main.sqlite_schema WHERE type='table' AND name=?1)", [&metadata_name], |row| row.get::<_, bool>(0)).unwrap_or(false);
@@ -475,7 +480,7 @@ fn aggregate_delta_statements(plan: &Plan, name: &str, db: &Connection, id: usiz
 #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn arrangement_side(plan: &Plan, name: &str, id: usize, side: usize) -> Option<ArrangementSide> {
     let node = &plan.nodes[id];
-    let child = out_table(node.inputs[side], plan.nodes[node.inputs[side]].fields.len());
+    let child = plan.out_table(node.inputs[side], plan.nodes[node.inputs[side]].fields.len());
     let key = if plan.native_key_values(id,side).is_some() {
         plan.key_lookup(name,id,side)
     } else {
@@ -492,7 +497,7 @@ fn arrangement_side(plan: &Plan, name: &str, id: usize, side: usize) -> Option<A
 fn split_statements(plan: &Plan, name: &str, db: &Connection, id: usize, side: usize) -> SplitStatements {
     let node = &plan.nodes[id];
     let width = plan.nodes[node.inputs[side]].fields.len();
-    let child = out_table(node.inputs[side], width);
+    let child = plan.out_table(node.inputs[side], width);
     let t = plan.live_input(db,name,id,side,false,false);
     let arrived = arrived_table(id, side, width);
     let left = left_table(id, side, width);
@@ -518,7 +523,7 @@ fn fixpoint_statements(plan: &Plan, name: &str, db: &Connection, id: usize, widt
     let all = table(name, id, member);
     let work = table(name, id, member + 1);
     let cols = columns(width);
-    let out = out_table(id, width);
+    let out = plan.out_table(id, width);
     let deleted = deleted_table(id, width);
     let identity_of =
         |alias: &str| json_key((0..width).map(|i| plain(&format!("{alias}.c{i}"))).collect());
@@ -734,7 +739,7 @@ fn derive_sql(
 fn apply_state_statements(plan: &Plan, name: &str) -> ApplyStateStatements {
     let node = &plan.nodes[plan.output];
     let width = node.fields.len();
-    let out = out_table(plan.output, width);
+    let out = plan.out_table(plan.output, width);
     let state = format!("main.{}", crate::catalog::quote(&format!("{name}_state")));
     let projected = (0..width).map(|i|format!("o.c{i}")).collect::<Vec<_>>().join(",");
     let check = format!("sqlite_ivm_row_check({projected})");

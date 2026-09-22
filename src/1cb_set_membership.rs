@@ -4,7 +4,7 @@ use crate::{
     catalog::{error, quote},
     native_keys::exact_row_match,
     relational::{Kind, Plan},
-    relational_maintenance::{columns, identity_sql, out_table},
+    relational_maintenance::{columns, identity_sql},
     statements::{self, Phase},
 };
 use rusqlite::{Connection, Result};
@@ -44,7 +44,7 @@ impl Plan {
         let width = self.nodes[id].fields.len();
         let cols = columns(width);
         self.nodes[id].inputs.iter().enumerate().map(|(side,input)| {
-            let child = out_table(*input,width);
+            let child = self.out_table(*input,width);
             let key = self.key_lookup(name,id,side);
             let identity = identity_sql(width);
             let filter = if positive_only { " WHERE __m<0" } else { "" };
@@ -56,7 +56,7 @@ impl Plan {
         let width = self.nodes[id].fields.len();
         let cols = columns(width);
         let state = set_membership_table(name,id);
-        let out = out_table(id,width);
+        let out = self.out_table(id,width);
         let inputs = self.set_membership_inputs(name,id,false);
         let projected = (0..width).map(|i|format!("o.c{i}")).collect::<Vec<_>>().join(",");
         let key = self.key_lookup(name,id,0);
@@ -75,7 +75,7 @@ impl Plan {
         let width = self.nodes[id].fields.len();
         let cols = columns(width);
         let state = set_membership_table(name,id);
-        let out = out_table(id,width);
+        let out = self.out_table(id,width);
         let before = format!("temp.__ivm_before_{width}");
         let inputs = self.set_membership_inputs(name,id,false);
         let negative = self.set_membership_inputs(name,id,true);

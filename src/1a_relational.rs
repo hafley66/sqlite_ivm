@@ -3,7 +3,7 @@
 use crate::{
     catalog::{error, quote},
     statements::{self, Phase},
-    relational::{Occurrence, Plan, Rule},
+    relational::{Kind, Occurrence, Plan, Rule},
 };
 use rusqlite::{types::Value, Connection, Result};
 pub type Row = Vec<Value>;
@@ -231,6 +231,51 @@ pub(crate) const BULK_MULTIPLICITY_BUDGET: i64 = 1_000_000;
 #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn out_table(id: usize, width: usize) -> String {
     format!("temp.__ivm_out_{width}_{id}")
+}
+impl Plan {
+    /// Give non-overlapping delta lifetimes of the same width one temp table.
+    /// Inputs start at the seed boundary; other nodes start at their topological
+    /// position. A table is reusable only after its last consumer has run.
+    pub(crate) fn assign_out_slots(&mut self) {
+        let count = self.nodes.len();
+        let mut last_reads: Vec<usize> = (0..count).collect();
+        for (consumer, node) in self.nodes.iter().enumerate() {
+            for &input in &node.inputs {
+                last_reads[input] = last_reads[input].max(consumer);
+            }
+        }
+        last_reads[self.output] = count;
+        if crate::relational_program::aggregate_sum_inputs(self).is_some() {
+            let input = self.nodes[self.output].inputs[0];
+            last_reads[input] = count;
+        }
+        for (id, node) in self.nodes.iter().enumerate() {
+            if matches!(node.kind, Kind::Input(_)) && last_reads[id] == id {
+                last_reads[id] = count;
+            }
+        }
+        let mut slots: std::collections::HashMap<usize, Vec<(usize, usize)>> =
+            std::collections::HashMap::new();
+        self.out_slots = Vec::with_capacity(count);
+        for (id, node) in self.nodes.iter().enumerate() {
+            let start = if matches!(node.kind, Kind::Input(_)) { 0 } else { id };
+            let width_slots = slots.entry(node.fields.len()).or_default();
+            if let Some((slot, end)) = width_slots.iter_mut().find(|(_, end)| *end < start) {
+                self.out_slots.push(*slot);
+                *end = last_reads[id];
+            } else {
+                width_slots.push((id, last_reads[id]));
+                self.out_slots.push(id);
+            }
+        }
+        self.out_last_reads = last_reads;
+        tracing::info!(nodes = count, out_tables = slots.values().map(Vec::len).sum::<usize>(), "scratch_output_lifetimes");
+    }
+
+    pub(crate) fn out_table(&self, id: usize, width: usize) -> String {
+        debug_assert_eq!(self.nodes[id].fields.len(), width);
+        out_table(self.out_slots[id], width)
+    }
 }
 #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn json_key(parts: Vec<String>) -> String {

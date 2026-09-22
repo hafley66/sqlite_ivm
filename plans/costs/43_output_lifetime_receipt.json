@@ -1,0 +1,113 @@
+{
+  "baseline_commit": "64dcfea",
+  "baseline_extension_sha256": "f70637acfb0bfed1d1f887cf3c65ee2b3c225eee7a165edb7b1cee9cfb0f80e2",
+  "new_extension_sha256": "d5d741cd4f8c68c5ca4ece23679eac6ca65a077e8ce7623938ef797d329e75bd",
+  "compiler_checkout": "/Users/chrishafley/projects/sprefa-wt/sqlite-perf-main",
+  "compiler_case": "oracle/eval/c2_partial_3.json",
+  "compiler_output_sha256": "e635f295151c51405f23a852e13ef5ca857da1fcb8cf551a064088289fdafd67",
+  "compiler_runs": [
+    {
+      "version": "before",
+      "wall_ms": 2537.5,
+      "peak_rss_bytes": 1009090560
+    },
+    {
+      "version": "after",
+      "wall_ms": 2208.4,
+      "peak_rss_bytes": 800145408
+    },
+    {
+      "version": "before",
+      "wall_ms": 2543.9,
+      "peak_rss_bytes": 1018986496
+    },
+    {
+      "version": "after",
+      "wall_ms": 2275.6,
+      "peak_rss_bytes": 794574848
+    },
+    {
+      "version": "before",
+      "wall_ms": 2531.8,
+      "peak_rss_bytes": 998768640
+    },
+    {
+      "version": "after",
+      "wall_ms": 2245.7,
+      "peak_rss_bytes": 797360128
+    }
+  ],
+  "compiler_mean": {
+    "before_wall_ms": 2537.7,
+    "after_wall_ms": 2243.2,
+    "before_peak_rss_bytes": 1008948565,
+    "after_peak_rss_bytes": 797360128
+  },
+  "scratch_output_tables": {
+    "before": 2491,
+    "after": 342,
+    "operators": 2491
+  },
+  "crossover_fixture": "bench/results/native-rowid-probes-observe/timings/12000-1000-200.json",
+  "crossover_final": {
+    "before": {
+      "final_checksum": "37a855bf4e75587e4d18e6426b94e5fcef60be731c273d66e28e6a791690c188",
+      "disk": {
+        "database_bytes": 540672,
+        "main_bytes": 4096,
+        "wal_bytes": 1458512,
+        "shm_bytes": 32768,
+        "temp_bytes": null,
+        "temp_scope": "SQLite temp files not sampled"
+      },
+      "sqlite_pages": {
+        "main": {
+          "page_count": 132,
+          "page_size": 4096
+        },
+        "temp": {
+          "page_count": 107,
+          "page_size": 4096
+        }
+      },
+      "sqlite_allocator": {
+        "current_bytes": 1562416,
+        "peak_bytes": 1942176
+      },
+      "process_peak_rss_platform_units": 54362112
+    },
+    "after": {
+      "final_checksum": "37a855bf4e75587e4d18e6426b94e5fcef60be731c273d66e28e6a791690c188",
+      "disk": {
+        "database_bytes": 540672,
+        "main_bytes": 4096,
+        "wal_bytes": 1458512,
+        "shm_bytes": 32768,
+        "temp_bytes": null,
+        "temp_scope": "SQLite temp files not sampled"
+      },
+      "sqlite_pages": {
+        "main": {
+          "page_count": 132,
+          "page_size": 4096
+        },
+        "temp": {
+          "page_count": 105,
+          "page_size": 4096
+        }
+      },
+      "sqlite_allocator": {
+        "current_bytes": 1553552,
+        "peak_bytes": 1932304
+      },
+      "process_peak_rss_platform_units": 50315264
+    }
+  },
+  "memory_scope": "c2 RSS includes dl8 Rust process, SQLite, extension, and allocator overhead; 12k crossover SQLite allocator is measured separately by sqlite3_status64 in its Python process. These peaks are not subtractable.",
+  "validation": {
+    "plugin": "84 passed, 2 skipped",
+    "sprefa_sqlite_oracle": "32/32",
+    "native_extension": "4 passed",
+    "shell_scenarios": "6 passed"
+  }
+}

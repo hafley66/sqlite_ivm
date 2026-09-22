@@ -3,7 +3,7 @@ use crate::{
     statements::{self, Phase},
     relational::{Kind, Plan, Rule},
     relational_maintenance::{
-        columns, out_table, roles, rule_from, rule_where, table,
+        columns, roles, rule_from, rule_where, table,
         BULK_GROUP_BUDGET, BULK_MULTIPLICITY_BUDGET, BULK_ROUND_BUDGET, Role,
     },
 };
@@ -22,7 +22,7 @@ impl Plan {
         } else { self.nodes[id].inputs.iter().enumerate().map(|(side, input)| {
             let width = self.nodes[*input].fields.len();
             self.live_input_from_rows(name, id, side, restricted, false,
-                format!("SELECT {},__m AS __n FROM {}", columns(width), out_table(*input, width)))
+                format!("SELECT {},__m AS __n FROM {}", columns(width), self.out_table(*input, width)))
         }).collect::<Vec<_>>() };
         self.materialize_from_sources(db, name, id, restricted, Some(&sources))
             .execute(db, name)
@@ -46,7 +46,7 @@ impl Plan {
         sources: Option<&[String]>,
     ) -> MaterializeStatements {
         let node = &self.nodes[id];
-        let out = out_table(id, node.fields.len());
+        let out = self.out_table(id, node.fields.len());
         let cols = columns(node.fields.len());
         // source_table never fails: it formats one of two static shapes.
         let source = |side: usize| -> String {
@@ -79,12 +79,12 @@ impl Plan {
                         .as_ref()
                         .map(|p| format!(" WHERE {p}"))
                         .unwrap_or_default(),
-                    child = out_table(node.inputs[0], self.nodes[node.inputs[0]].fields.len())
+                    child = self.out_table(node.inputs[0], self.nodes[node.inputs[0]].fields.len())
                 ),
             },
             Kind::Set(op) => {
                 if *op == "all" {
-                    let child = out_table(node.inputs[0], self.nodes[node.inputs[0]].fields.len());
+                    let child = self.out_table(node.inputs[0], self.nodes[node.inputs[0]].fields.len());
                     return MaterializeStatements::Set {
                         insert: format!("INSERT INTO {out}({cols},__m) SELECT {cols},__m FROM {child}"),
                     };

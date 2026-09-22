@@ -141,6 +141,8 @@ pub struct Plan {
     pub nodes: Vec<Node>,
     pub output: usize,
     pub names: Vec<String>,
+    pub(crate) out_slots: Vec<usize>,
+    pub(crate) out_last_reads: Vec<usize>,
 }
 #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub(crate) fn name(n: &str) -> String {
@@ -732,9 +734,12 @@ pub fn bind(db: &Connection, sql: &str) -> Result<Plan> {
             nodes: vec![],
             output: 0,
             names,
+            out_slots: vec![],
+            out_last_reads: vec![],
         },
         ctes: vec![],
     };
     compiler.plan.output = compiler.select(select)?;
+    compiler.plan.assign_out_slots();
     Ok(compiler.plan)
 }

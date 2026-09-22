@@ -135,13 +135,30 @@ impl Plan {
                 let _apply = tracing::debug_span!("node", kind = "apply_state", id).entered();
                 self.apply_state(db, program)?;
             }
+            for (side, child) in node.inputs.iter().enumerate() {
+                if self.out_last_reads[*child] == id
+                    && out_rows[*child] != 0
+                    && !node.inputs[..side].contains(child)
+                {
+                    statements::exec_cached(
+                        db,
+                        Phase::Drain,
+                        name,
+                        &program.nodes[*child].sweep,
+                        [],
+                    )?;
+                }
+            }
+            if self.out_last_reads[id] == id && written != 0 {
+                statements::exec_cached(db, Phase::Drain, name, &statements.sweep, [])?;
+            }
         }
-        // Sweep is the only clear: seed trusts it, and a failed drain aborts the
-        // enclosing statement, which unwinds the temp writes with it.
+        // Long-lived output and aggregate inputs remain until after apply_state.
+        // A failed drain aborts the enclosing statement and its temp writes.
         let _sweep = tracing::debug_span!("node", kind = "sweep", id = self.nodes.len()).entered();
-        for (statements, rows) in program.nodes.iter().zip(out_rows) {
+        for (id, (statements, rows)) in program.nodes.iter().zip(out_rows).enumerate() {
             tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
-            if rows != 0 {
+            if rows != 0 && self.out_last_reads[id] == self.nodes.len() {
                 statements::exec_cached(db, Phase::Drain, name, &statements.sweep, [])?;
             }
         }
