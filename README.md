@@ -187,8 +187,9 @@ Other aggregates, HAVING, windows, and LIMIT retain their existing paths.
 
 `hafley-observe::CountRecorder` supplies numeric event samples and aggregates.
 SQL phase names, workloads, cost fixtures, and regression assertions live in this
-repository. Vendored dependencies and their upstream commit are recorded in
-[vendor/0_SOURCE.md](vendor/0_SOURCE.md).
+repository. Both shared crates are local path dependencies in the sibling
+`../hafley-rs/crates/` directory: `hafley-observe` and `sqlite-bulk-trigger`.
+Library changes are made there and used directly by the plugin and benchmark.
 
 ## Build, test, package
 
@@ -211,8 +212,8 @@ Homebrew SQLite when `SQLITE3` is unset. `cargo-nextest`, Python 3, and coreutil
 
 The native extension builds into `target/extension`, separately from linked Rust
 tests and benchmark binaries. `just package` writes binary and source archives
-plus SHA-256 sidecars into `dist`. The source archive contains committed HEAD,
-including the vendored crates.
+plus SHA-256 sidecars into `dist`. The source archive contains committed HEAD;
+building it requires the sibling `hafley-rs` checkout with those shared crates.
 
 ## Shared benchmark
 
