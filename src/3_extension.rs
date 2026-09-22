@@ -80,18 +80,6 @@ pub fn register(db: &Connection) -> Result<()> {
         },
     )?;
     db.create_scalar_function(
-        c"sqlite_ivm_real_hex",
-        1,
-        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
-        |ctx| {
-            let value: rusqlite::types::Value = ctx.get(0)?;
-            match value {
-                rusqlite::types::Value::Real(v) => Ok(Some(format!("{:016x}", v.to_bits()))),
-                _ => Ok(None),
-            }
-        },
-    )?;
-    db.create_scalar_function(
         c"sqlite_ivm_drop",
         1,
         FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DIRECTONLY,

@@ -11,11 +11,12 @@ mod database;
 use database::register;
 
 #[test]
-fn row_identity_upserts_survive_hash_collisions_and_legacy_indexes() -> Result<()> {
+fn source_reads_survive_hash_collisions_and_migrate_copied_inputs() -> Result<()> {
     for legacy in [false, true] {
         let path = std::env::temp_dir().join(format!("ivm-row-identity-{}-{legacy}.db", std::process::id()));
         assert!(!path.exists(), "test receipt already exists: {}", path.display());
-        {
+        if legacy { std::fs::write(&path, include_bytes!("fixtures/4_copied_inputs_v6.db")).unwrap(); }
+        if !legacy {
             let db = Connection::open(&path)?;
             register(&db)?;
             db.create_scalar_function(c"sqlite_ivm_hash", 1,
@@ -25,20 +26,7 @@ fn row_identity_upserts_survive_hash_collisions_and_legacy_indexes() -> Result<(
                 CREATE TABLE a(k INTEGER,v INTEGER);
                 CREATE VIRTUAL TABLE g USING sqlite_ivm('SELECT k,count(*) AS n,sum(v) AS s FROM a GROUP BY k');
                 INSERT INTO a VALUES(1,2),(1,2),(1,3),(2,9)")?;
-            if legacy {
-                let indexes = db.prepare("SELECT name,tbl_name FROM sqlite_schema WHERE type='index' AND sql LIKE 'CREATE UNIQUE INDEX%' AND tbl_name GLOB 'g_op*'")?
-                    .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
-                    .collect::<Result<Vec<_>>>()?;
-                assert!(!indexes.is_empty());
-                for (index, table) in indexes {
-                    db.execute_batch(&format!("DROP INDEX \"{index}\";CREATE INDEX \"{index}\" ON \"{table}\"(__r)"))?;
-                }
-                let support: String = db.query_row("SELECT name FROM sqlite_schema WHERE type='table' AND name GLOB 'g_op*' AND sql LIKE '%__safe%'", [], |row| row.get(0))?;
-                db.execute_batch(&format!("DROP TABLE \"{support}\";DROP INDEX __ivm_g_result_group"))?;
-                db.execute("DELETE FROM __ivm_objects WHERE object_name=?1 OR object_name='__ivm_g_result_group'", [&support])?;
-                db.execute_batch("UPDATE __ivm_schema SET format_version=5")?;
-                db.execute_batch("UPDATE __ivm_objects SET definition=(SELECT sql FROM sqlite_schema WHERE name=object_name) WHERE object_type='index' AND view_name='g'")?;
-            }
+
         }
         {
             let db = Connection::open(&path)?;
@@ -47,6 +35,9 @@ fn row_identity_upserts_survive_hash_collisions_and_legacy_indexes() -> Result<(
                 rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC | rusqlite::functions::FunctionFlags::SQLITE_INNOCUOUS,
                 |_| Ok(0i64))?;
             db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON")?;
+            assert_eq!(db.query_row("SELECT count(*) FROM g", [], |r| r.get::<_,i64>(0))?, 2);
+            assert_eq!(db.query_row("SELECT format_version FROM __ivm_schema", [], |r| r.get::<_,i64>(0))?, 8);
+            assert!(arrangements(&db,"g")?.is_empty());
             for mutation in [
                 "BEGIN;UPDATE a SET v=v+1 WHERE k=1;INSERT INTO a VALUES(2,10);COMMIT",
                 "BEGIN;DELETE FROM a WHERE v=3;UPDATE a SET k=3 WHERE k=2;ROLLBACK",
@@ -249,20 +240,12 @@ fn arrangements(db: &Connection, view: &str) -> Result<Vec<(String, usize)>> {
 
 /// `__r` stopped being UNIQUE when it became a hash, so one row per composite
 /// is an invariant of the maintenance code and needs its own rail.
-fn assert_one_row_per_composite(db: &Connection, view: &str, at: &str) -> Result<()> {
-    for (table, width) in arrangements(db, view)? {
-        let composite = identity_sql(width);
-        let (rows, distinct, stored): (i64, i64, i64) = db.query_row(
-            &format!("SELECT count(*),count(DISTINCT {composite}),count(*) FILTER (WHERE sqlite_ivm_hash({composite})=__r) FROM \"{table}\""),
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )?;
-        assert_eq!(rows, distinct, "{at}: {table} holds a duplicate composite");
-        assert_eq!(
-            rows, stored,
-            "{at}: {table} stored a hash its own columns do not rebuild"
-        );
-    }
+fn assert_result_identity_without_copied_inputs(db: &Connection, view: &str, at: &str) -> Result<()> {
+    assert!(arrangements(db,view)?.is_empty(), "{view}: persistent input rows at {at}");
+    let width: i64 = db.query_row("SELECT count(*) FROM pragma_table_info(?1) WHERE name NOT LIKE '__ivm_%'",[view],|r|r.get(0))?;
+    let composite = format!("sqlite_ivm_row_check({})",(0..width).map(|i|format!("c{i}")).collect::<Vec<_>>().join(","));
+    let invalid: i64 = db.query_row(&format!("SELECT count(*) FROM \"{view}_state\" WHERE __check!={composite}"),[],|r|r.get(0))?;
+    assert_eq!(invalid,0,"{view}: result identity at {at}");
     Ok(())
 }
 
@@ -285,12 +268,12 @@ fn hashing_the_identity_keeps_one_arrangement_row_per_composite() -> Result<()> 
             "INSERT INTO hash_source(id,value) VALUES(?1,?2)",
             rusqlite::params![index as i64, value.clone()],
         )?;
-        assert_one_row_per_composite(&db, "hash_view", name)?;
+        assert_result_identity_without_copied_inputs(&db, "hash_view", name)?;
         db.execute(
             "INSERT INTO hash_source(id,value) VALUES(?1,?2)",
             rusqlite::params![(index + CORPUS_SIZE) as i64, value],
         )?;
-        assert_one_row_per_composite(&db, "hash_view", name)?;
+        assert_result_identity_without_copied_inputs(&db, "hash_view", name)?;
     }
     Ok(())
 }
@@ -309,30 +292,16 @@ fn the_identity_splits_where_the_key_folds_and_joins_where_unique_would_split() 
            'SELECT DISTINCT value FROM folded_source');
          INSERT INTO folded_source(id,value) VALUES(1,1),(2,1.0),(3,NULL),(4,NULL)",
     )?;
-    let (table, width) = arrangements(&db, "folded_view")?.remove(0);
-    let composite = identity_sql(width);
-
-    let folded: i64 = db.query_row(
-        &format!("SELECT count(*) FROM \"{table}\" WHERE __k=(SELECT __k FROM \"{table}\" WHERE typeof(c0)='integer')"),
-        [],
-        |row| row.get(0),
-    )?;
-    assert_eq!(folded, 2, "integer 1 and real 1.0 share one __k");
-
-    let nulls: (i64, i64) = db.query_row(
-        &format!("SELECT count(*),coalesce(sum(__n),0) FROM \"{table}\" WHERE c0 IS NULL"),
-        [],
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )?;
-    assert_eq!(nulls, (1, 2), "two NULL rows are one identity at multiplicity 2");
-
-    let distinct: i64 = db.query_row(
-        &format!("SELECT count(DISTINCT {composite}) FROM \"{table}\""),
-        [],
-        |row| row.get(0),
-    )?;
-    assert_eq!(distinct, 3, "integer 1, real 1.0 and NULL are three identities");
-    assert_one_row_per_composite(&db, "folded_view", "folded corpus")?;
+    let composite = identity_sql(1);
+    let distinct: i64 = db.query_row(&format!("SELECT count(DISTINCT {composite}) FROM (SELECT value AS c0 FROM folded_source)"),[],|r|r.get(0))?;
+    assert_eq!(distinct,3,"integer, real, and NULL retain distinct identities");
+    let result_count: i64 = db.query_row("SELECT count(*) FROM folded_view",[],|r|r.get(0))?;
+    assert_eq!(result_count,2,"integer and real share SQL equality; duplicate NULLs produce one result");
+    db.execute_batch("DELETE FROM folded_source WHERE id IN (1,3)")?;
+    assert_eq!(db.query_row("SELECT count(*) FROM folded_view",[],|r|r.get::<_,i64>(0))?,2);
+    db.execute_batch("DELETE FROM folded_source")?;
+    assert_eq!(db.query_row("SELECT count(*) FROM folded_view",[],|r|r.get::<_,i64>(0))?,0);
+    assert_result_identity_without_copied_inputs(&db, "folded_view", "folded corpus")?;
     Ok(())
 }
 

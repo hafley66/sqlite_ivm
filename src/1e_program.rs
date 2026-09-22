@@ -5,7 +5,7 @@ use crate::{
     relational::{Kind, Occurrence, Plan, Rule},
     relational_materialize::MaterializeStatements,
     relational_maintenance::{
-        arrived_table, columns, deleted_table, delta_index, delta_table, identity_sql, json_key,
+        arrived_table, columns, deleted_table, identity_sql, json_key,
         keys_table, left_table, out_table, parameters, plain, roles, rule_from, rule_where, table,
         Role,
     },
@@ -52,6 +52,7 @@ pub(crate) struct ArrangementStatements {
     pub(crate) clear_before: String,
     pub(crate) sides: Vec<Option<ArrangementSide>>,
     pub(crate) materialize: MaterializeStatements,
+    pub(crate) materialize_before: MaterializeStatements,
     pub(crate) stored_before: Option<StoredGroupStatements>,
     pub(crate) aggregate_delta: Option<AggregateDeltaStatements>,
 }
@@ -68,10 +69,10 @@ pub(crate) struct AggregateDeltaStatements {
     pub(crate) invalidate: String,
 }
 
-/// Inner joins propagate signed input deltas against the opposite arrangement.
-/// Side zero runs before its upsert; side one sees that updated side zero.
+/// Inner joins probe current sources and subtract the two-delta cross term.
 pub(crate) struct JoinDeltaStatements {
     pub(crate) sides: [String; 2],
+    pub(crate) cross: String,
     pub(crate) bad: String,
     pub(crate) consolidate: bool,
 }
@@ -79,16 +80,6 @@ pub(crate) struct JoinDeltaStatements {
 pub(crate) struct ArrangementSide {
     pub(crate) intern: String,
     pub(crate) touch: String,
-    pub(crate) upsert: UpsertStatements,
-}
-
-pub(crate) struct UpsertStatements {
-    pub(crate) clear_delta: String,
-    pub(crate) fill_delta: String,
-    pub(crate) apply: String,
-    pub(crate) insert_new: Option<String>,
-    pub(crate) bad: String,
-    pub(crate) drop_zero: String,
 }
 
 pub(crate) struct SplitStatements {
@@ -119,9 +110,6 @@ pub(crate) struct FixpointStatements {
 }
 
 pub(crate) struct FixpointSide {
-    pub(crate) intern: String,
-    pub(crate) touch: String,
-    pub(crate) upsert: UpsertStatements,
     pub(crate) split: SplitStatements,
     pub(crate) exists_left: String,
     /// Per rule mentioning the side, per occurrence of it: the derive reading
@@ -132,6 +120,7 @@ pub(crate) struct FixpointSide {
 
 pub(crate) struct ApplyStateStatements {
     pub(crate) wanted: String,
+    pub(crate) replace: Option<String>,
     pub(crate) retract: String,
     pub(crate) peak: String,
     pub(crate) extend: String,
@@ -159,6 +148,12 @@ fn scratch_statements(plan: &Plan) -> Vec<String> {
             "CREATE TABLE IF NOT EXISTS {out}({cols},__m); CREATE TABLE IF NOT EXISTS temp.__ivm_before_{width}_{id}({cols},__m)",
             out = out_table(id, width)
         ));
+        if id == plan.output {
+            if let Some(keys) = plan.stored_group_key().filter(|k| !k.is_empty()) {
+                let signature = crate::relational_maintenance::row_hash(keys.as_bytes()) as u64;
+                statements.push(format!("CREATE INDEX IF NOT EXISTS temp.__ivm_out_{width}_{id}_group_{signature:x} ON __ivm_out_{width}_{id}({keys},__m)"));
+            }
+        }
         // Aggregate deltas join the stored before-image by projected group
         // columns. The scratch table otherwise requires one scan per group.
         if id == plan.output && aggregate_sum_inputs(plan).is_some() {
@@ -174,19 +169,14 @@ fn scratch_statements(plan: &Plan) -> Vec<String> {
                 }
             }
         }
-        if matches!(
-            node.kind,
-            Kind::Set(_) | Kind::Join { .. } | Kind::Group { .. } | Kind::Fixpoint { .. }
-        ) {
-            for side in 0..node.inputs.len() {
-                let side_width = plan.nodes[node.inputs[side]].fields.len();
-                statements.push(format!(
-                    "CREATE TABLE IF NOT EXISTS {delta}(__r INTEGER NOT NULL,__v TEXT NOT NULL,__n INTEGER NOT NULL,{cols}); CREATE INDEX IF NOT EXISTS {index}_r ON {bare}(__r)",
-                    delta = delta_table(id, side, side_width),
-                    cols = columns(side_width),
-                    index = delta_index(id, side, side_width),
-                    bare = delta_table(id, side, side_width).trim_start_matches("temp.")
-                ));
+        if matches!(node.kind,Kind::Join { .. } | Kind::Group { .. }) {
+            for (side, input) in node.inputs.iter().enumerate() {
+                let child_width = plan.nodes[*input].fields.len();
+                let child = out_table(*input, child_width);
+                let key = plan.native_key_columns(id,side).expect("join key").join(",");
+                if key.is_empty() { continue; }
+                let signature = crate::relational_maintenance::row_hash(key.as_bytes()) as u64;
+                statements.push(format!("CREATE INDEX IF NOT EXISTS temp.__ivm_out_{child_width}_{input}_key_{signature:x} ON {}({key})",child.trim_start_matches("temp.")));
             }
         }
         if let Kind::Fixpoint { .. } = node.kind {
@@ -258,7 +248,6 @@ fn arrangement_statements(
     let out = out_table(id, width);
     let cols = columns(width);
     let before = format!("temp.__ivm_before_{width}_{id}");
-    let identity = identity_sql(width);
     ArrangementStatements {
         park: format!("INSERT INTO {before} SELECT * FROM {out}"),
         clear_out: format!("DELETE FROM {out}"),
@@ -266,37 +255,35 @@ fn arrangement_statements(
             format!("INSERT INTO {out} SELECT {cols},-__m FROM {before}"),
             format!("DELETE FROM {before}"),
         ],
-        consolidate: format!("INSERT INTO {before} SELECT {cols},sum(__m) FROM {out} GROUP BY {identity} HAVING sum(__m)!=0"),
-        join_delta: join_delta_statements(plan, name, id),
+        consolidate: format!("INSERT INTO {before} SELECT {cols},sum(__m) FROM {out} GROUP BY {} HAVING sum(__m)!=0", crate::native_keys::exact_row_columns(width,"").join(",")),
+        join_delta: join_delta_statements(plan, name, db, id),
         emit: format!("INSERT INTO {out} SELECT * FROM {before}"),
         clear_before: format!("DELETE FROM {before}"),
         sides: (0..node.inputs.len())
-            .map(|side| arrangement_side(plan, name, db, id, side))
+            .map(|side| arrangement_side(plan, name, id, side))
             .collect(),
         materialize: plan.materialize_statements(db, name, id, true),
+        materialize_before: plan.materialize_from_sources(db, name, id, true, Some(
+            &(0..node.inputs.len()).map(|side| plan.live_input(db, name, id, side, true, true)).collect::<Vec<_>>()
+        )),
         aggregate_delta: aggregate_delta_statements(plan, name, db, id),
         stored_before: if id == plan.output {
             plan.stored_group_key().and_then(|key| {
-                let state_name = format!("{name}_state");
-                let suffix = format!("({key})");
-                let indexed = crate::statements::query_map(
-                    db, crate::statements::Phase::Declare, name,
-                    "SELECT sql FROM main.sqlite_schema WHERE type='index' AND tbl_name=?1 AND sql IS NOT NULL",
-                    [&state_name], |row| row.get::<_, String>(0),
-                ).is_ok_and(|definitions| definitions.iter().any(|sql| sql.ends_with(&suffix)));
-                indexed.then(|| {
-                    let selected = format!("FROM main.{} WHERE {key} IN (SELECT __v FROM {} WHERE __i IN (SELECT __k FROM temp.__ivm_touched))", crate::catalog::quote(&state_name), keys_table(name));
-                    StoredGroupStatements {
-                        read: format!("INSERT INTO {out}({cols},__m) SELECT {cols},1 {selected}"),
-                        corrupt: format!("SELECT EXISTS(SELECT 1 {selected} AND __key!={identity})"),
-                    }
+                let keys = if key.is_empty() { vec!["0".into()] } else { key.split(',').map(str::to_string).collect() };
+                let source = format!("main.{}",crate::catalog::quote(&format!("{name}_state")));
+                let selected = plan.touched_source(name,id,&keys,&source);
+                let projection = (0..width).map(|i|format!("s.c{i}")).collect::<Vec<_>>().join(",");
+                let check = format!("sqlite_ivm_row_check({projection})");
+                Some(StoredGroupStatements {
+                    read: format!("INSERT INTO {out}({cols},__m) SELECT {projection},1 FROM {selected}"),
+                    corrupt: format!("SELECT EXISTS(SELECT 1 FROM {selected} WHERE s.__check!={check})"),
                 })
             })
         } else { None },
     }
 }
 
-fn join_delta_statements(plan: &Plan, name: &str, id: usize) -> Option<JoinDeltaStatements> {
+fn join_delta_statements(plan: &Plan, name: &str, db: &Connection, id: usize) -> Option<JoinDeltaStatements> {
     let node = &plan.nodes[id];
     let Kind::Join { mode: "inner", predicate, .. } = &node.kind else {
         return None;
@@ -305,25 +292,27 @@ fn join_delta_statements(plan: &Plan, name: &str, id: usize) -> Option<JoinDelta
     let right_width = plan.nodes[node.inputs[1]].fields.len();
     let cols = columns(node.fields.len());
     let out = out_table(id, node.fields.len());
-    let dict = keys_table(name);
     let projection = (0..left_width).map(|i| format!("l.c{i} AS c{i}"))
         .chain((0..right_width).map(|i| format!("r.c{i} AS c{}", left_width + i)))
         .collect::<Vec<_>>().join(",");
-    let sides = [0, 1].map(|side| {
+    let delta = |side: usize| {
         let child = out_table(node.inputs[side], plan.nodes[node.inputs[side]].fields.len());
-        let key = plan.key_sql(id, side).expect("inner join input key");
-        let delta = format!("(SELECT *, (SELECT __i FROM {dict} WHERE __v={key}) AS __k FROM {child})");
-        let (left, right, weight) = if side == 0 {
-            (delta, table(name, id, 1), "l.__m*r.__n")
-        } else {
-            (table(name, id, 0), delta, "l.__n*r.__m")
-        };
-        let body = format!("SELECT {projection},{weight} AS __m FROM {left} l JOIN {right} r ON l.__k=r.__k AND NOT EXISTS(SELECT 1 FROM json_each((SELECT __v FROM {dict} WHERE __i=l.__k)) WHERE type='null')");
+        child
+    };
+    let matched = plan.native_join_match(id);
+    let join = |left: String, right: String, weight: &str, drive_right: bool| {
+        let from = if drive_right { format!("{right} r CROSS JOIN {left} l") } else { format!("{left} l CROSS JOIN {right} r") };
+        let body = format!("SELECT {projection},{weight} AS __m FROM {from} ON {matched}");
         let filter = predicate.as_ref().map(|p| format!(" WHERE {p}")).unwrap_or_default();
         format!("INSERT INTO {out}({cols},__m) SELECT * FROM ({body}){filter}")
-    });
+    };
+    let sides = [
+        join(delta(0), plan.live_input(db,name,id,1,false,false), "l.__m*r.__n", false),
+        join(plan.live_input(db,name,id,0,false,false), delta(1), "l.__n*r.__m", true),
+    ];
     Some(JoinDeltaStatements {
         sides,
+        cross: join(delta(0), delta(1), "-l.__m*r.__m", false),
         bad: format!("SELECT EXISTS(SELECT 1 FROM {out} WHERE typeof(__m)!='integer')"),
         consolidate: !group_consumers_consolidate(plan, id),
     })
@@ -389,7 +378,7 @@ pub(crate) fn aggregate_sum_inputs(plan: &Plan) -> Option<Vec<(usize, String)>> 
 
 /// Safe integer groups add signed contributions to their stored before-image.
 /// Nullable sums carry non-null support counts. Groups leaving the bounded
-/// domain use the authoritative input arrangement for subsequent recomputations.
+/// domain recompute affected groups from authoritative source reads.
 fn aggregate_delta_statements(plan: &Plan, name: &str, db: &Connection, id: usize) -> Option<AggregateDeltaStatements> {
     if id != plan.output { return None; }
     let sums = aggregate_sum_inputs(plan)?;
@@ -420,7 +409,7 @@ fn aggregate_delta_statements(plan: &Plan, name: &str, db: &Connection, id: usiz
         else if expression == "coalesce(sum(__n),0)" { new_count.clone() }
         else { format!("CASE WHEN m.nn{i}=0 THEN NULL ELSE coalesce(b.c{i},0)+coalesce(g.c{i},0) END") }
     }).collect::<Vec<_>>().join(",");
-    let groups = if keys.is_empty() { String::new() } else { format!(" GROUP BY {}", plan.key_sql(id, 0)?) };
+    let groups = if keys.is_empty() { String::new() } else { format!(" GROUP BY {}", keys.join(",")) };
     let joined = if key_positions.is_empty() { "1".to_string() } else {
         // Both values are projected integer group keys. Remove the computed
         // expression's affinity so SQLite can probe the untyped scratch index.
@@ -428,107 +417,50 @@ fn aggregate_delta_statements(plan: &Plan, name: &str, db: &Connection, id: usiz
     };
     let nonempty = if keys.is_empty() { String::new() } else { format!(" WHERE ({new_count})>0") };
     let projected = expressions.iter().enumerate().map(|(i, e)|format!("{e} AS c{i}")).collect::<Vec<_>>().join(",");
-    let key = plan.key_sql(id, 0)?;
-    let dict = keys_table(name);
+    let key = plan.key_lookup(name,id,0);
+    let grouped = if keys.is_empty() { "(0+0)".into() } else { keys.join(",") };
     let metadata_columns = sums.iter().map(|(i,_)|format!("nn{i}")).collect::<Vec<_>>().join(",");
     let nonnull = sums.iter().map(|(_,v)|format!("sum(CASE WHEN ({v}) IS NULL THEN 0 ELSE __n END)")).collect::<Vec<_>>().join(",");
     let updates = sums.iter().map(|(i,_)|format!("nn{i}=nn{i}+excluded.nn{i}")).collect::<Vec<_>>().join(",");
     Some(AggregateDeltaStatements {
         eligible: format!("SELECT {}", checks.join(" AND ")),
-        update_counts: format!("INSERT INTO {metadata}(__k,__safe,{metadata_columns}) SELECT (SELECT __i FROM {dict} WHERE __v={key}),1,{nonnull} FROM {delta} WHERE true GROUP BY {key} ON CONFLICT(__k) DO UPDATE SET {updates}"),
+        update_counts: format!("INSERT INTO {metadata}(__k,__safe,{metadata_columns}) SELECT {key},1,{nonnull} FROM {delta} WHERE true GROUP BY {grouped} ON CONFLICT(__k) DO UPDATE SET {updates}"),
         invalidate: format!("INSERT INTO {metadata}(__k,__safe,{metadata_columns}) SELECT __k,0,{} FROM temp.__ivm_touched WHERE true ON CONFLICT(__k) DO UPDATE SET __safe=0", sums.iter().map(|_|"0").collect::<Vec<_>>().join(",")),
-        apply: format!("INSERT INTO {out}({cols},__m) SELECT {values},1 FROM (SELECT {projected},(SELECT __i FROM {dict} WHERE __v={key}) AS __group_key FROM {delta}{groups}) g LEFT JOIN {before} b ON {joined} JOIN {metadata} m ON m.__k=g.__group_key{nonempty}"),
+        apply: format!("INSERT INTO {out}({cols},__m) SELECT {values},1 FROM (SELECT {projected},{key} AS __group_key FROM {delta}{groups}) g LEFT JOIN {before} b ON {joined} JOIN {metadata} m ON m.__k=g.__group_key{nonempty}"),
     })
 }
 
-fn arrangement_side(plan: &Plan, name: &str, db: &Connection, id: usize, side: usize) -> Option<ArrangementSide> {
+fn arrangement_side(plan: &Plan, name: &str, id: usize, side: usize) -> Option<ArrangementSide> {
     let node = &plan.nodes[id];
     let child = out_table(node.inputs[side], plan.nodes[node.inputs[side]].fields.len());
-    let dict = keys_table(name);
-    let key = plan.key_sql(id, side)?;
+    let key = if plan.native_key_values(id,side).is_some() {
+        plan.key_lookup(name,id,side)
+    } else {
+        let dict = keys_table(name);
+        format!("(SELECT __i FROM {dict} WHERE __v={})",plan.key_sql(id,side)?)
+    };
     Some(ArrangementSide {
-        intern: format!("INSERT OR IGNORE INTO {dict}(__v) SELECT {key} FROM {child}"),
-        touch: format!("INSERT OR IGNORE INTO temp.__ivm_touched SELECT __i FROM {dict} WHERE __v IN (SELECT {key} FROM {child})"),
-        upsert: upsert_statements(plan, name, db, id, side, &key),
+        intern: plan.insert_keys(name,id,side),
+        touch: format!("INSERT OR IGNORE INTO temp.__ivm_touched SELECT {key} FROM {child}"),
     })
 }
 
-fn upsert_statements(
-    plan: &Plan,
-    name: &str,
-    db: &Connection,
-    id: usize,
-    side: usize,
-    key: &str,
-) -> UpsertStatements {
-    let node = &plan.nodes[id];
-    let child_width = plan.nodes[node.inputs[side]].fields.len();
-    let child = out_table(node.inputs[side], child_width);
-    let t = table(name, id, side);
-    let cols = columns(child_width);
-    let identity = identity_sql(child_width);
-    let identity_of =
-        |alias: &str| json_key((0..child_width).map(|i| plain(&format!("{alias}.c{i}"))).collect());
-    let dict = keys_table(name);
-    let delta = delta_table(id, side, child_width);
-    let arrangement_identity = identity_of(&t);
-    let table_name = format!("{name}_op{id}x{side}");
-    let suffix = format!("(__r,{identity})");
-    let indexed_identity = crate::statements::query_map(
-        db, crate::statements::Phase::Declare, name,
-        "SELECT sql FROM main.sqlite_schema WHERE type='index' AND tbl_name=?1 AND sql LIKE 'CREATE UNIQUE INDEX%'",
-        [&table_name], |row| row.get::<_, String>(0),
-    ).is_ok_and(|definitions| definitions.iter().any(|sql| sql.ends_with(&suffix)));
-    let insert = format!("INSERT INTO {t}(__k,__r,__n,{cols}) SELECT (SELECT __i FROM {dict} WHERE __v={key}),d.__r,d.__n,{cols} FROM {delta} d");
-    UpsertStatements {
-        clear_delta: format!("DELETE FROM {delta}"),
-        fill_delta: format!(
-            "INSERT INTO {delta}(__r,__v,__n,{cols}) SELECT sqlite_ivm_hash(__ivm_v),__ivm_v,__ivm_n,{cols} \
-             FROM (SELECT {identity} AS __ivm_v,sum(__m) AS __ivm_n,{cols} FROM {child} GROUP BY {identity}) WHERE __ivm_n!=0"
-        ),
-        apply: if indexed_identity {
-            format!("{insert} WHERE true ON CONFLICT(__r,{identity}) DO UPDATE SET __n={t}.__n+excluded.__n")
-        } else {
-            format!("UPDATE {t} SET __n={t}.__n+d.__n FROM {delta} d WHERE {t}.__r IN (SELECT __r FROM {delta}) AND d.__r={t}.__r AND d.__v={arrangement_identity}")
-        },
-        insert_new: (!indexed_identity).then(|| format!(
-            "{insert} WHERE NOT EXISTS(SELECT 1 FROM {t} a WHERE a.__r=d.__r AND {}=d.__v)", identity_of("a")
-        )),
-        // Only identities present in this delta can have changed multiplicity.
-        // The hash bounds the index lookup; the update above still checks the
-        // full identity so collisions cannot apply another row's delta.
-        bad: format!("SELECT EXISTS(SELECT 1 FROM {t} WHERE __r IN (SELECT __r FROM {delta}) AND (__n<0 OR typeof(__n)!='integer'))"),
-        drop_zero: format!("DELETE FROM {t} WHERE __r IN (SELECT __r FROM {delta}) AND __n=0"),
-    }
-}
-
-fn split_statements(plan: &Plan, name: &str, id: usize, side: usize) -> SplitStatements {
+fn split_statements(plan: &Plan, name: &str, db: &Connection, id: usize, side: usize) -> SplitStatements {
     let node = &plan.nodes[id];
     let width = plan.nodes[node.inputs[side]].fields.len();
     let child = out_table(node.inputs[side], width);
-    let t = table(name, id, side);
+    let t = plan.live_input(db,name,id,side,false,false);
     let arrived = arrived_table(id, side, width);
     let left = left_table(id, side, width);
     let cols = columns(width);
-    let identity_of =
-        |alias: &str| json_key((0..width).map(|i| plain(&format!("{alias}.c{i}"))).collect());
-    let delta_identity = identity_of("o");
-    let stored_identity = identity_of("a");
-    let net = format!(
-        "(SELECT sum(o.__m) FROM {child} o WHERE sqlite_ivm_hash({delta_identity})=a.__r AND {delta_identity}={stored_identity})"
-    );
+    let identity = identity_sql(width);
+    let delta = format!("(SELECT {identity} AS __v,{cols},sum(__m) AS __n FROM {child} GROUP BY {identity} HAVING sum(__m)!=0)");
+    let current = format!("(SELECT coalesce(sum(a.__n),0) FROM {t} a WHERE a.rowid=o.__v)");
     SplitStatements {
         clear_arrived: format!("DELETE FROM {arrived}"),
         clear_left: format!("DELETE FROM {left}"),
-        fill_left: format!(
-            "INSERT INTO {left} SELECT {cols} FROM {t} a \
-             WHERE a.__r IN (SELECT sqlite_ivm_hash({delta_identity}) FROM {child} o) AND a.__n+coalesce({net},0)=0"
-        ),
-        fill_arrived: format!(
-            "INSERT INTO {arrived} SELECT {cols} FROM (SELECT {identity} AS __ivm_r,sum(__m) AS __ivm_n,{cols} FROM {child} GROUP BY {identity}) o \
-             WHERE __ivm_n>0 AND NOT EXISTS(SELECT 1 FROM {t} a WHERE a.__r=sqlite_ivm_hash(o.__ivm_r) AND {stored_identity}=o.__ivm_r)",
-            identity = identity_sql(width)
-        ),
+        fill_left: format!("INSERT INTO {left} SELECT {cols} FROM {delta} o WHERE o.__n<0 AND {current}=0"),
+        fill_arrived: format!("INSERT INTO {arrived} SELECT {cols} FROM {delta} o WHERE o.__n>0 AND {current}=o.__n"),
     }
 }
 
@@ -562,7 +494,7 @@ fn fixpoint_statements(plan: &Plan, name: &str, db: &Connection, id: usize, widt
         let mut params: Vec<Value> = vec![];
         rule_from(
             rule,
-            &roles(name, id, 0, rule, None, Role::Table(all.clone())),
+            &roles(plan, db, false, name, id, 0, rule, None, Role::Table(all.clone())),
             &mut params,
         )
     };
@@ -599,7 +531,7 @@ fn fixpoint_statements(plan: &Plan, name: &str, db: &Connection, id: usize, widt
                 let mut params: Vec<Value> = vec![];
                 let from = rule_from(
                     rule,
-                    &roles(name, id, 0, rule, None, Role::Range(all.clone(), 0, 0)),
+                    &roles(plan, db, false, name, id, 0, rule, None, Role::Range(all.clone(), 0, 0)),
                     &mut params,
                 );
                 derive_sql(&all, &all, &cols, rule, &from, false)
@@ -612,7 +544,7 @@ fn fixpoint_statements(plan: &Plan, name: &str, db: &Connection, id: usize, widt
                 let mut params: Vec<Value> = vec![];
                 let from = rule_from(
                     rule,
-                    &roles(name, id, 0, rule, None, Role::Range(work.clone(), 0, 0)),
+                    &roles(plan, db, true, name, id, 0, rule, None, Role::Range(work.clone(), 0, 0)),
                     &mut params,
                 );
                 derive_sql(&work, &all, &cols, rule, &from, true)
@@ -651,9 +583,6 @@ fn fixpoint_side(
         unreachable!()
     };
     let child_width = plan.nodes[node.inputs[side]].fields.len();
-    let child = out_table(node.inputs[side], child_width);
-    let dict = keys_table(name);
-    let key = plan.key_sql(id, side)?;
     let arrived = arrived_table(id, side, child_width);
     let left = left_table(id, side, child_width);
     let cols = columns(plan.nodes[id].fields.len());
@@ -671,6 +600,7 @@ fn fixpoint_side(
                         let from = rule_from(
                             rule,
                             &roles(
+                                plan, db, false,
                                 name,
                                 id,
                                 side,
@@ -687,10 +617,7 @@ fn fixpoint_side(
             .collect::<Vec<_>>()
     };
     Some(FixpointSide {
-        intern: format!("INSERT OR IGNORE INTO {dict}(__v) SELECT {key} FROM {child}"),
-        touch: format!("INSERT OR IGNORE INTO temp.__ivm_touched SELECT __i FROM {dict} WHERE __v IN (SELECT {key} FROM {child})"),
-        upsert: upsert_statements(plan, name, db, id, side, &key),
-        split: split_statements(plan, name, id, side),
+        split: split_statements(plan, name, db, id, side),
         exists_left: format!("SELECT EXISTS(SELECT 1 FROM {left})"),
         arrive_derives: side_derives(&arrived),
         left_derives: rules
@@ -706,6 +633,7 @@ fn fixpoint_side(
                         let from = rule_from(
                             rule,
                             &roles(
+                                plan, db, true,
                                 name,
                                 id,
                                 side,
@@ -760,19 +688,40 @@ fn apply_state_statements(plan: &Plan, name: &str) -> ApplyStateStatements {
     let width = node.fields.len();
     let out = out_table(plan.output, width);
     let state = format!("main.{}", crate::catalog::quote(&format!("{name}_state")));
-    let key = json_key((0..width).map(|i| plain(&format!("o.c{i}"))).collect());
-    ApplyStateStatements {
+    let projected = (0..width).map(|i|format!("o.c{i}")).collect::<Vec<_>>().join(",");
+    let check = format!("sqlite_ivm_row_check({projected})");
+    let exact = crate::native_keys::exact_row_columns(width,"o.").join(",");
+    let matched = crate::native_keys::exact_row_match(width,"s.","d.");
+    let previous = crate::native_keys::exact_row_match(width,"p.","s.");
+    let mut statements = ApplyStateStatements {
         wanted: format!("SELECT coalesce(sum(-__m),0) FROM {out} o WHERE __m<0"),
+        replace: None,
         retract: format!(
-            "DELETE FROM {state} WHERE rowid IN (SELECT s.rowid FROM {state} s JOIN (SELECT {key} AS __key,sum(-__m) AS __n FROM {out} o WHERE __m<0 GROUP BY {key}) d ON s.__key=d.__key \
-             WHERE (SELECT count(*) FROM {state} p WHERE p.__key=s.__key AND p.rowid<=s.rowid)<=d.__n)"
+            "DELETE FROM {state} WHERE rowid IN (SELECT s.rowid FROM {state} s JOIN (SELECT {projected},sum(-__m) AS __n FROM {out} o WHERE __m<0 GROUP BY {exact}) d ON {matched} \
+             WHERE (SELECT count(*) FROM {state} p WHERE {previous} AND p.rowid<=s.rowid)<=d.__n)"
         ),
         peak: format!("SELECT coalesce(max(__m),0) FROM {out}"),
         extend: format!(
             "WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<(SELECT coalesce(max(__m),0) FROM {out})) \
-             INSERT INTO {state}(__key,{}) SELECT {key},o.c0{} FROM {out} o,seq WHERE o.__m>0 AND seq.n<=o.__m",
-            columns(width),
-            (1..width).map(|i| format!(",o.c{i}")).collect::<String>()
+             INSERT INTO {state}(__check,{}) SELECT {check},{projected} FROM {out} o,seq WHERE o.__m>0 AND seq.n<=o.__m",
+            columns(width)
         ),
+    };
+    if let Some(keys) = plan.stored_group_key().filter(|_| matches!(node.kind,Kind::Group { window:false,limit:None,.. })) {
+        let positions = if keys.is_empty() { vec![] } else { keys.split(',').collect::<Vec<_>>() };
+        let same_group = |left: &str, right: &str| {
+            if positions.is_empty() { "1".into() } else {
+                positions.iter().map(|c|format!("{left}.{c} IS (+{right}.{c})")).collect::<Vec<_>>().join(" AND ")
+            }
+        };
+        let positive = same_group("s","o");
+        let negative = same_group("s","d");
+        let output_for_state = same_group("o","s");
+        let output_for_delta = same_group("o","d");
+        let candidates = format!("SELECT s.rowid FROM {out} d CROSS JOIN {state} s ON {negative} WHERE d.__m<0");
+        statements.replace = Some(format!("UPDATE {state} AS s SET ({},__check)=(SELECT {projected},{check} FROM {out} o WHERE o.__m>0 AND {output_for_state}) WHERE s.rowid IN ({candidates} AND EXISTS(SELECT 1 FROM {out} o WHERE o.__m>0 AND {output_for_delta}))",columns(width)));
+        statements.retract = format!("DELETE FROM {state} WHERE rowid IN ({candidates} AND NOT EXISTS(SELECT 1 FROM {out} o WHERE o.__m>0 AND {output_for_delta}))");
+        statements.extend = format!("INSERT INTO {state}(__check,{}) SELECT {check},{projected} FROM {out} o WHERE o.__m>0 AND NOT EXISTS(SELECT 1 FROM {state} s WHERE {positive})",columns(width));
     }
+    statements
 }

@@ -7,7 +7,6 @@
 mod database;
 use database::register;
 use rusqlite::{Connection, Result};
-use sqlite_ivm::relational_maintenance::identity_sql;
 use std::process::Command;
 
 const COMPASS: &str = include_str!("golden/compass.sql");
@@ -57,23 +56,11 @@ fn compass_passes_in_process() -> Result<()> {
     assert!(failed.is_empty(), "compass checks failed: {failed:?}");
     assert_eq!(results.len(), 9, "check count in compass.sql");
 
-    // Rail: the stored hash rebuilds from the row's own columns, every row,
-    // every arrangement; and one row per composite.
-    let tables = arrangements(&db)?;
-    assert!(!tables.is_empty(), "compass created no arrangement with __r");
-    for (table, width) in tables {
-        let composite = identity_sql(width);
-        let (rows, distinct, rebuilt): (i64, i64, i64) = db.query_row(
-            &format!(
-                "SELECT count(*), count(DISTINCT {composite}), \
-                 count(*) FILTER (WHERE sqlite_ivm_hash({composite})=__r) FROM \"{table}\""
-            ),
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )?;
-        assert_eq!(rows, distinct, "{table}: duplicate composite");
-        assert_eq!(rows, rebuilt, "{table}: stored hash does not rebuild");
-    }
+    // Source rows have no persistent per-operator duplicates.
+    assert!(arrangements(&db)?.is_empty(), "compass retained copied input rows");
+    let width = db.prepare("SELECT * FROM compass")?.column_count();
+    let invalid: i64 = db.query_row(&format!("SELECT count(*) FROM compass_state WHERE __check!=sqlite_ivm_row_check({})",(0..width).map(|i|format!("c{i}")).collect::<Vec<_>>().join(",")),[],|r|r.get(0))?;
+    assert_eq!(invalid,0,"stored output identity");
 
     // Rail: nothing waits between transactions.
     let waiting: i64 = db

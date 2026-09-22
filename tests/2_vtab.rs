@@ -143,9 +143,6 @@ fn defensive_shadow_protection_allows_source_dml_and_native_lifecycle() -> Resul
             ("earnings".into(), "virtual".into()),
             ("earnings_delta".into(), "shadow".into()),
             ("earnings_keys".into(), "shadow".into()),
-            ("earnings_op4x0".into(), "shadow".into()),
-            ("earnings_op4x1".into(), "shadow".into()),
-            ("earnings_op7x0".into(), "shadow".into()),
             ("earnings_op7x1".into(), "shadow".into()),
             ("earnings_state".into(), "shadow".into())
         ]

@@ -1,5 +1,5 @@
-//! Every operator emits the row stored in its arrangement.
-//! Equality keys select membership, while stored row values select emitted identity.
+//! Signed rows retain their values through source reads and result updates.
+//! Equality keys select membership; exact native cells select result identity.
 use crate::{
     catalog::{error, quote},
     statements::{self, Phase},
@@ -15,14 +15,6 @@ pub(crate) fn columns(n: usize) -> String {
 }
 pub(crate) fn table(name: &str, id: usize, side: usize) -> String {
     format!("main.{}", quote(&format!("{name}_op{id}x{side}")))
-}
-/// Upsert scratch: one side's delta summed per identity, the identity and its
-/// hash computed once per row instead of once per comparison.
-pub(crate) fn delta_table(id: usize, side: usize, width: usize) -> String {
-    format!("temp.__ivm_delta_{width}_{id}_{side}")
-}
-pub(crate) fn delta_index(id: usize, side: usize, width: usize) -> String {
-    format!("temp.__ivm_delta_{width}_{id}_{side}_r")
 }
 /// Fixpoint scratch: one side's rows that entered its arrangement this batch.
 pub(crate) fn arrived_table(id: usize, side: usize, width: usize) -> String {
@@ -56,6 +48,43 @@ pub fn row_hash(bytes: &[u8]) -> i64 {
 /// Maintenance cannot run without a Plan and a Plan only comes from `bind`,
 /// so registering there reaches every connection that can issue this SQL.
 pub fn register_functions(db: &Connection) -> Result<()> {
+    db.create_scalar_function(
+        c"sqlite_ivm_real_hex",
+        1,
+        rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| {
+            let value: rusqlite::types::Value = ctx.get(0)?;
+            match value {
+                rusqlite::types::Value::Real(v) => Ok(Some(format!("{:016x}", v.to_bits()))),
+                _ => Ok(None),
+            }
+        },
+    )?;
+
+    // A corruption check only. Row identity and index matching never use this
+    // checksum; collisions therefore cannot merge rows or select a retraction.
+    db.create_scalar_function(
+        c"sqlite_ivm_row_check", -1,
+        rusqlite::functions::FunctionFlags::SQLITE_UTF8
+            | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+        |ctx| {
+            use rusqlite::types::ValueRef;
+            let mut hash = FNV_OFFSET;
+            let mut feed = |bytes: &[u8]| {
+                for byte in bytes { hash = (hash ^ *byte as u64).wrapping_mul(FNV_PRIME); }
+            };
+            for i in 0..ctx.len() {
+                match ctx.get_raw(i) {
+                    ValueRef::Null => feed(&[0]),
+                    ValueRef::Integer(value) => { feed(&[1]); feed(&value.to_le_bytes()); }
+                    ValueRef::Real(value) => { feed(&[2]); feed(&value.to_bits().to_le_bytes()); }
+                    ValueRef::Text(value) => { feed(&[3]); feed(&(value.len() as u64).to_le_bytes()); feed(value); }
+                    ValueRef::Blob(value) => { feed(&[4]); feed(&(value.len() as u64).to_le_bytes()); feed(value); }
+                }
+            }
+            Ok(hash as i64)
+        },
+    )?;
     db.create_scalar_function(
         c"sqlite_ivm_hash",
         1,
@@ -144,6 +173,9 @@ pub(crate) fn rule_from(rule: &Rule, roles: &[Role], params: &mut Vec<Value>) ->
 /// side reads it; every other occurrence reads the full arrangement, so a rule
 /// that mentions the side twice is driven once per occurrence.
 pub(crate) fn roles(
+    plan: &Plan,
+    db: &Connection,
+    before: bool,
     name: &str,
     id: usize,
     side: usize,
@@ -158,7 +190,7 @@ pub(crate) fn roles(
             (Occurrence::Input(s), Some((at, delta))) if *s == side && n == at => {
                 Role::Table(delta.to_string())
             }
-            (Occurrence::Input(s), _) => Role::Table(table(name, id, *s)),
+            (Occurrence::Input(s), _) => Role::Table(plan.live_input(db, name, id, *s, false, before)),
             (Occurrence::Member, _) => match &member {
                 Role::Table(t) => Role::Table(t.clone()),
                 Role::Range(t, lo, hi) => Role::Range(t.clone(), *lo, *hi),
@@ -186,8 +218,7 @@ pub(crate) fn json_key(parts: Vec<String>) -> String {
 pub(crate) fn folded(value: &str) -> String {
     format!("CASE typeof({value}) WHEN 'blob' THEN json_object('blob',hex({value})) WHEN 'real' THEN CASE WHEN {value}=CAST({value} AS INTEGER) AND typeof(CAST({value} AS INTEGER))='integer' THEN CAST({value} AS INTEGER) ELSE json_object('real',sqlite_ivm_real_hex({value})) END WHEN 'text' THEN {value}||'' ELSE {value} END")
 }
-/// The composite an arrangement row rebuilds from its own stored columns.
-/// `fill` writes it and `change` compares against it, so the two must agree.
+/// Encoded identity retained for set representatives and recursive membership.
 pub fn identity_sql(width: usize) -> String {
     json_key((0..width).map(|i| plain(&format!("c{i}"))).collect())
 }
@@ -265,8 +296,8 @@ pub fn hooks(db: &Connection, name: &str, plan: &Plan) -> Result<Vec<(&'static s
                         .join(",")
                 ));
             }
-            // Arrangements contain the old row independently of the source SQL
-            // table. AFTER avoids retracting writes rejected by OR IGNORE.
+            // Stage OLD/NEW only after the source write succeeds. AFTER avoids
+            // retracting writes rejected by OR IGNORE.
             statements::batch(
                 db,
                 Phase::Declare,

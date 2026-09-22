@@ -5,7 +5,7 @@ use crate::{
     relational_maintenance::{BULK_MULTIPLICITY_BUDGET, BULK_ROUND_BUDGET, Row},
     relational_program::{
         ArrangementStatements, FixpointSide, FixpointStatements, KindStatements, Program,
-        SplitStatements, UpsertStatements, CLEAR_TOUCHED,
+        SplitStatements, CLEAR_TOUCHED,
     },
 };
 use rusqlite::{params, params_from_iter, types::Value, Connection, Result};
@@ -125,10 +125,11 @@ impl Plan {
                 if !touched {
                     continue;
                 }
-                let side_statements = statements.sides[side].as_ref().expect("inner join arrangement");
-                statements::exec_cached(db, Phase::Maintain, name, &side_statements.intern, [])?;
                 written += statements::exec_cached(db, Phase::Maintain, name, &join.sides[side], [])?;
-                upsert(db, name, Phase::Maintain, &side_statements.upsert)?;
+
+            }
+            if touched_inputs.iter().all(|t| *t) {
+                written += statements::exec_cached(db, Phase::Maintain, name, &join.cross, [])?;
             }
             let bad: bool = statements::query_cached(db, Phase::Maintain, name, &join.bad, [], |r| r.get(0))?;
             if bad {
@@ -151,23 +152,15 @@ impl Plan {
             if let Some(stored_before) = &statements.stored_before {
                 let corrupt: bool = statements::query_cached(db, Phase::Maintain, name, &stored_before.corrupt, [], |row| row.get(0))?;
                 if corrupt {
-                    statements.materialize.execute(db, name)?;
+                    statements.materialize_before.execute(db, name)?;
                 } else {
                     statements::exec_cached(db, Phase::Maintain, name, &stored_before.read, [])?;
                 }
             } else {
-                statements.materialize.execute(db, name)?;
+                statements.materialize_before.execute(db, name)?;
             }
             statements::exec_cached(db, Phase::Maintain, name, &statements.park, [])?;
             statements::exec_cached(db, Phase::Maintain, name, &statements.clear_out, [])?;
-            for (side, touched) in touched_inputs.iter().enumerate() {
-                if *touched {
-                    let side = statements.sides[side]
-                        .as_ref()
-                        .ok_or_else(|| error("arrangement node without a key"))?;
-                    upsert(db, name, Phase::Maintain, &side.upsert)?;
-                }
-            }
             // After, then out = after minus before as a bag.
             if let Some(aggregate) = &statements.aggregate_delta {
                 let eligible: bool = statements::query_cached(db, Phase::Maintain, name, &aggregate.eligible, [], |row| row.get(0))?;
@@ -207,13 +200,12 @@ impl Plan {
                 let statements_side = statements.sides[side]
                     .as_ref()
                     .ok_or_else(|| error("arrangement node without a key"))?;
-                statements::exec_cached(db, Phase::Fixpoint, name, &statements_side.intern, [])?;
-                statements::exec_cached(db, Phase::Fixpoint, name, &statements_side.touch, [])?;
                 split_side(db, name, &statements_side.split)?;
-                upsert(db, name, Phase::Fixpoint, &statements_side.upsert)?;
+
                 written += self.fixpoint(db, name, id, statements, statements_side)?;
             }
         }
+        statements::exec_cached(db, Phase::Fixpoint, name, &statements.clear_work, [])?;
         Ok(written)
     }
     /// Applies the output node's delta to the result rows: retractions delete
@@ -224,7 +216,11 @@ impl Plan {
         let wanted: i64 = statements::query_cached(db, Phase::Maintain, name, &statements.wanted, [], |r| {
             r.get(0)
         })?;
-        let removed = statements::exec_cached(db, Phase::Maintain, name, &statements.retract, [])?;
+        let replaced = match &statements.replace {
+            Some(sql) => statements::exec_cached(db,Phase::Maintain,name,sql,[])?,
+            None => 0,
+        };
+        let removed = replaced + statements::exec_cached(db, Phase::Maintain, name, &statements.retract, [])?;
         if removed as i64 != wanted {
             return Err(error(format!(
                 "missing result multiplicity: {wanted} retractions, {removed} rows present"
@@ -365,26 +361,7 @@ impl Plan {
     }
 }
 
-/// Adds one side's delta rows (in that input's out table) to the
-/// arrangement. Existing identities take the summed multiplicity; new
-/// identities are inserted; zero rows leave; a negative row is an error.
-fn upsert(db: &Connection, name: &str, phase: Phase, statements: &UpsertStatements) -> Result<()> {
-    statements::exec_cached(db, phase, name, &statements.clear_delta, [])?;
-    statements::exec_cached(db, phase, name, &statements.fill_delta, [])?;
-    statements::exec_cached(db, phase, name, &statements.apply, [])?;
-    if let Some(insert_new) = &statements.insert_new {
-        statements::exec_cached(db, phase, name, insert_new, [])?;
-    }
-    let bad: bool = statements::query_cached(db, phase, name, &statements.bad, [], |r| r.get(0))?;
-    if bad {
-        return Err(error("negative arrangement multiplicity"));
-    }
-    statements::exec_cached(db, phase, name, &statements.drop_zero, [])?;
-    Ok(())
-}
-
-/// Splits one side's delta into the rows entering its arrangement and the
-/// rows leaving it, by net multiplicity against what is stored.
+/// Identify input identities whose support crosses zero in this batch.
 fn split_side(db: &Connection, name: &str, statements: &SplitStatements) -> Result<()> {
     statements::exec_cached(db, Phase::Fixpoint, name, &statements.clear_arrived, [])?;
     statements::exec_cached(db, Phase::Fixpoint, name, &statements.clear_left, [])?;

@@ -153,6 +153,13 @@ impl Collector {
         schema::delta_name(&self.name)
     }
 
+    /// Follow a shadow-table rename performed by the host. Pending rows and
+    /// savepoint marks stay intact. After a DDL rollback the host supplies the
+    /// restored owner name before updating or draining the collector again.
+    pub fn rebind_shadow(&mut self, owner: impl Into<String>) {
+        self.name = owner.into();
+    }
+
     pub fn create_shadow(&self, db: &Connection) -> Result<()> {
         db.execute_batch(&schema::create_delta(&self.name, self.width))
     }

@@ -351,6 +351,7 @@ fn relational_group_locality_and_ddl_preserve_btrees() -> Result<()> {
         CREATE TABLE writes(region TEXT);
         CREATE TRIGGER watch_insert AFTER INSERT ON earnings_state BEGIN INSERT INTO writes VALUES(NEW.c0);END;
         CREATE TRIGGER watch_delete AFTER DELETE ON earnings_state BEGIN INSERT INTO writes VALUES(OLD.c0);END;
+        CREATE TRIGGER watch_update AFTER UPDATE ON earnings_state BEGIN INSERT INTO writes VALUES(NEW.c0);END;
         UPDATE farms SET price=25 WHERE id=1;")?;
     let written = db
         .prepare("SELECT DISTINCT region FROM writes")?
@@ -358,7 +359,7 @@ fn relational_group_locality_and_ddl_preserve_btrees() -> Result<()> {
         .collect::<Result<Vec<_>>>()?;
     assert_eq!(written, vec!["north"]);
     // Remove observer triggers before testing source ALTER schema validation.
-    db.execute_batch("DROP TRIGGER watch_insert;DROP TRIGGER watch_delete;DELETE FROM writes")?;
+    db.execute_batch("DROP TRIGGER watch_insert;DROP TRIGGER watch_delete;DROP TRIGGER watch_update;DELETE FROM writes")?;
     let physical = || -> Result<Vec<(String, i64)>> {
         db.prepare("SELECT o.object_type,s.rootpage FROM __ivm_objects o JOIN sqlite_schema s ON s.name=o.object_name WHERE o.object_type IN('table','index') ORDER BY s.rootpage")?.query_map([],|r|Ok((r.get(0)?,r.get(1)?)))?.collect()
     };

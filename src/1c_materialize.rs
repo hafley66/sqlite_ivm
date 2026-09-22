@@ -3,7 +3,7 @@ use crate::{
     statements::{self, Phase},
     relational::{Kind, Plan, Rule},
     relational_maintenance::{
-        columns, keys_table, out_table, roles, rule_from, rule_where, table,
+        columns, out_table, roles, rule_from, rule_where, table,
         BULK_GROUP_BUDGET, BULK_MULTIPLICITY_BUDGET, BULK_ROUND_BUDGET, Role,
     },
 };
@@ -24,11 +24,18 @@ impl Plan {
         id: usize,
         restricted: bool,
     ) -> MaterializeStatements {
+        self.materialize_from_sources(db, name, id, restricted, None)
+    }
+    pub(crate) fn materialize_from_sources(
+        &self, db: &Connection, name: &str, id: usize, restricted: bool,
+        sources: Option<&[String]>,
+    ) -> MaterializeStatements {
         let node = &self.nodes[id];
         let out = out_table(id, node.fields.len());
         let cols = columns(node.fields.len());
         // source_table never fails: it formats one of two static shapes.
         let source = |side: usize| -> String {
+            if let Some(sources) = sources { return sources[side].clone(); }
             let Ok(t) = self.source_table(db, name, id, side, restricted) else {
                 unreachable!()
             };
@@ -64,7 +71,7 @@ impl Plan {
                 let width = node.fields.len();
                 let reps = |t: &str| {
                     format!(
-                        "SELECT a.c0{},1 FROM {t} a WHERE a.rowid=(SELECT MIN(rowid) FROM {t} b WHERE b.__k=a.__k)",
+                        "SELECT a.c0{},1 FROM (SELECT *,min(rowid) FROM {t} GROUP BY __k) a WHERE true",
                         (1..width).map(|i| format!(",a.c{i}")).collect::<String>()
                     )
                 };
@@ -84,10 +91,9 @@ impl Plan {
                         format!("INSERT INTO {out}({cols},__m) {}", reps(&t0))
                     }
                     ("union", _) => format!(
-                        "INSERT INTO {out}({cols},__m) {} UNION ALL SELECT a.c0{},1 FROM {} a WHERE a.rowid=(SELECT MIN(rowid) FROM {} b WHERE b.__k=a.__k) AND a.__k NOT IN(SELECT __k FROM {})",
+                        "INSERT INTO {out}({cols},__m) {} UNION ALL SELECT a.c0{},1 FROM (SELECT *,min(rowid) FROM {} GROUP BY __k) a WHERE a.__k NOT IN(SELECT __k FROM {})",
                         reps(&t0),
                         (1..width).map(|i| format!(",a.c{i}")).collect::<String>(),
-                        t1.clone(),
                         t1.clone(),
                         t0
                     ),
@@ -109,12 +115,7 @@ impl Plan {
                 let right_n = self.nodes[node.inputs[1]].fields.len();
                 let t0 = source(0);
                 let t1 = source(1);
-                // A join key equal on both sides still cannot match when a
-                // component is NULL, and the components live in the dictionary.
-                let dict = keys_table(name);
-                let no_null = |k: &str| {
-                    format!("NOT EXISTS(SELECT 1 FROM json_each((SELECT __v FROM {dict} WHERE __i={k})) WHERE type='null')")
-                };
+                let matched = self.native_join_match(id);
                 let left_cols = |q: &str| {
                     (0..left_n)
                         .map(|i| format!("{q}.c{i} AS c{i}"))
@@ -147,37 +148,29 @@ impl Plan {
                     parts.extend((0..right_n).map(|j| format!("{outer}.c{j} AS c{}", left_n + j)));
                     parts.join(",")
                 };
-                let restriction = |key: &str| {
-                    format!(
-                        "{}{}{}",
-                        no_null(key),
-                        if predicate.is_some() { " AND " } else { "" },
-                        predicate.as_deref().unwrap_or("")
-                    )
-                };
+                let restriction = predicate.as_deref().unwrap_or("1");
                 let combined = format!(
-                    "SELECT {},{},l.__n*r.__n AS __m FROM {t0} l JOIN {t1} r ON l.__k=r.__k AND {}",
+                    "SELECT {},{},l.__n*r.__n AS __m FROM {t0} l JOIN {t1} r ON {matched}",
                     left_cols("l"),
-                    right_cols("r"),
-                    no_null("l.__k")
+                    right_cols("r")
                 );
                 let inner = match predicate {
                     Some(p) => format!("SELECT * FROM ({combined}) WHERE {p}"),
                     None => combined,
                 };
                 let unmatched_left = format!(
-                    "SELECT {},{},l.__n AS __m FROM {t0} l WHERE NOT EXISTS(SELECT 1 FROM (SELECT {} FROM {t1} r WHERE r.__k=l.__k) m WHERE {})",
+                    "SELECT {},{},l.__n AS __m FROM {t0} l WHERE NOT EXISTS(SELECT 1 FROM (SELECT {} FROM {t1} r WHERE {matched}) m WHERE {})",
                     left_cols("l"),
                     null_cols(left_n, right_n),
                     left_pair("l", "r"),
-                    restriction("l.__k")
+                    restriction
                 );
                 let unmatched_right = format!(
-                    "SELECT {},{},r.__n AS __m FROM {t1} r WHERE NOT EXISTS(SELECT 1 FROM (SELECT {} FROM {t0} l WHERE l.__k=r.__k) m WHERE {})",
+                    "SELECT {},{},r.__n AS __m FROM {t1} r WHERE NOT EXISTS(SELECT 1 FROM (SELECT {} FROM {t0} l WHERE {matched}) m WHERE {})",
                     null_cols(0, left_n),
                     right_cols("r"),
                     right_pair("r", "l"),
-                    restriction("r.__k")
+                    restriction
                 );
                 let body = match *mode {
                     "inner" => inner,
@@ -185,17 +178,16 @@ impl Plan {
                     "right" => format!("{inner} UNION ALL {unmatched_right}"),
                     "full" => format!("{inner} UNION ALL {unmatched_left} UNION ALL {unmatched_right}"),
                     "semi" => format!(
-                        "SELECT {},l.__n AS __m FROM {t0} l WHERE {} AND EXISTS(SELECT 1 FROM (SELECT {} FROM {t1} r WHERE r.__k=l.__k) m WHERE {})",
+                        "SELECT {},l.__n AS __m FROM {t0} l WHERE EXISTS(SELECT 1 FROM (SELECT {} FROM {t1} r WHERE {matched}) m WHERE {})",
                         left_cols("l"),
-                        no_null("l.__k"),
                         left_pair("l", "r"),
-                        restriction("l.__k")
+                        restriction
                     ),
                     _ => format!(
-                        "SELECT {},l.__n AS __m FROM {t0} l WHERE NOT EXISTS(SELECT 1 FROM (SELECT {} FROM {t1} r WHERE r.__k=l.__k) m WHERE {})",
+                        "SELECT {},l.__n AS __m FROM {t0} l WHERE NOT EXISTS(SELECT 1 FROM (SELECT {} FROM {t1} r WHERE {matched}) m WHERE {})",
                         left_cols("l"),
                         left_pair("l", "r"),
-                        restriction("l.__k")
+                        restriction
                     ),
                 };
                 MaterializeStatements::Join {
@@ -233,7 +225,7 @@ impl Plan {
                         let mut sql =
                             format!("INSERT INTO {out}({cols},__m) SELECT {replaced},1 FROM {t}");
                         if !keys.is_empty() {
-                            sql.push_str(" GROUP BY __k");
+                            sql.push_str(&format!(" GROUP BY {}", keys.join(",")));
                         }
                         if let Some(h) = having {
                             sql.push_str(&format!(" HAVING {h}"));
@@ -299,7 +291,7 @@ impl Plan {
                         let mut params: Vec<Value> = vec![];
                         let from = rule_from(
                             rule,
-                            &roles(name, id, 0, rule, None, Role::Table(all.clone())),
+                            &roles(self, db, false, name, id, 0, rule, None, Role::Table(all.clone())),
                             &mut params,
                         );
                         fixpoint_derive(&all, &cols, rule, &from)
@@ -312,7 +304,7 @@ impl Plan {
                         let mut params: Vec<Value> = vec![];
                         let from = rule_from(
                             rule,
-                            &roles(name, id, 0, rule, None, Role::Range(all.clone(), 0, 0)),
+                            &roles(self, db, false, name, id, 0, rule, None, Role::Range(all.clone(), 0, 0)),
                             &mut params,
                         );
                         fixpoint_derive(&all, &cols, rule, &from)
@@ -433,7 +425,7 @@ impl MaterializeStatements {
                             Phase::Materialize,
                             name,
                             &g.limit_insert,
-                            [key.get::<_, i64>(0)?],
+                            [key.get::<_, Value>(0)?],
                         )?;
                     }
                     drop(key_rows);

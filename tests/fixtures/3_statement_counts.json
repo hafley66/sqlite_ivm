@@ -4,7 +4,7 @@
       [
         "declare",
         "CREATE",
-        35
+        34
       ],
       [
         "declare",
@@ -19,12 +19,12 @@
       [
         "declare",
         "INSERT",
-        18
+        17
       ],
       [
         "declare",
         "SELECT",
-        31
+        29
       ],
       [
         "materialize",
@@ -34,23 +34,23 @@
       [
         "materialize",
         "INSERT",
-        7
+        6
       ],
       [
         "materialize",
         "SELECT",
-        3
+        2
       ]
     ],
     "scans": [
       [
         "declare",
-        2891,
-        191
+        2557,
+        135
       ],
       [
         "materialize",
-        216,
+        158,
         0
       ]
     ]
@@ -60,7 +60,7 @@
       [
         "declare",
         "CREATE",
-        35
+        34
       ],
       [
         "declare",
@@ -75,12 +75,12 @@
       [
         "declare",
         "INSERT",
-        18
+        17
       ],
       [
         "declare",
         "SELECT",
-        131
+        329
       ],
       [
         "drain",
@@ -95,17 +95,22 @@
       [
         "maintain",
         "DELETE",
-        800
+        600
       ],
       [
         "maintain",
         "INSERT",
-        1100
+        1000
       ],
       [
         "maintain",
         "SELECT",
-        600
+        400
+      ],
+      [
+        "maintain",
+        "UPDATE",
+        100
       ],
       [
         "materialize",
@@ -115,33 +120,33 @@
       [
         "materialize",
         "INSERT",
-        207
+        206
       ],
       [
         "materialize",
         "SELECT",
-        3
+        2
       ]
     ],
     "scans": [
       [
         "declare",
-        43291,
-        191
+        366157,
+        135
       ],
       [
         "drain",
-        212100,
+        232300,
         0
       ],
       [
         "maintain",
-        11972808,
-        323400
+        5890950,
+        0
       ],
       [
         "materialize",
-        209266,
+        239508,
         0
       ]
     ]
@@ -151,7 +156,7 @@
       [
         "declare",
         "CREATE",
-        35
+        34
       ],
       [
         "declare",
@@ -166,12 +171,12 @@
       [
         "declare",
         "INSERT",
-        18
+        17
       ],
       [
         "declare",
         "SELECT",
-        32
+        131
       ],
       [
         "drain",
@@ -186,17 +191,22 @@
       [
         "maintain",
         "DELETE",
-        8
+        6
       ],
       [
         "maintain",
         "INSERT",
-        11
+        10
       ],
       [
         "maintain",
         "SELECT",
-        6
+        4
+      ],
+      [
+        "maintain",
+        "UPDATE",
+        1
       ],
       [
         "materialize",
@@ -206,33 +216,33 @@
       [
         "materialize",
         "INSERT",
-        9
+        8
       ],
       [
         "materialize",
         "SELECT",
-        3
+        2
       ]
     ],
     "scans": [
       [
         "declare",
-        2899,
-        191
+        45397,
+        135
       ],
       [
         "drain",
-        60630,
+        60634,
         0
       ],
       [
         "maintain",
-        58452,
-        1584
+        42294,
+        1287
       ],
       [
         "materialize",
-        2356,
+        2799,
         198
       ]
     ]
@@ -242,7 +252,7 @@
       [
         "declare",
         "CREATE",
-        64
+        57
       ],
       [
         "declare",
@@ -257,12 +267,12 @@
       [
         "declare",
         "INSERT",
-        30
+        27
       ],
       [
         "declare",
         "SELECT",
-        51
+        63
       ],
       [
         "drain",
@@ -277,17 +287,17 @@
       [
         "fixpoint",
         "DELETE",
-        8
+        5
       ],
       [
         "fixpoint",
         "INSERT",
-        17
+        9
       ],
       [
         "fixpoint",
         "SELECT",
-        9
+        7
       ],
       [
         "maintain",
@@ -307,19 +317,19 @@
       [
         "materialize",
         "INSERT",
-        21
+        17
       ],
       [
         "materialize",
         "SELECT",
-        6
+        4
       ]
     ],
     "scans": [
       [
         "declare",
-        5365,
-        441
+        5872,
+        287
       ],
       [
         "drain",
@@ -328,17 +338,17 @@
       ],
       [
         "fixpoint",
-        6769,
-        126
+        5880,
+        154
       ],
       [
         "maintain",
-        612,
+        663,
         35
       ],
       [
         "materialize",
-        1030,
+        882,
         42
       ]
     ]
@@ -348,7 +358,7 @@
       [
         "declare",
         "CREATE",
-        64
+        57
       ],
       [
         "declare",
@@ -363,12 +373,12 @@
       [
         "declare",
         "INSERT",
-        30
+        27
       ],
       [
         "declare",
         "SELECT",
-        52
+        250
       ],
       [
         "drain",
@@ -383,17 +393,17 @@
       [
         "fixpoint",
         "DELETE",
-        17
+        13
       ],
       [
         "fixpoint",
         "INSERT",
-        33
+        21
       ],
       [
         "fixpoint",
         "SELECT",
-        19
+        16
       ],
       [
         "maintain",
@@ -413,19 +423,19 @@
       [
         "materialize",
         "INSERT",
-        22
+        18
       ],
       [
         "materialize",
         "SELECT",
-        6
+        4
       ]
     ],
     "scans": [
       [
         "declare",
-        5381,
-        441
+        174920,
+        287
       ],
       [
         "drain",
@@ -434,17 +444,17 @@
       ],
       [
         "fixpoint",
-        118658,
-        2673
+        659895,
+        30787
       ],
       [
         "maintain",
-        6592,
+        7103,
         495
       ],
       [
         "materialize",
-        7691,
+        7543,
         693
       ]
     ]

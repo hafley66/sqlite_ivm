@@ -1,19 +1,7 @@
 #![cfg(not(feature = "extension"))]
-//! Encoder ownership:
-//! - `key()` after `key_expression` feeds Set, Join, Group, and fixpoint input
-//!   maintenance in `src/1a_relational.rs:35`.
-//! - `identity()` stores arrangement row identities and result state keys in
-//!   `src/1a_relational.rs:52`.
-//! - `key_sql()` feeds recursive `all` and `work` tables in
-//!   `src/0b_relational.rs:177`.
-//!
-//! What the encoders produce is now interned, so `__k` holds a dictionary id
-//! and the composite this file compares comes back out of the dictionary.
-//!
-//! JSON-subtype group keys are confirmed as divergent. Expression group keys
-//! are admitted by `src/0b_relational.rs:1339`; bulk `fill` preserves the JSON
-//! subtype while incremental Group maintenance receives a plain text value at
-//! `src/1a_relational.rs:1102`. The final test records the resulting split.
+//! Compare native group-key partitions with the existing independent encoder
+//! corpus. Set and recursive membership still use encoded keys; result storage
+//! and join/group lookup use native cells.
 
 use rusqlite::{types::Value, Connection, Result};
 use sqlite_ivm::relational::{key_expression, key_sql};
@@ -125,14 +113,6 @@ fn rendered_rows(db: &Connection, sql: &str) -> Result<Vec<String>> {
     Ok(rows)
 }
 
-fn arrangement_name(db: &Connection, view: &str) -> Result<String> {
-    db.query_row(
-        "SELECT object_name FROM __ivm_objects WHERE view_name=?1 AND object_type='table' AND EXISTS (SELECT 1 FROM pragma_table_info(object_name) WHERE name='__k') AND EXISTS (SELECT 1 FROM pragma_table_info(object_name) WHERE name='__r') LIMIT 1",
-        [view],
-        |row| row.get(0),
-    )
-}
-
 fn create_view(db: &Connection, view: &str, query: &str) -> Result<()> {
     db.execute_batch(&format!(
         "CREATE VIRTUAL TABLE {view} USING sqlite_ivm('{}')",
@@ -162,15 +142,12 @@ fn dictionary_name(db: &Connection, view: &str) -> Result<String> {
 /// oracle compares against comes back through the dictionary, not the column.
 /// The arrangement holds one row per distinct value, so each source row finds
 /// its arrangement row by exact value and type.
-fn rust_keys(db: &Connection, view: &str, arrangement: &str, source: &str) -> Result<Vec<String>> {
-    let dictionary = dictionary_name(db, view)?;
-    let mut statement = db.prepare(&format!(
-        "SELECT d.__v FROM {source} s JOIN {arrangement} a ON typeof(a.c0)=typeof(s.value) AND a.c0 IS s.value JOIN \"{dictionary}\" d ON d.__i=a.__k ORDER BY s.id"
-    ))?;
-    let rows = statement
-        .query_map([], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<String>>>()?;
-    Ok(rows)
+fn indexed_source_keys(db: &Connection, view: &str, source: &str) -> Result<Vec<String>> {
+    let dictionary = dictionary_name(db,view)?;
+    let index: String = db.query_row("SELECT definition FROM __ivm_objects WHERE view_name=?1 AND object_type='index' AND object_name GLOB '__ivm_*_source_*' ORDER BY object_name LIMIT 1",[view],|r|r.get(0))?;
+    let expression = index.split_once(" ON ").unwrap().1.split_once('(').unwrap().1.strip_suffix(')').unwrap();
+    db.prepare(&format!("SELECT CAST(d.__i AS TEXT) FROM (SELECT id,{expression} AS key FROM {source}) s JOIN \"{dictionary}\" d ON d.k0 IS (+s.key) AND d.__node IS NOT NULL ORDER BY s.id"))?
+        .query_map([],|r|r.get(0))?.collect()
 }
 
 #[test]
@@ -207,8 +184,7 @@ fn rust_key_after_expression_agrees_with_sql_key_sql() -> Result<()> {
         }
 
         create_view(&db, &bulk, &query)?;
-        let arrangement = arrangement_name(&db, &incremental)?;
-        let rust = rust_keys(&db, &incremental, &arrangement, &source)?;
+        let rust = indexed_source_keys(&db, &incremental, &source)?;
         let sql = sql_keys(&db, &source, collation)?;
         assert_eq!(rust.len(), CORPUS_SIZE, "{collation}: arrangement rows");
         assert_eq!(sql.len(), CORPUS_SIZE, "{collation}: oracle rows");

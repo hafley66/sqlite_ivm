@@ -482,7 +482,7 @@ fn comma_join_star_predicate_matches_plain_query() -> Result<()> {
 }
 
 #[test]
-fn comma_join_arrangements_hold_side_row_counts_never_the_product() -> Result<()> {
+fn comma_joins_keep_no_persistent_input_rows() -> Result<()> {
     let db = Connection::open_in_memory()?;
     register(&db)?;
     db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON")?;
@@ -512,14 +512,9 @@ fn comma_join_arrangements_hold_side_row_counts_never_the_product() -> Result<()
         v => panic!("unexpected object name {v:?}"),
     })
     .collect::<Vec<_>>();
-    assert_eq!(arrangements.len(), 4, "{arrangements:?}");
-    for name in arrangements {
-        let (n, total): (i64, i64) = db.query_row(
-            &format!("SELECT COUNT(*),COALESCE(SUM(__n),0) FROM main.\"{name}\""),
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )?;
-        assert_eq!((n, total), (1000, 1000), "{name}");
-    }
+    assert!(arrangements.is_empty(), "{arrangements:?}");
+    assert_eq!(rows(&db,"SELECT * FROM result")?,rows(&db,query)?);
+    db.execute_batch("BEGIN;UPDATE a SET k=k+1 WHERE id<20;DELETE FROM b WHERE id%17=0;INSERT INTO c VALUES(1001,1);COMMIT")?;
+    assert_eq!(rows(&db,"SELECT * FROM result")?,rows(&db,query)?);
     Ok(())
 }

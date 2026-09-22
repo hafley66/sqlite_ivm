@@ -33,9 +33,9 @@ fn nullable_sum_support_survives_failure_snapshots_and_reopen() -> Result<()> {
     assert_eq!(rows(&writer, "SELECT * FROM totals")?, rows(&writer, query)?);
     reader.execute_batch("COMMIT")?;
     assert_eq!(rows(&reader, "SELECT * FROM totals")?, rows(&reader, query)?);
-    writer.execute_batch("CREATE TEMP TRIGGER fail_sum BEFORE INSERT ON main.totals_state BEGIN SELECT RAISE(ABORT,'sum failure');END")?;
+    writer.execute_batch("CREATE TEMP TRIGGER fail_sum BEFORE INSERT ON main.totals_state BEGIN SELECT RAISE(ABORT,'sum failure');END;CREATE TEMP TRIGGER fail_sum_update BEFORE UPDATE ON main.totals_state BEGIN SELECT RAISE(ABORT,'sum failure');END")?;
     assert!(writer.execute_batch("UPDATE a SET v=7,w=NULL").is_err());
-    writer.execute_batch("DROP TRIGGER fail_sum")?;
+    writer.execute_batch("DROP TRIGGER fail_sum;DROP TRIGGER fail_sum_update")?;
     assert_eq!(rows(&writer, "SELECT * FROM totals")?, rows(&writer, query)?);
     // Force maintenance inside the savepoint, including the unsafe marker.
     writer.execute_batch("SAVEPOINT invalid;INSERT INTO a VALUES(1,0.5,3)")?;
@@ -96,7 +96,7 @@ fn wal_snapshots_writer_contention_and_failed_maintenance_are_atomic() -> Result
         rows(&reader, "SELECT * FROM result")?,
         rows(&writer, query)?
     );
-    writer.execute_batch("CREATE TEMP TRIGGER fail_result BEFORE INSERT ON main.result_state BEGIN SELECT RAISE(ABORT,'injected result write failure');END")?;
+    writer.execute_batch("CREATE TEMP TRIGGER fail_result BEFORE INSERT ON main.result_state BEGIN SELECT RAISE(ABORT,'injected result write failure');END;CREATE TEMP TRIGGER fail_result_update BEFORE UPDATE ON main.result_state BEGIN SELECT RAISE(ABORT,'injected result write failure');END")?;
     let before = rows(&writer, "SELECT * FROM a")?;
     assert!(writer.execute_batch("UPDATE a SET v=11").is_err());
     assert_eq!(rows(&writer, "SELECT * FROM a")?, before);
@@ -104,7 +104,7 @@ fn wal_snapshots_writer_contention_and_failed_maintenance_are_atomic() -> Result
         rows(&writer, "SELECT * FROM result")?,
         rows(&writer, query)?
     );
-    writer.execute_batch("DROP TRIGGER fail_result;UPDATE a SET v=11")?;
+    writer.execute_batch("DROP TRIGGER fail_result;DROP TRIGGER fail_result_update;UPDATE a SET v=11")?;
     assert_eq!(
         rows(&writer, "SELECT * FROM result")?,
         rows(&writer, query)?
@@ -116,6 +116,7 @@ fn wal_snapshots_writer_contention_and_failed_maintenance_are_atomic() -> Result
     drop(contender);
     drop(writer);
     let raw = Connection::open(&path)?;
+    sqlite_ivm::relational_maintenance::register_functions(&raw)?;
     raw.execute_batch("UPDATE result_state SET c2=1234567")?;
     drop(raw);
     let writer = open(&path)?;

@@ -7,6 +7,8 @@ use crate::{
 use rusqlite::{ffi, types::ValueRef, vtab::*, Connection, Result};
 use std::{
     borrow::Cow,
+    collections::{BTreeMap, BTreeSet},
+    sync::{Arc, Mutex, Weak},
     ffi::{c_char, c_int, CStr, CString},
     ptr,
 };
@@ -26,7 +28,15 @@ pub fn register(db: &Connection) -> Result<()> {
         raw.xRollbackTo = Some(rollback_to);
         std::mem::transmute(raw)
     };
-    db.create_module(c"sqlite_ivm", &MODULE, None::<()>)
+    db.create_module(c"sqlite_ivm", &MODULE, Some(Arc::new(ViewChanges::default())))
+}
+
+/// SQLite can retain an old vtab instance after failed DDL while reconnecting
+/// another instance for the same view. They must drain one transaction batch.
+#[derive(Default)]
+struct ViewChanges {
+    collectors: Mutex<BTreeMap<i64, Weak<Mutex<sqlite_bulk_trigger::Collector>>>>,
+    transactions: Mutex<BTreeSet<i64>>,
 }
 
 #[repr(C)]
@@ -42,7 +52,8 @@ struct Table {
     /// Every SQL string this view's drain issues, built beside the plan.
     program: Option<Program>,
     /// Source rows staged since the last drain. Present once the plan is bound.
-    collector: Option<sqlite_bulk_trigger::Collector>,
+    collector: Option<Arc<Mutex<sqlite_bulk_trigger::Collector>>>,
+    changes: Arc<ViewChanges>,
 }
 
 fn recursive(plan: &crate::relational::Plan) -> bool {
@@ -83,15 +94,26 @@ pub(crate) fn migrate(
     if format < 5 && recursive(&plan) {
         return Ok(None);
     }
+    let public_schema: Option<String> = if legacy { None } else { Some(statements::query(
+        conn,Phase::Declare,name,
+        "SELECT declaration FROM __ivm_schema WHERE id=(SELECT id FROM __ivm_views WHERE name=?1)",
+        [name],|r|r.get(0),
+    )?) };
     drop_triggers(conn, name)?;
-    if legacy {
+    if legacy || format < 8 {
         convert(conn, name, &plan)?;
     } else {
         relational_maintenance::hooks(conn, name, &plan)?;
         statements::exec(conn,Phase::Declare,name,"UPDATE main.__ivm_objects SET definition=(SELECT sql FROM main.sqlite_schema WHERE type=object_type AND name=object_name) WHERE view_name=?1",[name])?;
         set_schema(conn, name, &plan)?;
     }
-    Ok(Some(declaration(&plan)))
+    if let Some(public_schema) = public_schema {
+        statements::exec(conn,Phase::Declare,name,
+            "UPDATE __ivm_schema SET declaration=?1 WHERE id=(SELECT id FROM __ivm_views WHERE name=?2)",
+            [&public_schema,name],
+        )?;
+        Ok(Some(public_schema))
+    } else { Ok(Some(declaration(&plan))) }
 }
 // A `generic=0` row stores the retired engine's shadows. Every entry that can
 // meet one rebuilds it as a relational arrangement: xConnect through `migrate`,
@@ -105,7 +127,7 @@ pub(crate) fn convert(
         conn,
         Phase::Declare,
         name,
-        "SELECT object_type,object_name FROM main.__ivm_objects WHERE view_name=?1 AND object_type IN ('table','index')",
+        "SELECT object_type,object_name FROM main.__ivm_objects WHERE view_name=?1 AND object_type IN ('table','index') ORDER BY CASE object_type WHEN 'index' THEN 0 ELSE 1 END",
         [name],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
@@ -178,7 +200,7 @@ fn set_schema(conn: &Connection, name: &str, plan: &crate::relational::Plan) -> 
         conn,
         Phase::Declare,
         name,
-        "UPDATE main.__ivm_schema SET declaration=?1, roles=?2, generic=1, format_version=6 WHERE id=(SELECT id FROM main.__ivm_views WHERE name=?3)",
+        "UPDATE main.__ivm_schema SET declaration=?1, roles=?2, generic=1, format_version=8 WHERE id=(SELECT id FROM main.__ivm_views WHERE name=?3)",
         rusqlite::params![declaration(plan), roles, name],
     )?;
     Ok(())
@@ -227,6 +249,7 @@ impl Table {
         name: &[u8],
         args: &[&[u8]],
         create: bool,
+        changes: Arc<ViewChanges>,
     ) -> Result<(Cow<'static, CStr>, Self)> {
         if schema != b"main" {
             return Err(error("sqlite_ivm tables must be in main"));
@@ -251,7 +274,7 @@ impl Table {
                 &conn,
                 Phase::Declare,
                 name,
-                "SELECT EXISTS(SELECT 1 FROM main.__ivm_schema WHERE format_version NOT IN (2,3,4,5,6))",
+                "SELECT EXISTS(SELECT 1 FROM main.__ivm_schema WHERE format_version NOT IN (2,3,4,5,6,7,8))",
                 [],
                 |r| r.get(0),
             )?;
@@ -281,7 +304,7 @@ impl Table {
                 })
                 .collect::<Result<Vec<_>>>()?;
             let mut declaration = declaration;
-            if format < 5 || !generic {
+            if format < 8 || !generic {
                 match migrate(&conn, name, !generic, format) {
                     Ok(Some(fresh)) => {
                         declaration = fresh;
@@ -325,6 +348,7 @@ impl Table {
                 plan: None,
                 program: None,
                 collector: None,
+                changes,
             };
             // Bind now so the scratch tables exist before any trigger program
             // runs; a failure here surfaces again at the first write.
@@ -349,13 +373,13 @@ impl Table {
         let declaration = declaration(&plan);
         let roles: Vec<c_int> = (1..=plan.names.len() as c_int).collect();
         statements::batch(&conn,Phase::Declare,name,"CREATE TABLE IF NOT EXISTS main.__ivm_schema(id INTEGER PRIMARY KEY,declaration TEXT NOT NULL,generic INTEGER NOT NULL,roles TEXT NOT NULL,format_version INTEGER NOT NULL)")?;
-        // Format 6 adds transactional aggregate eligibility/non-null counts.
-        // Older binaries must reject it rather than leave these counts stale.
+        // Format 7 reads operator inputs from sources. Older binaries must reject
+        // it because their copied-input tables no longer exist.
         statements::exec(
             &conn,
             Phase::Declare,
             name,
-            "INSERT INTO main.__ivm_schema VALUES(?1,?2,1,?3,6)",
+            "INSERT INTO main.__ivm_schema VALUES(?1,?2,1,?3,8)",
             rusqlite::params![
                 id,
                 declaration,
@@ -375,7 +399,12 @@ impl Table {
                 sql,
                 generation: crate::source_ddl::generation(),
                 roles,
-                collector: Some(plan.collector(name)),
+                collector: Some({
+                    let collector = Arc::new(Mutex::new(plan.collector(name)));
+                    changes.collectors.lock().expect("view changes lock").insert(id,Arc::downgrade(&collector));
+                    collector
+                }),
+                changes: changes.clone(),
                 plan: Some(plan),
                 program: Some(program),
             },
@@ -412,7 +441,11 @@ impl Table {
             let name = self.name()?;
             let program = Program::build(&plan, &name, &self.db);
             plan.prepare_scratch(&self.db, &program)?;
-            self.collector = Some(plan.collector(&name));
+            let mut collectors = self.changes.collectors.lock().expect("view changes lock");
+            let collector = collectors.get(&self.id).and_then(Weak::upgrade)
+                .unwrap_or_else(|| Arc::new(Mutex::new(plan.collector(&name))));
+            collectors.insert(self.id,Arc::downgrade(&collector));
+            self.collector = Some(collector);
             self.plan = Some(plan);
             self.program = Some(program);
             self.sql = sql;
@@ -514,9 +547,12 @@ impl Table {
 impl Table {
     /// Hands every staged source row to the plan in one batch.
     fn drain(&mut self) -> Result<()> {
+        let name = self.name()?;
         let Some(collector) = self.collector.as_mut() else {
             return Ok(());
         };
+        let mut collector = collector.lock().expect("view changes lock");
+        collector.rebind_shadow(&name);
         if collector.staged().is_empty() && collector.spilled_rows() == 0 {
             return Ok(());
         }
@@ -527,6 +563,7 @@ impl Table {
             &format!("DELETE FROM {shadow} RETURNING *"),
             || collector.drain(&self.db),
         )?;
+        drop(collector);
         let name = self.name()?;
         let stale = self
             .program
@@ -563,7 +600,7 @@ impl Table {
 impl<'vtab> TransactionVTab<'vtab> for Table {
     fn begin(&mut self) -> Result<()> {
         if let Some(collector) = self.collector.as_mut() {
-            collector.begin();
+            if self.changes.transactions.lock().expect("view changes lock").insert(self.id) { collector.lock().expect("view changes lock").begin(); }
         }
         Ok(())
     }
@@ -572,13 +609,15 @@ impl<'vtab> TransactionVTab<'vtab> for Table {
     }
     fn commit(&mut self) -> Result<()> {
         if let Some(collector) = self.collector.as_mut() {
-            collector.commit();
+            collector.lock().expect("view changes lock").commit();
+            self.changes.transactions.lock().expect("view changes lock").remove(&self.id);
         }
         Ok(())
     }
     fn rollback(&mut self) -> Result<()> {
         if let Some(collector) = self.collector.as_mut() {
-            collector.rollback();
+            collector.lock().expect("view changes lock").rollback();
+            self.changes.transactions.lock().expect("view changes lock").remove(&self.id);
         }
         Ok(())
     }
@@ -602,36 +641,36 @@ fn dispatch(raw: *mut ffi::sqlite3_vtab, body: impl FnOnce(&mut Table)) -> c_int
 unsafe extern "C" fn savepoint(raw: *mut ffi::sqlite3_vtab, index: c_int) -> c_int {
     dispatch(raw, |table| {
         if let Some(collector) = table.collector.as_mut() {
-            collector.savepoint(index);
+            collector.lock().expect("view changes lock").savepoint(index);
         }
     })
 }
 unsafe extern "C" fn release(raw: *mut ffi::sqlite3_vtab, index: c_int) -> c_int {
     dispatch(raw, |table| {
         if let Some(collector) = table.collector.as_mut() {
-            collector.release(index);
+            collector.lock().expect("view changes lock").release(index);
         }
     })
 }
 unsafe extern "C" fn rollback_to(raw: *mut ffi::sqlite3_vtab, index: c_int) -> c_int {
     dispatch(raw, |table| {
         if let Some(collector) = table.collector.as_mut() {
-            collector.rollback_to(index);
+            collector.lock().expect("view changes lock").rollback_to(index);
         }
     })
 }
 unsafe impl<'vtab> VTab<'vtab> for Table {
-    type Aux = ();
+    type Aux = Arc<ViewChanges>;
     type Cursor = Cursor;
     fn connect(
         db: &mut VTabConnection,
-        _: Option<&()>,
+        changes: Option<&Self::Aux>,
         _: &[u8],
         schema: &[u8],
         name: &[u8],
         args: &[&[u8]],
     ) -> Result<(Cow<'static, CStr>, Self)> {
-        Self::attach(db, schema, name, args, false)
+        Self::attach(db, schema, name, args, false, changes.expect("connection batch registry").clone())
     }
     fn best_index(&self, info: &mut IndexInfo) -> Result<bool> {
         info.set_estimated_cost(1_000_000.0);
@@ -655,13 +694,13 @@ impl<'vtab> CreateVTab<'vtab> for Table {
     const KIND: VTabKind = VTabKind::Default;
     fn create(
         db: &mut VTabConnection,
-        _: Option<&()>,
+        changes: Option<&Self::Aux>,
         _: &[u8],
         schema: &[u8],
         name: &[u8],
         args: &[&[u8]],
     ) -> Result<(Cow<'static, CStr>, Self)> {
-        Self::attach(db, schema, name, args, true)
+        Self::attach(db, schema, name, args, true, changes.expect("connection batch registry").clone())
     }
     fn destroy(&self) -> Result<()> {
         catalog::uninstall(&self.db, &self.name()?)
@@ -714,10 +753,13 @@ impl<'vtab> UpdateVTab<'vtab> for Table {
         } else {
             sqlite_bulk_trigger::Sign::Delete
         };
+        let name = self.name()?;
         let collector = self
             .collector
             .as_mut()
             .ok_or_else(|| error("collector missing after bind"))?;
+        let mut collector = collector.lock().expect("view changes lock");
+        collector.rebind_shadow(&name);
         let shadow = collector.shadow_table();
         statements::guard(
             Phase::Drain,

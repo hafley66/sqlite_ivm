@@ -52,6 +52,14 @@ pub(crate) fn column_references(sql: &str) -> Vec<usize> {
     });
     out
 }
+pub(crate) fn substitute_columns(sql: &str, expression: impl Fn(usize) -> String) -> String {
+    let mut out = String::with_capacity(sql.len());
+    visit_columns(sql, |token, c| {
+        if c == usize::MAX { out.push_str(token); }
+        else { out.push_str(&expression(c)); }
+    });
+    out
+}
 pub(crate) fn renumber_columns(sql: &str, map: impl Fn(usize) -> usize) -> String {
     let mut out = String::with_capacity(sql.len());
     visit_columns(sql, |token, c| {

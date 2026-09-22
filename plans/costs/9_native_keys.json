@@ -1,0 +1,481 @@
+{
+  "created_at": "2026-09-22T05:10:07.827410+00:00",
+  "fixture_sha256": "03a093bf232f8f34a9f254c0ef128ed5c7b9a2fd220b3164ab0b12d6a74d75e7",
+  "source": {
+    "historical_revision": "e2052d5ae",
+    "sha256": {
+      "43_sqlite_competitive/0a_state.h": "d5b7be68b7da63ef9b0b49c0564dc52def498a4b7ba7659f968a8c093a080d2a",
+      "43_sqlite_competitive/0ab_expressions.h": "ac75efedde54f5ccbc960cec588380e9487ce1951a7255b734789ea299de5e32",
+      "43_sqlite_competitive/0b_delta.h": "43ba65dfb91b5dae75e2c42283bc9afded7851c72c1d69f4a13547844b4fcbb9",
+      "43_sqlite_competitive/0bc_nonmonotone.h": "0cf1f30c657bb7c7314083c2d91d95f6f14e9e33596666c35e937665712f30af",
+      "43_sqlite_competitive/0c_batch.h": "544c12a205b02ad98e1810adda2b9c140adedac0de62b2f65cd60a1fb7692215",
+      "43_sqlite_competitive/1_native.c": "9254d680a8caa789780e6b920c0b6214bf5ebf1cf03b251b6a812381188cc388",
+      "43_sqlite_competitive/4_shootout.py": "a3e4a33b990dacdcf3ea2a353b22e18ae28e9d146d9d26d498ac0ef9e27fd9e7",
+      "42_sqlite_native_take2/7_shootout.py": "2dbca6dae896a8933683ddb7c3068c733cac63a5197622d6ef1376b4677c1983"
+    },
+    "command": [
+      "scripts/14_crossover_observe.py",
+      "--out",
+      "bench/results/native-rowid-probes-observe"
+    ],
+    "time_unix": 1790053374.685817,
+    "current_revision": "1a9338689eefa8eba204d8395b47097aa2a22396",
+    "current_patch_sha256": "013dff24c9f55a2b5ebd46d93154c15fba94648c1574ba7fab69ff87cf43d6b6"
+  },
+  "paired": {
+    "fixture_sha256": "03a093bf232f8f34a9f254c0ef128ed5c7b9a2fd220b3164ab0b12d6a74d75e7",
+    "time_unix": 1790053473.3635762,
+    "runs": [
+      {
+        "rep": 0,
+        "arm": "copied-inputs",
+        "command": [
+          "/opt/homebrew/opt/python@3.14/bin/python3.14",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/26_sqlite_plugin_adapter.py",
+          "--extension",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/before-index-paired-1790049830468682000/libsqlite_ivm.dylib",
+          "--fixture",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowid-probes-observe/timings/12000-1000-200.json",
+          "--db",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowids-paired-1790053473362723000/copied-inputs-0.db"
+        ],
+        "all_five_states_match": true
+      },
+      {
+        "rep": 0,
+        "arm": "native-index-rowids",
+        "command": [
+          "/opt/homebrew/opt/python@3.14/bin/python3.14",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/26_sqlite_plugin_adapter.py",
+          "--extension",
+          "/Users/chrishafley/projects/sqlite_ivm/target/extension/release/libsqlite_ivm.dylib",
+          "--fixture",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowid-probes-observe/timings/12000-1000-200.json",
+          "--db",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowids-paired-1790053473362723000/native-index-rowids-0.db"
+        ],
+        "all_five_states_match": true
+      },
+      {
+        "rep": 1,
+        "arm": "native-index-rowids",
+        "command": [
+          "/opt/homebrew/opt/python@3.14/bin/python3.14",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/26_sqlite_plugin_adapter.py",
+          "--extension",
+          "/Users/chrishafley/projects/sqlite_ivm/target/extension/release/libsqlite_ivm.dylib",
+          "--fixture",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowid-probes-observe/timings/12000-1000-200.json",
+          "--db",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowids-paired-1790053473362723000/native-index-rowids-1.db"
+        ],
+        "all_five_states_match": true
+      },
+      {
+        "rep": 1,
+        "arm": "copied-inputs",
+        "command": [
+          "/opt/homebrew/opt/python@3.14/bin/python3.14",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/26_sqlite_plugin_adapter.py",
+          "--extension",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/before-index-paired-1790049830468682000/libsqlite_ivm.dylib",
+          "--fixture",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowid-probes-observe/timings/12000-1000-200.json",
+          "--db",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowids-paired-1790053473362723000/copied-inputs-1.db"
+        ],
+        "all_five_states_match": true
+      },
+      {
+        "rep": 2,
+        "arm": "copied-inputs",
+        "command": [
+          "/opt/homebrew/opt/python@3.14/bin/python3.14",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/26_sqlite_plugin_adapter.py",
+          "--extension",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/before-index-paired-1790049830468682000/libsqlite_ivm.dylib",
+          "--fixture",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowid-probes-observe/timings/12000-1000-200.json",
+          "--db",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowids-paired-1790053473362723000/copied-inputs-2.db"
+        ],
+        "all_five_states_match": true
+      },
+      {
+        "rep": 2,
+        "arm": "native-index-rowids",
+        "command": [
+          "/opt/homebrew/opt/python@3.14/bin/python3.14",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/26_sqlite_plugin_adapter.py",
+          "--extension",
+          "/Users/chrishafley/projects/sqlite_ivm/target/extension/release/libsqlite_ivm.dylib",
+          "--fixture",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowid-probes-observe/timings/12000-1000-200.json",
+          "--db",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowids-paired-1790053473362723000/native-index-rowids-2.db"
+        ],
+        "all_five_states_match": true
+      },
+      {
+        "rep": 3,
+        "arm": "native-index-rowids",
+        "command": [
+          "/opt/homebrew/opt/python@3.14/bin/python3.14",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/26_sqlite_plugin_adapter.py",
+          "--extension",
+          "/Users/chrishafley/projects/sqlite_ivm/target/extension/release/libsqlite_ivm.dylib",
+          "--fixture",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowid-probes-observe/timings/12000-1000-200.json",
+          "--db",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowids-paired-1790053473362723000/native-index-rowids-3.db"
+        ],
+        "all_five_states_match": true
+      },
+      {
+        "rep": 3,
+        "arm": "copied-inputs",
+        "command": [
+          "/opt/homebrew/opt/python@3.14/bin/python3.14",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/26_sqlite_plugin_adapter.py",
+          "--extension",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/before-index-paired-1790049830468682000/libsqlite_ivm.dylib",
+          "--fixture",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowid-probes-observe/timings/12000-1000-200.json",
+          "--db",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowids-paired-1790053473362723000/copied-inputs-3.db"
+        ],
+        "all_five_states_match": true
+      },
+      {
+        "rep": 4,
+        "arm": "copied-inputs",
+        "command": [
+          "/opt/homebrew/opt/python@3.14/bin/python3.14",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/26_sqlite_plugin_adapter.py",
+          "--extension",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/before-index-paired-1790049830468682000/libsqlite_ivm.dylib",
+          "--fixture",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowid-probes-observe/timings/12000-1000-200.json",
+          "--db",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowids-paired-1790053473362723000/copied-inputs-4.db"
+        ],
+        "all_five_states_match": true
+      },
+      {
+        "rep": 4,
+        "arm": "native-index-rowids",
+        "command": [
+          "/opt/homebrew/opt/python@3.14/bin/python3.14",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/crossover/26_sqlite_plugin_adapter.py",
+          "--extension",
+          "/Users/chrishafley/projects/sqlite_ivm/target/extension/release/libsqlite_ivm.dylib",
+          "--fixture",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowid-probes-observe/timings/12000-1000-200.json",
+          "--db",
+          "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowids-paired-1790053473362723000/native-index-rowids-4.db"
+        ],
+        "all_five_states_match": true
+      }
+    ],
+    "samples_ms": {
+      "copied-inputs": [
+        78.83374899938644,
+        81.88462400175922,
+        80.71491799637442,
+        76.31962500090594,
+        79.17054399695189
+      ],
+      "native-index-rowids": [
+        26.94345799864095,
+        28.348960000585066,
+        26.333041003454127,
+        27.01866800089192,
+        27.086540998425335
+      ]
+    },
+    "binary_sha256": {
+      "copied-inputs": "4c22af1b72a83464db293c5e4e30a4fc42714854e957e9f16cb4d9da1bf36b3a",
+      "native-index-rowids": "2da1c877e32a7d8ef1875277956056d06898bf4b7cf801fcb8755023b1c0d713"
+    },
+    "medians_ms": {
+      "copied-inputs": 79.17054399695189,
+      "native-index-rowids": 27.01866800089192
+    }
+  },
+  "matrix": [
+    {
+      "rows": 400,
+      "batch": 10,
+      "fanout": 10,
+      "samples_ms": {
+        "sqlite-ivm": [
+          2.871750999474898,
+          3.0057889998715837,
+          3.172499998981948
+        ],
+        "dd": [
+          0.128085,
+          0.137832,
+          0.14150000000000001
+        ],
+        "historical-counted": [
+          1.6830420008773217,
+          1.7132919983851025,
+          1.6668330008542398
+        ]
+      },
+      "ivm_over_dd": 21.807628126063495
+    },
+    {
+      "rows": 12000,
+      "batch": 10,
+      "fanout": 10,
+      "samples_ms": {
+        "sqlite-ivm": [
+          3.700750001371489,
+          3.8781250004831236,
+          3.678544999274891
+        ],
+        "dd": [
+          0.222001,
+          0.262708,
+          0.232584
+        ],
+        "historical-counted": [
+          2.4755830036156112,
+          2.663209001184441,
+          2.669456998773967
+        ]
+      },
+      "ivm_over_dd": 15.911455652028895
+    },
+    {
+      "rows": 400,
+      "batch": 10,
+      "fanout": 200,
+      "samples_ms": {
+        "sqlite-ivm": [
+          3.077542998653371,
+          3.147793000607635,
+          3.389833002074738
+        ],
+        "dd": [
+          0.14766800000000002,
+          0.149875,
+          0.150793
+        ],
+        "historical-counted": [
+          1.941584001542651,
+          2.0145830003457377,
+          1.6833749978104606
+        ]
+      },
+      "ivm_over_dd": 21.002788994879964
+    },
+    {
+      "rows": 1200,
+      "batch": 10,
+      "fanout": 200,
+      "samples_ms": {
+        "sqlite-ivm": [
+          4.052583002703614,
+          3.4421239997755038,
+          3.942248000385007
+        ],
+        "dd": [
+          0.166499,
+          0.19304100000000002,
+          0.15337699999999999
+        ],
+        "historical-counted": [
+          1.974168000742793,
+          2.260749997731182,
+          2.1596679998765467
+        ]
+      },
+      "ivm_over_dd": 23.67730737352781
+    },
+    {
+      "rows": 4000,
+      "batch": 10,
+      "fanout": 200,
+      "samples_ms": {
+        "sqlite-ivm": [
+          3.8797940032964107,
+          3.6319169994385447,
+          3.8540840050700353
+        ],
+        "dd": [
+          0.216748,
+          0.189999,
+          0.15712500000000001
+        ],
+        "historical-counted": [
+          2.1960429985483643,
+          2.972209995277808,
+          2.336289999220753
+        ]
+      },
+      "ivm_over_dd": 20.28475942015503
+    },
+    {
+      "rows": 12000,
+      "batch": 10,
+      "fanout": 200,
+      "samples_ms": {
+        "sqlite-ivm": [
+          4.245000001901644,
+          4.34924999717623,
+          3.982083002483705
+        ],
+        "dd": [
+          0.243957,
+          0.267583,
+          0.21300000000000002
+        ],
+        "historical-counted": [
+          2.6950840019708266,
+          2.7169579989276826,
+          2.5064579986064928
+        ]
+      },
+      "ivm_over_dd": 17.400607491900804
+    },
+    {
+      "rows": 12000,
+      "batch": 1000,
+      "fanout": 200,
+      "samples_ms": {
+        "sqlite-ivm": [
+          26.019873999757692,
+          26.015166002252954,
+          26.291666994438856
+        ],
+        "dd": [
+          1.040794,
+          1.161209,
+          1.1374999999999997
+        ],
+        "historical-counted": [
+          21.120416999110603,
+          21.22787399457593,
+          22.26950099611713
+        ]
+      },
+      "ivm_over_dd": 22.874614505281492
+    },
+    {
+      "rows": 12000,
+      "batch": 1,
+      "fanout": 200,
+      "samples_ms": {
+        "sqlite-ivm": [
+          4.005584998594713,
+          3.568833002645988,
+          3.7062070023239357
+        ],
+        "dd": [
+          0.297334,
+          0.270459,
+          0.170583
+        ],
+        "historical-counted": [
+          2.430750000712578,
+          2.405081999313552,
+          2.144875998055795
+        ]
+      },
+      "ivm_over_dd": 13.70339682659455
+    },
+    {
+      "rows": 12000,
+      "batch": 100,
+      "fanout": 200,
+      "samples_ms": {
+        "sqlite-ivm": [
+          10.359792000599555,
+          10.519541001485777,
+          10.602333002680098
+        ],
+        "dd": [
+          0.348626,
+          0.35603999999999997,
+          0.437292
+        ],
+        "historical-counted": [
+          6.952707999516861,
+          7.153791999371606,
+          8.914584999729414
+        ]
+      },
+      "ivm_over_dd": 29.545952706116665
+    }
+  ],
+  "target_medians_ms": {
+    "sqlite-ivm": 26.019873999757692,
+    "dd": 1.1374999999999997,
+    "historical-counted": 21.22787399457593
+  },
+  "rowid_and_join_plans": [
+    {
+      "calls": 1,
+      "cumulative_vm_counter_samples_sum": 1984.0,
+      "profile_nanos": 0.0,
+      "query_plan": [
+        "SEARCH main.summary_state USING INTEGER PRIMARY KEY (rowid=?)",
+        "LIST SUBQUERY 2",
+        "SCAN d USING COVERING INDEX __ivm_out_3_6_group_8a27e07b54a66a6",
+        "CORRELATED SCALAR SUBQUERY 1",
+        "SEARCH o USING COVERING INDEX __ivm_out_3_6_group_8a27e07b54a66a6 (c0=? AND __m>?)",
+        "SEARCH s USING COVERING INDEX __ivm_summary_result_group (c0=?)"
+      ],
+      "query_plan_error": null,
+      "sql": "DELETE FROM main.\"summary_state\" WHERE rowid IN (SELECT s.rowid FROM temp.__ivm_out_3_6 d CROSS JOIN main.\"summary_state\" s ON s.c0 IS (+d.c0) WHERE d.__m<0 AND NOT EXISTS(SELECT 1 FROM temp.__ivm_out_3_6 o WHERE o.__m>0 AND o.c0 IS (+d.c0)))"
+    },
+    {
+      "calls": 1,
+      "cumulative_vm_counter_samples_sum": 17013.0,
+      "profile_nanos": 0.0,
+      "query_plan": [
+        "SCAN l",
+        "SEARCH main.dimension USING INTEGER PRIMARY KEY (rowid=?)"
+      ],
+      "query_plan_error": null,
+      "sql": "INSERT INTO temp.__ivm_out_5_4(c0,c1,c2,c3,c4,__m) SELECT * FROM (SELECT l.c0 AS c0,l.c1 AS c1,l.c2 AS c2,r.c0 AS c3,r.c1 AS c4,l.__m*r.__n AS __m FROM temp.__ivm_out_3_1 l CROSS JOIN (SELECT 0 AS __k,c0,c1,__n FROM (SELECT c0,c1,__n FROM (SELECT c0 AS c0,c1 AS c1,__n FROM (SELECT \"group_id\" AS c0,\"factor\" AS c1,1 AS __n FROM main.\"dimension\")))) r ON (l.c1)=(r.c0))"
+    },
+    {
+      "calls": 1,
+      "cumulative_vm_counter_samples_sum": 11906.0,
+      "profile_nanos": 0.0,
+      "query_plan": [
+        "SEARCH s USING INTEGER PRIMARY KEY (rowid=?)",
+        "LIST SUBQUERY 3",
+        "SCAN d USING COVERING INDEX __ivm_out_3_6_group_8a27e07b54a66a6",
+        "SEARCH o EXISTS USING COVERING INDEX __ivm_out_3_6_group_8a27e07b54a66a6 (c0=? AND __m>?)",
+        "SEARCH s USING COVERING INDEX __ivm_summary_result_group (c0=?)",
+        "CORRELATED SCALAR SUBQUERY 1",
+        "SEARCH o USING INDEX __ivm_out_3_6_group_8a27e07b54a66a6 (c0=? AND __m>?)"
+      ],
+      "query_plan_error": null,
+      "sql": "UPDATE main.\"summary_state\" AS s SET (c0,c1,c2,__check)=(SELECT o.c0,o.c1,o.c2,sqlite_ivm_row_check(o.c0,o.c1,o.c2) FROM temp.__ivm_out_3_6 o WHERE o.__m>0 AND o.c0 IS (+s.c0)) WHERE s.rowid IN (SELECT s.rowid FROM temp.__ivm_out_3_6 d CROSS JOIN main.\"summary_state\" s ON s.c0 IS (+d.c0) WHERE d.__m<0 AND EXISTS(SELECT 1 FROM temp.__ivm_out_3_6 o WHERE o.__m>0 AND o.c0 IS (+d.c0)))"
+    }
+  ],
+  "verified": {
+    "root_tests": 75,
+    "native_load_tests": 3,
+    "crud_rollback_scripts": true,
+    "cli": true,
+    "source_index_probes": true,
+    "result_rowid_probes": true,
+    "no_json_keys_in_join_group_result_sql": true
+  },
+  "remaining_encoded_keys": [
+    "set membership",
+    "recursive membership"
+  ],
+  "upstream_collector": "29ce8a5e454643e845dc98dcc278ad55bd61e024",
+  "paths": {
+    "matrix": "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowid-probes-observe",
+    "paired": "/Users/chrishafley/projects/sqlite_ivm/bench/results/native-rowids-paired-1790053473362723000"
+  }
+}

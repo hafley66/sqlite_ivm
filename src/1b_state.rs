@@ -3,22 +3,22 @@ use crate::{
     statements::{self, Phase},
     relational::{Kind, Occurrence, Plan},
     relational_maintenance::{
-        columns, folded, json_key, keys_table, out_table, plain, table, BULK_MULTIPLICITY_BUDGET,
+        columns, folded, json_key, out_table, table, BULK_MULTIPLICITY_BUDGET,
     },
 };
 use rusqlite::{types::Value, Connection, Result};
 
 impl Plan {
     /// When every grouping key is projected unchanged, stored output rows can
-    /// supply the before-image without aggregating the input arrangement again.
+    /// supply the before-image without aggregating source inputs again.
     pub(crate) fn stored_group_key(&self) -> Option<String> {
         let node = &self.nodes[self.output];
-        let Kind::Group { keys, expressions, window: false, limit: None, .. } = &node.kind else {
+        let Kind::Group { keys, expressions, window: false, .. } = &node.kind else {
             return None;
         };
         let positions = keys.iter().map(|key| expressions.iter().position(|expression| expression == key))
             .collect::<Option<Vec<_>>>()?;
-        Some(json_key(positions.iter().map(|i| folded(&format!("c{i}"))).collect()))
+        Some(positions.iter().map(|i| format!("c{i}")).collect::<Vec<_>>().join(","))
     }
     pub fn create_state(&self, db: &Connection, name: &str) -> Result<Vec<(&'static str, String)>> {
         // A recreated view must not collide with index names a rename retained:
@@ -52,15 +52,14 @@ impl Plan {
         }
         let mut objects = vec![];
         let dictionary = format!("{name}_keys");
-        statements::batch(
-            db,
-            Phase::Declare,
-            name,
-            &format!(
-                "CREATE TABLE main.{}(__i INTEGER PRIMARY KEY,__v TEXT NOT NULL UNIQUE)",
-                quote(&dictionary)
-            ),
-        )?;
+        let key_width = self.nodes.iter().enumerate().filter_map(|(id,_)| self.native_key_values(id,0).map(|k|k.len())).max().unwrap_or(1);
+        let key_columns = (0..key_width).map(|i|format!("k{i}")).collect::<Vec<_>>().join(",");
+        statements::batch(db, Phase::Declare, name, &format!(
+            "CREATE TABLE main.{}(__i INTEGER PRIMARY KEY,__v TEXT UNIQUE,__node INTEGER,{key_columns})", quote(&dictionary)
+        ))?;
+        let native_index = fresh_index(db,name,format!("__ivm_{name}_native_keys"))?;
+        statements::batch(db,Phase::Declare,name,&format!("CREATE INDEX main.{} ON {}(__node,{key_columns})",quote(&native_index),quote(&dictionary)))?;
+        objects.push(("index",native_index));
         objects.push(("table", dictionary));
         let state = format!("{name}_state");
         let result_key = fresh_index(db, name, format!("__ivm_{name}_result_key"))?;
@@ -69,19 +68,20 @@ impl Plan {
             Phase::Declare,
             name,
             &format!(
-                "CREATE TABLE main.{}(__key TEXT NOT NULL,{}); CREATE INDEX main.{} ON {}(__key)",
+                "CREATE TABLE main.{}(__id INTEGER PRIMARY KEY AUTOINCREMENT,__check INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}({})",
                 quote(&state),
                 (0..self.names.len())
                     .map(|i| format!("c{i}"))
                     .collect::<Vec<_>>()
                     .join(","),
                 quote(&result_key),
-                quote(&state)
+                quote(&state),
+                crate::native_keys::exact_row_columns(self.names.len(), "").join(",")
             ),
         )?;
         objects.push(("table", state));
         objects.push(("index", result_key));
-        if let Some(group_key) = self.stored_group_key() {
+        if let Some(group_key) = self.stored_group_key().filter(|k| !k.is_empty()) {
             let index = fresh_index(db, name, format!("__ivm_{name}_result_group"))?;
             statements::batch(db, Phase::Declare, name, &format!(
                 "CREATE INDEX main.{} ON {}({group_key})", quote(&index), quote(&format!("{name}_state"))
@@ -99,38 +99,25 @@ impl Plan {
                 continue;
             }
             for (side, input) in node.inputs.iter().enumerate() {
-                let t = format!("{name}_op{id}x{side}");
-                let n = self.nodes[*input].fields.len();
-                let key = fresh_index(db, name, format!("__ivm_{name}_op{id}_{side}_key"))?;
-                let row = fresh_index(db, name, format!("__ivm_{name}_op{id}_{side}_row"))?;
-                statements::batch(db, Phase::Declare, name, &format!("CREATE TABLE main.{}(__k INTEGER NOT NULL,__r INTEGER NOT NULL,__n INTEGER NOT NULL,{}); CREATE INDEX main.{} ON {}(__k); CREATE UNIQUE INDEX main.{} ON {}(__r,{})",quote(&t),columns(n),quote(&key),quote(&t),quote(&row),quote(&t),crate::relational_maintenance::identity_sql(n)))?;
-                objects.push(("table", t));
-                objects.push(("index", key));
-                objects.push(("index", row));
-                if let Kind::Group {
-                    order,
-                    limit: Some(_),
-                    ..
-                } = &node.kind
-                {
-                    if !order.is_empty() {
-                        let index =
-                            fresh_index(db, name, format!("__ivm_{name}_op{id}_{side}_order"))?;
-                        statements::batch(
-                            db,
-                            Phase::Declare,
-                            name,
-                            &format!(
-                                "CREATE INDEX main.{} ON {}(__k,{})",
-                                quote(&index),
-                                quote(&format!("{name}_op{id}x{side}")),
-                                order
-                                    .iter()
-                                    .map(|o| o.replace(" NULLS FIRST", "").replace(" NULLS LAST", ""))
-                                    .collect::<Vec<_>>()
-                                    .join(",")
-                            ),
-                        )?;
+                let mut expressions = match self.native_key_columns(id,side) {
+                    Some(keys) if keys.is_empty() => vec![],
+                    Some(keys) => vec![keys.join(",")],
+                    None => vec![self.key_sql(id,side).expect("operator key")],
+                };
+                if let Kind::Group { order, .. } = &node.kind {
+                    expressions.extend(order.iter().map(|o| o.replace(" NULLS FIRST", "").replace(" NULLS LAST", "")));
+                }
+                if let Kind::Fixpoint { rules } = &node.kind {
+                    expressions.extend(rules.iter().flat_map(|r| &r.indexes).filter_map(|(occurrence, expression)| {
+                        (*occurrence == Occurrence::Input(side)).then(|| expression.clone())
+                    }));
+                }
+                for (position, expression) in expressions.iter().enumerate() {
+                    if let Some((source, expression)) = self.source_expression(*input, expression) {
+                        let index = fresh_index(db, name, format!("__ivm_{name}_source_{id}_{side}_{position}"))?;
+                        statements::batch(db, Phase::Declare, name, &format!(
+                            "CREATE INDEX main.{} ON {}({expression})", quote(&index), quote(&self.sources[source].name)
+                        ))?;
                         objects.push(("index", index));
                     }
                 }
@@ -155,7 +142,7 @@ impl Plan {
                 let mut created = vec![];
                 for (occurrence, expression) in rules.iter().flat_map(|r| &r.indexes) {
                     let side = match occurrence {
-                        Occurrence::Input(side) => *side,
+                        Occurrence::Input(_) => continue,
                         Occurrence::Member => member,
                     };
                     if created.contains(&(side, expression)) {
@@ -270,7 +257,7 @@ impl Plan {
             let safe = sums.iter().map(|(_,v)|format!("min(typeof({v}) IN ('integer','null') AND coalesce(abs(CAST(({v}) AS REAL)),0)<=1000000)")).collect::<Vec<_>>().join(" AND ");
             statements::exec(db, Phase::Materialize, name, &format!(
                 "INSERT INTO {}(__k,__safe,{columns}) SELECT __k,sum(__n)<=1000000 AND {safe},{values} FROM {} GROUP BY __k",
-                table(name, self.output, 1), table(name, self.output, 0)
+                table(name, self.output, 1), self.live_input(db, name, self.output, 0, false, false)
             ), [])?;
         }
         Ok(())
@@ -289,8 +276,8 @@ impl Plan {
         }
         Ok(())
     }
-    /// The `__k` composite of one input side of an arrangement node, as SQL
-    /// over that side's `c<i>` columns. None for nodes without arrangements.
+    /// Encoded membership keys for sets and recursion. Join/group keys use
+    /// native_key_columns and cannot take this encoding path.
     pub(crate) fn key_sql(&self, id: usize, side: usize) -> Option<String> {
         let node = &self.nodes[id];
         let child_node = &self.nodes[node.inputs[side]];
@@ -306,21 +293,6 @@ impl Plan {
                     })
                     .collect(),
             ),
-            Kind::Join { left, right, .. } => {
-                let positions = if side == 0 { left } else { right };
-                json_key(
-                    positions
-                        .iter()
-                        .map(|i| {
-                            folded(&crate::relational::key_expression(
-                                &format!("c{i}"),
-                                &child_node.fields[*i].collation,
-                            ))
-                        })
-                        .collect(),
-                )
-            }
-            Kind::Group { keys, .. } => json_key(keys.iter().map(|e| folded(e)).collect()),
             Kind::Fixpoint { .. } => {
                 json_key((0..width).map(|i| folded(&format!("c{i}"))).collect())
             }
@@ -329,63 +301,16 @@ impl Plan {
     }
     fn fill(&self, db: &Connection, name: &str, id: usize, side: usize) -> Result<()> {
         let node = &self.nodes[id];
-        let child = node.inputs[side];
-        let child_node = &self.nodes[child];
-        let width = child_node.fields.len();
-        let out = out_table(child, width);
-        let t = table(name, id, side);
-        let r = json_key((0..width).map(|i| plain(&format!("c{i}"))).collect());
-        let Some(k) = self.key_sql(id, side) else {
-            return Ok(());
-        };
-        let dict = keys_table(name);
-        statements::exec(
-            db,
-            Phase::Materialize,
-            name,
-            &format!("INSERT OR IGNORE INTO {dict}(__v) SELECT {k} FROM {out}"),
-            [],
-        )?;
-        let k = format!("(SELECT __i FROM {dict} WHERE __v={k})");
-        // No UNIQUE target is left to upsert against. Rows sharing a composite
-        // are equal in every column, so the grouped select keeps the same row.
-        statements::exec(
-            db,
-            Phase::Materialize,
-            name,
-            &format!(
-                "INSERT INTO {t}(__k,__r,__n,{cols}) SELECT {k},sqlite_ivm_hash(__ivm_r),__ivm_n,{cols} FROM (SELECT {r} AS __ivm_r,sum(__m) AS __ivm_n,{cols} FROM {out} GROUP BY {r})",
-                cols = columns(width)
-            ),
-            [],
-        )?;
-        let bad: bool = statements::query(
-            db,
-            Phase::Materialize,
-            name,
-            &format!("SELECT EXISTS(SELECT 1 FROM {t} WHERE typeof(__n)!='integer' OR __n<0)"),
-            [],
-            |r| r.get(0),
-        )?;
-        if bad {
-            return Err(error("arrangement multiplicity overflow"));
-        }
+        if matches!(node.kind, Kind::Join { mode: "inner", .. } | Kind::Fixpoint { .. }) { return Ok(()); }
+        statements::exec(db,Phase::Materialize,name,&self.insert_keys(name,id,side),[])?;
         Ok(())
     }
-    /// The arrangement a bulk read scans: the whole table when populating, or a
-    /// subquery over the touched keys when draining a batch. The subquery names
-    /// `rowid` explicitly so the Set representative select can read it. No
-    /// DDL here: a drain runs inside a trigger program.
+    /// Read current source rows, optionally restricted to touched keys.
+    /// No DDL here: a drain may run inside a trigger program.
     pub(crate) fn source_table(&self, db: &Connection, name: &str, id: usize, side: usize, restricted: bool) -> Result<String> {
-        let full = table(name, id, side);
-        if !restricted {
-            return Ok(full);
-        }
-        let _ = db;
-        Ok(format!(
-            "(SELECT rowid AS rowid,* FROM {full} WHERE __k IN (SELECT __k FROM temp.__ivm_touched))"
-        ))
+        Ok(self.live_input(db, name, id, side, restricted, false))
     }
+
     fn write_state(&self, db: &Connection, name: &str, id: usize) -> Result<()> {
         let width = self.nodes[id].fields.len();
         let out = out_table(id, width);
@@ -401,13 +326,13 @@ impl Plan {
         if peak > BULK_MULTIPLICITY_BUDGET {
             return Err(error("result multiplicity expansion exceeds budget"));
         }
-        let k = json_key((0..width).map(|i| plain(&format!("o.c{i}"))).collect());
+        let k = format!("sqlite_ivm_row_check({})",(0..width).map(|i|format!("o.c{i}")).collect::<Vec<_>>().join(","));
         statements::exec(
             db,
             Phase::Materialize,
             name,
             &format!(
-                "WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<(SELECT coalesce((SELECT max(__m) FROM {out}),0))) INSERT INTO {state}(__key,{}) SELECT {k},o.c0{} FROM {out} o,seq WHERE seq.n<=o.__m",
+                "WITH RECURSIVE seq(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM seq WHERE n<(SELECT coalesce((SELECT max(__m) FROM {out}),0))) INSERT INTO {state}(__check,{}) SELECT {k},o.c0{} FROM {out} o,seq WHERE seq.n<=o.__m",
                 columns(width),
                 (1..width).map(|i| format!(",o.c{i}")).collect::<String>()
             ),

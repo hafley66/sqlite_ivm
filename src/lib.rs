@@ -16,10 +16,14 @@ pub mod columns;
 pub(crate) mod statements;
 #[path = "1a_relational.rs"]
 pub mod relational_maintenance;
+#[path = "1ab_native_keys.rs"]
+pub(crate) mod native_keys;
 #[path = "1b_state.rs"]
 pub mod relational_state;
 #[path = "1c_materialize.rs"]
 pub mod relational_materialize;
+#[path = "1ca_source_reads.rs"]
+pub(crate) mod source_reads;
 #[path = "1d_drain.rs"]
 pub mod relational_drain;
 #[path = "1e_program.rs"]

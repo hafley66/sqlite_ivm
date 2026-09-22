@@ -3,7 +3,7 @@
 Transactional incremental SQL views for SQLite, implemented as a Rust loadable
 extension. Ordinary source `INSERT`, `UPDATE`, and `DELETE` statements maintain
 persistent results inside the source transaction. Rollback and savepoints cover
-source rows, intermediate arrangements, and results together.
+source rows, pending deltas, and results together.
 
 Version 0.3.0 is a prerelease with the explicitly bounded SQL contract below.
 MIT OR Apache-2.0 licensed. The package is independent of the surrounding compiler.
@@ -107,29 +107,47 @@ remain available.
 
 ## State and incremental work
 
-`xCreate` creates persistent operator arrangements, indexes, source triggers, and
-an ownership manifest, then loads existing source rows once. `xConnect` reads a
-persisted result schema. Maintenance lazily binds the catalog query and refreshes
-it after managed source DDL; reconnect does not populate results again.
+`xCreate` creates native source indexes, result storage, source triggers, key
+columns, and an ownership manifest. Operator inputs are read from authoritative
+source tables and compiled subqueries. Persistent copies of join/group input rows
+are absent. `xConnect` reads a persisted result schema; maintenance rebinds after
+managed source DDL.
 
-Source hooks send OLD/NEW row images to `xUpdate`. Projection and filtering emit
-signed rows. Joins look up matching keys. Sets maintain support counts. Aggregates
-and windows emit the difference within the affected group. Top-k reads an indexed
-candidate prefix. A recursive CTE keeps one member table per fixpoint; insertion
-runs semi-naive rounds whose delta is a rowid range of that table, deletion
-over-deletes the derivable region into a work table, rederives from the remaining
-facts, then emits the net difference. Every round is one statement per recursive
-term, so statement counts follow the changed rows and rounds, never the member
-size. No mutation rebuilds the entire view from its defining SELECT. Large
-affected groups or graph regions can still require large work.
+```text
+OLD / NEW cells -> signed batch -> native source-index probes
+                                       |
+                  deltaL JOIN newR + newL JOIN deltaR - deltaL JOIN deltaR
+                                       |
+                      group columns -> signed contributions
+                                       |
+                         result INTEGER PRIMARY KEY
+                         update surviving groups in place
+```
 
-`xRename` preserves state and index B-trees; `xDestroy` validates the exact owned
-DDL before cleanup. Shared `__ivm_*` catalogs remain after the last view is dropped.
-New views use storage format 6, including transactional aggregate eligibility
-and non-null support counts. Older extensions reject this format. Format 5 views
-remain usable through the original arrangement path. Formats 2 through 4 use the
-existing writable-database migration path; format 1 requires its matching older
-extension. The original ordinary-view prototypes are not migrated.
+Join and aggregate keys use separate SQLite values and composite indexes.
+NULL group keys match with `IS`; join equality uses `=`. Touched groups have
+integer IDs in a dictionary with native key columns. Result rows have explicit
+integer primary keys, and projected aggregate groups preserve those IDs across
+updates. Result insertion/retraction and duplicate consolidation compare native
+values, storage types, and exact REAL bits. An integer checksum supports the
+existing corruption-recovery check; it never selects a row or defines equality.
+Set and recursive membership keys retain their existing encoded representation.
+
+Projection/filtering and inner joins propagate signed deltas. Eligible bounded
+integer COUNT/SUM groups add contributions and maintain non-null support counts.
+Other aggregates, outer joins, sets, windows, and top-k evaluate affected-key
+before/after results and emit their signed difference. Before-input reads subtract
+the pending delta from current source rows. A recursive CTE retains member/work
+state and uses delete-and-rederive; its work table is cleared after the drain.
+Large affected groups and graph regions can require large work. The batch boundary
+is a transaction/read drain; this API has no dataflow timestamp frontier runtime.
+
+`xRename` preserves state and index B-trees; `xDestroy` validates owned DDL before
+cleanup. Shared `__ivm_*` catalogs remain after the last view is dropped. New views
+use storage format 8. Compatible formats 2 through 7 rebuild through the existing
+writable-database migration path, removing copied input tables and installing the
+native-key layout. Pre-5 recursive state still requires its matching older
+extension; format 1 and the original ordinary-view prototypes are not migrated.
 
 Enable `SQLITE_DBCONFIG_DEFENSIVE` to prevent direct shadow-table writes. Reserved
 hidden columns (`__ivm_source`, `__ivm_adding`, `__ivm_row`) and catalogs are internal

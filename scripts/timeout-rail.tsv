@@ -43,7 +43,7 @@ Darwin arm64	sqlite-ivm::3_relational::shared_circuit_states	0.205
 Darwin arm64	sqlite-ivm::3_relational::unsupported_clause_combinations_fail_before_install	0.011
 Darwin arm64	sqlite-ivm::4_features::blobs_and_adjacent_floats_survive_trigger_transport	0.030
 Darwin arm64	sqlite-ivm::4_features::collations_control_group_distinct_join_and_outer_predicates	0.064
-Darwin arm64	sqlite-ivm::4_features::comma_join_arrangements_hold_side_row_counts_never_the_product	0.020
+Darwin arm64	sqlite-ivm::4_features::comma_joins_keep_no_persistent_input_rows	0.020
 Darwin arm64	sqlite-ivm::4_features::comma_join_star_predicate_matches_plain_query	0.073
 Darwin arm64	sqlite-ivm::4_features::feature_compositions_against_sqlite	1.278
 Darwin arm64	sqlite-ivm::4_features::materialized_output_affinity_matches_ordinary_view_consumers	0.012
