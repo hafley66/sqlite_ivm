@@ -5,14 +5,31 @@ existing compiler's affected-group recomputation, once per changed source row.
 """
 
 import argparse
+import ctypes
 import hashlib
 import json
 import re
 import resource
 import sqlite3
+import _sqlite3
 import sys
 import time
 from pathlib import Path
+
+
+def sqlite_allocator_bytes():
+    """SQLite's own allocator gauge and high-water mark in this process."""
+    library = ctypes.CDLL(_sqlite3.__file__)
+    current = ctypes.c_longlong()
+    peak = ctypes.c_longlong()
+    status = library.sqlite3_status64
+    status.argtypes = [ctypes.c_int, ctypes.POINTER(ctypes.c_longlong),
+                       ctypes.POINTER(ctypes.c_longlong), ctypes.c_int]
+    status.restype = ctypes.c_int
+    result = status(0, ctypes.byref(current), ctypes.byref(peak), 0)
+    if result != 0:
+        raise RuntimeError(f'sqlite3_status64(SQLITE_STATUS_MEMORY_USED): {result}')
+    return {'current_bytes': current.value, 'peak_bytes': peak.value}
 
 
 def quoted(name):
@@ -203,6 +220,10 @@ def main(plugin_install=None):
                           'exact_input_output_validated': True,
                           'summary': actual['summary']}), flush=True)
     live_disk = {name: Path(args.db + suffix).stat().st_size if Path(args.db + suffix).exists() else 0 for name,suffix in [('main_bytes',''),('wal_bytes','-wal'),('shm_bytes','-shm')]}
+    sqlite_pages = {schema: {'page_count': db.execute(f'PRAGMA {schema}.page_count').fetchone()[0],
+                             'page_size': db.execute(f'PRAGMA {schema}.page_size').fetchone()[0]}
+                    for schema in ('main', 'temp')}
+    sqlite_memory = sqlite_allocator_bytes()
     db.close()
     db = sqlite3.connect(args.db, isolation_level=None)
     if plugin_install is not None:
@@ -215,6 +236,7 @@ def main(plugin_install=None):
                       'final_checksum': checksum, 'fresh_reopen_validated': True,
                       'final_input_hash': input_hash,
                       'disk': {'database_bytes': Path(args.db).stat().st_size, **live_disk, 'temp_bytes': None, 'temp_scope':'SQLite temp files not sampled'},
+                      'sqlite_pages': sqlite_pages, 'sqlite_allocator': sqlite_memory,
                       'process_peak_rss_platform_units': resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
                       'rss_units': 'bytes' if sys.platform == 'darwin' else 'KiB'}), flush=True)
 

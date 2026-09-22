@@ -15,6 +15,15 @@ Run these recipes from the repository root. Each builds the required artifacts.
 Native extension builds use `target/extension` to avoid overwriting the linked
 Rust library used by the benchmark binary.
 
+The crossover adapter's `case-total` row records process peak RSS (Rust,
+Python, SQLite and the loader together), SQLite allocator current and peak
+bytes from `sqlite3_status64(SQLITE_STATUS_MEMORY_USED)`, main and temp page
+counts and sizes, and live database/WAL/SHM file sizes. SQLite allocator bytes
+exclude Rust allocations. RSS includes both allocators and cannot be
+subtracted from the SQLite high-water mark to derive a Rust heap peak, since
+the peaks can occur at different times. Temp file bytes are not sampled;
+`temp.page_count * temp.page_size` is logical temp database space.
+
 ## Subcommands
 
 ### `bench shootout [smoke|quick] [--engines e1,e2] [--out DIR] [--circuits c1,c2] [--pg-prefix DIR]`

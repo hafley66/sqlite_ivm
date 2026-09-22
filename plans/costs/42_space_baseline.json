@@ -1,0 +1,66 @@
+{
+  "plugin_commit": "64dcfea",
+  "extension_sha256": "f70637acfb0bfed1d1f887cf3c65ee2b3c225eee7a165edb7b1cee9cfb0f80e2",
+  "fixture": "bench/results/native-rowid-probes-observe/timings/12000-1000-200.json",
+  "fixture_sha256": "03a093bf232f8f34a9f254c0ef128ed5c7b9a2fd220b3164ab0b12d6a74d75e7",
+  "command": "cd /Users/chrishafley/projects/sqlite_ivm && python3 bench/crossover/26_sqlite_plugin_adapter.py --extension target/extension/release/libsqlite_ivm.dylib --fixture bench/results/native-rowid-probes-observe/timings/12000-1000-200.json --db /private/tmp/ivm-space.db",
+  "setup": {
+    "event": "case-setup",
+    "status": "ok",
+    "setup_ms": 43.59670799931337,
+    "program_sha256": null,
+    "runtime": "stock SQLite 3.53.2",
+    "algorithm": "sqlite_ivm persistent relational arrangements",
+    "sql_consumer_install_api": true,
+    "durability": "WAL/synchronous=FULL",
+    "memory_scope": "Python process incl SQLite; no enforced total cap",
+    "extension_sha256": "f70637acfb0bfed1d1f887cf3c65ee2b3c225eee7a165edb7b1cee9cfb0f80e2",
+    "extension_path": "/private/tmp/libsqlite_ivm_64dcfea.dylib",
+    "build": "sqlite-ivm 0.3; extension SHA-256 above",
+    "logging": {
+      "event_limit": 0,
+      "transactional_metrics": 0,
+      "sink": "stderr"
+    },
+    "source_foreign_key": false
+  },
+  "total": {
+    "event": "case-total",
+    "status": "ok",
+    "update_plus_query_ms": 28.948000001037144,
+    "final_checksum": "37a855bf4e75587e4d18e6426b94e5fcef60be731c273d66e28e6a791690c188",
+    "fresh_reopen_validated": true,
+    "final_input_hash": "7aefe61db4d05f6cff1b0f7d39a10129a591290f5661d1f674243dd8b7ae2812",
+    "disk": {
+      "database_bytes": 540672,
+      "main_bytes": 4096,
+      "wal_bytes": 1458512,
+      "shm_bytes": 32768,
+      "temp_bytes": null,
+      "temp_scope": "SQLite temp files not sampled"
+    },
+    "sqlite_pages": {
+      "main": {
+        "page_count": 132,
+        "page_size": 4096
+      },
+      "temp": {
+        "page_count": 107,
+        "page_size": 4096
+      }
+    },
+    "sqlite_allocator": {
+      "current_bytes": 1562416,
+      "peak_bytes": 1942176
+    },
+    "process_peak_rss_platform_units": 54362112,
+    "rss_units": "bytes"
+  },
+  "compiler_case": "oracle/eval/c2_partial_3.json",
+  "compiler_process": {
+    "wall_ms": 2531.1,
+    "peak_rss_bytes": 985497600,
+    "output_sha256": "e635f295151c51405f23a852e13ef5ca857da1fcb8cf551a064088289fdafd67"
+  },
+  "scope": "SQLite allocator and persistent/temp page measures apply to the 12k-row plugin benchmark; compiler-case RSS is the whole dl8 process."
+}
