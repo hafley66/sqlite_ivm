@@ -1,0 +1,373 @@
+{
+  "method": "alternating ABBAAB standalone replay, exact captured c2 source DB, arena, view SQL and rounds; same driver and host",
+  "before_commit": "96f6158",
+  "after_commit": "49d5acd",
+  "runs": [
+    {
+      "run": 1,
+      "plugin": "before",
+      "samples": [
+        {
+          "database_bytes": 20840448,
+          "elapsed_ms": 0.0,
+          "main_pages": 318,
+          "page_size": 65536,
+          "phase": "source_ready",
+          "process_peak_rss_bytes": 8126464,
+          "shm_bytes": 32768,
+          "sqlite_allocator_current_bytes": 657024,
+          "sqlite_allocator_peak_bytes": 657024,
+          "sqlite_connection_cache_bytes": 132240,
+          "sqlite_connection_schema_bytes": 93072,
+          "sqlite_connection_statement_bytes": 0,
+          "temp_pages": 0,
+          "wal_bytes": 0
+        },
+        {
+          "database_bytes": 20840448,
+          "elapsed_ms": 750.9611659999999,
+          "main_pages": 1144,
+          "page_size": 65536,
+          "phase": "view_installed",
+          "process_peak_rss_bytes": 195477504,
+          "shm_bytes": 32768,
+          "sqlite_allocator_current_bytes": 155895600,
+          "sqlite_allocator_peak_bytes": 156433552,
+          "sqlite_connection_cache_bytes": 91320512,
+          "sqlite_connection_schema_bytes": 4716960,
+          "sqlite_connection_statement_bytes": 14129984,
+          "temp_pages": 559,
+          "wal_bytes": 54218152
+        },
+        {
+          "database_bytes": 74973184,
+          "elapsed_ms": 266.590291,
+          "main_pages": 1144,
+          "page_size": 65536,
+          "phase": "rounds_complete",
+          "process_peak_rss_bytes": 230768640,
+          "shm_bytes": 32768,
+          "sqlite_allocator_current_bytes": 172642784,
+          "sqlite_allocator_peak_bytes": 178188704,
+          "sqlite_connection_cache_bytes": 92241600,
+          "sqlite_connection_schema_bytes": 4718272,
+          "sqlite_connection_statement_bytes": 29364496,
+          "temp_pages": 559,
+          "wal_bytes": 68182432
+        },
+        {
+          "output_file": "/private/tmp/c2-native-paired-0.rows",
+          "phase": "output",
+          "rounds_run": 2,
+          "rows": 947
+        }
+      ],
+      "output_sha256": "8df5e106237fdbf1034e4904dc777f256329be235816bcd3d0ddb6c3ab95da29"
+    },
+    {
+      "run": 2,
+      "plugin": "after",
+      "samples": [
+        {
+          "database_bytes": 20840448,
+          "elapsed_ms": 0.0,
+          "main_pages": 318,
+          "page_size": 65536,
+          "phase": "source_ready",
+          "process_peak_rss_bytes": 7585792,
+          "shm_bytes": 32768,
+          "sqlite_allocator_current_bytes": 657024,
+          "sqlite_allocator_peak_bytes": 657024,
+          "sqlite_connection_cache_bytes": 132240,
+          "sqlite_connection_schema_bytes": 93072,
+          "sqlite_connection_statement_bytes": 0,
+          "temp_pages": 0,
+          "wal_bytes": 0
+        },
+        {
+          "database_bytes": 20840448,
+          "elapsed_ms": 769.4399579999999,
+          "main_pages": 1145,
+          "page_size": 65536,
+          "phase": "view_installed",
+          "process_peak_rss_bytes": 185909248,
+          "shm_bytes": 32768,
+          "sqlite_allocator_current_bytes": 154917616,
+          "sqlite_allocator_peak_bytes": 155455568,
+          "sqlite_connection_cache_bytes": 90859968,
+          "sqlite_connection_schema_bytes": 4853216,
+          "sqlite_connection_statement_bytes": 13700592,
+          "temp_pages": 551,
+          "wal_bytes": 54283712
+        },
+        {
+          "database_bytes": 75038720,
+          "elapsed_ms": 268.300875,
+          "main_pages": 1145,
+          "page_size": 65536,
+          "phase": "rounds_complete",
+          "process_peak_rss_bytes": 223739904,
+          "shm_bytes": 32768,
+          "sqlite_allocator_current_bytes": 171351184,
+          "sqlite_allocator_peak_bytes": 176897296,
+          "sqlite_connection_cache_bytes": 91781056,
+          "sqlite_connection_schema_bytes": 4854528,
+          "sqlite_connection_statement_bytes": 28618880,
+          "temp_pages": 551,
+          "wal_bytes": 68247992
+        },
+        {
+          "output_file": "/private/tmp/c2-native-paired-1.rows",
+          "phase": "output",
+          "rounds_run": 2,
+          "rows": 947
+        }
+      ],
+      "output_sha256": "8df5e106237fdbf1034e4904dc777f256329be235816bcd3d0ddb6c3ab95da29"
+    },
+    {
+      "run": 3,
+      "plugin": "after",
+      "samples": [
+        {
+          "database_bytes": 20840448,
+          "elapsed_ms": 0.0,
+          "main_pages": 318,
+          "page_size": 65536,
+          "phase": "source_ready",
+          "process_peak_rss_bytes": 8388608,
+          "shm_bytes": 32768,
+          "sqlite_allocator_current_bytes": 657024,
+          "sqlite_allocator_peak_bytes": 657024,
+          "sqlite_connection_cache_bytes": 132240,
+          "sqlite_connection_schema_bytes": 93072,
+          "sqlite_connection_statement_bytes": 0,
+          "temp_pages": 0,
+          "wal_bytes": 0
+        },
+        {
+          "database_bytes": 20840448,
+          "elapsed_ms": 724.427708,
+          "main_pages": 1145,
+          "page_size": 65536,
+          "phase": "view_installed",
+          "process_peak_rss_bytes": 189153280,
+          "shm_bytes": 32768,
+          "sqlite_allocator_current_bytes": 154917616,
+          "sqlite_allocator_peak_bytes": 155455568,
+          "sqlite_connection_cache_bytes": 90859968,
+          "sqlite_connection_schema_bytes": 4853216,
+          "sqlite_connection_statement_bytes": 13700592,
+          "temp_pages": 551,
+          "wal_bytes": 54283712
+        },
+        {
+          "database_bytes": 75038720,
+          "elapsed_ms": 243.54049999999998,
+          "main_pages": 1145,
+          "page_size": 65536,
+          "phase": "rounds_complete",
+          "process_peak_rss_bytes": 227557376,
+          "shm_bytes": 32768,
+          "sqlite_allocator_current_bytes": 171351184,
+          "sqlite_allocator_peak_bytes": 176897296,
+          "sqlite_connection_cache_bytes": 91781056,
+          "sqlite_connection_schema_bytes": 4854528,
+          "sqlite_connection_statement_bytes": 28618880,
+          "temp_pages": 551,
+          "wal_bytes": 68247992
+        },
+        {
+          "output_file": "/private/tmp/c2-native-paired-2.rows",
+          "phase": "output",
+          "rounds_run": 2,
+          "rows": 947
+        }
+      ],
+      "output_sha256": "8df5e106237fdbf1034e4904dc777f256329be235816bcd3d0ddb6c3ab95da29"
+    },
+    {
+      "run": 4,
+      "plugin": "before",
+      "samples": [
+        {
+          "database_bytes": 20840448,
+          "elapsed_ms": 0.0,
+          "main_pages": 318,
+          "page_size": 65536,
+          "phase": "source_ready",
+          "process_peak_rss_bytes": 7553024,
+          "shm_bytes": 32768,
+          "sqlite_allocator_current_bytes": 657024,
+          "sqlite_allocator_peak_bytes": 657024,
+          "sqlite_connection_cache_bytes": 132240,
+          "sqlite_connection_schema_bytes": 93072,
+          "sqlite_connection_statement_bytes": 0,
+          "temp_pages": 0,
+          "wal_bytes": 0
+        },
+        {
+          "database_bytes": 20840448,
+          "elapsed_ms": 749.515334,
+          "main_pages": 1144,
+          "page_size": 65536,
+          "phase": "view_installed",
+          "process_peak_rss_bytes": 185958400,
+          "shm_bytes": 32768,
+          "sqlite_allocator_current_bytes": 155895600,
+          "sqlite_allocator_peak_bytes": 156433552,
+          "sqlite_connection_cache_bytes": 91320512,
+          "sqlite_connection_schema_bytes": 4716960,
+          "sqlite_connection_statement_bytes": 14129984,
+          "temp_pages": 559,
+          "wal_bytes": 54218152
+        },
+        {
+          "database_bytes": 74973184,
+          "elapsed_ms": 260.170834,
+          "main_pages": 1144,
+          "page_size": 65536,
+          "phase": "rounds_complete",
+          "process_peak_rss_bytes": 222330880,
+          "shm_bytes": 32768,
+          "sqlite_allocator_current_bytes": 172642784,
+          "sqlite_allocator_peak_bytes": 178188704,
+          "sqlite_connection_cache_bytes": 92241600,
+          "sqlite_connection_schema_bytes": 4718272,
+          "sqlite_connection_statement_bytes": 29364496,
+          "temp_pages": 559,
+          "wal_bytes": 68182432
+        },
+        {
+          "output_file": "/private/tmp/c2-native-paired-3.rows",
+          "phase": "output",
+          "rounds_run": 2,
+          "rows": 947
+        }
+      ],
+      "output_sha256": "8df5e106237fdbf1034e4904dc777f256329be235816bcd3d0ddb6c3ab95da29"
+    },
+    {
+      "run": 5,
+      "plugin": "before",
+      "samples": [
+        {
+          "database_bytes": 20840448,
+          "elapsed_ms": 0.0,
+          "main_pages": 318,
+          "page_size": 65536,
+          "phase": "source_ready",
+          "process_peak_rss_bytes": 8044544,
+          "shm_bytes": 32768,
+          "sqlite_allocator_current_bytes": 657024,
+          "sqlite_allocator_peak_bytes": 657024,
+          "sqlite_connection_cache_bytes": 132240,
+          "sqlite_connection_schema_bytes": 93072,
+          "sqlite_connection_statement_bytes": 0,
+          "temp_pages": 0,
+          "wal_bytes": 0
+        },
+        {
+          "database_bytes": 20840448,
+          "elapsed_ms": 758.1281250000001,
+          "main_pages": 1144,
+          "page_size": 65536,
+          "phase": "view_installed",
+          "process_peak_rss_bytes": 191250432,
+          "shm_bytes": 32768,
+          "sqlite_allocator_current_bytes": 155895600,
+          "sqlite_allocator_peak_bytes": 156433552,
+          "sqlite_connection_cache_bytes": 91320512,
+          "sqlite_connection_schema_bytes": 4716960,
+          "sqlite_connection_statement_bytes": 14129984,
+          "temp_pages": 559,
+          "wal_bytes": 54218152
+        },
+        {
+          "database_bytes": 74973184,
+          "elapsed_ms": 248.939166,
+          "main_pages": 1144,
+          "page_size": 65536,
+          "phase": "rounds_complete",
+          "process_peak_rss_bytes": 225411072,
+          "shm_bytes": 32768,
+          "sqlite_allocator_current_bytes": 172642784,
+          "sqlite_allocator_peak_bytes": 178188704,
+          "sqlite_connection_cache_bytes": 92241600,
+          "sqlite_connection_schema_bytes": 4718272,
+          "sqlite_connection_statement_bytes": 29364496,
+          "temp_pages": 559,
+          "wal_bytes": 68182432
+        },
+        {
+          "output_file": "/private/tmp/c2-native-paired-4.rows",
+          "phase": "output",
+          "rounds_run": 2,
+          "rows": 947
+        }
+      ],
+      "output_sha256": "8df5e106237fdbf1034e4904dc777f256329be235816bcd3d0ddb6c3ab95da29"
+    },
+    {
+      "run": 6,
+      "plugin": "after",
+      "samples": [
+        {
+          "database_bytes": 20840448,
+          "elapsed_ms": 0.0,
+          "main_pages": 318,
+          "page_size": 65536,
+          "phase": "source_ready",
+          "process_peak_rss_bytes": 8028160,
+          "shm_bytes": 32768,
+          "sqlite_allocator_current_bytes": 657024,
+          "sqlite_allocator_peak_bytes": 657024,
+          "sqlite_connection_cache_bytes": 132240,
+          "sqlite_connection_schema_bytes": 93072,
+          "sqlite_connection_statement_bytes": 0,
+          "temp_pages": 0,
+          "wal_bytes": 0
+        },
+        {
+          "database_bytes": 20840448,
+          "elapsed_ms": 739.276416,
+          "main_pages": 1145,
+          "page_size": 65536,
+          "phase": "view_installed",
+          "process_peak_rss_bytes": 191791104,
+          "shm_bytes": 32768,
+          "sqlite_allocator_current_bytes": 154917616,
+          "sqlite_allocator_peak_bytes": 155455568,
+          "sqlite_connection_cache_bytes": 90859968,
+          "sqlite_connection_schema_bytes": 4853216,
+          "sqlite_connection_statement_bytes": 13700592,
+          "temp_pages": 551,
+          "wal_bytes": 54283712
+        },
+        {
+          "database_bytes": 75038720,
+          "elapsed_ms": 252.061584,
+          "main_pages": 1145,
+          "page_size": 65536,
+          "phase": "rounds_complete",
+          "process_peak_rss_bytes": 224280576,
+          "shm_bytes": 32768,
+          "sqlite_allocator_current_bytes": 171351184,
+          "sqlite_allocator_peak_bytes": 176897296,
+          "sqlite_connection_cache_bytes": 91781056,
+          "sqlite_connection_schema_bytes": 4854528,
+          "sqlite_connection_statement_bytes": 28618880,
+          "temp_pages": 551,
+          "wal_bytes": 68247992
+        },
+        {
+          "output_file": "/private/tmp/c2-native-paired-5.rows",
+          "phase": "output",
+          "rounds_run": 2,
+          "rows": 947
+        }
+      ],
+      "output_sha256": "8df5e106237fdbf1034e4904dc777f256329be235816bcd3d0ddb6c3ab95da29"
+    }
+  ]
+}
