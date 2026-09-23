@@ -21,8 +21,12 @@ impl Plan {
             Vec::new()
         } else { self.nodes[id].inputs.iter().enumerate().map(|(side, input)| {
             let width = self.nodes[*input].fields.len();
-            self.live_input_from_rows(name, id, side, restricted, false,
-                format!("SELECT {},__m AS __n FROM {}", columns(width), self.out_table(*input, width)))
+            let rows = format!("SELECT {},__m AS __n FROM {}", columns(width), self.out_table(*input, width));
+            if matches!(self.nodes[id].kind, Kind::Fixpoint { .. }) {
+                format!("({rows})")
+            } else {
+                self.live_input_from_rows(name, id, side, restricted, false, rows)
+            }
         }).collect::<Vec<_>>() };
         self.materialize_from_sources(db, name, id, restricted, Some(&sources))
             .execute(db, name)
@@ -51,6 +55,9 @@ impl Plan {
         // source_table never fails: it formats one of two static shapes.
         let source = |side: usize| -> String {
             if let Some(sources) = sources { return sources[side].clone(); }
+            if matches!(node.kind, Kind::Fixpoint { .. }) {
+                return self.fixpoint_rows(db, name, id, side, false);
+            }
             let Ok(t) = self.source_table(db, name, id, side, restricted) else {
                 unreachable!()
             };
@@ -356,8 +363,7 @@ impl Plan {
 #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 fn fixpoint_derive(target: &str, cols: &str, rule: &Rule, from: &str) -> String {
     format!(
-        "INSERT OR IGNORE INTO {target}(__k,{cols}) SELECT {},{} {from}{}",
-        rule.key,
+        "INSERT OR IGNORE INTO {target}({cols}) SELECT {} {from}{}",
         rule.head.join(","),
         rule_where(rule, None)
     )

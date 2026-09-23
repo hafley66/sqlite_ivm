@@ -262,7 +262,7 @@ fn recursive_member_tables_follow_savepoints_and_rollback() -> Result<()> {
     db.execute_batch("ROLLBACK")?;
     verify("after rollback")?;
     assert_eq!(rows(&db, "SELECT * FROM reach")?, settled);
-    let member: String = db.query_row("SELECT o.object_name FROM __ivm_objects o WHERE o.view_name='reach' AND o.object_type='table' AND EXISTS(SELECT 1 FROM pragma_table_info(o.object_name) WHERE name='__k') AND NOT EXISTS(SELECT 1 FROM pragma_table_info(o.object_name) WHERE name='__r') ORDER BY o.object_name LIMIT 1",[],|r| r.get(0))?;
+    let member: String = db.query_row("SELECT o.object_name FROM __ivm_objects o WHERE o.view_name='reach' AND o.object_type='table' AND o.object_name LIKE 'reach_op%x%' AND EXISTS(SELECT 1 FROM pragma_table_info(o.object_name) WHERE name='__id') ORDER BY o.object_name LIMIT 1",[],|r| r.get(0))?;
     db.execute_batch(&format!("CREATE TEMP TRIGGER fail_member BEFORE DELETE ON main.{member} BEGIN SELECT RAISE(ABORT,'injected member failure');END"))?;
     let member_failure = db
         .execute_batch("DELETE FROM edges WHERE a=3 AND b=1")

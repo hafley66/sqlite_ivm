@@ -1,7 +1,7 @@
 //! Join and group keys stay in SQLite cells, with one indexed column per key.
 use crate::{
     columns::substitute_columns,
-    relational::{key_expression, Kind, Plan},
+    relational::{key_expression, Field, Kind, Plan},
     relational_maintenance::keys_table,
 };
 
@@ -100,4 +100,24 @@ pub(crate) fn exact_row_columns(width: usize, alias: &str) -> Vec<String> {
 pub(crate) fn exact_row_match(width: usize, left: &str, right: &str) -> String {
     exact_row_columns(width,left).iter().zip(exact_row_columns(width,right))
         .map(|(l,r)|format!("({l}) IS ({r})")).collect::<Vec<_>>().join(" AND ")
+}
+
+/// SQLite equality for recursive membership, including NULL, numeric folding,
+/// BLOB storage class, and the field's collation. The member columns have no
+/// affinity, so IS compares the stored cells without introducing coercion.
+pub(crate) fn membership_match(fields: &[Field], left: &str, right: &str) -> String {
+    fields.iter().enumerate().map(|(i, field)|
+        format!("({left}c{i} COLLATE {}) IS {right}c{i}", field.collation)
+    ).collect::<Vec<_>>().join(" AND ")
+}
+
+/// Two native SQLite index expressions per cell: a storage-class tag and its
+/// value. A tagged integer zero stands in for NULL, so the UNIQUE index treats
+/// two NULL cells as equal without conflating NULL with an actual zero.
+pub(crate) fn membership_index(fields: &[Field]) -> String {
+    if fields.is_empty() { return "(0)".into(); }
+    fields.iter().enumerate().flat_map(|(i, field)| [
+        format!("(CASE typeof(c{i}) WHEN 'null' THEN 0 WHEN 'integer' THEN 1 WHEN 'real' THEN 1 WHEN 'text' THEN 2 ELSE 3 END)"),
+        format!("(CASE WHEN c{i} IS NULL THEN 0 ELSE c{i} END) COLLATE {}", field.collation),
+    ]).collect::<Vec<_>>().join(",")
 }

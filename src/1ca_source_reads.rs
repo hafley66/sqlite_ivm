@@ -10,6 +10,18 @@ use crate::{
 use rusqlite::Connection;
 
 impl Plan {
+    /// Rule inputs need cells only. Before-state subtracts this batch's child
+    /// delta by exact row identity, without constructing transport keys.
+    pub(crate) fn fixpoint_rows(&self, db: &Connection, name: &str, id: usize, side: usize, before: bool) -> String {
+        let input = self.nodes[id].inputs[side];
+        let width = self.nodes[input].fields.len();
+        let cols = columns(width);
+        let current = format!("SELECT {cols},__n FROM ({})", self.live_rows(db, name, input));
+        if !before { return format!("({current})"); }
+        let delta = self.out_table(input, width);
+        let exact = crate::native_keys::exact_row_columns(width, "").join(",");
+        format!("(SELECT {cols},sum(__n) AS __n FROM ({current} UNION ALL SELECT {cols},-__m AS __n FROM {delta}) GROUP BY {exact} HAVING sum(__n)>0)")
+    }
     #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn source_expression(&self, id: usize, expression: &str) -> Option<(usize, String)> {
         if column_references(expression).is_empty() {

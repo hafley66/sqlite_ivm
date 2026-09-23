@@ -208,7 +208,7 @@ pub(crate) fn roles(
             (Occurrence::Input(s), Some((at, delta))) if *s == side && n == at => {
                 Role::Table(delta.to_string())
             }
-            (Occurrence::Input(s), _) => Role::Table(plan.live_input(db, name, id, *s, false, before)),
+            (Occurrence::Input(s), _) => Role::Table(plan.fixpoint_rows(db, name, id, *s, before)),
             (Occurrence::Member, _) => match &member {
                 Role::Table(t) => Role::Table(t.clone()),
                 Role::Range(t, lo, hi) => Role::Range(t.clone(), *lo, *hi),

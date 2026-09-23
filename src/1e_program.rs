@@ -2,12 +2,13 @@
 //! connection, keyed by node id and role, so no drain call formats SQL.
 
 use crate::{
+    native_keys::{exact_row_match, membership_match},
     set_membership::SetMembershipStatements,
     relational::{Kind, Occurrence, Plan, Rule},
     relational_materialize::MaterializeStatements,
     relational_maintenance::{
-        arrived_table, columns, deleted_table, identity_sql, json_key,
-        keys_table, left_table, parameters, plain, roles, rule_from, rule_where, table,
+        arrived_table, columns, deleted_table, keys_table, left_table,
+        parameters, roles, rule_from, rule_where, table,
         Role,
     },
 };
@@ -217,7 +218,7 @@ fn scratch_statements(plan: &Plan) -> Vec<String> {
                 ));
             }
             statements.push(format!(
-                "CREATE TABLE IF NOT EXISTS {deleted}(__k TEXT PRIMARY KEY,{cols})",
+                "CREATE TABLE IF NOT EXISTS {deleted}(__id INTEGER PRIMARY KEY,{cols})",
                 deleted = deleted_table(id, width)
             ));
         }
@@ -505,13 +506,14 @@ fn split_statements(plan: &Plan, name: &str, db: &Connection, id: usize, side: u
     let node = &plan.nodes[id];
     let width = plan.nodes[node.inputs[side]].fields.len();
     let child = plan.out_table(node.inputs[side], width);
-    let t = plan.live_input(db,name,id,side,false,false);
+    let t = plan.fixpoint_rows(db,name,id,side,false);
     let arrived = arrived_table(id, side, width);
     let left = left_table(id, side, width);
     let cols = columns(width);
-    let identity = identity_sql(width);
-    let delta = format!("(SELECT {identity} AS __v,{cols},sum(__m) AS __n FROM {child} GROUP BY {identity} HAVING sum(__m)!=0)");
-    let current = format!("(SELECT coalesce(sum(a.__n),0) FROM {t} a WHERE a.rowid=o.__v)");
+    let exact = crate::native_keys::exact_row_columns(width, "").join(",");
+    let matched = exact_row_match(width, "a.", "o.");
+    let delta = format!("(SELECT {cols},sum(__m) AS __n FROM {child} GROUP BY {exact} HAVING sum(__m)!=0)");
+    let current = format!("(SELECT coalesce(sum(a.__n),0) FROM {t} a WHERE {matched})");
     SplitStatements {
         clear_arrived: format!("DELETE FROM {arrived}"),
         clear_left: format!("DELETE FROM {left}"),
@@ -532,10 +534,9 @@ fn fixpoint_statements(plan: &Plan, name: &str, db: &Connection, id: usize, widt
     let cols = columns(width);
     let out = plan.out_table(id, width);
     let deleted = deleted_table(id, width);
-    let identity_of =
-        |alias: &str| json_key((0..width).map(|i| plain(&format!("{alias}.c{i}"))).collect());
-    let d_identity = identity_of("d");
-    let a_identity = identity_of("a");
+    let equal = membership_match(&node.fields, "a.", "d.");
+    let work_equal = membership_match(&node.fields, "a.", "w.");
+    let exact = exact_row_match(width, "a.", "d.");
     let d_cols = (0..width).map(|i| format!("d.c{i}")).collect::<Vec<_>>().join(",");
     let a_cols = (0..width).map(|i| format!("a.c{i}")).collect::<Vec<_>>().join(",");
     let matched = |rule: &Rule| {
@@ -571,13 +572,13 @@ fn fixpoint_statements(plan: &Plan, name: &str, db: &Connection, id: usize, widt
         clear_work: format!("DELETE FROM {work}"),
         clear_deleted: format!("DELETE FROM {deleted}"),
         collect_deleted: format!(
-            "INSERT OR IGNORE INTO {deleted}(__k,{cols}) SELECT __k,{cols} FROM {all} WHERE __k IN (SELECT __k FROM {work} WHERE rowid>?1 AND rowid<=?2)"
+            "INSERT OR IGNORE INTO {deleted}(__id,{cols}) SELECT a.__id,{a_cols} FROM {all} a WHERE EXISTS(SELECT 1 FROM {work} w WHERE w.rowid>?1 AND w.rowid<=?2 AND {work_equal})"
         ),
         drop_deleted_range: format!(
-            "DELETE FROM {all} WHERE __k IN (SELECT __k FROM {work} WHERE rowid>?1 AND rowid<=?2)"
+            "DELETE FROM {all} AS a WHERE EXISTS(SELECT 1 FROM {work} w WHERE w.rowid>?1 AND w.rowid<=?2 AND {work_equal})"
         ),
         restore: format!(
-            "INSERT OR IGNORE INTO {all}(__k,{cols}) SELECT w.__k,{} FROM {work} w WHERE {}",
+            "INSERT OR IGNORE INTO {all}({cols}) SELECT {} FROM {work} w WHERE {}",
             (0..width).map(|i| format!("w.c{i}")).collect::<Vec<_>>().join(","),
             restore_parts.join(" OR ")
         ),
@@ -591,7 +592,7 @@ fn fixpoint_statements(plan: &Plan, name: &str, db: &Connection, id: usize, widt
                     &roles(plan, db, false, name, id, 0, rule, None, Role::Range(all.clone(), 0, 0)),
                     &mut params,
                 );
-                derive_sql(&all, &all, &cols, rule, &from, false)
+                derive_sql(&all, &all, &cols, &node.fields, rule, &from, false)
             })
             .collect(),
         delete_derives: rules
@@ -604,20 +605,20 @@ fn fixpoint_statements(plan: &Plan, name: &str, db: &Connection, id: usize, widt
                     &roles(plan, db, true, name, id, 0, rule, None, Role::Range(work.clone(), 0, 0)),
                     &mut params,
                 );
-                derive_sql(&work, &all, &cols, rule, &from, true)
+                derive_sql(&work, &all, &cols, &node.fields, rule, &from, true)
             })
             .collect(),
         retract_gone: format!(
             "INSERT INTO {out}({cols},__m) SELECT {d_cols},-1 FROM {deleted} d \
-             WHERE NOT EXISTS(SELECT 1 FROM {all} a WHERE a.__k=d.__k AND {a_identity}={d_identity})"
+             WHERE NOT EXISTS(SELECT 1 FROM {all} a WHERE {equal} AND {exact})"
         ),
         emit_stored: format!(
-            "INSERT INTO {out}({cols},__m) SELECT {a_cols},1 FROM {deleted} d JOIN {all} a ON a.__k=d.__k \
-             WHERE {a_identity}!={d_identity}"
+            "INSERT INTO {out}({cols},__m) SELECT {a_cols},1 FROM {deleted} d JOIN {all} a ON {equal} \
+             WHERE NOT ({exact})"
         ),
         emit_fresh: format!(
             "INSERT INTO {out}({cols},__m) SELECT {a_cols},1 FROM {all} a WHERE a.rowid>?1 \
-             AND NOT EXISTS(SELECT 1 FROM {deleted} d WHERE d.__k=a.__k)"
+             AND NOT EXISTS(SELECT 1 FROM {deleted} d WHERE {equal})"
         ),
         seed_new: format!("INSERT INTO {out}({cols},__m) SELECT {cols},1 FROM {all} WHERE rowid>?1"),
         sides: (0..node.inputs.len())
@@ -668,7 +669,7 @@ fn fixpoint_side(
                             ),
                             &mut params,
                         );
-                        derive_sql(all, all, &cols, rule, &from, false)
+                        derive_sql(all, all, &cols, &node.fields, rule, &from, false)
                     })
                     .collect::<Vec<_>>()
             })
@@ -701,7 +702,7 @@ fn fixpoint_side(
                             ),
                             &mut params,
                         );
-                        derive_sql(work, all, &cols, rule, &from, true)
+                        derive_sql(work, all, &cols, &node.fields, rule, &from, true)
                     })
                     .collect::<Vec<_>>()
             })
@@ -716,14 +717,16 @@ fn derive_sql(
     target: &str,
     members: &str,
     cols: &str,
+    fields: &[crate::relational::Field],
     rule: &Rule,
     from: &str,
     only_present: bool,
 ) -> String {
     if only_present {
+        let existing = membership_match(fields, "m.", "d.");
         format!(
-            "INSERT OR IGNORE INTO {target}(__k,{cols}) SELECT __k,{cols} FROM (SELECT {} AS __k,{} {from}{}) WHERE __k IN (SELECT __k FROM {members})",
-            rule.key,
+            "INSERT OR IGNORE INTO {target}({cols}) SELECT {} FROM (SELECT {} {from}{}) d WHERE EXISTS(SELECT 1 FROM {members} m WHERE {existing})",
+            (0..fields.len()).map(|i| format!("d.c{i}")).collect::<Vec<_>>().join(","),
             rule.head
                 .iter()
                 .enumerate()
@@ -734,8 +737,7 @@ fn derive_sql(
         )
     } else {
         format!(
-            "INSERT OR IGNORE INTO {target}(__k,{cols}) SELECT {},{} {from}{}",
-            rule.key,
+            "INSERT OR IGNORE INTO {target}({cols}) SELECT {} {from}{}",
             rule.head.join(","),
             rule_where(rule, None)
         )

@@ -160,7 +160,7 @@ fn format_eight_set_view_rebuilds_membership_on_connect() -> Result<()> {
         let value: i64 = db.query_row("SELECT x FROM result",[],|r|r.get(0))?;
         assert_eq!(value,1);
         let format: i64 = db.query_row("SELECT format_version FROM __ivm_schema",[],|r|r.get(0))?;
-        assert_eq!(format,9);
+        assert_eq!(format,10);
         db.execute_batch("INSERT INTO a VALUES(2)")?;
         assert_eq!(db.query_row("SELECT count(*) FROM result",[],|r|r.get::<_,i64>(0))?,2);
     }

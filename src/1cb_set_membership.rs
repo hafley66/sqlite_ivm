@@ -40,15 +40,19 @@ impl Plan {
         Ok(table_name)
     }
 
-    fn set_membership_inputs(&self, name: &str, id: usize, positive_only: bool) -> String {
+    fn set_membership_inputs(&self, name: &str, id: usize, positive_only: bool, identity: bool) -> String {
         let width = self.nodes[id].fields.len();
         let cols = columns(width);
         self.nodes[id].inputs.iter().enumerate().map(|(side,input)| {
             let child = self.out_table(*input,width);
             let key = self.key_lookup(name,id,side);
-            let identity = identity_sql(width);
+            let row_identity = if identity {
+                format!(",{} AS __identity", identity_sql(width))
+            } else {
+                String::new()
+            };
             let filter = if positive_only { " WHERE __m<0" } else { "" };
-            format!("SELECT {key} AS __k,__m,{cols},{side} AS __side,{identity} AS __identity FROM {child}{filter}")
+            format!("SELECT {key} AS __k,__m,{cols},{side} AS __side{row_identity} FROM {child}{filter}")
         }).collect::<Vec<_>>().join(" UNION ALL ")
     }
 
@@ -57,7 +61,7 @@ impl Plan {
         let cols = columns(width);
         let state = set_membership_table(name,id);
         let out = self.out_table(id,width);
-        let inputs = self.set_membership_inputs(name,id,false);
+        let inputs = self.set_membership_inputs(name,id,false,false);
         let projected = (0..width).map(|i|format!("o.c{i}")).collect::<Vec<_>>().join(",");
         let key = self.key_lookup(name,id,0);
         statements::exec(db,Phase::Materialize,name,&format!(
@@ -77,8 +81,8 @@ impl Plan {
         let state = set_membership_table(name,id);
         let out = self.out_table(id,width);
         let before = format!("temp.__ivm_before_{width}");
-        let inputs = self.set_membership_inputs(name,id,false);
-        let negative = self.set_membership_inputs(name,id,true);
+        let inputs = self.set_membership_inputs(name,id,false,true);
+        let negative = self.set_membership_inputs(name,id,true,false);
         let candidate_columns = (0..width).map(|i|format!("c{i}")).collect::<Vec<_>>().join(",");
         let assignments = (0..width).map(|i| {
             let key = self.key_lookup(name,id,0);

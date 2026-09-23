@@ -36,7 +36,7 @@ fn source_reads_survive_hash_collisions_and_migrate_copied_inputs() -> Result<()
                 |_| Ok(0i64))?;
             db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON")?;
             assert_eq!(db.query_row("SELECT count(*) FROM g", [], |r| r.get::<_,i64>(0))?, 2);
-            assert_eq!(db.query_row("SELECT format_version FROM __ivm_schema", [], |r| r.get::<_,i64>(0))?, 9);
+            assert_eq!(db.query_row("SELECT format_version FROM __ivm_schema", [], |r| r.get::<_,i64>(0))?, 10);
             assert!(arrangements(&db,"g")?.is_empty());
             for mutation in [
                 "BEGIN;UPDATE a SET v=v+1 WHERE k=1;INSERT INTO a VALUES(2,10);COMMIT",

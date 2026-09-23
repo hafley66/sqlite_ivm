@@ -143,12 +143,19 @@ impl Plan {
                         Phase::Declare,
                         name,
                         &format!(
-                            "CREATE TABLE main.{}(__id INTEGER PRIMARY KEY AUTOINCREMENT,__k TEXT NOT NULL UNIQUE,{})",
+                            "CREATE TABLE main.{}(__id INTEGER PRIMARY KEY AUTOINCREMENT,{})",
                             quote(&t),
                             columns(node.fields.len())
                         ),
                     )?;
                     objects.push(("table", t));
+                    let index = fresh_index(db, name, format!("__ivm_{name}_fix{id}_{side}_membership"))?;
+                    statements::batch(db, Phase::Declare, name, &format!(
+                        "CREATE UNIQUE INDEX main.{} ON {}({})",
+                        quote(&index), quote(&format!("{name}_op{id}x{side}")),
+                        crate::native_keys::membership_index(&node.fields)
+                    ))?;
+                    objects.push(("index", index));
                 }
                 let mut created = vec![];
                 for (occurrence, expression) in rules.iter().flat_map(|r| &r.indexes) {

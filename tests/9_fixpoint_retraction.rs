@@ -110,3 +110,38 @@ fn unused_recursive_projection_does_not_leak_into_reused_output() -> Result<()> 
     assert_eq!(rows(&db, "SELECT n FROM odd_view ORDER BY n")?, rows(&db, query)?);
     Ok(())
 }
+
+#[test]
+fn format_nine_fixpoint_members_rebuild_on_connect() -> Result<()> {
+    let path = std::env::temp_dir().join(format!("ivm-fixpoint-format9-{}.db", std::process::id()));
+    assert!(!path.exists(), "test receipt already exists: {}", path.display());
+    let query = "WITH RECURSIVE r(n) AS (
+        SELECT n FROM roots UNION SELECT e.b FROM r JOIN edges e ON e.a=r.n
+    ) SELECT n FROM r";
+    {
+        let db = Connection::open(&path)?;
+        register(&db)?;
+        db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON;
+            CREATE TABLE roots(n INTEGER);CREATE TABLE edges(a INTEGER,b INTEGER);
+            INSERT INTO roots VALUES(1);INSERT INTO edges VALUES(1,2),(2,3)")?;
+        db.execute_batch(&format!("CREATE VIRTUAL TABLE reach USING sqlite_ivm('{query}')"))?;
+        assert_eq!(rows(&db, "SELECT n FROM reach")?, rows(&db, query)?);
+        db.execute_batch("UPDATE __ivm_schema SET format_version=9")?;
+    }
+    {
+        let db = Connection::open(&path)?;
+        register(&db)?;
+        db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON")?;
+        assert_eq!(rows(&db, "SELECT n FROM reach")?, rows(&db, query)?);
+        assert_eq!(db.query_row("SELECT format_version FROM __ivm_schema", [], |r| r.get::<_, i64>(0))?, 10);
+        let native_indexes: i64 = db.query_row(
+            "SELECT count(*) FROM __ivm_objects WHERE view_name='reach' AND object_type='index' AND object_name LIKE '%_membership_%'",
+            [], |r| r.get(0),
+        )?;
+        assert!(native_indexes > 0);
+        db.execute_batch("DELETE FROM edges WHERE a=2;INSERT INTO edges VALUES(1,4)")?;
+        assert_eq!(rows(&db, "SELECT n FROM reach")?, rows(&db, query)?);
+    }
+    std::fs::remove_file(path).unwrap();
+    Ok(())
+}
