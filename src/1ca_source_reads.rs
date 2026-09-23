@@ -60,7 +60,7 @@ impl Plan {
             if !seen.insert(id) {
                 return;
             }
-            if !matches!(plan.nodes[id].kind, Kind::Fixpoint { .. }) {
+            if !matches!(plan.nodes[id].kind, Kind::Fixpoint { .. } | Kind::Set("union" | "distinct")) {
                 for input in &plan.nodes[id].inputs {
                     tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                     visit(plan, *input, seen, order);
@@ -132,6 +132,10 @@ impl Plan {
                 .map(|input| format!("SELECT * FROM __ivm_read_{input}"))
                 .collect::<Vec<_>>()
                 .join(" UNION ALL "),
+            Kind::Set("union" | "distinct") => format!(
+                "SELECT {cols},1 AS __n FROM {} WHERE __n>0",
+                crate::set_membership::set_membership_table(name, id)
+            ),
             Kind::Fixpoint { .. } => format!(
                 "SELECT {cols},1 AS __n FROM {}",
                 table(name, id, node.inputs.len())
@@ -139,14 +143,16 @@ impl Plan {
             _ => {
                 let sources = (0..node.inputs.len())
                     .map(|side| {
-                        self.live_input_from_rows(
-                            name,
-                            id,
-                            side,
-                            false,
-                            false,
-                            format!("SELECT * FROM __ivm_read_{}", node.inputs[side]),
-                        )
+                        let rows = format!("SELECT * FROM __ivm_read_{}", node.inputs[side]);
+                        if matches!(node.kind, Kind::Join { .. } | Kind::Group { window: false, limit: None, .. }) {
+                            // These materializers consume only cN and __n. Building
+                            // __k/rowid here repeats row encoding through every
+                            // nested live read, although neither value is read.
+                            let width = self.nodes[node.inputs[side]].fields.len();
+                            format!("(SELECT {},__n FROM ({rows}))", columns(width))
+                        } else {
+                            self.live_input_from_rows(name, id, side, false, false, rows)
+                        }
                     })
                     .collect::<Vec<_>>();
                 let statement = self.materialize_from_sources(db, name, id, false, Some(&sources));

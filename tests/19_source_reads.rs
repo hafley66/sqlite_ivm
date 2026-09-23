@@ -483,6 +483,40 @@ fn set_source_reads_use_indexed_membership_boundaries() -> Result<()> {
 }
 
 #[test]
+fn recursive_rules_read_current_union_membership_after_retraction() -> Result<()> {
+    let db = Connection::open_in_memory()?;
+    register(&db)?;
+    db.execute_batch(
+        "PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON;
+         CREATE TABLE left_roots(n INTEGER);CREATE TABLE right_roots(n INTEGER);
+         CREATE TABLE edges(src INTEGER,dst INTEGER);
+         INSERT INTO left_roots VALUES(1);INSERT INTO right_roots VALUES(2);
+         INSERT INTO edges VALUES(1,3),(2,3),(3,4)",
+    )?;
+    let query = "WITH RECURSIVE seeds(n) AS (SELECT n FROM left_roots UNION SELECT n FROM right_roots),
+        reach(n) AS (SELECT n FROM seeds UNION SELECT e.dst FROM reach r JOIN edges e ON e.src=r.n)
+        SELECT n FROM reach";
+    db.execute_batch(&format!("CREATE VIRTUAL TABLE result USING sqlite_ivm('{query}')"))?;
+    let rows = |sql: &str| -> Result<Vec<i64>> {
+        db.prepare(sql)?.query_map([], |row| row.get(0))?.collect()
+    };
+    for mutation in [
+        "DELETE FROM left_roots WHERE n=1",
+        "BEGIN;INSERT INTO left_roots VALUES(5);INSERT INTO edges VALUES(5,6);COMMIT",
+        "BEGIN;DELETE FROM right_roots WHERE n=2;DELETE FROM edges WHERE src=5;COMMIT",
+        "INSERT INTO right_roots VALUES(1)",
+    ] {
+        db.execute_batch(mutation)?;
+        assert_eq!(
+            rows("SELECT n FROM result ORDER BY n")?,
+            rows(&format!("{query} ORDER BY n"))?,
+            "{mutation}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn population_reuses_completed_operator_results() -> Result<()> {
     let db = Connection::open_in_memory()?;
     register(&db)?;

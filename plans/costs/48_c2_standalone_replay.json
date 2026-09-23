@@ -1,0 +1,152 @@
+{
+  "case": "c2_partial_3",
+  "plugin_before_commit": "1d6d8d6",
+  "compiler_fixture": "oracle/eval/c2_partial_3.json",
+  "source_sha256": "4ebe8a4acc1b2b76e6c8e0d670ba3a16d20db25eca11f07c3060ae1b0e5d6ce7",
+  "arena_sha256": "0f3fa28ef93a1986357942730e23f4b9b0f3dfd329e798f922a61e28745790c9",
+  "view_sql_sha256": "a45061150caf62141a64a076ae16bf438de29c9ef61a83c85e1f78a0263219b7",
+  "rounds_sha256": "03cb7c194e3ae9a294d755243d195c302c505749145e49d637ab119eadd7d826",
+  "view_sql_bytes": 78219,
+  "round_statement": {
+    "before_bytes": 135047,
+    "after_bytes": 7445,
+    "before_sha256": "58f23a015376095c9d0ea2bf96aef3e3efa92dcee979441af5f1a901a66b0904",
+    "after_sha256": "2b0304f71cbc577afd642be8cf1dfc61bd8b3fb344d52a7afe4f0a3d83039811",
+    "site": "src/1d_drain.rs:346",
+    "prepare_cached_first_before_us": 55400,
+    "prepare_cached_repeat_before_us": 436,
+    "prepare_cached_first_after_us": 318,
+    "prepare_cached_repeat_after_us": 45.5
+  },
+  "standalone": {
+    "before": {
+      "view_install_ms": [
+        724.14,
+        853.498,
+        790.605
+      ],
+      "nonlinear_rounds_ms": [
+        1188.038,
+        1318.03,
+        1401.343
+      ],
+      "process_peak_rss_bytes": [
+        515014656,
+        513064960,
+        523927552
+      ],
+      "sqlite_allocator_peak_bytes": [
+        195187920,
+        195187920,
+        195187920
+      ],
+      "temp_pages": [
+        559,
+        559,
+        559
+      ],
+      "page_size_bytes": [
+        65536,
+        65536,
+        65536
+      ],
+      "main_database_bytes": [
+        74973184,
+        74973184,
+        74973184
+      ],
+      "wal_bytes": [
+        68182432,
+        68182432,
+        68182432
+      ]
+    },
+    "after": {
+      "view_install_ms": [
+        701.813,
+        1025.581,
+        1021.143
+      ],
+      "nonlinear_rounds_ms": [
+        278.211,
+        283.325,
+        276.232
+      ],
+      "process_peak_rss_bytes": [
+        222232576,
+        221380608,
+        230801408
+      ],
+      "sqlite_allocator_peak_bytes": [
+        178188672,
+        178188672,
+        178188672
+      ],
+      "temp_pages": [
+        559,
+        559,
+        559
+      ],
+      "page_size_bytes": [
+        65536,
+        65536,
+        65536
+      ],
+      "main_database_bytes": [
+        74973184,
+        74973184,
+        74973184
+      ],
+      "wal_bytes": [
+        68182432,
+        68182432,
+        68182432
+      ]
+    }
+  },
+  "standalone_output_rows": 947,
+  "standalone_output_sha256": "8df5e106237fdbf1034e4904dc777f256329be235816bcd3d0ddb6c3ab95da29",
+  "compiler_eval": {
+    "before_ms": [
+      1923.38,
+      1922.67,
+      1966.77
+    ],
+    "after_ms": [
+      881.1,
+      873.73,
+      882.94
+    ],
+    "output_sha256": "e635f295151c51405f23a852e13ef5ca857da1fcb8cf551a064088289fdafd67"
+  },
+  "sqlite_profile": {
+    "before": {
+      "events": 21359,
+      "vm_step": 20081562,
+      "fullscan_step": 1500715,
+      "sort": 5185,
+      "autoindex": 5555,
+      "reprepare": 117,
+      "run": 21366,
+      "sum_statement_mem_used_bytes": 271360432
+    },
+    "after": {
+      "events": 21359,
+      "vm_step": 18660957,
+      "fullscan_step": 1463807,
+      "sort": 3729,
+      "autoindex": 5543,
+      "reprepare": 117,
+      "run": 21366,
+      "sum_statement_mem_used_bytes": 254496960
+    }
+  },
+  "gates": {
+    "plugin_cargo_test": "passed; 2 ignored",
+    "plugin_nextest": "86 passed, 2 skipped; timeout rail failed on 19 unrecorded rows and 2 wall-time pins",
+    "compiler_emitted_eval_oracle_contract": "27 passed",
+    "native_extension_load": "4 passed",
+    "native_crud": "passed",
+    "native_compass": "passed"
+  }
+}
