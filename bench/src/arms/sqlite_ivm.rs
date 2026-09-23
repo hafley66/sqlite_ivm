@@ -22,7 +22,13 @@ pub struct SqliteIvm {
 
 impl SqliteIvm {
     pub fn new(path: PathBuf, extension: PathBuf) -> Self {
-        Self { path, extension, query: String::new(), db: None, disk: None }
+        Self {
+            path,
+            extension,
+            query: String::new(),
+            db: None,
+            disk: None,
+        }
     }
 
     /// Extension dylib: `IVM_EXTENSION` override, else next to the bench
@@ -55,7 +61,7 @@ fn load_extension(db: &Connection, path: &Path) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("extension path is not UTF-8"))?;
     unsafe {
         db.load_extension_enable()?;
-        db.load_extension(path, None::<&str>)?;
+        db.load_extension(path, Some("sqlite3_extension_init"))?;
         db.load_extension_disable()?;
     }
     Ok(())
