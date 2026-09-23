@@ -1,0 +1,44 @@
+[
+  {
+    "run": 0,
+    "plugin": "A",
+    "elapsed_ms": 4731.175624998286,
+    "exit": 0,
+    "sha256": "91b0e1f74940888481d8f351ead00acd9e709cc387d156a1acb75174ddf0c16a"
+  },
+  {
+    "run": 1,
+    "plugin": "B",
+    "elapsed_ms": 4465.470249997452,
+    "exit": 0,
+    "sha256": "91b0e1f74940888481d8f351ead00acd9e709cc387d156a1acb75174ddf0c16a"
+  },
+  {
+    "run": 2,
+    "plugin": "B",
+    "elapsed_ms": 4490.283792008995,
+    "exit": 0,
+    "sha256": "91b0e1f74940888481d8f351ead00acd9e709cc387d156a1acb75174ddf0c16a"
+  },
+  {
+    "run": 3,
+    "plugin": "A",
+    "elapsed_ms": 4615.037958996254,
+    "exit": 0,
+    "sha256": "91b0e1f74940888481d8f351ead00acd9e709cc387d156a1acb75174ddf0c16a"
+  },
+  {
+    "run": 4,
+    "plugin": "A",
+    "elapsed_ms": 4589.637874989421,
+    "exit": 0,
+    "sha256": "91b0e1f74940888481d8f351ead00acd9e709cc387d156a1acb75174ddf0c16a"
+  },
+  {
+    "run": 5,
+    "plugin": "B",
+    "elapsed_ms": 4543.545375010581,
+    "exit": 0,
+    "sha256": "91b0e1f74940888481d8f351ead00acd9e709cc387d156a1acb75174ddf0c16a"
+  }
+]

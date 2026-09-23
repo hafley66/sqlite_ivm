@@ -244,6 +244,7 @@ impl Plan {
             statements::exec(db, Phase::Declare, name, &format!("DELETE FROM {out}"), [])?;
         }
         let mut reads = vec![0usize; self.nodes.len()];
+        let mut materialized_rows = vec![0usize; self.nodes.len()];
         reads[self.output] += 1;
         let aggregate_sums = crate::relational_program::aggregate_sum_inputs(self);
         if aggregate_sums.is_some() {
@@ -273,15 +274,25 @@ impl Plan {
                 Kind::Set(op) if *op == "all" => false,
                 _ => true,
             };
-            if direct {
+            let empty_input = match &node.kind {
+                Kind::Map { .. } => materialized_rows[node.inputs[0]] == 0,
+                Kind::Join { mode: "inner", .. } => node.inputs.iter().any(|input| materialized_rows[*input] == 0),
+                Kind::Set(_) => !node.inputs.is_empty() && node.inputs.iter().all(|input| materialized_rows[*input] == 0),
+                _ => false,
+            };
+            if direct && !empty_input {
                 for side in 0..node.inputs.len() {
                     tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
                     self.fill(db, name, id, side)?;
                 }
             }
-            self.materialize(db, name, id, false)?;
+            materialized_rows[id] = if empty_input {
+                0
+            } else {
+                self.materialize(db, name, id, false)?
+            };
             tracing::debug!("populate_node_materialized");
-            if self.has_set_membership(id) {
+            if !empty_input && self.has_set_membership(id) {
                 self.populate_set_membership(db,name,id)?;
             }
             if direct {

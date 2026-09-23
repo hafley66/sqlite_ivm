@@ -34,7 +34,7 @@
       [
         "materialize",
         "INSERT",
-        6
+        4
       ],
       [
         "materialize",
@@ -50,7 +50,7 @@
       ],
       [
         "materialize",
-        154,
+        134,
         0
       ]
     ]
@@ -120,7 +120,7 @@
       [
         "materialize",
         "INSERT",
-        206
+        204
       ],
       [
         "materialize",
@@ -146,7 +146,7 @@
       ],
       [
         "materialize",
-        4854,
+        4834,
         0
       ]
     ]
@@ -216,7 +216,7 @@
       [
         "materialize",
         "INSERT",
-        8
+        6
       ],
       [
         "materialize",
@@ -242,7 +242,7 @@
       ],
       [
         "materialize",
-        2775,
+        2755,
         198
       ]
     ]
@@ -317,7 +317,7 @@
       [
         "materialize",
         "INSERT",
-        17
+        11
       ],
       [
         "materialize",
@@ -348,7 +348,7 @@
       ],
       [
         "materialize",
-        807,
+        747,
         42
       ]
     ]
@@ -423,7 +423,7 @@
       [
         "materialize",
         "INSERT",
-        18
+        12
       ],
       [
         "materialize",
@@ -454,7 +454,7 @@
       ],
       [
         "materialize",
-        6348,
+        6288,
         594
       ]
     ]

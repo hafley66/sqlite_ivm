@@ -13,7 +13,7 @@ impl Plan {
     /// Initial population only. Maintenance uses materialize_statements with
     /// authoritative live inputs and signed deltas instead of this scratch bag.
     #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
-    pub(crate) fn materialize(&self, db: &Connection, name: &str, id: usize, restricted: bool) -> Result<()> {
+    pub(crate) fn materialize(&self, db: &Connection, name: &str, id: usize, restricted: bool) -> Result<usize> {
         // Population walks topologically: each child already has a complete
         // weighted result in scratch. Read that boundary once instead of
         // compiling its entire upstream graph for every downstream operator.
@@ -30,7 +30,6 @@ impl Plan {
         }).collect::<Vec<_>>() };
         self.materialize_from_sources(db, name, id, restricted, Some(&sources))
             .execute(db, name)
-            .map(|_| ())
     }
     /// Every SQL string materializing this node issues, built once and reused by
     /// both the populate path and the per-view drain program.
