@@ -1,0 +1,6 @@
+mode=sqlite frontier=0 inputs=5 outputs=2 elapsed_ns=2141208
+snapshot=[[1, 100], [3, 300]]
+objects tables=12 indexes=5 triggers=9
+callbacks=Some(Counts { begin: 1, savepoint: 5, release: 5, rollback_to: 0, update: 5, sync: 1, commit: 1, rollback: 0 })
+sqlite_memory=Some(SqliteMemory { allocator_current_bytes: 229072, allocator_peak_bytes: 282208, connection_cache_bytes: 87616, connection_schema_bytes: 22112, connection_statement_bytes: 31328 })
+rust_peak_rss_bytes=Some(8060928)

@@ -1,0 +1,18 @@
+[package]
+name = "lab_20260923_0"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Own workspace root. A lab never joins the entry point workspace.
+[workspace]
+
+[dependencies]
+rusqlite = { version = "=0.40.2", features = ["functions", "vtab"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+hafley-observe = { path = "../../../hafley-rs-wt/main-codex-attribution/crates/hafley-observe" }
+sqlite-ext = { path = "../../../hafley-rs-wt/main-codex-attribution/crates/sqlite-ext" }
+
+[dev-dependencies]
+rusqlite = { version = "=0.40.2", features = ["load_extension"] }

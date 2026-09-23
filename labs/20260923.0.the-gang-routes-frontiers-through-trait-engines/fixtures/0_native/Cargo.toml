@@ -1,0 +1,14 @@
+[package]
+name = "engine-iso-native-fixture"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+lab_20260923_0 = { path = "../.." }
+sqlite-ext = { path = "../../../../../hafley-rs-wt/main-codex-attribution/crates/sqlite-ext", features = ["loadable"] }
