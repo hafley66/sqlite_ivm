@@ -8,7 +8,7 @@ description = "Circuit shootout and scale sweep harness for sqlite-ivm"
 [workspace]
 
 [dependencies]
-hafley-observe = { path = "../../hafley-rs/crates/hafley-observe" }
+hafley-observe = { path = "../../hafley-rs-wt/main-codex-attribution/crates/hafley-observe" }
 anyhow = "1"
 differential-dataflow = "=0.25.1"
 libc = "0.2"

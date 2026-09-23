@@ -1019,11 +1019,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "sqlite-bulk-trigger"
+name = "sqlite-ext"
 version = "0.1.0"
 dependencies = [
+ "hafley-observe",
  "rusqlite",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1034,7 +1036,7 @@ dependencies = [
  "rusqlite",
  "serde_json",
  "sha2",
- "sqlite-bulk-trigger",
+ "sqlite-ext",
  "sqlite3-parser",
  "tracing",
  "tracing-subscriber",

@@ -417,8 +417,8 @@ impl Plan {
     /// The collector that stages this view's source rows between a trigger
     /// firing and the drain. Its shadow table is one of the view's objects.
     #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
-    pub fn collector(&self, name: &str) -> sqlite_bulk_trigger::Collector {
+    pub fn collector(&self, name: &str) -> sqlite_ext::Collector {
         let width = self.sources.iter().map(|s| s.columns.len()).max().unwrap_or(0);
-        sqlite_bulk_trigger::Collector::new(name, width)
+        sqlite_ext::Collector::new(name, width)
     }
 }

@@ -1,60 +1,15 @@
 use crate::catalog::{error, quote};
 use crate::statements::{self, Phase};
-use hafley_observe::{Config, FormatConfig, OutputFormat};
 use rusqlite::{functions::FunctionFlags, Connection, Result};
-use std::io::IsTerminal;
-use tracing_subscriber::{
-    fmt::{format::FmtSpan, writer::BoxMakeWriter},
-    layer::SubscriberExt,
-    util::SubscriberInitExt,
-};
-
-static OBSERVE: std::sync::Once = std::sync::Once::new();
-
-// Log entry before work starts and elapsed span time on close, including native builds.
-// A host process that already owns a global subscriber keeps it; try_init fails quietly.
-fn observe() {
-    OBSERVE.call_once(|| {
-        let ansi = std::io::stderr().is_terminal();
-        let version = env!("CARGO_PKG_VERSION");
-        let config = Config::from_env("sqlite_ivm", version, "warn", ansi).unwrap_or(Config {
-            service_name: "sqlite_ivm",
-            service_version: version,
-            default_filter: "warn",
-            format: OutputFormat::Human,
-            ansi,
-        });
-        let format = FormatConfig {
-            span_events: FmtSpan::NEW | FmtSpan::CLOSE,
-            ..FormatConfig::standard(config.format, config.ansi)
-        };
-        // chrome_layer is None unless the trace path variable is set, so an unasked-for
-        // run pays nothing and writes no file.
-        let installed = tracing_subscriber::registry()
-            .with(hafley_observe::env_filter(config.default_filter))
-            .with(hafley_observe::format_layer(
-                format,
-                BoxMakeWriter::new(std::io::stderr),
-            ))
-            .with(hafley_observe::chrome_layer())
-            .try_init();
-        if installed.is_ok() {
-            hafley_observe::startup(&config);
-        }
-    });
-}
+const PLUGIN: sqlite_ext::Plugin =
+    sqlite_ext::Plugin::new("sqlite_ivm", env!("CARGO_PKG_VERSION"), "warn", install);
 
 #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub fn register(db: &Connection) -> Result<()> {
-    observe();
-    // Counters are read per statement: 8_group_limit runs 2.1s without them, 10.7s with.
-    // Installed only when a subscriber would keep the events, so an unasked-for
-    // run pays nothing. `HAFLEY_LOG=sqlite=debug` or `HAFLEY_TRACE` opens it.
-    if hafley_observe::trace_path().is_some()
-        || tracing::enabled!(target: hafley_observe::sqlite::SQLITE_TARGET, tracing::Level::DEBUG)
-    {
-        hafley_observe::sqlite::instrument(db);
-    }
+    PLUGIN.register(db)
+}
+
+fn install(db: &Connection) -> Result<()> {
     crate::vtab::register(db)?;
     crate::source_ddl::register(db)?;
     crate::relational_maintenance::register_functions(db)?;
@@ -110,18 +65,4 @@ pub fn register(db: &Connection) -> Result<()> {
 }
 
 #[cfg(feature = "extension")]
-#[no_mangle]
-#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
-pub unsafe extern "C" fn sqlite3_extension_init(
-    db: *mut rusqlite::ffi::sqlite3,
-    error: *mut *mut std::os::raw::c_char,
-    api: *mut rusqlite::ffi::sqlite3_api_routines,
-) -> std::os::raw::c_int {
-    // The library initializes the SQLite API table and owns ABI error conversion.
-    unsafe {
-        Connection::extension_init2(db, error, api, |db| {
-            register(&db)?;
-            Ok(false)
-        })
-    }
-}
+sqlite_ext::sqlite_extension!(sqlite3_extension_init, PLUGIN);

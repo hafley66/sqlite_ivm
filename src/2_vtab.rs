@@ -13,22 +13,14 @@ use std::{
     ptr,
 };
 
-// rusqlite 0.40.2 documents Module as repr(transparent) over sqlite3_module.
-// Keep its allocation, cursor, update and error adapters; fill the two missing
-// SQLite callbacks in the ABI descriptor. No C source or replacement binding.
 #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub fn register(db: &Connection) -> Result<()> {
-    const MODULE: Module<Table> = unsafe {
-        let mut raw: ffi::sqlite3_module =
-            std::mem::transmute(Module::<Table>::update_module_with_tx());
-        raw.iVersion = 3;
-        raw.xRename = Some(rename);
-        raw.xShadowName = Some(shadow_name);
-        raw.xSavepoint = Some(savepoint);
-        raw.xRelease = Some(release);
-        raw.xRollbackTo = Some(rollback_to);
-        std::mem::transmute(raw)
-    };
+    const MODULE: Module<Table> = sqlite_ext::vtab_module!(
+        Table,
+        sqlite_ext::VtabCallbacks::savepoints(savepoint, release, rollback_to)
+            .rename(rename)
+            .shadow_name(shadow_name)
+    );
     db.create_module(c"sqlite_ivm", &MODULE, Some(Arc::new(ViewChanges::default())))
 }
 
@@ -36,7 +28,7 @@ pub fn register(db: &Connection) -> Result<()> {
 /// another instance for the same view. They must drain one transaction batch.
 #[derive(Default)]
 struct ViewChanges {
-    collectors: Mutex<BTreeMap<i64, Weak<Mutex<sqlite_bulk_trigger::Collector>>>>,
+    collectors: Mutex<BTreeMap<i64, Weak<Mutex<sqlite_ext::Collector>>>>,
     transactions: Mutex<BTreeSet<i64>>,
 }
 
@@ -53,7 +45,7 @@ struct Table {
     /// Every SQL string this view's drain issues, built beside the plan.
     program: Option<Program>,
     /// Source rows staged since the last drain. Present once the plan is bound.
-    collector: Option<Arc<Mutex<sqlite_bulk_trigger::Collector>>>,
+    collector: Option<Arc<Mutex<sqlite_ext::Collector>>>,
     changes: Arc<ViewChanges>,
 }
 
@@ -606,8 +598,8 @@ impl Table {
                     .parse()
                     .map_err(|_| error("invalid source ordinal"))?;
                 let sign = match change.sign {
-                    sqlite_bulk_trigger::Sign::Insert => 1,
-                    sqlite_bulk_trigger::Sign::Delete => -1,
+                    sqlite_ext::Sign::Insert => 1,
+                    sqlite_ext::Sign::Delete => -1,
                 };
                 Ok((source, change.values, sign))
             })
@@ -650,45 +642,31 @@ impl<'vtab> TransactionVTab<'vtab> for Table {
     }
 }
 #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
-fn dispatch(raw: *mut ffi::sqlite3_vtab, body: impl FnOnce(&mut Table)) -> c_int {
-    // Never unwind into C.
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let table = unsafe { &mut *raw.cast::<Table>() };
-        body(table)
-    }));
-    match result {
-        Ok(()) => ffi::SQLITE_OK,
-        Err(_) => unsafe {
-            rusqlite::to_sqlite_error(
-                &error("panic in virtual-table savepoint callback"),
-                &mut (*raw).zErrMsg,
-            )
-        },
-    }
-}
-#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 unsafe extern "C" fn savepoint(raw: *mut ffi::sqlite3_vtab, index: c_int) -> c_int {
-    dispatch(raw, |table| {
+    unsafe { sqlite_ext::vtab_callback(raw, "xSavepoint", |table: &mut Table| {
         if let Some(collector) = table.collector.as_mut() {
             collector.lock().expect("view changes lock").savepoint(index);
         }
-    })
+        Ok(())
+    }) }
 }
 #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 unsafe extern "C" fn release(raw: *mut ffi::sqlite3_vtab, index: c_int) -> c_int {
-    dispatch(raw, |table| {
+    unsafe { sqlite_ext::vtab_callback(raw, "xRelease", |table: &mut Table| {
         if let Some(collector) = table.collector.as_mut() {
             collector.lock().expect("view changes lock").release(index);
         }
-    })
+        Ok(())
+    }) }
 }
 #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 unsafe extern "C" fn rollback_to(raw: *mut ffi::sqlite3_vtab, index: c_int) -> c_int {
-    dispatch(raw, |table| {
+    unsafe { sqlite_ext::vtab_callback(raw, "xRollbackTo", |table: &mut Table| {
         if let Some(collector) = table.collector.as_mut() {
             collector.lock().expect("view changes lock").rollback_to(index);
         }
-    })
+        Ok(())
+    }) }
 }
 unsafe impl<'vtab> VTab<'vtab> for Table {
     type Aux = Arc<ViewChanges>;
@@ -788,9 +766,9 @@ impl<'vtab> UpdateVTab<'vtab> for Table {
             .collect::<Result<Vec<_>>>()?;
         plan.validate(source, &row)?;
         let sign = if adding == 1 {
-            sqlite_bulk_trigger::Sign::Insert
+            sqlite_ext::Sign::Insert
         } else {
-            sqlite_bulk_trigger::Sign::Delete
+            sqlite_ext::Sign::Delete
         };
         let name = self.name()?;
         let collector = self
@@ -807,7 +785,7 @@ impl<'vtab> UpdateVTab<'vtab> for Table {
             || {
                 collector.update(
                     &self.db,
-                    sqlite_bulk_trigger::RowChange::new(source.to_string(), sign, row),
+                    sqlite_ext::RowChange::new(source.to_string(), sign, row),
                 )
             },
         )?;
@@ -960,20 +938,13 @@ unsafe impl VTabCursor for Cursor {
 
 #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 unsafe extern "C" fn rename(raw: *mut ffi::sqlite3_vtab, new: *const c_char) -> c_int {
-    // The adapter is the only custom callback with fallible work. Never unwind into C.
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let table = unsafe { &mut *raw.cast::<Table>() };
+    unsafe { sqlite_ext::vtab_callback(raw, "xRename", |table: &mut Table| {
         table.refresh()?;
-        let name = unsafe { CStr::from_ptr(new) }
+        let name = CStr::from_ptr(new)
             .to_str()
             .map_err(|e| error(e.to_string()))?;
         table.rename_to(name)
-    }))
-    .unwrap_or_else(|_| Err(error("panic in virtual-table rename")));
-    match result {
-        Ok(()) => ffi::SQLITE_OK,
-        Err(e) => unsafe { rusqlite::to_sqlite_error(&e, &mut (*raw).zErrMsg) },
-    }
+    }) }
 }
 #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 unsafe extern "C" fn shadow_name(name: *const c_char) -> c_int {
