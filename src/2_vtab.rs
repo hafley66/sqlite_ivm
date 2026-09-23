@@ -105,7 +105,7 @@ pub(crate) fn migrate(
         [name],|r|r.get(0),
     )?) };
     drop_triggers(conn, name)?;
-    if legacy || format < 10 {
+    if legacy || format < 11 {
         convert(conn, name, &plan)?;
     } else {
         relational_maintenance::hooks(conn, name, &plan)?;
@@ -211,7 +211,7 @@ fn set_schema(conn: &Connection, name: &str, plan: &crate::relational::Plan) -> 
         conn,
         Phase::Declare,
         name,
-        "UPDATE main.__ivm_schema SET declaration=?1, roles=?2, generic=1, format_version=10 WHERE id=(SELECT id FROM main.__ivm_views WHERE name=?3)",
+        "UPDATE main.__ivm_schema SET declaration=?1, roles=?2, generic=1, format_version=11 WHERE id=(SELECT id FROM main.__ivm_views WHERE name=?3)",
         rusqlite::params![declaration(plan), roles, name],
     )?;
     Ok(())
@@ -290,7 +290,7 @@ impl Table {
                 &conn,
                 Phase::Declare,
                 name,
-                "SELECT EXISTS(SELECT 1 FROM main.__ivm_schema WHERE format_version NOT IN (2,3,4,5,6,7,8,9,10))",
+                "SELECT EXISTS(SELECT 1 FROM main.__ivm_schema WHERE format_version NOT IN (2,3,4,5,6,7,8,9,10,11))",
                 [],
                 |r| r.get(0),
             )?;
@@ -320,7 +320,7 @@ impl Table {
                 })
                 .collect::<Result<Vec<_>>>()?;
             let mut declaration = declaration;
-            if format < 10 || !generic {
+            if format < 11 || !generic {
                 match migrate(&conn, name, !generic, format) {
                     Ok(Some(fresh)) => {
                         declaration = fresh;
@@ -395,7 +395,7 @@ impl Table {
             &conn,
             Phase::Declare,
             name,
-            "INSERT INTO main.__ivm_schema VALUES(?1,?2,1,?3,10)",
+            "INSERT INTO main.__ivm_schema VALUES(?1,?2,1,?3,11)",
             rusqlite::params![
                 id,
                 declaration,

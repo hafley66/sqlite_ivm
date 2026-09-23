@@ -80,7 +80,7 @@ Darwin arm64	sqlite-ivm::5_transactions::recursive_member_tables_follow_savepoin
 Darwin arm64	sqlite-ivm::5_transactions::wal_snapshots_writer_contention_and_failed_maintenance_are_atomic	0.028
 Darwin arm64	sqlite-ivm::7_key_agreement::identity_round_trips_the_corpus	0.014
 Darwin arm64	sqlite-ivm::7_key_agreement::json_subtype_group_key_agrees_between_bulk_and_incremental_paths	0.014
-Darwin arm64	sqlite-ivm::7_key_agreement::rust_key_after_expression_agrees_with_sql_key_sql	0.027
+Darwin arm64	sqlite-ivm::7_key_agreement::native_group_key_matches_sqlite_value_equality	0.027
 Darwin arm64	sqlite-ivm::8_group_limit::group_limit_matches_plain_sql_across_multiplicity_limit_and_offset	1.393
 Darwin arm64	sqlite-ivm::8_group_limit::window_with_limit_reads_every_copy	0.126
 Darwin arm64	sqlite-ivm::9_fixpoint_retraction::fixpoint_retraction_emits_the_stored_representative	0.026

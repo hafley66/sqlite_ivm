@@ -7,7 +7,7 @@ use crate::{
     relational::{Kind, Occurrence, Plan, Rule},
     relational_materialize::MaterializeStatements,
     relational_maintenance::{
-        arrived_table, columns, deleted_table, keys_table, left_table,
+        arrived_table, columns, deleted_table, left_table,
         parameters, roles, rule_from, rule_where, table,
         Role,
     },
@@ -489,12 +489,7 @@ fn aggregate_delta_statements(plan: &Plan, name: &str, db: &Connection, id: usiz
 fn arrangement_side(plan: &Plan, name: &str, id: usize, side: usize) -> Option<ArrangementSide> {
     let node = &plan.nodes[id];
     let child = plan.out_table(node.inputs[side], plan.nodes[node.inputs[side]].fields.len());
-    let key = if plan.native_key_values(id,side).is_some() {
-        plan.key_lookup(name,id,side)
-    } else {
-        let dict = keys_table(name);
-        format!("(SELECT __i FROM {dict} WHERE __v={})",plan.key_sql(id,side)?)
-    };
+    let key = plan.key_lookup(name,id,side);
     Some(ArrangementSide {
         intern: plan.insert_keys(name,id,side),
         touch: format!("INSERT OR IGNORE INTO temp.__ivm_touched SELECT {key} FROM {child}"),

@@ -4,7 +4,7 @@
       [
         "declare",
         "CREATE",
-        30
+        31
       ],
       [
         "declare",
@@ -19,12 +19,12 @@
       [
         "declare",
         "INSERT",
-        17
+        18
       ],
       [
         "declare",
         "SELECT",
-        29
+        31
       ],
       [
         "materialize",
@@ -45,8 +45,8 @@
     "scans": [
       [
         "declare",
-        2463,
-        135
+        2580,
+        142
       ],
       [
         "materialize",
@@ -60,7 +60,7 @@
       [
         "declare",
         "CREATE",
-        30
+        31
       ],
       [
         "declare",
@@ -75,12 +75,12 @@
       [
         "declare",
         "INSERT",
-        17
+        18
       ],
       [
         "declare",
         "SELECT",
-        330
+        332
       ],
       [
         "drain",
@@ -131,8 +131,8 @@
     "scans": [
       [
         "declare",
-        4925,
-        145
+        5042,
+        152
       ],
       [
         "drain",
@@ -141,7 +141,7 @@
       ],
       [
         "maintain",
-        80282,
+        79882,
         0
       ],
       [
@@ -156,7 +156,7 @@
       [
         "declare",
         "CREATE",
-        30
+        31
       ],
       [
         "declare",
@@ -171,12 +171,12 @@
       [
         "declare",
         "INSERT",
-        17
+        18
       ],
       [
         "declare",
         "SELECT",
-        132
+        134
       ],
       [
         "drain",
@@ -227,8 +227,8 @@
     "scans": [
       [
         "declare",
-        3341,
-        145
+        3458,
+        152
       ],
       [
         "drain",
@@ -237,7 +237,7 @@
       ],
       [
         "maintain",
-        40682,
+        40282,
         1287
       ],
       [
@@ -252,7 +252,7 @@
       [
         "declare",
         "CREATE",
-        44
+        43
       ],
       [
         "declare",
@@ -267,12 +267,12 @@
       [
         "declare",
         "INSERT",
-        29
+        28
       ],
       [
         "declare",
         "SELECT",
-        67
+        65
       ],
       [
         "drain",
@@ -328,8 +328,8 @@
     "scans": [
       [
         "declare",
-        4525,
-        341
+        4178,
+        278
       ],
       [
         "drain",
@@ -358,7 +358,7 @@
       [
         "declare",
         "CREATE",
-        44
+        43
       ],
       [
         "declare",
@@ -373,12 +373,12 @@
       [
         "declare",
         "INSERT",
-        29
+        28
       ],
       [
         "declare",
         "SELECT",
-        254
+        252
       ],
       [
         "drain",
@@ -434,8 +434,8 @@
     "scans": [
       [
         "declare",
-        6021,
-        341
+        5674,
+        278
       ],
       [
         "drain",

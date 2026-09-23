@@ -17,6 +17,9 @@ impl Plan {
                 ).collect()
             }
             Kind::Group { keys, .. } => keys.clone(),
+            Kind::Set(_) => node.fields.iter().enumerate().map(|(i, field)|
+                key_expression(&format!("c{i}"), &field.collation)
+            ).collect(),
             _ => return None,
         })
     }
@@ -39,11 +42,8 @@ impl Plan {
     #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     pub(crate) fn key_lookup(&self, name: &str, id: usize, side: usize) -> String {
         let dict = keys_table(name);
-        if let Some(keys) = self.native_key_values(id,side) {
-            format!("(SELECT d.__i FROM {dict} d WHERE d.__node={id} AND {})", Self::native_key_match(&keys,"d"))
-        } else {
-            format!("(SELECT __i FROM {dict} WHERE __v={})",self.key_sql(id,side).expect("operator key"))
-        }
+        let keys = self.native_key_values(id,side).expect("arrangement keys");
+        format!("(SELECT d.__i FROM {dict} d WHERE d.__node={id} AND {})", Self::native_key_match(&keys,"d"))
     }
 
     #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
@@ -51,12 +51,9 @@ impl Plan {
         let input = self.nodes[id].inputs[side];
         let child = self.out_table(input,self.nodes[input].fields.len());
         let dict = keys_table(name);
-        if let Some(keys) = self.native_key_values(id,side) {
-            let columns = (0..keys.len()).map(|i|format!("k{i}")).collect::<Vec<_>>().join(",");
-            format!("INSERT INTO {dict}(__node,{columns}) SELECT DISTINCT {id},{} FROM {child} WHERE NOT EXISTS(SELECT 1 FROM {dict} d WHERE d.__node={id} AND {})",keys.join(","),Self::native_key_match(&keys,"d"))
-        } else {
-            format!("INSERT OR IGNORE INTO {dict}(__v) SELECT {} FROM {child}",self.key_sql(id,side).expect("operator key"))
-        }
+        let keys = self.native_key_values(id,side).expect("arrangement keys");
+        let columns = (0..keys.len()).map(|i|format!("k{i}")).collect::<Vec<_>>().join(",");
+        format!("INSERT OR IGNORE INTO {dict}(__node,{columns}) SELECT DISTINCT {id},{} FROM {child}",keys.join(","))
     }
 
     /// Drive a source/index probe from each distinct touched key. IS includes
@@ -120,4 +117,15 @@ pub(crate) fn membership_index(fields: &[Field]) -> String {
         format!("(CASE typeof(c{i}) WHEN 'null' THEN 0 WHEN 'integer' THEN 1 WHEN 'real' THEN 1 WHEN 'text' THEN 2 ELSE 3 END)"),
         format!("(CASE WHEN c{i} IS NULL THEN 0 ELSE c{i} END) COLLATE {}", field.collation),
     ]).collect::<Vec<_>>().join(",")
+}
+
+/// The dictionary stores normalized cells from many nodes in one table. Each
+/// node id and tagged cell tuple has one integer identity, including NULLs.
+pub(crate) fn dictionary_membership_index(width: usize) -> String {
+    let mut expressions = vec!["__node".to_string()];
+    for i in 0..width {
+        expressions.push(format!("(CASE typeof(k{i}) WHEN 'null' THEN 0 WHEN 'integer' THEN 1 WHEN 'real' THEN 1 WHEN 'text' THEN 2 ELSE 3 END)"));
+        expressions.push(format!("(CASE WHEN k{i} IS NULL THEN 0 ELSE k{i} END) COLLATE BINARY"));
+    }
+    expressions.join(",")
 }

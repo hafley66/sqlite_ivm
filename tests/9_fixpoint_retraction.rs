@@ -133,7 +133,7 @@ fn format_nine_fixpoint_members_rebuild_on_connect() -> Result<()> {
         register(&db)?;
         db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON")?;
         assert_eq!(rows(&db, "SELECT n FROM reach")?, rows(&db, query)?);
-        assert_eq!(db.query_row("SELECT format_version FROM __ivm_schema", [], |r| r.get::<_, i64>(0))?, 10);
+        assert_eq!(db.query_row("SELECT format_version FROM __ivm_schema", [], |r| r.get::<_, i64>(0))?, 11);
         let native_indexes: i64 = db.query_row(
             "SELECT count(*) FROM __ivm_objects WHERE view_name='reach' AND object_type='index' AND object_name LIKE '%_membership_%'",
             [], |r| r.get(0),

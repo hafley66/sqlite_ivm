@@ -104,7 +104,6 @@ pub enum Occurrence {
 pub struct Rule {
     pub occurrences: Vec<(Occurrence, usize)>,
     pub head: Vec<String>,
-    pub key: String,
     pub predicate: Option<String>,
     pub indexes: Vec<(Occurrence, String)>,
 }
@@ -225,19 +224,6 @@ pub fn key_expression(value: &str, collation: &str) -> String {
         }
         _ => value.into(),
     }
-}
-/// UNION distinct identity in SQL: integral reals fold to integers, other reals
-/// and blobs are tagged objects, text is collation-normalized, NULL equals NULL.
-#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
-pub fn key_sql(parts: &[(String, String)]) -> String {
-    let normalized = parts
-        .iter()
-        .map(|(value, collation)| {
-            let x = format!("({})", key_expression(value, collation));
-            format!("CASE typeof({x}) WHEN 'blob' THEN json_object('blob',hex({x})) WHEN 'real' THEN CASE WHEN {x}=CAST({x} AS INTEGER) THEN CAST({x} AS INTEGER) ELSE json_object('real',printf('%!.17g',{x})) END WHEN 'text' THEN {x}||'' ELSE {x} END")
-        })
-        .collect::<Vec<_>>();
-    format!("json_array({})", normalized.join(","))
 }
 #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
 pub fn column_reference(index: usize, affinity: &str) -> String {

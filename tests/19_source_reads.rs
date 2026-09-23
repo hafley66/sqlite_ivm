@@ -160,7 +160,7 @@ fn format_eight_set_view_rebuilds_membership_on_connect() -> Result<()> {
         let value: i64 = db.query_row("SELECT x FROM result",[],|r|r.get(0))?;
         assert_eq!(value,1);
         let format: i64 = db.query_row("SELECT format_version FROM __ivm_schema",[],|r|r.get(0))?;
-        assert_eq!(format,10);
+        assert_eq!(format,11);
         db.execute_batch("INSERT INTO a VALUES(2)")?;
         assert_eq!(db.query_row("SELECT count(*) FROM result",[],|r|r.get::<_,i64>(0))?,2);
     }
@@ -308,11 +308,10 @@ fn composite_keys_use_native_cells_and_group_rowids_survive_updates() -> Result<
             .all(|s| !s.contains("json_") && !s.contains("sqlite_ivm_hash")),
         "{indexes:#?}"
     );
-    let native: (i64, i64) =
-        db.query_row("SELECT count(*),count(__v) FROM result_keys", [], |r| {
-            Ok((r.get(0)?, r.get(1)?))
-        })?;
-    assert_eq!(native, (3, 0));
+    let native: i64 = db.query_row("SELECT count(*) FROM result_keys", [], |r| r.get(0))?;
+    assert_eq!(native, 3);
+    let text_key: i64 = db.query_row("SELECT count(*) FROM pragma_table_info('result_keys') WHERE name='__v'", [], |r| r.get(0))?;
+    assert_eq!(text_key, 0);
     for mutation in [
         "BEGIN;UPDATE fact SET v=v+1 WHERE id=1;UPDATE dimension SET factor=factor+1 WHERE id=1;COMMIT",
         "BEGIN;UPDATE fact SET k=2,tag='text' WHERE id IN(1,2);DELETE FROM dimension WHERE id=4;ROLLBACK",
@@ -427,6 +426,13 @@ fn set_source_reads_use_indexed_membership_boundaries() -> Result<()> {
         "view",
         Some("sql"),
     );
+    let json_indexes: i64 = db.query_row(
+        "SELECT count(*) FROM sqlite_schema WHERE type='index' AND name LIKE '__ivm_%' AND (sql LIKE '%json_array(%' OR sql LIKE '%json_object(%')",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(json_indexes, 0);
+    assert!(statements.keys().all(|(_, sql)| !sql.contains("json_array(") && !sql.contains("json_object(")));
     let mut indexed_membership_count = 0;
     for ((_, sql), sums) in &statements {
         if !sql.contains("result_op") || !sql.contains("__ivm_touched") || sql.contains('?') {

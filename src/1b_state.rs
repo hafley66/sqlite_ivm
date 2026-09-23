@@ -2,9 +2,7 @@ use crate::{
     catalog::{error, quote},
     statements::{self, Phase},
     relational::{Kind, Occurrence, Plan},
-    relational_maintenance::{
-        columns, folded, json_key, table, BULK_MULTIPLICITY_BUDGET,
-    },
+    relational_maintenance::{columns, table, BULK_MULTIPLICITY_BUDGET},
 };
 use rusqlite::{types::Value, Connection, Result};
 
@@ -58,8 +56,11 @@ impl Plan {
         let key_width = self.nodes.iter().enumerate().filter_map(|(id,_)| self.native_key_values(id,0).map(|k|k.len())).max().unwrap_or(1);
         let key_columns = (0..key_width).map(|i|format!("k{i}")).collect::<Vec<_>>().join(",");
         statements::batch(db, Phase::Declare, name, &format!(
-            "CREATE TABLE main.{}(__i INTEGER PRIMARY KEY,__v TEXT UNIQUE,__node INTEGER,{key_columns})", quote(&dictionary)
+            "CREATE TABLE main.{}(__i INTEGER PRIMARY KEY,__node INTEGER NOT NULL,{key_columns})", quote(&dictionary)
         ))?;
+        let unique_keys = fresh_index(db,name,format!("__ivm_{name}_unique_keys"))?;
+        statements::batch(db,Phase::Declare,name,&format!("CREATE UNIQUE INDEX main.{} ON {}({})",quote(&unique_keys),quote(&dictionary),crate::native_keys::dictionary_membership_index(key_width)))?;
+        objects.push(("index",unique_keys));
         let native_index = fresh_index(db,name,format!("__ivm_{name}_native_keys"))?;
         statements::batch(db,Phase::Declare,name,&format!("CREATE INDEX main.{} ON {}(__node,{key_columns})",quote(&native_index),quote(&dictionary)))?;
         objects.push(("index",native_index));
@@ -111,7 +112,7 @@ impl Plan {
                 let mut expressions = match self.native_key_columns(id,side) {
                     Some(keys) if keys.is_empty() => vec![],
                     Some(keys) => vec![keys.join(",")],
-                    None => vec![self.key_sql(id,side).expect("operator key")],
+                    None => vec![],
                 };
                 if let Kind::Group { order, .. } = &node.kind {
                     expressions.extend(order.iter().map(|o| o.replace(" NULLS FIRST", "").replace(" NULLS LAST", "")));
@@ -337,30 +338,6 @@ impl Plan {
             )?;
         }
         Ok(())
-    }
-    /// Encoded membership keys for sets and recursion. Join/group keys use
-    /// native_key_columns and cannot take this encoding path.
-    #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
-    pub(crate) fn key_sql(&self, id: usize, side: usize) -> Option<String> {
-        let node = &self.nodes[id];
-        let child_node = &self.nodes[node.inputs[side]];
-        let width = child_node.fields.len();
-        Some(match &node.kind {
-            Kind::Set(_) => json_key(
-                (0..node.fields.len())
-                    .map(|i| {
-                        folded(&crate::relational::key_expression(
-                            &format!("c{i}"),
-                            &node.fields[i].collation,
-                        ))
-                    })
-                    .collect(),
-            ),
-            Kind::Fixpoint { .. } => {
-                json_key((0..width).map(|i| folded(&format!("c{i}"))).collect())
-            }
-            _ => return None,
-        })
     }
     #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
     fn fill(&self, db: &Connection, name: &str, id: usize, side: usize) -> Result<()> {

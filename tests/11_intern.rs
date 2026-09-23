@@ -1,10 +1,10 @@
 #![cfg(not(feature = "extension"))]
-//! The dictionary is the only place a composite key lives as text. Interning
-//! must be injective and idempotent, or two equal keys reach two arrangements.
+//! Dictionary cells retain SQLite values under one indexed integer identity.
+//! Interning must be injective and idempotent for each value-equality class.
 
 use rusqlite::{types::Value, Connection, OptionalExtension, Result};
-use sqlite_ivm::relational::{key_expression, key_sql};
-use sqlite_ivm::relational_maintenance::{identity_sql, intern, resolve, row_hash};
+use sqlite_ivm::relational::key_expression;
+use sqlite_ivm::relational_maintenance::row_hash;
 
 #[path = "support/0_database.rs"]
 mod database;
@@ -36,7 +36,7 @@ fn source_reads_survive_hash_collisions_and_migrate_copied_inputs() -> Result<()
                 |_| Ok(0i64))?;
             db.execute_batch("PRAGMA recursive_triggers=ON;PRAGMA trusted_schema=ON")?;
             assert_eq!(db.query_row("SELECT count(*) FROM g", [], |r| r.get::<_,i64>(0))?, 2);
-            assert_eq!(db.query_row("SELECT format_version FROM __ivm_schema", [], |r| r.get::<_,i64>(0))?, 10);
+            assert_eq!(db.query_row("SELECT format_version FROM __ivm_schema", [], |r| r.get::<_,i64>(0))?, 11);
             assert!(arrangements(&db,"g")?.is_empty());
             for mutation in [
                 "BEGIN;UPDATE a SET v=v+1 WHERE k=1;INSERT INTO a VALUES(2,10);COMMIT",
@@ -58,8 +58,8 @@ fn source_reads_survive_hash_collisions_and_migrate_copied_inputs() -> Result<()
     Ok(())
 }
 
-/// Mirrors the corpus in `tests/7_key_agreement.rs`, which owns the encoder
-/// agreement; this file owns only what the dictionary does with the result.
+/// Mirrors the corpus in `tests/7_key_agreement.rs`, which owns source-key
+/// agreement; this file owns the dictionary identities for those cells.
 const CORPUS_SIZE: usize = 17;
 const COLLATION_COUNT: usize = 3;
 const COLLATIONS: [&str; COLLATION_COUNT] = ["BINARY", "NOCASE", "RTRIM"];
@@ -109,16 +109,14 @@ fn view_database() -> Result<Connection> {
 
 fn dictionary(db: &Connection, view: &str) -> Result<String> {
     db.query_row(
-        "SELECT object_name FROM __ivm_objects WHERE view_name=?1 AND object_type='table' AND EXISTS (SELECT 1 FROM pragma_table_info(object_name) WHERE name='__i') AND EXISTS (SELECT 1 FROM pragma_table_info(object_name) WHERE name='__v') LIMIT 1",
+        "SELECT object_name FROM __ivm_objects WHERE view_name=?1 AND object_type='table' AND EXISTS (SELECT 1 FROM pragma_table_info(object_name) WHERE name='__i') AND EXISTS (SELECT 1 FROM pragma_table_info(object_name) WHERE name='k0') LIMIT 1",
         [view],
         |row| row.get::<_, String>(0),
     )
     .map(|name| format!("main.\"{name}\""))
 }
 
-/// The composites the engine actually interns, produced by the SQL encoder so
-/// this file never grows a second copy of the encoding rules.
-fn composites(db: &Connection) -> Result<Vec<String>> {
+fn composites(db: &Connection) -> Result<Vec<Value>> {
     let cases = corpus();
     let mut values = vec![];
     for (collation_index, collation) in COLLATIONS.iter().enumerate() {
@@ -126,18 +124,27 @@ fn composites(db: &Connection) -> Result<Vec<String>> {
             collation_index < COLLATION_COUNT,
             "COLLATION_COUNT protects the bounded collation matrix"
         );
-        let expression = key_sql(&[(key_expression("?1", collation), "BINARY".into())]);
+        let expression = key_expression("?1", collation);
         for (index, (_, value)) in cases.iter().enumerate() {
             assert!(
                 index < CORPUS_SIZE,
                 "CORPUS_SIZE protects the bounded composite loop"
             );
             values.push(db.query_row(&format!("SELECT {expression}"), [value], |row| {
-                row.get::<_, String>(0)
+                row.get::<_, Value>(0)
             })?);
         }
     }
     Ok(values)
+}
+
+fn intern_cell(db: &Connection, dict: &str, value: &Value) -> Result<i64> {
+    db.execute(&format!("INSERT OR IGNORE INTO {dict}(__node,k0) VALUES(0,?1)"), [value])?;
+    db.query_row(&format!("SELECT __i FROM {dict} WHERE __node=0 AND k0 IS (+?1)"), [value], |r| r.get(0))
+}
+
+fn same_cell(db: &Connection, left: &Value, right: &Value) -> Result<bool> {
+    db.query_row("SELECT ?1 IS ?2", rusqlite::params![left,right], |r| r.get(0))
 }
 
 fn rows_in(db: &Connection, table: &str) -> Result<i64> {
@@ -153,7 +160,7 @@ fn interning_is_injective_and_resolve_round_trips_the_corpus() -> Result<()> {
 
     let ids = values
         .iter()
-        .map(|value| intern(&db, &dict, value))
+        .map(|value| intern_cell(&db, &dict, value))
         .collect::<Result<Vec<i64>>>()?;
 
     for (left, left_value) in values.iter().enumerate() {
@@ -161,15 +168,12 @@ fn interning_is_injective_and_resolve_round_trips_the_corpus() -> Result<()> {
             left < CORPUS_SIZE * COLLATION_COUNT,
             "the bounded corpus matrix protects the comparison loop"
         );
-        assert_eq!(
-            resolve(&db, &dict, ids[left])?,
-            *left_value,
-            "resolve round trip at {left}"
-        );
+        let stored = db.query_row(&format!("SELECT k0 FROM {dict} WHERE __i=?1"), [ids[left]], |r| r.get::<_,Value>(0))?;
+        assert!(same_cell(&db, &stored, left_value)?, "resolve round trip at {left}");
         for (right, right_value) in values.iter().enumerate() {
             assert_eq!(
                 ids[left] == ids[right],
-                left_value == right_value,
+                same_cell(&db, left_value, right_value)?,
                 "id equality must match composite equality at {left} and {right}"
             );
         }
@@ -185,12 +189,12 @@ fn re_interning_adds_no_row_and_moves_no_id() -> Result<()> {
 
     let first = values
         .iter()
-        .map(|value| intern(&db, &dict, value))
+        .map(|value| intern_cell(&db, &dict, value))
         .collect::<Result<Vec<i64>>>()?;
     let after_first = rows_in(&db, &dict)?;
     let second = values
         .iter()
-        .map(|value| intern(&db, &dict, value))
+        .map(|value| intern_cell(&db, &dict, value))
         .collect::<Result<Vec<i64>>>()?;
 
     assert_eq!(first, second, "interning is idempotent");
@@ -206,7 +210,7 @@ fn re_interning_adds_no_row_and_moves_no_id() -> Result<()> {
 fn dropping_the_view_drops_its_dictionary() -> Result<()> {
     let db = view_database()?;
     let dict = dictionary(&db, "intern_view")?;
-    intern(&db, &dict, "[]")?;
+    intern_cell(&db, &dict, &Value::Integer(1))?;
     db.execute_batch("DROP TABLE intern_view")?;
     let survivor: Option<String> = db
         .query_row(
@@ -292,8 +296,7 @@ fn the_identity_splits_where_the_key_folds_and_joins_where_unique_would_split() 
            'SELECT DISTINCT value FROM folded_source');
          INSERT INTO folded_source(id,value) VALUES(1,1),(2,1.0),(3,NULL),(4,NULL)",
     )?;
-    let composite = identity_sql(1);
-    let distinct: i64 = db.query_row(&format!("SELECT count(DISTINCT {composite}) FROM (SELECT value AS c0 FROM folded_source)"),[],|r|r.get(0))?;
+    let distinct: i64 = db.query_row("SELECT count(*) FROM (SELECT 1 FROM folded_source GROUP BY typeof(value),value COLLATE BINARY,CASE WHEN typeof(value)='real' THEN sqlite_ivm_real_hex(value) END)",[],|r|r.get(0))?;
     assert_eq!(distinct,3,"integer, real, and NULL retain distinct identities");
     let result_count: i64 = db.query_row("SELECT count(*) FROM folded_view",[],|r|r.get(0))?;
     assert_eq!(result_count,2,"integer and real share SQL equality; duplicate NULLs produce one result");

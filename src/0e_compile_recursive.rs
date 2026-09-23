@@ -3,7 +3,7 @@ use crate::compile_from::{
     column_pair, equalities, part_expressions_mention, part_mentions, table_mentions,
 };
 use crate::relational::{
-    alias, collation, column_reference, expression, expression_affinity, has_aggregate, key_sql,
+    alias, collation, column_reference, expression, expression_affinity, has_aggregate,
     name, Compiler, Field, Kind, Occurrence, Rule,
 };
 use rusqlite::Result;
@@ -69,19 +69,12 @@ impl Compiler<'_> {
             f.position = i;
             f.merged_star = false;
         }
-        let key_parts = |head: &[String]| {
-            head.iter()
-                .zip(&member_fields)
-                .map(|(h, f)| (h.clone(), f.collation.clone()))
-                .collect::<Vec<_>>()
-        };
         let mut rules = vec![];
         for side in 0..inputs.len() {
             tracing::trace!(source_file = file!(), source_line = line!(), "loop_iteration");
             let head = (0..width).map(|i| format!("c{i}")).collect::<Vec<_>>();
             rules.push(Rule {
                 occurrences: vec![(Occurrence::Input(side), width)],
-                key: key_sql(&key_parts(&head)),
                 head,
                 predicate: None,
                 indexes: vec![],
@@ -245,7 +238,6 @@ impl Compiler<'_> {
             }
             rules.push(Rule {
                 occurrences,
-                key: key_sql(&key_parts(&head)),
                 head,
                 predicate,
                 indexes,

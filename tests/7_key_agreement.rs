@@ -1,10 +1,9 @@
 #![cfg(not(feature = "extension"))]
-//! Compare native group-key partitions with the existing independent encoder
-//! corpus. Set and recursive membership still use encoded keys; result storage
-//! and join/group lookup use native cells.
+//! Compare native group-key partitions with SQLite value equality across the
+//! bounded storage-class and collation corpus.
 
 use rusqlite::{types::Value, Connection, Result};
-use sqlite_ivm::relational::{key_expression, key_sql};
+use sqlite_ivm::relational::key_expression;
 
 #[path = "support/0_database.rs"]
 mod database;
@@ -120,19 +119,18 @@ fn create_view(db: &Connection, view: &str, query: &str) -> Result<()> {
     ))
 }
 
-fn sql_keys(db: &Connection, source: &str, collation: &str) -> Result<Vec<String>> {
+fn sql_keys(db: &Connection, source: &str, collation: &str) -> Result<Vec<Value>> {
     let normalized = key_expression("value", collation);
-    let expression = key_sql(&[(normalized, "BINARY".into())]);
-    let mut statement = db.prepare(&format!("SELECT {expression} FROM {source} ORDER BY id"))?;
+    let mut statement = db.prepare(&format!("SELECT {normalized} FROM {source} ORDER BY id"))?;
     let rows = statement
-        .query_map([], |row| row.get::<_, String>(0))?
-        .collect::<Result<Vec<String>>>()?;
+        .query_map([], |row| row.get::<_, Value>(0))?
+        .collect::<Result<Vec<Value>>>()?;
     Ok(rows)
 }
 
 fn dictionary_name(db: &Connection, view: &str) -> Result<String> {
     db.query_row(
-        "SELECT object_name FROM __ivm_objects WHERE view_name=?1 AND object_type='table' AND EXISTS (SELECT 1 FROM pragma_table_info(object_name) WHERE name='__v') LIMIT 1",
+        "SELECT object_name FROM __ivm_objects WHERE view_name=?1 AND object_type='table' AND EXISTS (SELECT 1 FROM pragma_table_info(object_name) WHERE name='k0') LIMIT 1",
         [view],
         |row| row.get(0),
     )
@@ -151,7 +149,7 @@ fn indexed_source_keys(db: &Connection, view: &str, source: &str) -> Result<Vec<
 }
 
 #[test]
-fn rust_key_after_expression_agrees_with_sql_key_sql() -> Result<()> {
+fn native_group_key_matches_sqlite_value_equality() -> Result<()> {
     let cases = corpus();
     assert_eq!(COLLATIONS.len(), COLLATION_COUNT);
     let db = Connection::open_in_memory()?;
@@ -201,7 +199,7 @@ fn rust_key_after_expression_agrees_with_sql_key_sql() -> Result<()> {
                 );
                 assert_eq!(
                     rust_left == rust_right,
-                    sql[left] == sql[right],
+                    db.query_row("SELECT ?1 IS ?2", rusqlite::params![sql[left],sql[right]], |r| r.get::<_, bool>(0))?,
                     "{collation}: {} and {}: Rust and SQL key partitions differ",
                     cases[left].name,
                     cases[right].name

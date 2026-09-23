@@ -4,7 +4,7 @@ use crate::{
     catalog::quote,
     columns::{column_references, substitute_columns},
     relational::{Kind, Plan},
-    relational_maintenance::{columns, identity_sql, keys_table, table},
+    relational_maintenance::{columns, table},
     relational_materialize::MaterializeStatements,
 };
 use rusqlite::Connection;
@@ -227,17 +227,8 @@ impl Plan {
         let width = self.nodes[input].fields.len();
         let cols = columns(width);
         let native = self.native_key_values(id, side);
-        let key = if native.is_none() {
-            self.key_sql(id, side).expect("membership key")
-        } else {
-            String::new()
-        };
-        let identity = identity_sql(width);
-        let filter = if restricted && native.is_none() {
-            format!(" WHERE {key} IN (SELECT __v FROM {} WHERE __i IN (SELECT __k FROM temp.__ivm_touched))",keys_table(name))
-        } else {
-            String::new()
-        };
+        let exact = crate::native_keys::exact_row_columns(width, "").join(",");
+        let key = native.as_ref().map(|_| self.key_lookup(name, id, side));
         let read = |source: String, weight: &str| {
             if restricted {
                 if let Some(keys) = &native {
@@ -251,15 +242,14 @@ impl Plan {
                     );
                 }
             }
-            format!("SELECT {cols},{weight} FROM {source}{filter}")
+            format!("SELECT {cols},{weight} FROM {source}")
         };
         let current = read(format!("({source_rows})"), "__n");
         let rows = if before {
             let delta = read(self.out_table(input, width), "__m");
-            let exact = crate::native_keys::exact_row_columns(width, "").join(",");
             format!("SELECT {cols},sum(__n) AS __n FROM ({current} UNION ALL SELECT {cols},-__m AS __n FROM ({delta})) GROUP BY {exact} HAVING sum(__n)>0")
         } else if matches!(self.nodes[id].kind, Kind::Set(_)) {
-            format!("SELECT {cols},sum(__n) AS __n FROM ({current}) GROUP BY {identity}")
+            format!("SELECT {cols},sum(__n) AS __n FROM ({current}) GROUP BY {exact}")
         } else {
             current
         };
@@ -267,11 +257,15 @@ impl Plan {
             let key = if matches!(self.nodes[id].kind, Kind::Join { .. }) {
                 "0".into()
             } else {
-                self.key_lookup(name, id, side)
+                key.expect("arrangement key")
             };
-            format!("(SELECT {key} AS __k,{cols},__n FROM ({rows}))")
+            if matches!(self.nodes[id].kind, Kind::Set(_)) {
+                format!("(SELECT row_number() OVER (ORDER BY {exact}) AS rowid,{key} AS __k,{cols},__n FROM ({rows}))")
+            } else {
+                format!("(SELECT {key} AS __k,{cols},__n FROM ({rows}))")
+            }
         } else {
-            format!("(SELECT {identity} AS rowid,{key} AS __k,{cols},__n FROM ({rows}))")
+            format!("(SELECT row_number() OVER (ORDER BY {exact}) AS rowid,0 AS __k,{cols},__n FROM ({rows}))")
         }
     }
 }

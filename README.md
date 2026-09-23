@@ -151,7 +151,7 @@ is a transaction/read drain; this API has no dataflow timestamp frontier runtime
 
 `xRename` preserves state and index B-trees; `xDestroy` validates owned DDL before
 cleanup. Shared `__ivm_*` catalogs remain after the last view is dropped. New views
-use storage format 9. Compatible formats 2 through 8 rebuild through the existing
+use storage format 11. Compatible formats 2 through 10 rebuild through the existing
 writable-database migration path, removing copied input tables and installing the
 native-key layout. Pre-5 recursive state still requires its matching older
 extension; format 1 and the original ordinary-view prototypes are not migrated.

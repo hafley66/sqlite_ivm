@@ -1,0 +1,50 @@
+[
+  {
+    "run": 0,
+    "plugin": "A",
+    "elapsed_ms": 897.9158750007628,
+    "exit": 0,
+    "stdout_sha256": "e635f295151c51405f23a852e13ef5ca857da1fcb8cf551a064088289fdafd67",
+    "stderr": ""
+  },
+  {
+    "run": 1,
+    "plugin": "B",
+    "elapsed_ms": 840.1501669941354,
+    "exit": 0,
+    "stdout_sha256": "e635f295151c51405f23a852e13ef5ca857da1fcb8cf551a064088289fdafd67",
+    "stderr": ""
+  },
+  {
+    "run": 2,
+    "plugin": "B",
+    "elapsed_ms": 832.8958330021123,
+    "exit": 0,
+    "stdout_sha256": "e635f295151c51405f23a852e13ef5ca857da1fcb8cf551a064088289fdafd67",
+    "stderr": ""
+  },
+  {
+    "run": 3,
+    "plugin": "A",
+    "elapsed_ms": 858.9744170021731,
+    "exit": 0,
+    "stdout_sha256": "e635f295151c51405f23a852e13ef5ca857da1fcb8cf551a064088289fdafd67",
+    "stderr": ""
+  },
+  {
+    "run": 4,
+    "plugin": "A",
+    "elapsed_ms": 874.5297079949523,
+    "exit": 0,
+    "stdout_sha256": "e635f295151c51405f23a852e13ef5ca857da1fcb8cf551a064088289fdafd67",
+    "stderr": ""
+  },
+  {
+    "run": 5,
+    "plugin": "B",
+    "elapsed_ms": 824.9496249991353,
+    "exit": 0,
+    "stdout_sha256": "e635f295151c51405f23a852e13ef5ca857da1fcb8cf551a064088289fdafd67",
+    "stderr": ""
+  }
+]

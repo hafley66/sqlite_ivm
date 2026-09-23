@@ -245,7 +245,7 @@ fn drop_uses_exact_catalog_ownership_and_rejects_missing_or_changed_objects() ->
         |r| r.get(0),
     )?;
     db.execute_batch("DROP INDEX __ivm_earnings_result_key;")?;
-    for replacement in ["", "CREATE INDEX __ivm_earnings_result_key ON earnings_keys(__v)"] {
+    for replacement in ["", "CREATE INDEX __ivm_earnings_result_key ON earnings_keys(k0)"] {
         db.execute_batch(replacement)?;
         assert!(db
             .query_row("SELECT sqlite_ivm_drop('earnings')", [], |r| r

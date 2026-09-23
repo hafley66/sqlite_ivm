@@ -1,0 +1,260 @@
+[
+  {
+    "label": "A",
+    "run": 0,
+    "hash": "8df5e106237fdbf1034e4904dc777f256329be235816bcd3d0ddb6c3ab95da29",
+    "install": {
+      "database_bytes": 20840448,
+      "elapsed_ms": 752.040334,
+      "main_pages": 1145,
+      "page_size": 65536,
+      "phase": "view_installed",
+      "process_peak_rss_bytes": 184598528,
+      "shm_bytes": 32768,
+      "sqlite_allocator_current_bytes": 154917616,
+      "sqlite_allocator_peak_bytes": 155455568,
+      "sqlite_connection_cache_bytes": 90859968,
+      "sqlite_connection_schema_bytes": 4853216,
+      "sqlite_connection_statement_bytes": 13700592,
+      "temp_pages": 551,
+      "wal_bytes": 54283712
+    },
+    "rounds": {
+      "database_bytes": 75038720,
+      "elapsed_ms": 253.270125,
+      "main_pages": 1145,
+      "page_size": 65536,
+      "phase": "rounds_complete",
+      "process_peak_rss_bytes": 225312768,
+      "shm_bytes": 32768,
+      "sqlite_allocator_current_bytes": 171351184,
+      "sqlite_allocator_peak_bytes": 176897296,
+      "sqlite_connection_cache_bytes": 91781056,
+      "sqlite_connection_schema_bytes": 4854528,
+      "sqlite_connection_statement_bytes": 28618880,
+      "temp_pages": 551,
+      "wal_bytes": 68247992
+    },
+    "output": {
+      "output_file": "/private/tmp/c2-nojson-pair-0.rows",
+      "phase": "output",
+      "rounds_run": 2,
+      "rows": 947
+    }
+  },
+  {
+    "label": "B",
+    "run": 1,
+    "hash": "8df5e106237fdbf1034e4904dc777f256329be235816bcd3d0ddb6c3ab95da29",
+    "install": {
+      "database_bytes": 20840448,
+      "elapsed_ms": 720.310166,
+      "main_pages": 1145,
+      "page_size": 65536,
+      "phase": "view_installed",
+      "process_peak_rss_bytes": 198164480,
+      "shm_bytes": 32768,
+      "sqlite_allocator_current_bytes": 163714000,
+      "sqlite_allocator_peak_bytes": 164251648,
+      "sqlite_connection_cache_bytes": 90859968,
+      "sqlite_connection_schema_bytes": 2355472,
+      "sqlite_connection_statement_bytes": 24434016,
+      "temp_pages": 551,
+      "wal_bytes": 54283712
+    },
+    "rounds": {
+      "database_bytes": 75038720,
+      "elapsed_ms": 199.44045899999998,
+      "main_pages": 1145,
+      "page_size": 65536,
+      "phase": "rounds_complete",
+      "process_peak_rss_bytes": 225574912,
+      "shm_bytes": 32768,
+      "sqlite_allocator_current_bytes": 175416240,
+      "sqlite_allocator_peak_bytes": 180978816,
+      "sqlite_connection_cache_bytes": 91781056,
+      "sqlite_connection_schema_bytes": 2356832,
+      "sqlite_connection_statement_bytes": 34457088,
+      "temp_pages": 551,
+      "wal_bytes": 67133472
+    },
+    "output": {
+      "output_file": "/private/tmp/c2-nojson-pair-1.rows",
+      "phase": "output",
+      "rounds_run": 2,
+      "rows": 947
+    }
+  },
+  {
+    "label": "B",
+    "run": 2,
+    "hash": "8df5e106237fdbf1034e4904dc777f256329be235816bcd3d0ddb6c3ab95da29",
+    "install": {
+      "database_bytes": 20840448,
+      "elapsed_ms": 708.536875,
+      "main_pages": 1145,
+      "page_size": 65536,
+      "phase": "view_installed",
+      "process_peak_rss_bytes": 199819264,
+      "shm_bytes": 32768,
+      "sqlite_allocator_current_bytes": 163714000,
+      "sqlite_allocator_peak_bytes": 164251648,
+      "sqlite_connection_cache_bytes": 90859968,
+      "sqlite_connection_schema_bytes": 2355472,
+      "sqlite_connection_statement_bytes": 24434016,
+      "temp_pages": 551,
+      "wal_bytes": 54283712
+    },
+    "rounds": {
+      "database_bytes": 75038720,
+      "elapsed_ms": 248.35258299999998,
+      "main_pages": 1145,
+      "page_size": 65536,
+      "phase": "rounds_complete",
+      "process_peak_rss_bytes": 227459072,
+      "shm_bytes": 32768,
+      "sqlite_allocator_current_bytes": 175416240,
+      "sqlite_allocator_peak_bytes": 180978816,
+      "sqlite_connection_cache_bytes": 91781056,
+      "sqlite_connection_schema_bytes": 2356832,
+      "sqlite_connection_statement_bytes": 34457088,
+      "temp_pages": 551,
+      "wal_bytes": 67133472
+    },
+    "output": {
+      "output_file": "/private/tmp/c2-nojson-pair-2.rows",
+      "phase": "output",
+      "rounds_run": 2,
+      "rows": 947
+    }
+  },
+  {
+    "label": "A",
+    "run": 3,
+    "hash": "8df5e106237fdbf1034e4904dc777f256329be235816bcd3d0ddb6c3ab95da29",
+    "install": {
+      "database_bytes": 20840448,
+      "elapsed_ms": 697.550292,
+      "main_pages": 1145,
+      "page_size": 65536,
+      "phase": "view_installed",
+      "process_peak_rss_bytes": 191234048,
+      "shm_bytes": 32768,
+      "sqlite_allocator_current_bytes": 154917616,
+      "sqlite_allocator_peak_bytes": 155455568,
+      "sqlite_connection_cache_bytes": 90859968,
+      "sqlite_connection_schema_bytes": 4853216,
+      "sqlite_connection_statement_bytes": 13700592,
+      "temp_pages": 551,
+      "wal_bytes": 54283712
+    },
+    "rounds": {
+      "database_bytes": 75038720,
+      "elapsed_ms": 208.105542,
+      "main_pages": 1145,
+      "page_size": 65536,
+      "phase": "rounds_complete",
+      "process_peak_rss_bytes": 227885056,
+      "shm_bytes": 32768,
+      "sqlite_allocator_current_bytes": 171351184,
+      "sqlite_allocator_peak_bytes": 176897296,
+      "sqlite_connection_cache_bytes": 91781056,
+      "sqlite_connection_schema_bytes": 4854528,
+      "sqlite_connection_statement_bytes": 28618880,
+      "temp_pages": 551,
+      "wal_bytes": 68247992
+    },
+    "output": {
+      "output_file": "/private/tmp/c2-nojson-pair-3.rows",
+      "phase": "output",
+      "rounds_run": 2,
+      "rows": 947
+    }
+  },
+  {
+    "label": "A",
+    "run": 4,
+    "hash": "8df5e106237fdbf1034e4904dc777f256329be235816bcd3d0ddb6c3ab95da29",
+    "install": {
+      "database_bytes": 20840448,
+      "elapsed_ms": 723.940333,
+      "main_pages": 1145,
+      "page_size": 65536,
+      "phase": "view_installed",
+      "process_peak_rss_bytes": 191447040,
+      "shm_bytes": 32768,
+      "sqlite_allocator_current_bytes": 154917616,
+      "sqlite_allocator_peak_bytes": 155455568,
+      "sqlite_connection_cache_bytes": 90859968,
+      "sqlite_connection_schema_bytes": 4853216,
+      "sqlite_connection_statement_bytes": 13700592,
+      "temp_pages": 551,
+      "wal_bytes": 54283712
+    },
+    "rounds": {
+      "database_bytes": 75038720,
+      "elapsed_ms": 234.906208,
+      "main_pages": 1145,
+      "page_size": 65536,
+      "phase": "rounds_complete",
+      "process_peak_rss_bytes": 225017856,
+      "shm_bytes": 32768,
+      "sqlite_allocator_current_bytes": 171351184,
+      "sqlite_allocator_peak_bytes": 176897296,
+      "sqlite_connection_cache_bytes": 91781056,
+      "sqlite_connection_schema_bytes": 4854528,
+      "sqlite_connection_statement_bytes": 28618880,
+      "temp_pages": 551,
+      "wal_bytes": 68247992
+    },
+    "output": {
+      "output_file": "/private/tmp/c2-nojson-pair-4.rows",
+      "phase": "output",
+      "rounds_run": 2,
+      "rows": 947
+    }
+  },
+  {
+    "label": "B",
+    "run": 5,
+    "hash": "8df5e106237fdbf1034e4904dc777f256329be235816bcd3d0ddb6c3ab95da29",
+    "install": {
+      "database_bytes": 20840448,
+      "elapsed_ms": 707.6693750000001,
+      "main_pages": 1145,
+      "page_size": 65536,
+      "phase": "view_installed",
+      "process_peak_rss_bytes": 201490432,
+      "shm_bytes": 32768,
+      "sqlite_allocator_current_bytes": 163714000,
+      "sqlite_allocator_peak_bytes": 164251648,
+      "sqlite_connection_cache_bytes": 90859968,
+      "sqlite_connection_schema_bytes": 2355472,
+      "sqlite_connection_statement_bytes": 24434016,
+      "temp_pages": 551,
+      "wal_bytes": 54283712
+    },
+    "rounds": {
+      "database_bytes": 75038720,
+      "elapsed_ms": 226.374,
+      "main_pages": 1145,
+      "page_size": 65536,
+      "phase": "rounds_complete",
+      "process_peak_rss_bytes": 225935360,
+      "shm_bytes": 32768,
+      "sqlite_allocator_current_bytes": 175416240,
+      "sqlite_allocator_peak_bytes": 180978816,
+      "sqlite_connection_cache_bytes": 91781056,
+      "sqlite_connection_schema_bytes": 2356832,
+      "sqlite_connection_statement_bytes": 34457088,
+      "temp_pages": 551,
+      "wal_bytes": 67133472
+    },
+    "output": {
+      "output_file": "/private/tmp/c2-nojson-pair-5.rows",
+      "phase": "output",
+      "rounds_run": 2,
+      "rows": 947
+    }
+  }
+]

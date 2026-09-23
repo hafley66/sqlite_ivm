@@ -123,34 +123,6 @@ pub fn validate_name(name: &str) -> Result<()> {
 pub fn keys_table(name: &str) -> String {
     format!("main.{}", quote(&format!("{name}_keys")))
 }
-/// Interning is idempotent and monotone: one composite takes one id for the
-/// life of the view, so two equal composites can never reach two ids.
-#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
-pub fn intern(db: &Connection, dict: &str, value: &str) -> Result<i64> {
-    // One seek on hit and on miss: the conflict arm updates nothing and still
-    // returns the existing id.
-    statements::query_cached(
-        db,
-        Phase::Maintain,
-        dict,
-        &format!(
-            "INSERT INTO {dict}(__v) VALUES(?1) ON CONFLICT(__v) DO UPDATE SET __v=__v RETURNING __i"
-        ),
-        [value],
-        |r| r.get(0),
-    )
-}
-#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
-pub fn resolve(db: &Connection, dict: &str, id: i64) -> Result<String> {
-    statements::query_cached(
-        db,
-        Phase::Maintain,
-        dict,
-        &format!("SELECT __v FROM {dict} WHERE __i=?1"),
-        [id],
-        |r| r.get(0),
-    )
-}
 pub(crate) enum Role {
     Table(String),
     Range(String, i64, i64),
@@ -279,23 +251,6 @@ impl Plan {
         debug_assert_eq!(self.nodes[id].fields.len(), width);
         out_table(self.out_slots[id], width)
     }
-}
-#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
-pub(crate) fn json_key(parts: Vec<String>) -> String {
-    format!("json_array({})", parts.join(","))
-}
-#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
-pub(crate) fn folded(value: &str) -> String {
-    format!("CASE typeof({value}) WHEN 'blob' THEN json_object('blob',hex({value})) WHEN 'real' THEN CASE WHEN {value}=CAST({value} AS INTEGER) AND typeof(CAST({value} AS INTEGER))='integer' THEN CAST({value} AS INTEGER) ELSE json_object('real',sqlite_ivm_real_hex({value})) END WHEN 'text' THEN {value}||'' ELSE {value} END")
-}
-/// Encoded identity retained for set representatives and recursive membership.
-#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
-pub fn identity_sql(width: usize) -> String {
-    json_key((0..width).map(|i| plain(&format!("c{i}"))).collect())
-}
-#[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
-pub(crate) fn plain(value: &str) -> String {
-    format!("CASE typeof({value}) WHEN 'blob' THEN json_object('blob',hex({value})) WHEN 'real' THEN json_object('real',sqlite_ivm_real_hex({value})) WHEN 'text' THEN {value}||'' ELSE {value} END")
 }
 
 #[tracing::instrument(level = "trace", skip_all, fields(source_file = file!(), source_line = line!()))]
