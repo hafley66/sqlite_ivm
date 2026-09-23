@@ -1,0 +1,5 @@
+0_initial	10	2	12
+0_initial	20	1	11
+1_move_and_add	10	4	26
+2_cross_zero	10	4	12
+3_delete_two	10	2	4

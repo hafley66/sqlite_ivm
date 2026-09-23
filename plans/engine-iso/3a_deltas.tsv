@@ -1,0 +1,13 @@
+0_initial	1	100	1
+0_initial	3	300	1
+1_both_join_inputs	1	200	1
+1_both_join_inputs	2	100	1
+1_both_join_inputs	2	200	1
+2_duplicate_union_support	EMPTY
+3_join_support_retract	EMPTY
+4_last_join_support	1	100	-1
+5_last_union_support	1	200	-1
+6_savepoint_rollback	EMPTY
+7_transaction_rollback	EMPTY
+8_update	2	200	-1
+8_update	2	300	1
