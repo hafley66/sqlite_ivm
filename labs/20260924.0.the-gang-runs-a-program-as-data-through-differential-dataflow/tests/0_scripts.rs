@@ -23,3 +23,18 @@ fn s_w_weights_access() {
 fn s_w_weights_team_cost() {
     println!("{}", support::run::<Dd>("3_weights_team_cost"));
 }
+
+#[test]
+fn s_n1_antijoin() {
+    println!("{}", support::run::<Dd>("4_antijoin"));
+}
+
+#[test]
+fn s_n4_self_join() {
+    println!("{}", support::run::<Dd>("5_self_join"));
+}
+
+#[test]
+fn s_n3_topk() {
+    println!("{}", support::run::<Dd>("6_topk"));
+}

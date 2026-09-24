@@ -1,0 +1,15 @@
+{
+  "rels": [
+    {"id": 0, "name": "membership", "cols": ["Int", "Int"], "kind": "Source"},
+    {"id": 1, "name": "direct_grant", "cols": ["Int", "Int"], "kind": "Source"},
+    {"id": 2, "name": "lonely", "cols": ["Int", "Int"], "kind": "Derived"}
+  ],
+  "nodes": [
+    {"Get": 0},
+    {"Mfp": {"input": 0, "filter": [{"Call": ["Gt", [{"Col": 1}, {"Lit": 10}]]}]}},
+    {"Get": 1},
+    {"Antijoin": {"l": 1, "r": 2, "lk": [0], "rk": [0]}}
+  ],
+  "strata": [{"Let": {"id": 2, "body": 3}}],
+  "outputs": [2]
+}

@@ -122,9 +122,40 @@ impl<'s> Rel for DdRel<'s> {
         c.threshold(|_, w: &W| if *w > 0 { 1 as W } else { 0 })
     }
 
+    fn topk(&mut self, c: Self::C, key: &[ColId], order: &[Order], limit: u32) -> Result<Self::C, EngineError> {
+        let (key, order) = (key.to_vec(), order.to_vec());
+        Ok(c.map(move |row| (cols(&row, &key), row))
+            .reduce(move |_k, input: &[(&Row, W)], output: &mut Vec<(Row, W)>| {
+                let mut live: Vec<(&Row, W)> = input.iter().filter(|(_, w)| *w > 0).map(|(r, w)| (*r, *w)).collect();
+                live.sort_by(|(a, _), (b, _)| rank(&order, a, b));
+                let mut left = limit as W;
+                for (row, w) in live {
+                    if left == 0 {
+                        break;
+                    }
+                    let take = w.min(left);
+                    output.push((row.clone(), take));
+                    left -= take;
+                }
+            })
+            .map(|(_, row)| row))
+    }
+
     fn output(&mut self, rel: RelId, c: Self::C) {
         self.outputs.push((rel, c));
     }
+}
+
+/// `order` first, then the whole row ascending, so ties resolve the same way in every engine.
+fn rank(order: &[Order], a: &Row, b: &Row) -> std::cmp::Ordering {
+    order
+        .iter()
+        .map(|o| {
+            let ord = a[o.col as usize].cmp(&b[o.col as usize]);
+            if o.desc { ord.reverse() } else { ord }
+        })
+        .find(|ord| ord.is_ne())
+        .unwrap_or_else(|| a.cmp(b))
 }
 
 enum Command {
