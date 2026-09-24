@@ -23,7 +23,10 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ivm_emit import load_emit, parse_ddl, parse_query, referenced_relations, split_top_level
+import importlib
+_emit = importlib.import_module("0_ivm_emit")
+load_emit, parse_ddl, parse_query = _emit.load_emit, _emit.parse_ddl, _emit.parse_query
+referenced_relations, split_top_level = _emit.referenced_relations, _emit.split_top_level
 
 
 def longest_chain(names, refs):

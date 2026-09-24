@@ -24,13 +24,17 @@ Writes `frontier_probe.tsv`; prints each verdict.
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ivm_emit import load_emit, parse_ddl, parse_query, referenced_relations
+import importlib
+_emit = importlib.import_module("0_ivm_emit")
+load_emit, parse_ddl, parse_query = _emit.load_emit, _emit.parse_ddl, _emit.parse_query
+referenced_relations = _emit.referenced_relations
 
 SQLITE3 = os.environ.get("SQLITE3", "/opt/homebrew/opt/sqlite/bin/sqlite3")
 
@@ -94,6 +98,8 @@ def probe_one(db, ext, program, candidate, sources):
             f"BEGIN; INSERT INTO {source} VALUES ({row_values}); COMMIT;",
             "SELECT '*reinserted*';",
             f'SELECT count(*) FROM "frontier_{program}";',
+            "SELECT '*fresh*';",
+            f"SELECT count(*) FROM ({candidate}) AS fresh;",
         ]
     else:
         script += [f'SELECT count(*) FROM "frontier_{program}";']
@@ -103,7 +109,7 @@ def probe_one(db, ext, program, candidate, sources):
         [SQLITE3, "-batch", db], input="\n".join(script),
         capture_output=True, text=True,
     )
-    if run.returncode != 0 or "Error" in run.stderr:
+    if run.returncode != 0 or re.search(r"error", run.stderr + run.stdout, re.IGNORECASE):
         return "rejected", error_text(run)
     lines = [l for l in run.stdout.splitlines() if l.strip()]
     if not lines or lines[0] != program:
@@ -114,13 +120,18 @@ def probe_one(db, ext, program, candidate, sources):
             return None
         return lines[lines.index(marker) + 1]
 
-    deleted, reinserted = after("*deleted*"), after("*reinserted*")
+    deleted, reinserted, fresh = after("*deleted*"), after("*reinserted*"), after("*fresh*")
     if deleted is None:
         return "accepted-no-source", f"installed as {program}; no writable source table found"
-    return (
-        "accepted-settled",
-        f"installed as {program}; frontier rows after delete: {deleted}, after re-insert: {reinserted}",
+    detail = (
+        f"installed as {program}; frontier rows after delete: {deleted}, "
+        f"after re-insert: {reinserted}"
     )
+    if fresh is not None:
+        detail += f"; fresh recompute count: {fresh}"
+        if fresh != reinserted:
+            return "accepted-mismatch", detail
+    return "accepted-settled", detail
 
 
 def probe(out, stem, ext, rows):
@@ -170,6 +181,66 @@ def probe(out, stem, ext, rows):
         rows.append(f"{stem}\tminimal_derived\thand-stripped from {sources[0]}\t0\t{verdict}\t{detail}")
         print(f"{stem} minimal_derived: {verdict} :: {detail[:200]}")
         rows.append(f"{stem}\tnote\t-\t-\t-\temitted bodies rejected above; minimal hand-stripped body shows engine liveness\t-")
+
+        # Separate gate: a FRESH process reopening the same DB cannot read
+        # the frontier snapshot (the install's `frontier_<prog>_cN` vtab
+        # modules are connection-local). This is expected-unsupported, kept
+        # as a recorded failure rather than hidden.
+        reopen_db = os.path.join(workdir, "reopen.sqlite")
+        os.makedirs(workdir, exist_ok=True)
+        shutil.copy(store, reopen_db)
+        install_script = "\n".join([
+            "PRAGMA recursive_triggers=ON;",
+            "PRAGMA trusted_schema=ON;",
+            f".load {ext}",
+            f"SELECT sqlite_ivm_frontier_install({sql_literal(prog)}, {sql_literal(minimal)});",
+            "",
+        ])
+        reopen_read = subprocess.run(
+            [SQLITE3, "-batch", reopen_db],
+            input="\n".join([
+                "PRAGMA recursive_triggers=ON;",
+                "PRAGMA trusted_schema=ON;",
+                f".load {ext}",
+                f'SELECT count(*) FROM "frontier_{prog}";',
+                "",
+            ]),
+            capture_output=True, text=True,
+        )
+        failed = (
+            reopen_read.returncode != 0
+            or re.search(r"error", reopen_read.stderr + reopen_read.stdout, re.IGNORECASE)
+        )
+        if failed:
+            rows.append(f"{stem}\treopen_gate\tfresh read after install\t0\treopen-read-failed\t{error_text(reopen_read)}")
+            print(f"{stem} reopen_gate read: failed :: {error_text(reopen_read)[:160]}")
+        else:
+            count = reopen_read.stdout.strip().splitlines()[-1]
+            rows.append(f"{stem}\treopen_gate\tfresh read after install\t0\treopen-read\tfresh process reads snapshot; count={count}")
+            print(f"{stem} reopen_gate read: reopen-read; count={count}")
+
+        reopen_mut = subprocess.run(
+            [SQLITE3, "-batch", reopen_db],
+            input="\n".join([
+                "PRAGMA recursive_triggers=ON;",
+                "PRAGMA trusted_schema=ON;",
+                f".load {ext}",
+                f"BEGIN; DELETE FROM {sources[0]} WHERE __id = 1; COMMIT;",
+                "",
+            ]),
+            capture_output=True, text=True,
+        )
+        mut_failed = (
+            reopen_mut.returncode != 0
+            or re.search(r"error", reopen_mut.stderr + reopen_mut.stdout, re.IGNORECASE)
+        )
+        shutil.rmtree(workdir, ignore_errors=True)
+        if mut_failed:
+            rows.append(f"{stem}\treopen_gate\tfresh committed mutation\t1\treopen-mutate-unsupported\t{error_text(reopen_mut)}")
+            print(f"{stem} reopen_gate mutate: reopen-mutate-unsupported :: {error_text(reopen_mut)[:160]}")
+        else:
+            rows.append(f"{stem}\treopen_gate\tfresh committed mutation\t1\treopen-mutate-vacuous\tDELETE ran but the program is not registered in the fresh process, so no IVM settle was expected")
+            print(f"{stem} reopen_gate mutate: reopen-mutate-vacuous")
 
 
 def main():

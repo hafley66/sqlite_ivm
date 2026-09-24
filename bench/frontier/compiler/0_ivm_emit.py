@@ -63,9 +63,11 @@ def parse_query(query):
     """One module-arg query -> dict with the WITH prefix, CTE bodies, arms.
 
     Emitted shape (sprefa `src/_5_reify/_7_sqlite.rs`): an optional
-    `WITH [RECURSIVE] <ctes> ` prefix and `SELECT <outer> FROM <target>`,
-    where <target> is one quoted CTE name or a parenthesized UNION list.
-    Rule bodies are the top-level UNION branches inside each CTE body.
+    `WITH [RECURSIVE] <ctes> ` prefix and `SELECT <cols> FROM <target>`.
+    The current emitter's outer target is always one quoted CTE name; a
+    parenthesized UNION target would make the outer split ambiguous, so it
+    is rejected instead of guessed. Rule bodies are the top-level UNION
+    branches inside each CTE body.
     """
     with_clause = None
     rest = query
@@ -118,20 +120,26 @@ def parse_query(query):
     if match and not ctes:
         raise ValueError(f"no CTEs parsed in: {query[:120]}...")
     body = rest[pos:].lstrip()
-
-    outer = re.match(r"^SELECT (?P<outer>.*) FROM (?P<target>.+)$", body, re.DOTALL)
+    outer = re.match(r"^SELECT ", body)
     if not outer:
         raise ValueError(f"unrecognized outer SELECT: {body[:120]}...")
-    target = outer.group("target").strip()
-    if target.startswith("(") and target.endswith(")"):
-        arms = split_top_level(target[1:-1], " UNION ")
-    else:
-        arms = [target]
+    # else (extra FROMs, parenthesized targets) is not an emitted shape.
+    pieces = split_top_level(body, " FROM ")
+    if len(pieces) != 2 or not pieces[0].startswith("SELECT "):
+        raise ValueError(f"unrecognized outer SELECT: {body[:120]}...")
+    outer_columns = pieces[0][len("SELECT "):]
+    target = pieces[1].strip()
+    if target.startswith("("):
+        raise ValueError(
+            "parenthesized UNION outer target not produced by the current "
+            f"emitter: {target[:80]}..."
+        )
+    arms = [target]
     return {
         "recursive": with_clause == "WITH RECURSIVE ",
         "ctes": ctes,
         "arms": arms,
-        "outer_columns": outer.group("outer"),
+        "outer_columns": outer_columns,
     }
 
 

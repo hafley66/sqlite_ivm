@@ -27,9 +27,10 @@ mkdir -p "$out"
 emit_case() {
   local stem=$1 src=$2
   local code
-  "$dl8" compile "$sprefa/$src" > "$out/$stem.json"
+  "$dl8" compile "$sprefa/$src" > "$out/$stem.json" 2> "$out/$stem.compile.stderr.txt"
+  printf 'compile\t%s\t%s\n' "$stem" "$?" >> "$out/receipt.tsv"
   code=0
-  "$dl8" emit sqlite "$out/$stem.json" > "$out/$stem.emit.json" || code=$?
+  "$dl8" emit sqlite "$out/$stem.json" > "$out/$stem.emit.json" 2> "$out/$stem.emit.stderr.txt" || code=$?
   printf 'emit\t%s\t%s\n' "$stem" "$code" >> "$out/receipt.tsv"
   STEM=$stem OUT=$out python3 - <<'PY'
 import json, os
@@ -40,11 +41,11 @@ open(f"{out}/{stem}.sql", "w").write(sql)
 PY
   code=0
   "$dl8" eval --db "$out/$stem.store.sqlite" "$out/$stem.json" \
-    > "$out/$stem.closure.json" || code=$?
+    > "$out/$stem.closure.json" 2> "$out/$stem.eval-db.stderr.txt" || code=$?
   printf 'eval-db\t%s\t%s\n' "$stem" "$code" >> "$out/receipt.tsv"
   code=0
   DL8_ENGINE=sqlite "$dl8" eval "$out/$stem.json" \
-    > "$out/$stem.closure-sqlite.json" || code=$?
+    > "$out/$stem.closure-sqlite.json" 2> "$out/$stem.eval-sqlite.stderr.txt" || code=$?
   printf 'eval-sqlite\t%s\t%s\n' "$stem" "$code" >> "$out/receipt.tsv"
 }
 
