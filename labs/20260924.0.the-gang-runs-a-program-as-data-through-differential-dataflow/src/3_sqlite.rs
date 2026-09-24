@@ -1,5 +1,7 @@
 //! SQLite engine: `lower` emits one delta table and one INSERT..SELECT per node; all state lives in tables.
 //! Join uses the pre-image rule: every node integrates only after every fill of the settle has run.
+//! Every read of integrated state is driven from a delta (CROSS JOIN fixes the loop order); aliases of
+//! integrated tables end in `_i` so query plans name them.
 
 use crate::ir::*;
 use crate::rel::*;
@@ -30,7 +32,9 @@ enum Owner {
 
 struct Node {
     c: SqlC,
-    fill: Option<String>,
+    fill: Vec<String>,
+    /// Private state tables of the node (Reduce group accumulators, Min/Max arrangement).
+    ddl: Vec<String>,
     integrated: bool,
     indexes: Vec<Vec<usize>>,
     owner: Owner,
@@ -121,29 +125,22 @@ fn render(e: &Expr, arity: usize, maps: &[String]) -> Result<String, EngineError
     })
 }
 
-/// Key values present in `c`'s delta, as `touched(c0..)`; one row or none for an empty key.
+/// Distinct key values of `c`'s delta as `c0..`; one row or none for an empty key.
 fn touched(c: &SqlC, key: &[usize]) -> String {
     if key.is_empty() {
-        return format!("SELECT 1 FROM {} LIMIT 1", c.d);
+        return format!("(SELECT 1 FROM {} LIMIT 1) t", c.d);
     }
-    format!("SELECT DISTINCT {} FROM {}", key.iter().enumerate().map(|(t, k)| format!("c{k} AS c{t}")).collect::<Vec<_>>().join(", "), c.d)
+    format!("(SELECT DISTINCT {} FROM {}) t", key.iter().enumerate().map(|(t, k)| format!("c{k} AS c{t}")).collect::<Vec<_>>().join(", "), c.d)
 }
 
-/// `EXISTS` test of `alias`'s `cols` against `touched`.
-fn hit(alias: &str, cols: &[usize]) -> String {
-    let t: Vec<usize> = (0..cols.len()).collect();
-    format!("EXISTS (SELECT 1 FROM touched t WHERE {})", on("t", &t, alias, cols))
-}
-
-/// Current live rows of touched groups: I⁻(c) restricted to touched keys plus Δc, consolidated.
-fn current(c: &SqlC, key: &[usize], having: &str) -> String {
-    let all = list("", 0..c.arity);
+/// Rows of `table` whose `at` columns equal a key of `c`'s delta, read by index from the touched keys.
+fn of_touched(c: &SqlC, key: &[usize], table: &str, at: &[usize], arity: usize, sign: &str) -> String {
+    let t: Vec<usize> = (0..key.len()).collect();
     format!(
-        "SELECT {all}, SUM(w) AS w FROM (SELECT {all}, w FROM {i} s WHERE {hit} UNION ALL SELECT {all}, w FROM {d}) \
-         GROUP BY {all} HAVING SUM(w) {having}",
-        i = c.i,
-        d = c.d,
-        hit = hit("s", key)
+        "SELECT {}, {sign}x_i.w AS w FROM {} CROSS JOIN {table} x_i ON {}",
+        (0..arity).map(|x| format!("x_i.c{x} AS c{x}")).collect::<Vec<_>>().join(", "),
+        touched(c, key),
+        on("t", &t, "x_i", at)
     )
 }
 
@@ -173,14 +170,15 @@ impl SqlRel {
             (Some(a), true) => Owner::Loop(a.scc),
             _ => Owner::Settle,
         };
-        let fill = body(&c).map(|body| {
+        let fill = body(&c).into_iter().map(|body| {
             let cols = list("", 0..arity);
             format!(
                 "INSERT INTO {d} ({cols}, w) SELECT {cols}, SUM(w) FROM ({body}) WHERE true GROUP BY {cols} HAVING SUM(w) <> 0",
                 d = c.d
             )
         });
-        self.nodes.push(Node { c: c.clone(), fill, integrated: false, indexes: Vec::new(), owner });
+        let fill = fill.collect();
+        self.nodes.push(Node { c: c.clone(), fill, ddl: Vec::new(), integrated: false, indexes: Vec::new(), owner });
         c
     }
 
@@ -284,14 +282,17 @@ impl Rel for SqlRel {
         let (lk, rk) = (side(0)?, side(1)?);
         self.integrate(&a, lk.clone());
         self.integrate(&b, rk.clone());
-        let select = format!(
-            "SELECT {}, {}, l.w * r.w AS w",
-            (0..a.arity).map(|i| format!("l.c{i} AS c{i}")).collect::<Vec<_>>().join(", "),
-            (0..b.arity).map(|i| format!("r.c{i} AS c{}", a.arity + i)).collect::<Vec<_>>().join(", ")
-        );
-        let cond = on("l", &lk, "r", &rk);
-        let terms = [(&a.d, &b.d), (&a.i, &b.d), (&a.d, &b.i)];
-        let body = terms.iter().map(|(l, r)| format!("{select} FROM {l} l JOIN {r} r ON {cond}")).collect::<Vec<_>>().join(" UNION ALL ");
+        let term = |l: &str, r: &str, l_first: bool| {
+            let (la, ra) = (if l.ends_with("_i") { "l_i" } else { "l_d" }, if r.ends_with("_i") { "r_i" } else { "r_d" });
+            let from = if l_first { format!("{l} {la} CROSS JOIN {r} {ra}") } else { format!("{r} {ra} CROSS JOIN {l} {la}") };
+            format!(
+                "SELECT {}, {}, {la}.w * {ra}.w AS w FROM {from} ON {}",
+                (0..a.arity).map(|i| format!("{la}.c{i} AS c{i}")).collect::<Vec<_>>().join(", "),
+                (0..b.arity).map(|i| format!("{ra}.c{i} AS c{}", a.arity + i)).collect::<Vec<_>>().join(", "),
+                on(la, &lk, ra, &rk)
+            )
+        };
+        let body = [term(&a.d, &b.d, true), term(&a.i, &b.d, false), term(&a.d, &b.i, true)].join(" UNION ALL ");
         Ok(self.push(a.arity + b.arity, a.rec || b.rec, |_| Some(body)))
     }
 
@@ -315,32 +316,77 @@ impl Rel for SqlRel {
         self.union(vec![l, gone])
     }
 
-    /// Recomputes touched groups from I⁻(input) + Δinput, diffed against the stored group rows.
+    /// Per-group accumulators (count, sums) take Δinput by upsert; Min/Max read a private arrangement of
+    /// the input by index. Touched groups emit their new row minus their stored row.
     fn reduce(&mut self, c: Self::C, key: &[ColId], aggs: &[Agg]) -> Self::C {
         self.flat(&c, "Reduce over a LetRec variable");
         let key: Vec<usize> = key.iter().map(|k| *k as usize).collect();
-        self.integrate(&c, key.clone());
         let arity = key.len() + aggs.len();
-        let out = self.push(arity, false, |out| {
-            let values = aggs.iter().map(|agg| match agg {
-                Agg::Count => "SUM(w)".to_string(),
-                Agg::Sum(x) => format!("SUM(c{x} * w)"),
-                Agg::Min(x) => format!("MIN(CASE WHEN w > 0 THEN c{x} END)"),
-                Agg::Max(x) => format!("MAX(CASE WHEN w > 0 THEN c{x} END)"),
-            });
-            let select = key.iter().map(|k| format!("c{k}")).chain(values).enumerate().map(|(i, s)| format!("{s} AS c{i}")).collect::<Vec<_>>().join(", ");
-            let group = if key.is_empty() { String::new() } else { format!("GROUP BY {}", list("", key.iter().copied())) };
-            Some(format!(
-                "WITH touched AS ({touched}), cur AS ({cur}) \
-                 SELECT {select}, 1 AS w FROM cur {group} HAVING SUM(w) > 0 \
-                 UNION ALL SELECT {out_cols}, -w AS w FROM {out_i} o WHERE {hit_o}",
-                touched = touched(&c, &key),
-                cur = current(&c, &key, "<> 0"),
-                out_cols = list("", 0..arity),
-                out_i = out.i,
-                hit_o = hit("o", &(0..key.len()).collect::<Vec<_>>()),
-            ))
+        let out = self.push(arity, false, |_| None);
+        let k = out.node;
+        let (g, arr) = (format!("ivm_n{k}_g"), format!("ivm_n{k}_in"));
+        let gk: Vec<usize> = (0..key.len().max(1)).collect();
+        let gcols = gk.iter().map(|x| format!("g{x}")).collect::<Vec<_>>().join(", ");
+        let kx = if key.is_empty() { vec!["0".to_string()] } else { key.iter().map(|x| format!("c{x}")).collect() };
+        let group = if key.is_empty() { "HAVING COUNT(*) > 0".to_string() } else { format!("GROUP BY {}", kx.join(", ")) };
+        let sums: Vec<(usize, ColId)> = aggs.iter().enumerate().filter_map(|(j, a)| if let Agg::Sum(x) = a { Some((j, *x)) } else { None }).collect();
+        let extremes: Vec<ColId> = aggs.iter().filter_map(|a| if let Agg::Min(x) | Agg::Max(x) = a { Some(*x) } else { None }).collect();
+        let s_cols: String = sums.iter().map(|(j, _)| format!(", a{j}")).collect();
+        let mut ddl = vec![format!(
+            "CREATE TABLE {g} ({}, cnt INTEGER NOT NULL{}, PRIMARY KEY ({gcols})) WITHOUT ROWID",
+            gk.iter().map(|x| format!("g{x} INTEGER NOT NULL")).collect::<Vec<_>>().join(", "),
+            sums.iter().map(|(j, _)| format!(", a{j} INTEGER NOT NULL")).collect::<String>()
+        )];
+        let mut fill = vec![format!(
+            "INSERT INTO {g} ({gcols}, cnt{s_cols}) SELECT {}, SUM(w){} FROM {d} WHERE true {group} \
+             ON CONFLICT ({gcols}) DO UPDATE SET cnt = cnt + excluded.cnt{}",
+            kx.join(", "),
+            sums.iter().map(|(_, x)| format!(", SUM(c{x} * w)")).collect::<String>(),
+            sums.iter().map(|(j, _)| format!(", a{j} = a{j} + excluded.a{j}")).collect::<String>(),
+            d = c.d
+        )];
+        let all = list("", 0..c.arity);
+        if !extremes.is_empty() {
+            ddl.push(format!("CREATE TABLE {arr} ({}, w INTEGER NOT NULL, PRIMARY KEY ({all})) WITHOUT ROWID", decl(c.arity)));
+            for x in &extremes {
+                let cols = key.iter().chain([&(*x as usize)]).map(|x| format!("c{x}")).collect::<Vec<_>>().join(", ");
+                ddl.push(format!("CREATE INDEX IF NOT EXISTS ivm_n{k}_in{x} ON {arr} ({cols}, w)"));
+            }
+            fill.push(format!(
+                "INSERT INTO {arr} ({all}, w) SELECT {all}, SUM(w) FROM {d} WHERE true GROUP BY {all} ON CONFLICT ({all}) DO UPDATE SET w = w + excluded.w",
+                d = c.d
+            ));
+            fill.push(format!("DELETE FROM {arr} WHERE w = 0 AND ({all}) IN (SELECT {all} FROM {d})", d = c.d));
+        }
+        let g_on = |alias: &str| {
+            let pairs: Vec<String> = key.iter().zip(&gk).map(|(x, t)| format!("n_i.c{x} = {alias}.g{t}")).collect();
+            if pairs.is_empty() { "1".to_string() } else { pairs.join(" AND ") }
+        };
+        let values = aggs.iter().enumerate().map(|(j, agg)| match agg {
+            Agg::Count => "g_i.cnt".to_string(),
+            Agg::Sum(_) => format!("g_i.a{j}"),
+            Agg::Min(x) => format!("(SELECT n_i.c{x} FROM {arr} n_i WHERE {} AND n_i.w > 0 ORDER BY n_i.c{x} LIMIT 1)", g_on("g_i")),
+            Agg::Max(x) => format!("(SELECT n_i.c{x} FROM {arr} n_i WHERE {} AND n_i.w > 0 ORDER BY n_i.c{x} DESC LIMIT 1)", g_on("g_i")),
         });
+        let select = gk.iter().take(key.len()).map(|x| format!("g_i.g{x}")).chain(values).enumerate().map(|(i, s)| format!("{s} AS c{i}")).collect::<Vec<_>>().join(", ");
+        let body = format!(
+            "SELECT {select}, 1 AS w FROM (SELECT DISTINCT {kg} FROM {d}) t CROSS JOIN {g} g_i ON {t_on} WHERE g_i.cnt > 0 UNION ALL {gone}",
+            kg = kx.iter().zip(&gk).map(|(e, x)| format!("{e} AS g{x}")).collect::<Vec<_>>().join(", "),
+            d = c.d,
+            t_on = gk.iter().map(|x| format!("t.g{x} = g_i.g{x}")).collect::<Vec<_>>().join(" AND "),
+            gone = of_touched(&c, &key, &out.i, &(0..key.len()).collect::<Vec<_>>(), arity, "-"),
+        );
+        let cols = list("", 0..arity);
+        fill.push(format!("INSERT INTO {} ({cols}, w) SELECT {cols}, SUM(w) FROM ({body}) WHERE true GROUP BY {cols} HAVING SUM(w) <> 0", out.d));
+        fill.push(format!(
+            "DELETE FROM {g} WHERE cnt = 0{} AND ({gcols}) IN (SELECT {} FROM {d})",
+            sums.iter().map(|(j, _)| format!(" AND a{j} = 0")).collect::<String>(),
+            kx.join(", "),
+            d = c.d
+        ));
+        let node = &mut self.nodes[k];
+        node.fill = fill;
+        node.ddl = ddl;
         self.integrate(&out, Vec::new());
         out
     }
@@ -352,14 +398,14 @@ impl Rel for SqlRel {
         let n: Vec<usize> = (0..c.arity).collect();
         self.push(c.arity, false, |_| {
             Some(format!(
-                "SELECT {dc}, CASE WHEN COALESCE(i.w, 0) + d.w > 0 THEN 1 ELSE -1 END AS w \
-                 FROM (SELECT {all}, SUM(w) AS w FROM {d} GROUP BY {all}) d LEFT JOIN {i} i ON {cond} \
-                 WHERE (COALESCE(i.w, 0) > 0) <> (COALESCE(i.w, 0) + d.w > 0)",
+                "SELECT {dc}, CASE WHEN COALESCE(i_i.w, 0) + d.w > 0 THEN 1 ELSE -1 END AS w \
+                 FROM (SELECT {all}, SUM(w) AS w FROM {d} GROUP BY {all}) d LEFT JOIN {i} i_i ON {cond} \
+                 WHERE (COALESCE(i_i.w, 0) > 0) <> (COALESCE(i_i.w, 0) + d.w > 0)",
                 dc = n.iter().map(|x| format!("d.c{x} AS c{x}")).collect::<Vec<_>>().join(", "),
                 all = list("", 0..c.arity),
                 d = c.d,
                 i = c.i,
-                cond = on("i", &n, "d", &n),
+                cond = on("i_i", &n, "d", &n),
             ))
         })
     }
@@ -381,14 +427,13 @@ impl Rel for SqlRel {
                 .collect::<Vec<_>>()
                 .join(", ");
             Some(format!(
-                "WITH touched AS ({touched}), cur AS ({cur}), \
+                "WITH cur AS (SELECT {all}, SUM(w) AS w FROM ({old} UNION ALL SELECT {all}, w FROM {d}) GROUP BY {all} HAVING SUM(w) > 0), \
                  ranked AS (SELECT {all}, w, SUM(w) OVER ({part} ORDER BY {by} ROWS UNBOUNDED PRECEDING) - w AS before FROM cur) \
                  SELECT {all}, MIN(w, {limit} - before) AS w FROM ranked WHERE before < {limit} \
-                 UNION ALL SELECT {all}, -w AS w FROM {out_i} o WHERE {hit_o}",
-                touched = touched(&c, &key),
-                cur = current(&c, &key, "> 0"),
-                out_i = out.i,
-                hit_o = hit("o", &key),
+                 UNION ALL {gone}",
+                old = of_touched(&c, &key, &c.i, &key, c.arity, ""),
+                d = c.d,
+                gone = of_touched(&c, &key, &out.i, &key, c.arity, "-"),
             ))
         });
         self.integrate(&out, key);
@@ -511,6 +556,13 @@ fn decl(arity: usize) -> String {
 }
 
 impl Sql {
+    /// Runs `hook` on the fresh connection before any DDL; the engine keeps no counters itself.
+    pub fn install_observed(program: &Program, hook: Box<dyn FnOnce(&Connection)>) -> Result<Self, EngineError> {
+        let conn = Connection::open_in_memory().map_err(sql_err(Stage::Install))?;
+        hook(&conn);
+        Self::install_on(conn, program)
+    }
+
     pub fn install_on(conn: Connection, p: &Program) -> Result<Self, EngineError> {
         let mut rel = SqlRel::new(p);
         lower(p, &mut rel)?;
@@ -524,14 +576,15 @@ impl Sql {
             let SqlC { node: k, d, i, arity, .. } = &node.c;
             let cols = list("", 0..*arity);
             ddl.push(format!("CREATE TABLE {d} ({}, w INTEGER NOT NULL)", decl(*arity)));
+            ddl.extend(node.ddl.iter().cloned());
             for (s, plan) in rel.sccs.iter().enumerate() {
                 if plan.at == *k {
                     steps.push(Step::Loop(s));
                 }
             }
             match node.owner {
-                Owner::Loop(s) => sccs[s].fills.extend(node.fill.clone()),
-                _ => steps.extend(node.fill.clone().map(Step::Fill)),
+                Owner::Loop(s) => sccs[s].fills.extend(node.fill.iter().cloned()),
+                _ => steps.extend(node.fill.iter().cloned().map(Step::Fill)),
             }
             if let Owner::Copy(s) = node.owner {
                 let hold = format!("ivm_n{k}_hold");
@@ -567,7 +620,7 @@ impl Sql {
                 for t in [&nx, &del, &acc] {
                     ddl.push(format!("CREATE TABLE {t} ({}, w INTEGER NOT NULL)", decl(n)));
                 }
-                let live = |alias: &str, table: &str| format!("EXISTS (SELECT 1 FROM {table} x WHERE {} AND x.w > 0)", on("x", &all, alias, &all));
+                let live = |alias: &str, table: &str| format!("EXISTS (SELECT 1 FROM {table} x_i WHERE {} AND x_i.w > 0)", on("x_i", &all, alias, &all));
                 scc.vars.push(VarSql {
                     over_delete: format!(
                         "INSERT INTO {nx} SELECT {cols}, -1 FROM (SELECT DISTINCT {cols} FROM {bd} WHERE w < 0) t WHERE {}",
@@ -627,7 +680,8 @@ impl Sql {
             .collect();
         conn.execute_batch(&ddl.join(";\n")).map_err(sql_err(Stage::Install))?;
         let engine = Self { conn, tick: 0, sources, steps, sccs, integrates, clears, outputs };
-        let all = engine.statements();
+        let mut all = engine.statements();
+        all.extend(engine.outputs.iter().map(|o| &o.snapshot));
         engine.conn.set_prepared_statement_cache_capacity(all.len() + 8);
         for sql in all {
             engine.conn.prepare_cached(sql).map_err(sql_err(Stage::Install))?;
@@ -635,7 +689,8 @@ impl Sql {
         Ok(engine)
     }
 
-    fn statements(&self) -> Vec<&String> {
+    /// Every statement settle can run; snapshot reads are left out.
+    pub fn statements(&self) -> Vec<&String> {
         let mut all: Vec<&String> = self.sources.iter().flat_map(|s| [&s.count, &s.stage]).collect();
         all.extend(self.steps.iter().filter_map(|s| match s {
             Step::Fill(sql) => Some(sql),
@@ -651,7 +706,7 @@ impl Sql {
             }
         }
         all.extend(self.integrates.iter().chain(&self.clears));
-        all.extend(self.outputs.iter().flat_map(|o| [&o.delta, &o.snapshot]));
+        all.extend(self.outputs.iter().map(|o| &o.delta));
         all
     }
 
