@@ -1,0 +1,9 @@
+emit	2_partial	1
+eval-db	2_partial	0
+eval-sqlite	2_partial	0
+emit	1_transitive	0
+eval-db	1_transitive	0
+eval-sqlite	1_transitive	0
+emit	0_union_filter	0
+eval-db	0_union_filter	0
+eval-sqlite	0_union_filter	0

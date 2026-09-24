@@ -1,0 +1,10 @@
+{
+  "dep_depth": 0,
+  "derived_heads": 0,
+  "program_rules": 138,
+  "repeated_ctes": 0,
+  "rule_bodies": 0,
+  "sql_bytes": 0,
+  "view_installs": 0,
+  "views": []
+}

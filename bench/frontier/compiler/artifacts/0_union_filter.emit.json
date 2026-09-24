@@ -1,0 +1,30 @@
+{
+  "diagnostics": [],
+  "views": [
+    {
+      "ddl": "CREATE VIRTUAL TABLE \"0_union_filter.FromA_v1\" USING sqlite_ivm('WITH \"FromA_v1\"(\"c0_term\") AS (SELECT DISTINCT t0.\"c1_term\" FROM \"0_union_filter.Edge_a2\" AS t0 JOIN \"0_union_filter.term\" AS t1 ON (t1.\"id\" = t0.\"c0_term\") JOIN \"0_union_filter.term_arg\" AS t2 ON (t2.\"term\" = t0.\"c0_term\" AND t2.\"position\" = 0) JOIN \"0_union_filter.term\" AS t3 ON (t3.\"id\" = t2.\"child\") JOIN \"0_union_filter.sym\" AS t4 ON (t4.\"text\" = ''const'') JOIN \"0_union_filter.sym\" AS t5 ON (t5.\"id\" = t3.\"sym\" AND t1.\"kind\" = 5 AND t1.\"sym\" = t4.\"id\" AND t3.\"kind\" = 4 AND t5.\"text\" = ''a'') WHERE 1) SELECT \"c0_term\" FROM \"FromA_v1\"')",
+      "relation": "FromA",
+      "stratum": 0
+    },
+    {
+      "ddl": "CREATE VIRTUAL TABLE \"0_union_filter.Heavy_v2\" USING sqlite_ivm('WITH \"Heavy_v2\"(\"c0_term\", \"c1_term\") AS (SELECT DISTINCT t0.\"c0_term\", t0.\"c1_term\" FROM \"0_union_filter.Weight_a2\" AS t0 JOIN \"0_union_filter.term\" AS t1 ON (t1.\"id\" = t0.\"c1_term\") JOIN \"0_union_filter.term_arg\" AS t2 ON (t2.\"term\" = t0.\"c1_term\" AND t2.\"position\" = 0) JOIN \"0_union_filter.term\" AS t3 ON (t3.\"id\" = t2.\"child\") JOIN \"0_union_filter.sym\" AS t4 ON (t4.\"text\" = ''const'' AND t1.\"kind\" = 5 AND t1.\"sym\" = t4.\"id\" AND t3.\"kind\" = 0 AND t3.\"ival\" > 5) WHERE 1) SELECT \"c0_term\", \"c1_term\" FROM \"Heavy_v2\"')",
+      "relation": "Heavy",
+      "stratum": 0
+    },
+    {
+      "ddl": "CREATE VIRTUAL TABLE \"0_union_filter.Shifted_v2\" USING sqlite_ivm('WITH \"Shifted_v2\"(\"c0_term\", \"c1_int\") AS (SELECT DISTINCT t0.\"c0_term\", (t3.\"ival\" + 10) FROM \"0_union_filter.Weight_a2\" AS t0 JOIN \"0_union_filter.term\" AS t1 ON (t1.\"id\" = t0.\"c1_term\") JOIN \"0_union_filter.term_arg\" AS t2 ON (t2.\"term\" = t0.\"c1_term\" AND t2.\"position\" = 0) JOIN \"0_union_filter.term\" AS t3 ON (t3.\"id\" = t2.\"child\") JOIN \"0_union_filter.sym\" AS t4 ON (t4.\"text\" = ''const'' AND t1.\"kind\" = 5 AND t1.\"sym\" = t4.\"id\" AND t3.\"kind\" = 0 AND typeof((t3.\"ival\" + 10)) = ''integer'' AND 1) WHERE 1) SELECT \"c0_term\", \"c1_int\" FROM \"Shifted_v2\"')",
+      "relation": "Shifted",
+      "stratum": 0
+    },
+    {
+      "ddl": "CREATE VIRTUAL TABLE \"0_union_filter.Tagged_v2\" USING sqlite_ivm('WITH \"Heavy_v2\"(\"c0_term\", \"c1_term\") AS (SELECT DISTINCT t0.\"c0_term\", t0.\"c1_term\" FROM \"0_union_filter.Weight_a2\" AS t0 JOIN \"0_union_filter.term\" AS t1 ON (t1.\"id\" = t0.\"c1_term\") JOIN \"0_union_filter.term_arg\" AS t2 ON (t2.\"term\" = t0.\"c1_term\" AND t2.\"position\" = 0) JOIN \"0_union_filter.term\" AS t3 ON (t3.\"id\" = t2.\"child\") JOIN \"0_union_filter.sym\" AS t4 ON (t4.\"text\" = ''const'' AND t1.\"kind\" = 5 AND t1.\"sym\" = t4.\"id\" AND t3.\"kind\" = 0 AND t3.\"ival\" > 5) WHERE 1), \"Tagged_v2\"(\"c0_term\", \"c1_term\") AS (SELECT DISTINCT t0.\"c0_term\", t1.\"id\" FROM \"Heavy_v2\" AS t0 JOIN \"0_union_filter.term\" AS t1 ON (1) JOIN \"0_union_filter.term\" AS t2 ON (t2.\"id\" = t1.\"id\") JOIN \"0_union_filter.term_arg\" AS t3 ON (t3.\"term\" = t1.\"id\" AND t3.\"position\" = 0) JOIN \"0_union_filter.term\" AS t4 ON (t4.\"id\" = t3.\"child\") JOIN \"0_union_filter.sym\" AS t5 ON (t5.\"text\" = ''const'') JOIN \"0_union_filter.sym\" AS t6 ON (t6.\"id\" = t4.\"sym\" AND t2.\"kind\" = 5 AND t2.\"sym\" = t5.\"id\" AND t4.\"kind\" = 4 AND t6.\"text\" = ''heavy'') WHERE 1) SELECT \"c0_term\", \"c1_term\" FROM \"Tagged_v2\"')",
+      "relation": "Tagged",
+      "stratum": 0
+    },
+    {
+      "ddl": "CREATE VIRTUAL TABLE \"0_union_filter.Touched_v1\" USING sqlite_ivm('WITH \"Touched_v1\"(\"c0_term\") AS (SELECT DISTINCT t0.\"c0_term\" FROM \"0_union_filter.Edge_a2\" AS t0 WHERE 1 UNION SELECT DISTINCT t0.\"c1_term\" FROM \"0_union_filter.Edge_a2\" AS t0 WHERE 1) SELECT \"c0_term\" FROM \"Touched_v1\"')",
+      "relation": "Touched",
+      "stratum": 0
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "dep_depth": 2,
+  "derived_heads": 1,
+  "program_rules": 130,
+  "repeated_ctes": 0,
+  "rule_bodies": 3,
+  "sql_bytes": 478,
+  "view_installs": 1,
+  "views": [
+    {
+      "ctes": [
+        "\"Reach_r2\"",
+        "\"Reach_v2\""
+      ],
+      "name": "\"1_transitive.Reach_v2\"",
+      "recursive": true
+    }
+  ]
+}

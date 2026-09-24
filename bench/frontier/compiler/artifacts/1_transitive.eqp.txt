@@ -1,0 +1,9 @@
+-- "1_transitive.Reach_v2"
+QUERY PLAN
+|--CO-ROUTINE Reach_r2
+|  |--SETUP
+|  |  `--SCAN t0
+|  `--RECURSIVE STEP
+|     |--SCAN t0
+|     `--SEARCH t1 USING COVERING INDEX sqlite_autoindex_1_transitive.Edge_a2_1 (c0_term=?)
+`--SCAN Reach_r2

@@ -1,0 +1,1518 @@
+{
+  "closure": [
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                    }
+                  ],
+                  "f": "file"
+                }
+              ],
+              "f": "module"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            {
+              "a": "MaybePatch"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "a": "prelude"
+                    },
+                    {
+                      "args": [
+                        {
+                          "a": "prelude"
+                        },
+                        16
+                      ],
+                      "f": "reader_node"
+                    }
+                  ],
+                  "f": "owner"
+                },
+                [
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          {
+                            "a": "prelude"
+                          },
+                          {
+                            "args": [
+                              {
+                                "a": "prelude"
+                              },
+                              3
+                            ],
+                            "f": "reader_node"
+                          }
+                        ],
+                        "f": "owner"
+                      },
+                      [
+                        {
+                          "args": [
+                            {
+                              "args": [
+                                {
+                                  "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                                }
+                              ],
+                              "f": "file"
+                            },
+                            {
+                              "args": [
+                                {
+                                  "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                                },
+                                3
+                              ],
+                              "f": "reader_node"
+                            }
+                          ],
+                          "f": "owner"
+                        }
+                      ]
+                    ],
+                    "f": "application"
+                  }
+                ]
+              ],
+              "f": "application"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            5
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": ":"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                    }
+                  ],
+                  "f": "file"
+                }
+              ],
+              "f": "module"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            {
+              "a": "UserPatch"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "a": "prelude"
+                    },
+                    {
+                      "args": [
+                        {
+                          "a": "prelude"
+                        },
+                        3
+                      ],
+                      "f": "reader_node"
+                    }
+                  ],
+                  "f": "owner"
+                },
+                [
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          {
+                            "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                          }
+                        ],
+                        "f": "file"
+                      },
+                      {
+                        "args": [
+                          {
+                            "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                          },
+                          3
+                        ],
+                        "f": "reader_node"
+                      }
+                    ],
+                    "f": "owner"
+                  }
+                ]
+              ],
+              "f": "application"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            4
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": ":"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                    }
+                  ],
+                  "f": "file"
+                },
+                {
+                  "args": [
+                    {
+                      "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                    },
+                    33
+                  ],
+                  "f": "reader_node"
+                }
+              ],
+              "f": "owner"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            {
+              "a": "mode"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "a": "str"
+                    }
+                  ],
+                  "f": "primitive"
+                },
+                [
+                  {
+                    "s": "copy"
+                  }
+                ]
+              ],
+              "f": "application"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            0
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": ":"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                    }
+                  ],
+                  "f": "file"
+                },
+                {
+                  "args": [
+                    {
+                      "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                    },
+                    79
+                  ],
+                  "f": "reader_node"
+                }
+              ],
+              "f": "owner"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            {
+              "a": "unique"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "a": "str"
+                    }
+                  ],
+                  "f": "primitive"
+                },
+                [
+                  {
+                    "s": "yes"
+                  }
+                ]
+              ],
+              "f": "application"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            0
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": ":"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                    }
+                  ],
+                  "f": "file"
+                },
+                {
+                  "args": [
+                    {
+                      "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                    },
+                    88
+                  ],
+                  "f": "reader_node"
+                }
+              ],
+              "f": "owner"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "a": "prelude"
+                    },
+                    {
+                      "args": [
+                        {
+                          "a": "prelude"
+                        },
+                        200
+                      ],
+                      "f": "reader_node"
+                    }
+                  ],
+                  "f": "owner"
+                },
+                [
+                  {
+                    "s": "account"
+                  },
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          {
+                            "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                          }
+                        ],
+                        "f": "file"
+                      },
+                      {
+                        "args": [
+                          {
+                            "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                          },
+                          79
+                        ],
+                        "f": "reader_node"
+                      }
+                    ],
+                    "f": "owner"
+                  }
+                ]
+              ],
+              "f": "application"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "a": "int"
+                }
+              ],
+              "f": "primitive"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            0
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": ":"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                    }
+                  ],
+                  "f": "file"
+                },
+                {
+                  "args": [
+                    {
+                      "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                    },
+                    88
+                  ],
+                  "f": "reader_node"
+                }
+              ],
+              "f": "owner"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "a": "prelude"
+                    },
+                    {
+                      "args": [
+                        {
+                          "a": "prelude"
+                        },
+                        200
+                      ],
+                      "f": "reader_node"
+                    }
+                  ],
+                  "f": "owner"
+                },
+                [
+                  {
+                    "s": "revision"
+                  },
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          {
+                            "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                          }
+                        ],
+                        "f": "file"
+                      },
+                      {
+                        "args": [
+                          {
+                            "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                          },
+                          79
+                        ],
+                        "f": "reader_node"
+                      }
+                    ],
+                    "f": "owner"
+                  }
+                ]
+              ],
+              "f": "application"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "a": "int"
+                }
+              ],
+              "f": "primitive"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            2
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": ":"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "a": "str"
+                }
+              ],
+              "f": "primitive"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            [
+              {
+                "args": [
+                  {
+                    "s": "copy"
+                  }
+                ],
+                "f": "const"
+              }
+            ]
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "a": "str"
+                    }
+                  ],
+                  "f": "primitive"
+                },
+                [
+                  {
+                    "s": "copy"
+                  }
+                ]
+              ],
+              "f": "application"
+            }
+          ],
+          "f": "ref"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "intern"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "a": "str"
+                }
+              ],
+              "f": "primitive"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            [
+              {
+                "args": [
+                  {
+                    "s": "yes"
+                  }
+                ],
+                "f": "const"
+              }
+            ]
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "a": "str"
+                    }
+                  ],
+                  "f": "primitive"
+                },
+                [
+                  {
+                    "s": "yes"
+                  }
+                ]
+              ],
+              "f": "application"
+            }
+          ],
+          "f": "ref"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "intern"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "a": "prelude"
+                },
+                {
+                  "args": [
+                    {
+                      "a": "prelude"
+                    },
+                    3
+                  ],
+                  "f": "reader_node"
+                }
+              ],
+              "f": "owner"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            [
+              {
+                "args": [
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          {
+                            "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                          }
+                        ],
+                        "f": "file"
+                      },
+                      {
+                        "args": [
+                          {
+                            "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                          },
+                          3
+                        ],
+                        "f": "reader_node"
+                      }
+                    ],
+                    "f": "owner"
+                  }
+                ],
+                "f": "ref"
+              }
+            ]
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "a": "prelude"
+                    },
+                    {
+                      "args": [
+                        {
+                          "a": "prelude"
+                        },
+                        3
+                      ],
+                      "f": "reader_node"
+                    }
+                  ],
+                  "f": "owner"
+                },
+                [
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          {
+                            "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                          }
+                        ],
+                        "f": "file"
+                      },
+                      {
+                        "args": [
+                          {
+                            "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                          },
+                          3
+                        ],
+                        "f": "reader_node"
+                      }
+                    ],
+                    "f": "owner"
+                  }
+                ]
+              ],
+              "f": "application"
+            }
+          ],
+          "f": "ref"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "intern"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "a": "prelude"
+                },
+                {
+                  "args": [
+                    {
+                      "a": "prelude"
+                    },
+                    16
+                  ],
+                  "f": "reader_node"
+                }
+              ],
+              "f": "owner"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            [
+              {
+                "args": [
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          {
+                            "a": "prelude"
+                          },
+                          {
+                            "args": [
+                              {
+                                "a": "prelude"
+                              },
+                              3
+                            ],
+                            "f": "reader_node"
+                          }
+                        ],
+                        "f": "owner"
+                      },
+                      [
+                        {
+                          "args": [
+                            {
+                              "args": [
+                                {
+                                  "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                                }
+                              ],
+                              "f": "file"
+                            },
+                            {
+                              "args": [
+                                {
+                                  "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                                },
+                                3
+                              ],
+                              "f": "reader_node"
+                            }
+                          ],
+                          "f": "owner"
+                        }
+                      ]
+                    ],
+                    "f": "application"
+                  }
+                ],
+                "f": "ref"
+              }
+            ]
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "a": "prelude"
+                    },
+                    {
+                      "args": [
+                        {
+                          "a": "prelude"
+                        },
+                        16
+                      ],
+                      "f": "reader_node"
+                    }
+                  ],
+                  "f": "owner"
+                },
+                [
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          {
+                            "a": "prelude"
+                          },
+                          {
+                            "args": [
+                              {
+                                "a": "prelude"
+                              },
+                              3
+                            ],
+                            "f": "reader_node"
+                          }
+                        ],
+                        "f": "owner"
+                      },
+                      [
+                        {
+                          "args": [
+                            {
+                              "args": [
+                                {
+                                  "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                                }
+                              ],
+                              "f": "file"
+                            },
+                            {
+                              "args": [
+                                {
+                                  "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                                },
+                                3
+                              ],
+                              "f": "reader_node"
+                            }
+                          ],
+                          "f": "owner"
+                        }
+                      ]
+                    ],
+                    "f": "application"
+                  }
+                ]
+              ],
+              "f": "application"
+            }
+          ],
+          "f": "ref"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "intern"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "a": "prelude"
+                },
+                {
+                  "args": [
+                    {
+                      "a": "prelude"
+                    },
+                    200
+                  ],
+                  "f": "reader_node"
+                }
+              ],
+              "f": "owner"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            [
+              {
+                "args": [
+                  {
+                    "s": "account"
+                  }
+                ],
+                "f": "const"
+              },
+              {
+                "args": [
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          {
+                            "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                          }
+                        ],
+                        "f": "file"
+                      },
+                      {
+                        "args": [
+                          {
+                            "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                          },
+                          79
+                        ],
+                        "f": "reader_node"
+                      }
+                    ],
+                    "f": "owner"
+                  }
+                ],
+                "f": "ref"
+              }
+            ]
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "a": "prelude"
+                    },
+                    {
+                      "args": [
+                        {
+                          "a": "prelude"
+                        },
+                        200
+                      ],
+                      "f": "reader_node"
+                    }
+                  ],
+                  "f": "owner"
+                },
+                [
+                  {
+                    "s": "account"
+                  },
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          {
+                            "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                          }
+                        ],
+                        "f": "file"
+                      },
+                      {
+                        "args": [
+                          {
+                            "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                          },
+                          79
+                        ],
+                        "f": "reader_node"
+                      }
+                    ],
+                    "f": "owner"
+                  }
+                ]
+              ],
+              "f": "application"
+            }
+          ],
+          "f": "ref"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "intern"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "a": "prelude"
+                },
+                {
+                  "args": [
+                    {
+                      "a": "prelude"
+                    },
+                    200
+                  ],
+                  "f": "reader_node"
+                }
+              ],
+              "f": "owner"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            [
+              {
+                "args": [
+                  {
+                    "s": "revision"
+                  }
+                ],
+                "f": "const"
+              },
+              {
+                "args": [
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          {
+                            "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                          }
+                        ],
+                        "f": "file"
+                      },
+                      {
+                        "args": [
+                          {
+                            "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                          },
+                          79
+                        ],
+                        "f": "reader_node"
+                      }
+                    ],
+                    "f": "owner"
+                  }
+                ],
+                "f": "ref"
+              }
+            ]
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    {
+                      "a": "prelude"
+                    },
+                    {
+                      "args": [
+                        {
+                          "a": "prelude"
+                        },
+                        200
+                      ],
+                      "f": "reader_node"
+                    }
+                  ],
+                  "f": "owner"
+                },
+                [
+                  {
+                    "s": "revision"
+                  },
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          {
+                            "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                          }
+                        ],
+                        "f": "file"
+                      },
+                      {
+                        "args": [
+                          {
+                            "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                          },
+                          79
+                        ],
+                        "f": "reader_node"
+                      }
+                    ],
+                    "f": "owner"
+                  }
+                ]
+              ],
+              "f": "application"
+            }
+          ],
+          "f": "ref"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "intern"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            []
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "nil"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            7
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "s": "Ada"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "a": "prelude"
+                  },
+                  {
+                    "args": [
+                      {
+                        "a": "prelude"
+                      },
+                      183
+                    ],
+                    "f": "reader_node"
+                  }
+                ],
+                "f": "owner"
+              },
+              [
+                {
+                  "args": [
+                    {
+                      "args": [
+                        {
+                          "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                        }
+                      ],
+                      "f": "file"
+                    },
+                    {
+                      "args": [
+                        {
+                          "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                        },
+                        3
+                      ],
+                      "f": "reader_node"
+                    }
+                  ],
+                  "f": "owner"
+                },
+                {
+                  "args": [
+                    {
+                      "args": [
+                        {
+                          "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                        }
+                      ],
+                      "f": "file"
+                    },
+                    {
+                      "args": [
+                        {
+                          "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                        },
+                        33
+                      ],
+                      "f": "reader_node"
+                    }
+                  ],
+                  "f": "owner"
+                }
+              ]
+            ],
+            "f": "application"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            []
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "prelude"
+              },
+              {
+                "args": [
+                  {
+                    "a": "prelude"
+                  },
+                  56
+                ],
+                "f": "reader_node"
+              }
+            ],
+            "f": "owner"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            7
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "s": "Ada"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                  }
+                ],
+                "f": "file"
+              },
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/tests/fixtures/2_partial.dl7"
+                  },
+                  3
+                ],
+                "f": "reader_node"
+              }
+            ],
+            "f": "owner"
+          }
+        ],
+        "f": "ref"
+      }
+    }
+  ],
+  "diagnostics": []
+}

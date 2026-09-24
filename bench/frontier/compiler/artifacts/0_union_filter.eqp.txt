@@ -1,0 +1,59 @@
+-- "0_union_filter.FromA_v1"
+QUERY PLAN
+|--CO-ROUTINE FromA_v1
+|  |--SCAN t1
+|  |--SEARCH t2 USING PRIMARY KEY (term=? AND position=?)
+|  |--SEARCH t3 USING INTEGER PRIMARY KEY (rowid=?)
+|  |--SEARCH t4 USING INTEGER PRIMARY KEY (rowid=?)
+|  |--SEARCH t5 USING INTEGER PRIMARY KEY (rowid=?)
+|  |--SEARCH t0 USING COVERING INDEX sqlite_autoindex_0_union_filter.Edge_a2_1 (c0_term=?)
+|  `--USE TEMP B-TREE FOR DISTINCT
+`--SCAN FromA_v1
+-- "0_union_filter.Heavy_v2"
+QUERY PLAN
+|--CO-ROUTINE Heavy_v2
+|  |--SEARCH t4 USING COVERING INDEX sqlite_autoindex_0_union_filter.sym_1 (text=?)
+|  |--SCAN t0 USING COVERING INDEX sqlite_autoindex_0_union_filter.Weight_a2_1
+|  |--SEARCH t1 USING INTEGER PRIMARY KEY (rowid=?)
+|  |--SEARCH t2 USING PRIMARY KEY (term=? AND position=?)
+|  `--SEARCH t3 USING INTEGER PRIMARY KEY (rowid=?)
+`--SCAN Heavy_v2
+-- "0_union_filter.Shifted_v2"
+QUERY PLAN
+|--CO-ROUTINE Shifted_v2
+|  |--SEARCH t4 USING COVERING INDEX sqlite_autoindex_0_union_filter.sym_1 (text=?)
+|  |--SCAN t0 USING COVERING INDEX sqlite_autoindex_0_union_filter.Weight_a2_1
+|  |--SEARCH t1 USING INTEGER PRIMARY KEY (rowid=?)
+|  |--SEARCH t2 USING PRIMARY KEY (term=? AND position=?)
+|  |--SEARCH t3 USING INTEGER PRIMARY KEY (rowid=?)
+|  `--USE TEMP B-TREE FOR DISTINCT
+`--SCAN Shifted_v2
+-- "0_union_filter.Tagged_v2"
+QUERY PLAN
+|--CO-ROUTINE Tagged_v2
+|  |--CO-ROUTINE Heavy_v2
+|  |  |--SEARCH t4 USING COVERING INDEX sqlite_autoindex_0_union_filter.sym_1 (text=?)
+|  |  |--SCAN t0 USING COVERING INDEX sqlite_autoindex_0_union_filter.Weight_a2_1
+|  |  |--SEARCH t1 USING INTEGER PRIMARY KEY (rowid=?)
+|  |  |--SEARCH t2 USING PRIMARY KEY (term=? AND position=?)
+|  |  `--SEARCH t3 USING INTEGER PRIMARY KEY (rowid=?)
+|  |--SEARCH t5 USING COVERING INDEX sqlite_autoindex_0_union_filter.sym_1 (text=?)
+|  |--SEARCH t6 USING COVERING INDEX sqlite_autoindex_0_union_filter.sym_1 (text=?)
+|  |--SCAN t2
+|  |--SEARCH t1 USING INTEGER PRIMARY KEY (rowid=?)
+|  |--SEARCH t3 USING PRIMARY KEY (term=? AND position=?)
+|  |--SEARCH t4 USING INTEGER PRIMARY KEY (rowid=?)
+|  |--SCAN t0
+|  `--USE TEMP B-TREE FOR DISTINCT
+`--SCAN Tagged_v2
+-- "0_union_filter.Touched_v1"
+QUERY PLAN
+|--CO-ROUTINE Touched_v1
+|  `--MERGE (UNION)
+|     |--LEFT
+|     |  `--SCAN t0 USING COVERING INDEX sqlite_autoindex_0_union_filter.Edge_a2_1
+|     `--RIGHT
+|        |--SCAN t0
+|        |--USE TEMP B-TREE FOR DISTINCT
+|        `--USE TEMP B-TREE FOR ORDER BY
+`--SCAN Touched_v1

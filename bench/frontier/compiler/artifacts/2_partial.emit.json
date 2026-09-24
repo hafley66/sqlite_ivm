@@ -1,0 +1,80 @@
+{
+  "diagnostics": [
+    {
+      "payload": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "excluded_request"
+              },
+              0
+            ],
+            "f": "rule"
+          },
+          {
+            "args": [
+              {
+                "a": "selected_request"
+              }
+            ],
+            "f": "depends_on"
+          }
+        ],
+        "f": "emit_sqlite_unsupported"
+      },
+      "phase": "emit"
+    },
+    {
+      "payload": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "history_request"
+              },
+              0
+            ],
+            "f": "rule"
+          },
+          {
+            "args": [
+              {
+                "a": "HistoryV1"
+              }
+            ],
+            "f": "relation"
+          }
+        ],
+        "f": "emit_sqlite_unsupported"
+      },
+      "phase": "emit"
+    },
+    {
+      "payload": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "selected_request"
+              },
+              0
+            ],
+            "f": "rule"
+          },
+          {
+            "args": [
+              {
+                "a": "Partial"
+              }
+            ],
+            "f": "relation"
+          }
+        ],
+        "f": "emit_sqlite_unsupported"
+      },
+      "phase": "emit"
+    }
+  ],
+  "views": []
+}

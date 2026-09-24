@@ -1,0 +1,47 @@
+{
+  "dep_depth": 2,
+  "derived_heads": 5,
+  "program_rules": 134,
+  "repeated_ctes": 1,
+  "rule_bodies": 7,
+  "sql_bytes": 3257,
+  "view_installs": 5,
+  "views": [
+    {
+      "ctes": [
+        "\"FromA_v1\""
+      ],
+      "name": "\"0_union_filter.FromA_v1\"",
+      "recursive": false
+    },
+    {
+      "ctes": [
+        "\"Heavy_v2\""
+      ],
+      "name": "\"0_union_filter.Heavy_v2\"",
+      "recursive": false
+    },
+    {
+      "ctes": [
+        "\"Shifted_v2\""
+      ],
+      "name": "\"0_union_filter.Shifted_v2\"",
+      "recursive": false
+    },
+    {
+      "ctes": [
+        "\"Heavy_v2\"",
+        "\"Tagged_v2\""
+      ],
+      "name": "\"0_union_filter.Tagged_v2\"",
+      "recursive": false
+    },
+    {
+      "ctes": [
+        "\"Touched_v1\""
+      ],
+      "name": "\"0_union_filter.Touched_v1\"",
+      "recursive": false
+    }
+  ]
+}

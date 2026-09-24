@@ -1,0 +1,906 @@
+{
+  "closure": [
+    {
+      "args": [
+        {
+          "args": [
+            []
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "nil"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            []
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "prelude"
+              },
+              {
+                "args": [
+                  {
+                    "a": "prelude"
+                  },
+                  56
+                ],
+                "f": "reader_node"
+              }
+            ],
+            "f": "owner"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "s": "a"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "s": "b"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  }
+                ],
+                "f": "file"
+              },
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  },
+                  3
+                ],
+                "f": "reader_node"
+              }
+            ],
+            "f": "owner"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "s": "b"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "s": "c"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  }
+                ],
+                "f": "file"
+              },
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  },
+                  3
+                ],
+                "f": "reader_node"
+              }
+            ],
+            "f": "owner"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "s": "c"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "s": "d"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  }
+                ],
+                "f": "file"
+              },
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  },
+                  3
+                ],
+                "f": "reader_node"
+              }
+            ],
+            "f": "owner"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "s": "d"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "s": "b"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  }
+                ],
+                "f": "file"
+              },
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  },
+                  3
+                ],
+                "f": "reader_node"
+              }
+            ],
+            "f": "owner"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "s": "x"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "s": "y"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  }
+                ],
+                "f": "file"
+              },
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  },
+                  3
+                ],
+                "f": "reader_node"
+              }
+            ],
+            "f": "owner"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "s": "a"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "s": "b"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  }
+                ],
+                "f": "file"
+              },
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  },
+                  36
+                ],
+                "f": "reader_node"
+              }
+            ],
+            "f": "owner"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "s": "a"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "s": "c"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  }
+                ],
+                "f": "file"
+              },
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  },
+                  36
+                ],
+                "f": "reader_node"
+              }
+            ],
+            "f": "owner"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "s": "a"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "s": "d"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  }
+                ],
+                "f": "file"
+              },
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  },
+                  36
+                ],
+                "f": "reader_node"
+              }
+            ],
+            "f": "owner"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "s": "b"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "s": "b"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  }
+                ],
+                "f": "file"
+              },
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  },
+                  36
+                ],
+                "f": "reader_node"
+              }
+            ],
+            "f": "owner"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "s": "b"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "s": "c"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  }
+                ],
+                "f": "file"
+              },
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  },
+                  36
+                ],
+                "f": "reader_node"
+              }
+            ],
+            "f": "owner"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "s": "b"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "s": "d"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  }
+                ],
+                "f": "file"
+              },
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  },
+                  36
+                ],
+                "f": "reader_node"
+              }
+            ],
+            "f": "owner"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "s": "c"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "s": "b"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  }
+                ],
+                "f": "file"
+              },
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  },
+                  36
+                ],
+                "f": "reader_node"
+              }
+            ],
+            "f": "owner"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "s": "c"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "s": "c"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  }
+                ],
+                "f": "file"
+              },
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  },
+                  36
+                ],
+                "f": "reader_node"
+              }
+            ],
+            "f": "owner"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "s": "c"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "s": "d"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  }
+                ],
+                "f": "file"
+              },
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  },
+                  36
+                ],
+                "f": "reader_node"
+              }
+            ],
+            "f": "owner"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "s": "d"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "s": "b"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  }
+                ],
+                "f": "file"
+              },
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  },
+                  36
+                ],
+                "f": "reader_node"
+              }
+            ],
+            "f": "owner"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "s": "d"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "s": "c"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  }
+                ],
+                "f": "file"
+              },
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  },
+                  36
+                ],
+                "f": "reader_node"
+              }
+            ],
+            "f": "owner"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "s": "d"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "s": "d"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  }
+                ],
+                "f": "file"
+              },
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  },
+                  36
+                ],
+                "f": "reader_node"
+              }
+            ],
+            "f": "owner"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "s": "x"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "s": "y"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  }
+                ],
+                "f": "file"
+              },
+              {
+                "args": [
+                  {
+                    "a": "/Users/chrishafley/projects/sprefa/fixtures/sqlite_emit/1_transitive.dl7"
+                  },
+                  36
+                ],
+                "f": "reader_node"
+              }
+            ],
+            "f": "owner"
+          }
+        ],
+        "f": "ref"
+      }
+    }
+  ],
+  "diagnostics": []
+}

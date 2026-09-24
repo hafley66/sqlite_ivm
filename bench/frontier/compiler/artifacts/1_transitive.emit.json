@@ -1,0 +1,10 @@
+{
+  "diagnostics": [],
+  "views": [
+    {
+      "ddl": "CREATE VIRTUAL TABLE \"1_transitive.Reach_v2\" USING sqlite_ivm('WITH RECURSIVE \"Reach_r2\"(\"member\", \"c0\", \"c1\") AS (SELECT 0, t0.\"c0_term\", t0.\"c1_term\" FROM \"1_transitive.Edge_a2\" AS t0 WHERE 1 UNION SELECT 0, t0.\"c0\", t1.\"c1_term\" FROM \"Reach_r2\" AS t0 JOIN \"1_transitive.Edge_a2\" AS t1 ON (t0.\"c1\" = t1.\"c0_term\") WHERE t0.\"member\" = 0), \"Reach_v2\"(\"c0_term\", \"c1_term\") AS (SELECT \"c0\", \"c1\" FROM \"Reach_r2\" WHERE \"member\" = 0) SELECT \"c0_term\", \"c1_term\" FROM \"Reach_v2\"')",
+      "relation": "Reach",
+      "stratum": 0
+    }
+  ]
+}
