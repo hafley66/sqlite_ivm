@@ -42,6 +42,26 @@ pub(crate) fn watch_collector(conn: &Connection, inst: &Arc<Installed>) -> Resul
     .map_err(|e| EngineError::new(Stage::Install, &inst.name, ErrorKind::Sqlite(e.to_string())))
 }
 
+/// Reconnect a persisted standalone collector before this connection writes
+/// any of its source tables. The collector and triggers remain in the file;
+/// only their connection-local module and callback state are restored.
+pub(crate) fn reattach_collector(
+    conn: &Connection,
+    inst: &Arc<Installed>,
+) -> Result<(), EngineError> {
+    let name = catalog::collector(&inst.name, inst.install);
+    let sources: Vec<&str> = inst.plan.sources.iter().map(String::as_str).collect();
+    sqlite_ext::reattach(
+        conn,
+        &name,
+        &sources,
+        ProgramTrigger {
+            program: Arc::clone(inst),
+        },
+    )
+    .map_err(|e| EngineError::new(Stage::Install, &inst.name, ErrorKind::Sqlite(e.to_string())))
+}
+
 pub(crate) struct ProgramTrigger {
     program: Arc<Installed>,
 }

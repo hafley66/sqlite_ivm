@@ -199,6 +199,21 @@ impl Program {
         })
     }
 
+    /// Opens a standalone program on a new connection and restores its
+    /// persisted source collector before any source-table write occurs.
+    pub fn reattach(conn: &rusqlite::Connection, name: &str) -> Result<Self, EngineError> {
+        let program = Self::open(conn, name)?;
+        if !program.inner.derived.is_empty() {
+            return Err(EngineError::unsupported(
+                Stage::Install,
+                name,
+                "a composed program must reattach with its producer",
+            ));
+        }
+        engine::reattach_collector(conn, &program.inner)?;
+        Ok(program)
+    }
+
     /// The program name.
     pub fn name(&self) -> &str {
         &self.inner.name
@@ -223,6 +238,99 @@ impl Program {
     pub fn view(&self) -> String {
         catalog::view(&self.inner.name)
     }
+}
+
+/// Restores every installed frontier collector after the extension loads on
+/// a fresh connection. The dependency catalog identifies composed pairs;
+/// remaining programs each own one standalone collector. This reads only
+/// schema/catalog rows and registers connection-local callback state.
+pub fn reattach_database(conn: &rusqlite::Connection) -> Result<(), EngineError> {
+    use std::collections::HashSet;
+
+    let exists = |table: &str| -> Result<bool, EngineError> {
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM main.sqlite_master WHERE type='table' AND name=?1)",
+            [table],
+            |row| row.get::<_, i64>(0),
+        )
+        .map(|found| found != 0)
+        .map_err(|e| EngineError::new(Stage::Install, table, ErrorKind::Sqlite(e.to_string())))
+    };
+    if !exists("frontier_catalog")? {
+        return Ok(());
+    }
+
+    let mut paired = HashSet::new();
+    if exists("frontier_dependency")? {
+        let mut query = conn
+            .prepare("SELECT producer, consumer FROM frontier_dependency ORDER BY producer")
+            .map_err(|e| {
+                EngineError::new(
+                    Stage::Install,
+                    "frontier_dependency",
+                    ErrorKind::Sqlite(e.to_string()),
+                )
+            })?;
+        let edges = query
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| {
+                EngineError::new(
+                    Stage::Install,
+                    "frontier_dependency",
+                    ErrorKind::Sqlite(e.to_string()),
+                )
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|e| {
+                EngineError::new(
+                    Stage::Install,
+                    "frontier_dependency",
+                    ErrorKind::Sqlite(e.to_string()),
+                )
+            })?;
+        drop(query);
+        for (producer, consumer) in edges {
+            Composition::reattach(conn, &producer, &consumer)?;
+            paired.insert(producer);
+            paired.insert(consumer);
+        }
+    }
+
+    let mut query = conn
+        .prepare("SELECT name FROM frontier_catalog ORDER BY name")
+        .map_err(|e| {
+            EngineError::new(
+                Stage::Install,
+                "frontier_catalog",
+                ErrorKind::Sqlite(e.to_string()),
+            )
+        })?;
+    let names = query
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| {
+            EngineError::new(
+                Stage::Install,
+                "frontier_catalog",
+                ErrorKind::Sqlite(e.to_string()),
+            )
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|e| {
+            EngineError::new(
+                Stage::Install,
+                "frontier_catalog",
+                ErrorKind::Sqlite(e.to_string()),
+            )
+        })?;
+    drop(query);
+    for name in names {
+        if !paired.contains(&name) {
+            Program::reattach(conn, &name)?;
+        }
+    }
+    Ok(())
 }
 
 /// The frontier contract: settle one complete batch of signed source changes,

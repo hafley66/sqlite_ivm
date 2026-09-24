@@ -68,7 +68,9 @@ fn composition_dependency_is_persisted_and_removed() {
     assert_eq!(producer, "bodies");
     pair.teardown(&conn).unwrap();
     let edges: i64 = conn
-        .query_row("SELECT count(*) FROM frontier_dependency", [], |row| row.get(0))
+        .query_row("SELECT count(*) FROM frontier_dependency", [], |row| {
+            row.get(0)
+        })
         .unwrap();
     assert_eq!(edges, 0);
 }
@@ -297,7 +299,7 @@ fn visible_totals(conn: &Connection) -> Vec<(i64, i64, i64)> {
 /// collector and ordinary SQL keeps settling, with the frontier counters
 /// continuing from where they were. This is NOT process-restart behavior:
 /// a new connection cannot reattach the collector module at all — see
-/// `fresh_connection_reattach_is_blocked_at_sqlite_ext`.
+/// `fresh_connection_reattaches_the_shared_collector`.
 #[test]
 fn same_connection_reopen_reregisters_the_shared_collector() {
     let conn = conn();
@@ -324,16 +326,11 @@ fn same_connection_reopen_reregisters_the_shared_collector() {
     assert_no_program_objects(&conn);
 }
 
-/// The fresh-connection blocker, pinned as the supported-lifecycle
-/// boundary. The collector module `sqlite_ext::watch` registers is
-/// connection-local; the vtab and triggers persist in the database schema,
-/// but a new connection fails schema load with `no such module` before any
-/// statement runs — the composition cannot settle, and neither can a single
-/// program (measured on canonical main in
-/// plans/engine-iso/10_frontier_reopen_probe.md). Recovery belongs at a
-/// reusable sqlite_ext reattach boundary, not as a composition workaround.
+/// A new connection restores the graph-owned collector before writing any
+/// source table. The producer and consumer continue from persisted roots and
+/// frontier counters; no source recomputation or collector replacement occurs.
 #[test]
-fn fresh_connection_reattach_is_blocked_at_sqlite_ext() {
+fn fresh_connection_reattaches_the_shared_collector() {
     let db = TempDb::new("frontier-composition-reopen");
     {
         let conn = Connection::open(&db.path).unwrap();
@@ -347,26 +344,16 @@ fn fresh_connection_reattach_is_blocked_at_sqlite_ext() {
     }
 
     let conn = Connection::open(&db.path).unwrap();
-    let open = Composition::open(&conn, "bodies", "grants");
-    let err = open
-        .err()
-        .expect("fresh-connection reattach is not supported yet");
-    assert!(
-        format!("{err}").contains("no such module"),
-        "expected the connection-local module error, got {err}"
-    );
-
-    // Statements avoiding the collector's schema objects still run, but any
-    // source write compiles the collector triggers and fails — the restart
-    // gate measured in plans/engine-iso/10_frontier_reopen_probe.md.
-    let write = conn.execute_batch("INSERT INTO body_c VALUES (9);");
-    let err = write
-        .err()
-        .expect("source writes cannot settle on a fresh connection");
-    assert!(
-        format!("{:?}", err).contains("no such module"),
-        "expected the connection-local module error, got {err}"
-    );
+    let reopened = Composition::reattach(&conn, "bodies", "grants").unwrap();
+    assert_eq!(frontier_of(&conn, "bodies"), 2);
+    assert_eq!(frontier_of(&conn, "grants"), 2);
+    assert_visible(&conn, &[(1, 10), (3, 30)]);
+    conn.execute_batch("INSERT INTO body_c VALUES (2);")
+        .unwrap();
+    assert_eq!(frontier_of(&conn, "bodies"), 3);
+    assert_eq!(frontier_of(&conn, "grants"), 3);
+    assert_visible(&conn, &[(1, 10), (2, 20), (3, 30)]);
+    reopened.teardown(&conn).unwrap();
 }
 
 /// A unique file-backed database, removed when the test ends.

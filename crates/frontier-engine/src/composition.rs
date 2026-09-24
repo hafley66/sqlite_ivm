@@ -85,7 +85,7 @@ impl Composition {
             }
         };
         if let Err(e) = validate_pair(conn, &producer, &consumer)
-            .and_then(|()| register(conn, producer.handle(), consumer.handle()))
+            .and_then(|()| register(conn, producer.handle(), consumer.handle(), false))
             .and_then(|()| record_dependency(conn, producer.name(), consumer.name()))
         {
             let _ = consumer.teardown(conn);
@@ -107,7 +107,45 @@ impl Composition {
         reject_derived_producer_sources(conn, &producer)?;
         validate_pair(conn, &producer, &consumer)?;
         drop_collector(conn, &producer)?;
-        register(conn, producer.handle(), consumer.handle())?;
+        register(conn, producer.handle(), consumer.handle(), false)?;
+        Ok(Self { producer, consumer })
+    }
+
+    /// Restores the one persisted collector on a new connection. This reads
+    /// the dependency row installed with the pair and rebinds its callback;
+    /// it does not drop or recreate any database object.
+    pub fn reattach(
+        conn: &Connection,
+        producer_name: &str,
+        consumer_name: &str,
+    ) -> Result<Self, EngineError> {
+        let producer = Program::open(conn, producer_name)?;
+        let consumer = Program::open(conn, consumer_name)?;
+        reject_derived_producer_sources(conn, &producer)?;
+        validate_pair(conn, &producer, &consumer)?;
+        let recorded: String = conn
+            .query_row(
+                "SELECT producer FROM frontier_dependency WHERE consumer=?1",
+                [consumer_name],
+                |row| row.get(0),
+            )
+            .map_err(|e| {
+                EngineError::new(
+                    Stage::Install,
+                    consumer_name,
+                    ErrorKind::Sqlite(e.to_string()),
+                )
+            })?;
+        if recorded != producer_name {
+            return Err(EngineError::new(
+                Stage::Install,
+                consumer_name,
+                ErrorKind::State(format!(
+                    "persisted producer {recorded:?} differs from requested {producer_name:?}"
+                )),
+            ));
+        }
+        register(conn, producer.handle(), consumer.handle(), true)?;
         Ok(Self { producer, consumer })
     }
 
@@ -143,11 +181,7 @@ impl Composition {
     }
 }
 
-fn record_dependency(
-    conn: &Connection,
-    producer: &str,
-    consumer: &str,
-) -> Result<(), EngineError> {
+fn record_dependency(conn: &Connection, producer: &str, consumer: &str) -> Result<(), EngineError> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS frontier_dependency(
              consumer TEXT PRIMARY KEY,
@@ -241,6 +275,7 @@ fn register(
     conn: &Connection,
     producer: Arc<Installed>,
     consumer: Arc<Installed>,
+    reattach: bool,
 ) -> Result<(), EngineError> {
     let name = collector_name(&producer);
     let view = catalog::view(&producer.name);
@@ -251,17 +286,17 @@ fn register(
         }
     }
     let tables: Vec<&str> = watched.iter().map(String::as_str).collect();
-    sqlite_ext::watch(
-        conn,
-        &name,
-        &tables,
-        GroupTrigger {
-            producer,
-            consumer,
-            view,
-        },
-    )
-    .map_err(|e| EngineError::new(Stage::Install, &name, ErrorKind::Sqlite(e.to_string())))
+    let callback = GroupTrigger {
+        producer,
+        consumer,
+        view,
+    };
+    let result = if reattach {
+        sqlite_ext::reattach(conn, &name, &tables, callback)
+    } else {
+        sqlite_ext::watch(conn, &name, &tables, callback)
+    };
+    result.map_err(|e| EngineError::new(Stage::Install, &name, ErrorKind::Sqlite(e.to_string())))
 }
 
 /// The graph-owned commit callback. One instance per composition.

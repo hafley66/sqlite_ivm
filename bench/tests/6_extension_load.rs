@@ -224,6 +224,81 @@ fn loaded_extension_bootstraps_preexisting_rows() -> Result<()> {
 }
 
 #[test]
+fn loaded_extension_reattaches_standalone_and_composed_frontiers() -> Result<()> {
+    let path = std::env::temp_dir().join(format!(
+        "sqlite-ivm-native-reattach-{}.sqlite",
+        std::process::id()
+    ));
+    std::fs::remove_file(&path).ok();
+    {
+        let db = Connection::open(&path)?;
+        db.execute_batch("PRAGMA recursive_triggers=ON; PRAGMA trusted_schema=ON;")?;
+        unsafe {
+            db.load_extension_enable()?;
+            db.load_extension(artifact(), Some("sqlite3_extension_init"))?;
+            db.load_extension_disable()?;
+        }
+        db.execute_batch(
+            "CREATE TABLE body_a(person INTEGER PRIMARY KEY);
+             CREATE TABLE body_b(person INTEGER PRIMARY KEY);
+             CREATE TABLE grant_resource(person INTEGER PRIMARY KEY, resource INTEGER NOT NULL);
+             CREATE TABLE job(id INTEGER PRIMARY KEY, team INTEGER NOT NULL, cost INTEGER NOT NULL);",
+        )?;
+        db.query_row(
+            "SELECT sqlite_ivm_frontier_compose(?1, ?2, ?3, ?4)",
+            [
+                "bodies",
+                "SELECT person FROM body_a UNION SELECT person FROM body_b",
+                "grants",
+                "SELECT b.person, g.resource FROM frontier_bodies b JOIN grant_resource g ON g.person=b.person",
+            ],
+            |row| row.get::<_, String>(0),
+        )?;
+        db.query_row(
+            "SELECT sqlite_ivm_frontier_install('team_cost',
+                'SELECT team, count(*) AS jobs, sum(cost) AS total_cost FROM job GROUP BY team')",
+            [],
+            |row| row.get::<_, String>(0),
+        )?;
+        db.execute_batch(
+            "BEGIN;
+             INSERT INTO body_a VALUES(1);
+             INSERT INTO grant_resource VALUES(1,10),(2,20);
+             INSERT INTO job VALUES(1,10,5);
+             COMMIT;",
+        )?;
+    }
+    {
+        let db = Connection::open(&path)?;
+        db.execute_batch("PRAGMA recursive_triggers=ON; PRAGMA trusted_schema=ON;")?;
+        unsafe {
+            db.load_extension_enable()?;
+            db.load_extension(artifact(), Some("sqlite3_extension_init"))?;
+            db.load_extension_disable()?;
+        }
+        db.execute_batch(
+            "BEGIN;
+             INSERT INTO body_b VALUES(2);
+             INSERT INTO job VALUES(2,10,7);
+             COMMIT;",
+        )?;
+        let grants = db
+            .prepare("SELECT person, resource FROM frontier_grants ORDER BY person")?
+            .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?
+            .collect::<Result<Vec<_>>>()?;
+        assert_eq!(grants, [(1, 10), (2, 20)]);
+        let total: (i64, i64) = db.query_row(
+            "SELECT jobs, total_cost FROM frontier_team_cost WHERE team=10",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        assert_eq!(total, (2, 12));
+    }
+    std::fs::remove_file(path).ok();
+    Ok(())
+}
+
+#[test]
 fn loaded_extension_retains_preparation_and_execution_events() {
     // A separate process lets the actual dylib install its hafley-observe layer.
     let output = std::process::Command::new(std::env::current_exe().unwrap())

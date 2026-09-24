@@ -126,7 +126,8 @@ fn register_frontier(db: &Connection) -> Result<()> {
             program.teardown(&db).map_err(rusqlite::Error::from)?;
             Ok(name)
         },
-    )
+    )?;
+    frontier_engine::reattach_database(db).map_err(rusqlite::Error::from)
 }
 
 #[cfg(feature = "extension")]
