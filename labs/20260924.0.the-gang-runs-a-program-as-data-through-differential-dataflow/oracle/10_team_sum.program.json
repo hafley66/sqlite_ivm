@@ -1,0 +1,12 @@
+{
+  "rels": [
+    {"id": 0, "name": "job", "cols": ["Int", "Int", "Int"], "kind": "Source"},
+    {"id": 1, "name": "team_sum", "cols": ["Int", "Int", "Int"], "kind": "Derived"}
+  ],
+  "nodes": [
+    {"Get": 0},
+    {"Reduce": {"input": 0, "key": [1], "aggs": ["Count", {"Sum": 2}]}}
+  ],
+  "strata": [{"Let": {"id": 1, "body": 1}}],
+  "outputs": [1]
+}

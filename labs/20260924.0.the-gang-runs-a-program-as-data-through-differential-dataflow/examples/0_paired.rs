@@ -32,6 +32,15 @@ fn workload(name: &str, n: i64) -> (Program, Frontier, Vec<Frontier>) {
             });
             (program("1_team_cost"), Frontier { changes: load }, churn.collect())
         }
+        "team_sum" => {
+            let load = (0..n).map(|id| change(0, vec![id, id % teams, id % 17], 1)).collect();
+            let churn = (0..200).map(|i| {
+                let id = i / 2;
+                let (from, to) = if i % 2 == 0 { (id % teams, (id + 1) % teams) } else { ((id + 1) % teams, id % teams) };
+                Frontier { changes: vec![change(0, vec![id, from, id % 17], -1), change(0, vec![id, to, id % 17], 1)] }
+            });
+            (program("10_team_sum"), Frontier { changes: load }, churn.collect())
+        }
         "reach_tail" | "reach_middle" => {
             let load = (0..n).map(|x| change(0, vec![x, x + 1], 1)).collect();
             let edge = if name == "reach_tail" { vec![n, n + 1] } else { vec![n / 2, n / 2 + 1] };

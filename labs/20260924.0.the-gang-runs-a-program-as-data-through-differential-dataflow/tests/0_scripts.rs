@@ -53,3 +53,8 @@ fn s_t_s_i_timing_and_cells() {
 fn s_n5_depth_cap() {
     println!("{}", support::run::<Dd>("9_depth_cap"));
 }
+
+#[test]
+fn s_g_accumulable_team_sum() {
+    println!("{}", support::run::<Dd>("10_team_sum"));
+}

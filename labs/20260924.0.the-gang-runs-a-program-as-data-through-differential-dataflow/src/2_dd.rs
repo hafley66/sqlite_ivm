@@ -152,6 +152,9 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
 
     fn reduce(&mut self, c: Self::C, key: &[ColId], aggs: &[Agg]) -> Self::C {
         let (key, aggs) = (key.to_vec(), aggs.to_vec());
+        if aggs.iter().all(|a| matches!(a, Agg::Count | Agg::Sum(_))) {
+            return accumulable(c, key, aggs);
+        }
         c.map(move |row| (cols(&row, &key), row))
             .reduce(move |_k, input: &[(&Row, W)], output: &mut Vec<(Row, W)>| {
                 let count: W = input.iter().map(|(_, w)| *w).sum();
@@ -206,6 +209,38 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
     fn output(&mut self, rel: RelId, c: Self::C) {
         self.outputs.push((rel, c));
     }
+}
+
+/// Count and Sum ride in the diff (`[count, sums..]`), so a group is one record and a change costs O(1) in group size.
+fn accumulable<'s, T: Nest>(c: Coll<'s, T>, key: Vec<ColId>, aggs: Vec<Agg>) -> Coll<'s, T> {
+    let sums: Vec<ColId> = aggs.iter().filter_map(|a| if let Agg::Sum(c) = a { Some(*c) } else { None }).collect();
+    c.explode(move |row: Row| {
+        let mut acc = vec![1 as W];
+        acc.extend(sums.iter().map(|c| row[*c as usize]));
+        Some(((cols(&row, &key), ()), acc))
+    })
+    .reduce(move |_k, input: &[(&(), Vec<W>)], output: &mut Vec<(Row, W)>| {
+        let acc = &input[0].1;
+        if acc[0] <= 0 {
+            return;
+        }
+        let mut next_sum = 1;
+        let values = aggs
+            .iter()
+            .map(|a| match a {
+                Agg::Count => acc[0],
+                _ => {
+                    next_sum += 1;
+                    acc[next_sum - 1]
+                }
+            })
+            .collect();
+        output.push((values, 1));
+    })
+    .map(|(mut k, values)| {
+        k.extend(values);
+        k
+    })
 }
 
 /// `order` first, then the whole row ascending, so ties resolve the same way in every engine.
