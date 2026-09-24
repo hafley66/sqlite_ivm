@@ -297,9 +297,8 @@ fn visible_totals(conn: &Connection) -> Vec<(i64, i64, i64)> {
 /// Same-connection handle reopen: dropping the handles without teardown
 /// leaves the schema objects; `Composition::open` re-registers the shared
 /// collector and ordinary SQL keeps settling, with the frontier counters
-/// continuing from where they were. This is NOT process-restart behavior:
-/// a new connection cannot reattach the collector module at all — see
-/// `fresh_connection_reattaches_the_shared_collector`.
+/// continuing from where they were. The fresh-connection path uses
+/// `Composition::reattach`; see `fresh_connection_reattaches_the_shared_collector`.
 #[test]
 fn same_connection_reopen_reregisters_the_shared_collector() {
     let conn = conn();
