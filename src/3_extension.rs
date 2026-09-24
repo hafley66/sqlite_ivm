@@ -1,5 +1,6 @@
 use crate::catalog::{error, quote};
 use crate::statements::{self, Phase};
+use frontier_engine::{Frontier, Program};
 use rusqlite::{functions::FunctionFlags, Connection, Result};
 const PLUGIN: sqlite_ext::Plugin =
     sqlite_ext::Plugin::new("sqlite_ivm", env!("CARGO_PKG_VERSION"), "warn", install);
@@ -13,6 +14,7 @@ fn install(db: &Connection) -> Result<()> {
     crate::vtab::register(db)?;
     crate::source_ddl::register(db)?;
     crate::relational_maintenance::register_functions(db)?;
+    register_frontier(db)?;
     db.create_scalar_function(
         c"sqlite_ivm_create",
         2,
@@ -60,6 +62,36 @@ fn install(db: &Connection) -> Result<()> {
                 &format!("DROP TABLE main.{}", quote(&canonical)),
             )?;
             Ok(canonical)
+        },
+    )
+}
+
+/// The frontier engine's own catalog and commit collector live on this SQLite
+/// connection. No program handle is retained by the extension entry point.
+fn register_frontier(db: &Connection) -> Result<()> {
+    db.create_scalar_function(
+        c"sqlite_ivm_frontier_install",
+        2,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DIRECTONLY,
+        |ctx| {
+            let name: String = ctx.get(0)?;
+            let select_sql: String = ctx.get(1)?;
+            let db = unsafe { ctx.get_connection()? };
+            Program::install(&db, &name, &select_sql)
+                .map(|program| program.name().to_owned())
+                .map_err(rusqlite::Error::from)
+        },
+    )?;
+    db.create_scalar_function(
+        c"sqlite_ivm_frontier_drop",
+        1,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DIRECTONLY,
+        |ctx| {
+            let name: String = ctx.get(0)?;
+            let db = unsafe { ctx.get_connection()? };
+            let program = Program::open(&db, &name).map_err(rusqlite::Error::from)?;
+            program.teardown(&db).map_err(rusqlite::Error::from)?;
+            Ok(name)
         },
     )
 }

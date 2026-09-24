@@ -36,6 +36,25 @@ The general virtual-table reader currently scans stored output rows.
 
 ## Supported query shapes
 
+The same extension also registers an experimental frontier path for the ISO
+engine. It has separate functions and a separate catalog:
+
+```sql
+CREATE TABLE job(id INTEGER PRIMARY KEY, team INTEGER NOT NULL, cost INTEGER NOT NULL);
+SELECT sqlite_ivm_frontier_install('team_cost',
+  'SELECT team, count(*) AS jobs, sum(cost) AS total_cost FROM job GROUP BY team');
+SELECT * FROM frontier_team_cost;
+SELECT * FROM frontier_team_cost_delta; -- signed changes at the last frontier
+SELECT sqlite_ivm_frontier_drop('team_cost');
+```
+
+The frontier path currently accepts integer projection, equality joins, and
+`COUNT(*)`/`SUM(integer)` grouping for the ISO cases. It rejects `WHERE`,
+`DISTINCT`, `HAVING`, `ORDER BY`, `LIMIT`, outer/cross/comma joins, `AVG`,
+`MIN`/`MAX`, `COUNT(column)`, and NULL input cells. Existing
+`CREATE VIRTUAL TABLE ... USING sqlite_ivm` views retain the broader contract
+below. The two paths may read the same source table in one connection.
+
 | Operator | Implemented contract |
 |---|---|
 | Projection and selection | Arithmetic and bit operations, comparisons, CASE, CAST, LIKE/GLOB, NULL tests, literal IN/BETWEEN, deterministic SQLite and registered scalar functions |

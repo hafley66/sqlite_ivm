@@ -60,6 +60,7 @@ enum Shape {
 enum SqliteMode {
     IsoRust,
     IsoExtension,
+    MainFrontier,
     DdExtension,
     Production,
 }
@@ -412,6 +413,19 @@ fn run_sqlite(
             row.get::<_, i64>(0)
         })?;
         format!("frontier_{name}")
+    } else if matches!(mode, SqliteMode::MainFrontier) {
+        sqlite_ivm::extension::register(&db)?;
+        let name = if cell.shape == Shape::Access {
+            "access"
+        } else {
+            "team_cost"
+        };
+        db.query_row(
+            "SELECT sqlite_ivm_frontier_install(?1, ?2)",
+            (name, query),
+            |row| row.get::<_, String>(0),
+        )?;
+        format!("frontier_{name}")
     } else if matches!(mode, SqliteMode::DdExtension) {
         let path = std::env::var_os("FRONTIER_DD_EXT_PATH")
             .context("FRONTIER_DD_EXT_PATH must name the built frontier-dd-ext library")?;
@@ -505,6 +519,7 @@ fn run_sqlite(
                 match mode {
                     SqliteMode::IsoRust => "sqlite-iso",
                     SqliteMode::IsoExtension => "sqlite-iso-ext",
+                    SqliteMode::MainFrontier => "sqlite-ivm-frontier",
                     SqliteMode::DdExtension => "dd-ext",
                     SqliteMode::Production => "sqlite-ivm",
                 },
@@ -893,6 +908,7 @@ fn main() -> Result<()> {
         "rust-iso",
         "sqlite-iso",
         "sqlite-iso-ext",
+        "sqlite-ivm-frontier",
         "dd-ext",
         "sqlite-ivm",
         "dd",
@@ -978,6 +994,7 @@ fn main() -> Result<()> {
             "rust-iso",
             "sqlite-iso",
             "sqlite-iso-ext",
+            "sqlite-ivm-frontier",
             "dd-ext",
             "sqlite-ivm",
             "dd",
@@ -1074,6 +1091,13 @@ fn main() -> Result<()> {
                                     cell,
                                     &phases,
                                     SqliteMode::DdExtension,
+                                    observe,
+                                    file,
+                                ),
+                                "sqlite-ivm-frontier" => run_sqlite(
+                                    cell,
+                                    &phases,
+                                    SqliteMode::MainFrontier,
                                     observe,
                                     file,
                                 ),

@@ -4,12 +4,13 @@ The Rust harness runs circuit shootouts, scale sweeps, and fixture dumps.
 
 ### Frontier stress: ISO engines, production, and DD
 
-`frontier-stress` replays one generated integer frontier stream through eight
+`frontier-stress` replays one generated integer frontier stream through nine
 arms: `direct-rust`, `direct-sqlite`, `rust-iso`, `sqlite-iso`,
-`sqlite-iso-ext`, `dd-ext`, `sqlite-ivm`, and `dd`. The `sqlite-iso-ext` arm loads the
+`sqlite-iso-ext`, `sqlite-ivm-frontier`, `dd-ext`, `sqlite-ivm`, and `dd`. The `sqlite-iso-ext` arm loads the
 ISO cdylib and installs it through `frontier_install`; `dd-ext` loads the same
 DD worker used by `dd` into a SQLite extension and settles through the SQLite
-commit collector. `just` builds both cdylibs
+commit collector. `sqlite-ivm-frontier` calls the frontier API registered by
+the production `sqlite_ivm` library. `just` builds both lab cdylibs
 before the run. The access shape is the packet's join under set UNION; the group shape
 is `COUNT/SUM`. Every checked frontier compares its visible rows and, for the
 four matrix cells, its signed output delta with fresh recomputation from
@@ -20,7 +21,7 @@ peak RSS and SQLite allocator readings belong to that arm.
 | Incremental engine | Rust caller | SQLite extension caller |
 | --- | --- | --- |
 | DD packet graph | `dd` | `dd-ext` |
-| SQLite ISO frontier engine | `sqlite-iso` | `sqlite-iso-ext` |
+| SQLite ISO frontier engine | `sqlite-iso` | `sqlite-iso-ext`, `sqlite-ivm-frontier` |
 
 `dd` and `dd-ext` use the same `frontier-dd-packet` dataflow graph. The
 SQLite-backed ISO cells use the same `frontier-engine` implementation.

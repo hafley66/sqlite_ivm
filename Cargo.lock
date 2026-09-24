@@ -175,6 +175,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "frontier-engine"
+version = "0.1.0"
+dependencies = [
+ "hafley-observe",
+ "rusqlite",
+ "sqlite-ext",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "futures-channel"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1032,6 +1043,7 @@ dependencies = [
 name = "sqlite-ivm"
 version = "0.3.0"
 dependencies = [
+ "frontier-engine",
  "hafley-observe",
  "rusqlite",
  "serde_json",

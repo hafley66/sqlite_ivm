@@ -88,6 +88,58 @@ fn loaded_extension_maintains_a_view_end_to_end() -> Result<()> {
 }
 
 #[test]
+fn loaded_extension_runs_frontier_and_virtual_table_on_one_source() -> Result<()> {
+    let db = open_loaded()?;
+    db.execute_batch(
+        "PRAGMA recursive_triggers=ON; PRAGMA trusted_schema=ON;
+         CREATE TABLE job(id INTEGER PRIMARY KEY,team INTEGER NOT NULL,cost INTEGER NOT NULL);",
+    )?;
+    let installed: String = db.query_row(
+        "SELECT sqlite_ivm_frontier_install(?1, ?2)",
+        [
+            "team_cost",
+            "SELECT team, count(*) AS jobs, sum(cost) AS total_cost FROM job GROUP BY team",
+        ],
+        |row| row.get(0),
+    )?;
+    assert_eq!(installed, "team_cost");
+    db.execute_batch(
+        "CREATE VIRTUAL TABLE old_path USING sqlite_ivm('SELECT team, count(*) AS jobs, sum(cost) AS total_cost FROM job GROUP BY team');
+         BEGIN;
+         INSERT INTO job VALUES(1,10,5),(2,10,7);
+         COMMIT;",
+    )?;
+    let sql = "SELECT jobs,total_cost FROM {view} WHERE team=10";
+    for view in ["frontier_team_cost", "old_path"] {
+        let result: (i64, i64) = db.query_row(&sql.replace("{view}", view), [], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+        assert_eq!(result, (2, 12), "{view}");
+    }
+    db.execute_batch("DELETE FROM job WHERE id=1")?;
+    for view in ["frontier_team_cost", "old_path"] {
+        let result: (i64, i64) = db.query_row(&sql.replace("{view}", view), [], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+        assert_eq!(result, (1, 7), "{view}");
+    }
+    let dropped: String = db.query_row(
+        "SELECT sqlite_ivm_frontier_drop('team_cost')",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(dropped, "team_cost");
+    db.execute_batch("INSERT INTO job VALUES(3,10,3)")?;
+    let legacy: (i64, i64) = db.query_row(
+        "SELECT jobs,total_cost FROM old_path WHERE team=10",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    assert_eq!(legacy, (2, 10));
+    Ok(())
+}
+
+#[test]
 fn loaded_extension_retains_preparation_and_execution_events() {
     // A separate process lets the actual dylib install its hafley-observe layer.
     let output = std::process::Command::new(std::env::current_exe().unwrap())
