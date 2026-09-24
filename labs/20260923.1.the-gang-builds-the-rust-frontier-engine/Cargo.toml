@@ -1,0 +1,15 @@
+[package]
+name = "lab_20260923_1"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+# Own workspace root. A lab never joins the entry point workspace.
+[workspace]
+
+[dependencies]
+tracing = "0.1"
+hafley-observe = { path = "/Users/chrishafley/projects/hafley-rs/crates/hafley-observe", default-features = false }
+
+[dev-dependencies]
+tracing-subscriber = "0.3"
