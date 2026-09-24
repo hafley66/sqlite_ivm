@@ -86,6 +86,7 @@ impl Composition {
         };
         if let Err(e) = validate_pair(conn, &producer, &consumer)
             .and_then(|()| register(conn, producer.handle(), consumer.handle()))
+            .and_then(|()| record_dependency(conn, producer.name(), consumer.name()))
         {
             let _ = consumer.teardown(conn);
             let _ = producer.teardown(conn);
@@ -126,8 +127,41 @@ impl Composition {
     pub fn teardown(self, conn: &Connection) -> Result<(), EngineError> {
         drop_collector(conn, &self.producer)?;
         self.consumer.teardown(conn)?;
-        self.producer.teardown(conn)
+        self.producer.teardown(conn)?;
+        conn.execute(
+            "DELETE FROM frontier_dependency WHERE consumer=?1 AND producer=?2",
+            [self.consumer.name(), self.producer.name()],
+        )
+        .map_err(|e| {
+            EngineError::new(
+                Stage::Teardown,
+                self.consumer.name(),
+                ErrorKind::Sqlite(e.to_string()),
+            )
+        })?;
+        Ok(())
     }
+}
+
+fn record_dependency(
+    conn: &Connection,
+    producer: &str,
+    consumer: &str,
+) -> Result<(), EngineError> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS frontier_dependency(
+             consumer TEXT PRIMARY KEY,
+             producer TEXT NOT NULL UNIQUE
+         )",
+    )
+    .and_then(|()| {
+        conn.execute(
+            "INSERT INTO frontier_dependency(consumer, producer) VALUES (?1, ?2)",
+            [consumer, producer],
+        )
+        .map(|_| ())
+    })
+    .map_err(|e| EngineError::new(Stage::Install, consumer, ErrorKind::Sqlite(e.to_string())))
 }
 
 fn reject_derived_producer_sources(

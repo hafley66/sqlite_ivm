@@ -54,6 +54,25 @@ fn install(conn: &Connection) -> Composition {
     Composition::install(conn, ("bodies", PRODUCER_SQL), ("grants", CONSUMER_SQL)).unwrap()
 }
 
+#[test]
+fn composition_dependency_is_persisted_and_removed() {
+    let conn = conn();
+    let pair = install(&conn);
+    let producer: String = conn
+        .query_row(
+            "SELECT producer FROM frontier_dependency WHERE consumer='grants'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(producer, "bodies");
+    pair.teardown(&conn).unwrap();
+    let edges: i64 = conn
+        .query_row("SELECT count(*) FROM frontier_dependency", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(edges, 0);
+}
+
 /// Seeds the oracle's 0_initial state in one frontier: Alice supported twice,
 /// body_c empty, grants for persons 1 and 2.
 fn seed(conn: &Connection) {
@@ -505,7 +524,7 @@ fn assert_no_program_objects(conn: &Connection) {
     let left: i64 = conn
         .query_row(
             "SELECT count(*) FROM sqlite_master WHERE name LIKE 'frontier_%' \
-             AND name NOT IN ('frontier_catalog', 'frontier_catalog_column')",
+             AND name NOT IN ('frontier_catalog', 'frontier_catalog_column', 'frontier_dependency')",
             [],
             |row| row.get(0),
         )
