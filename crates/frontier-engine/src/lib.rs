@@ -43,7 +43,7 @@ mod meter;
 mod observe;
 mod plan;
 
-pub use composition::{Composition, CompositionDelta};
+pub use composition::Composition;
 pub use error::{EngineError, ErrorKind, Stage};
 
 
@@ -210,6 +210,11 @@ impl Program {
     /// The source tables the program watches.
     pub fn sources(&self) -> &[String] {
         &self.inner.sources
+    }
+
+    /// Composition access to the install record.
+    pub(crate) fn handle(&self) -> std::sync::Arc<catalog::Installed> {
+        std::sync::Arc::clone(&self.inner)
     }
 
     /// The visible output view this program serves: `frontier_<name>`.

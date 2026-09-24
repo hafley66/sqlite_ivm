@@ -1,350 +1,505 @@
-//! Gate: one producer frontier view consumed by a second frontier view, both
-//! settled inside one source transaction through a real SQLite connection.
+//! Gate: ordinary SQL INSERT/DELETE/UPDATE + COMMIT on the base tables
+//! settles producer AND consumer at the same COMMIT through one shared,
+//! graph-owned collector. No manual settle exists: `Composition` exposes
+//! only install/open/teardown, and the tests drive real SQL only.
 //!
-//! The producer (`job_pairs`) is a projection over `job`; the consumer
-//! (`team_cost`) aggregates the producer's view. Every settled frontier
-//! checks the consumer view against a fresh SQL recomputation over the base
-//! table — insert, delete, mixed, rollback, and reopen — and the paired
-//! stress case draws deterministic batches and recomputes after each one.
+//! The oracle pair mirrors `plans/engine-iso/8_composed_oracle.sql` +
+//! `9_composed_expected.tsv`: the producer is the set-union of three body
+//! tables (body_c starts empty, so "add a body" is an INSERT), the consumer
+//! joins the producer's view with `grant_resource`. Every step checks the
+//! support weights, the consumer view, and the consumer's settled delta —
+//! including the support 3->2 step that must emit no downstream change, the
+//! one-transaction change of both consumer join inputs, and a rolled-back
+//! transaction.
 //!
-//! Composed programs install without a commit collector, so settlement is
-//! explicit: source rows land through SQL, then `Composition::settle` runs
-//! both programs. The direct-batch contract from `cases.rs` applies: the
-//! batch mirrors source changes that have already landed in the tables.
+//! `vtab_write_inside_xsync_is_rejected` reproduces the SQLite behavior that
+//! forces the shared-collector design (see `src/composition.rs` module docs):
+//! a virtual-table write fired inside another collector's `xSync` fails the
+//! COMMIT with SQLITE_LOCKED. If SQLite ever stops rejecting that, this test
+//! fails and the design gets reevaluated.
+//!
+//! `INSERT OR REPLACE` caveat: with SQLite's default `recursive_triggers =
+//! OFF`, the DELETE that REPLACE performs to clear a conflicting row fires
+//! no AFTER DELETE trigger, so the collector sees only the inserted half
+//! and a retracted row would stay visible. `INSERT`/`DELETE`/`UPDATE` are
+//! the supported write surface; enabling `PRAGMA recursive_triggers` on the
+//! connection restores correct REPLACE handling.
 
-use frontier_engine::{Cell, Composition, Frontier, OutputChange, Program, Sign, SourceChange};
+use frontier_engine::{Composition, Frontier, Program};
 use rusqlite::Connection;
+use sqlite_ext::{BulkTrigger, RowChange, watch};
 
 fn conn() -> Connection {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
-        "CREATE TABLE job(id INTEGER PRIMARY KEY, team INTEGER NOT NULL, cost INTEGER NOT NULL);",
+        "CREATE TABLE body_a(person INTEGER PRIMARY KEY);
+         CREATE TABLE body_b(person INTEGER PRIMARY KEY);
+         CREATE TABLE body_c(person INTEGER PRIMARY KEY);
+         CREATE TABLE grant_resource(person INTEGER PRIMARY KEY, resource INTEGER NOT NULL);",
     )
     .unwrap();
     conn
 }
 
-const PRODUCER_SQL: &str = "SELECT team, cost FROM job";
+const PRODUCER_SQL: &str =
+    "SELECT person FROM body_a UNION SELECT person FROM body_b UNION SELECT person FROM body_c";
 const CONSUMER_SQL: &str =
-    "SELECT team, count(*) AS jobs, sum(cost) AS total_cost FROM frontier_job_pairs GROUP BY team";
-const UNION_CONSUMER_SQL: &str = "SELECT team, cost FROM frontier_job_pairs";
+    "SELECT v.person, g.resource FROM frontier_bodies v JOIN grant_resource g ON g.person = v.person";
 
 fn install(conn: &Connection) -> Composition {
-    Composition::install(conn, ("job_pairs", PRODUCER_SQL), ("team_cost", CONSUMER_SQL)).unwrap()
+    Composition::install(conn, ("bodies", PRODUCER_SQL), ("grants", CONSUMER_SQL)).unwrap()
 }
 
-fn ins(id: i64, team: i64, cost: i64) -> SourceChange {
-    SourceChange::insert("job", [Cell::Integer(id), Cell::Integer(team), Cell::Integer(cost)])
-}
-
-fn del(id: i64, team: i64, cost: i64) -> SourceChange {
-    SourceChange::delete("job", [Cell::Integer(id), Cell::Integer(team), Cell::Integer(cost)])
-}
-
-
-/// The consumer view, straight SQL over the engine's visible output.
-fn consumer_view(conn: &Connection) -> Vec<(i64, i64, i64)> {
-    let mut stmt = conn
-        .prepare("SELECT team, jobs, total_cost FROM frontier_team_cost ORDER BY team")
-        .unwrap();
-    stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap()
-}
-
-/// Fresh SQLite recomputation: the consumer's definition applied to the base
-/// table, deduplicated exactly like the producer's set-union root.
-fn oracle(conn: &Connection) -> Vec<(i64, i64, i64)> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT team, count(*), sum(cost) FROM \
-             (SELECT DISTINCT team, cost FROM job) GROUP BY team ORDER BY team",
-        )
-        .unwrap();
-    stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap()
-}
-
-#[track_caller]
-fn assert_tracks(conn: &Connection) {
-    assert_eq!(
-        consumer_view(conn),
-        oracle(conn),
-        "consumer view diverged from fresh recomputation"
-    );
-}
-
-fn producer_delta(delta: &OutputChange) -> (i64, i64, i64) {
-    let sign = match delta.sign {
-        Sign::Insert => 1,
-        Sign::Delete => -1,
-    };
-    match (&delta.row[0], &delta.row[1]) {
-        (Cell::Integer(team), Cell::Integer(cost)) => (sign, *team, *cost),
-        _ => panic!("non-integer producer output"),
-    }
-}
-
-fn consumer_delta(delta: &OutputChange) -> (i64, i64, i64, i64) {
-    let sign = match delta.sign {
-        Sign::Insert => 1,
-        Sign::Delete => -1,
-    };
-    match (&delta.row[0], &delta.row[1], &delta.row[2]) {
-        (Cell::Integer(team), Cell::Integer(jobs), Cell::Integer(total)) => {
-            (sign, *team, *jobs, *total)
-        }
-        _ => panic!("non-integer consumer output"),
-    }
-}
-
-#[test]
-fn composed_pair_settles_in_one_source_transaction() {
-    let conn = conn();
-    let composed = install(&conn);
-
-    // An empty batch is a valid frontier over both programs.
-    let delta = composed.settle(&conn, &[]).unwrap();
-    assert!(delta.producer.is_empty() && delta.consumer.is_empty());
-    assert_tracks(&conn);
-
-    // Insert batch: the producer emits the new rows, the consumer the groups.
-    conn.execute_batch("BEGIN; INSERT INTO job VALUES (1,10,5),(2,10,7),(3,20,11); COMMIT;")
-        .unwrap();
-    let delta = composed
-        .settle(&conn, &[ins(1, 10, 5), ins(2, 10, 7), ins(3, 20, 11)])
-        .unwrap();
-    let mut producer: Vec<(i64, i64, i64)> = delta.producer.iter().map(producer_delta).collect();
-    producer.sort();
-    assert_eq!(producer, vec![(1, 10, 5), (1, 10, 7), (1, 20, 11)]);
-    let mut consumer: Vec<(i64, i64, i64, i64)> = delta.consumer.iter().map(consumer_delta).collect();
-    consumer.sort();
-    assert_eq!(consumer, vec![(1, 10, 2, 12), (1, 20, 1, 11)]);
-    assert_eq!(consumer_view(&conn), vec![(10, 2, 12), (20, 1, 11)]);
-    assert_tracks(&conn);
-    // Delete batch: full retraction of one producer row and its support.
-    conn.execute_batch("DELETE FROM job WHERE id = 2;").unwrap();
-    let delta = composed.settle(&conn, &[del(2, 10, 7)]).unwrap();
-    assert_eq!(
-        delta.producer.iter().map(producer_delta).collect::<Vec<_>>(),
-        vec![(-1, 10, 7)]
-    );
-    // The group root emits changed groups as before/after image pairs.
-    assert_eq!(
-        delta.consumer.iter().map(consumer_delta).collect::<Vec<_>>(),
-        vec![(1, 10, 1, 5), (-1, 10, 2, 12)]
-    );
-    assert_eq!(consumer_view(&conn), vec![(10, 1, 5), (20, 1, 11)]);
-    assert_tracks(&conn);
-
-    // Mixed batch: one row replaced net-zero inside a group, one group added.
+/// Seeds the oracle's 0_initial state in one frontier: Alice supported twice,
+/// body_c empty, grants for persons 1 and 2.
+fn seed(conn: &Connection) {
     conn.execute_batch(
         "BEGIN;
-         DELETE FROM job WHERE id = 1;
-         INSERT INTO job VALUES (5,10,5);
-         INSERT INTO job VALUES (4,30,9);
+         INSERT INTO body_a VALUES (1);
+         INSERT INTO body_b VALUES (1);
+         INSERT INTO grant_resource VALUES (1,10),(2,20),(3,30);
          COMMIT;",
     )
     .unwrap();
-    let delta = composed
-        .settle(&conn, &[del(1, 10, 5), ins(5, 10, 5), ins(4, 30, 9)])
-        .unwrap();
-    assert_eq!(
-        delta.producer.iter().map(producer_delta).collect::<Vec<_>>(),
-        vec![(1, 30, 9)],
-        "the net-zero row change must not reach either delta"
-    );
-    assert_eq!(
-        delta.consumer.iter().map(consumer_delta).collect::<Vec<_>>(),
-        vec![(1, 30, 1, 9)]
-    );
-    assert_eq!(consumer_view(&conn), vec![(10, 1, 5), (20, 1, 11), (30, 1, 9)]);
-    assert_tracks(&conn);
-
-    assert_eq!(composed.producer().frontier_id(&conn).unwrap(), 4);
-    assert_eq!(composed.consumer().frontier_id(&conn).unwrap(), 4);
 }
 
+/// The producer's support: visible output rows with their derivation weights.
+fn support(conn: &Connection) -> Vec<(i64, i64)> {
+    let mut stmt = conn
+        .prepare("SELECT person, __weight FROM frontier_bodies_root WHERE __weight > 0 ORDER BY person")
+        .unwrap();
+    stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+}
+
+/// The consumer view.
+fn visible(conn: &Connection) -> Vec<(i64, i64)> {
+    let mut stmt = conn
+        .prepare("SELECT person, resource FROM frontier_grants ORDER BY person, resource")
+        .unwrap();
+    stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+}
+
+/// The consumer's settled delta, in the engine's read order.
+fn grants_delta(conn: &Connection) -> Vec<(i64, i64, i64)> {
+    let mut stmt = conn
+        .prepare("SELECT person, resource, __sign FROM frontier_grants_delta ORDER BY person, resource, __sign")
+        .unwrap();
+    stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+}
+
+fn frontier_of(conn: &Connection, name: &str) -> i64 {
+    conn.query_row(
+        "SELECT frontier FROM frontier_catalog WHERE name = ?1",
+        [name],
+        |row| row.get(0),
+    )
+    .unwrap()
+}
+
+#[track_caller]
+fn assert_support(conn: &Connection, expected: &[(i64, i64)]) {
+    assert_eq!(support(conn), expected, "support diverged");
+}
+
+#[track_caller]
+fn assert_visible(conn: &Connection, expected: &[(i64, i64)]) {
+    assert_eq!(visible(conn), expected, "consumer view diverged");
+}
+
+/// The oracle sequence from plans/engine-iso 8_composed_oracle.sql /
+/// 9_composed_expected.tsv, expressed as plain SQL COMMITs.
 #[test]
-fn rollback_undoes_both_programs_to_the_previous_frontier() {
+fn composed_oracle_from_plans_engine_iso() {
     let conn = conn();
     let composed = install(&conn);
+    seed(&conn);
 
-    conn.execute_batch("INSERT INTO job VALUES (1,10,5),(2,20,7);")
-        .unwrap();
-    composed.settle(&conn, &[ins(1, 10, 5), ins(2, 20, 7)]).unwrap();
-    let before = consumer_view(&conn);
-    let producer_frontier = composed.producer().frontier_id(&conn).unwrap();
-    let consumer_frontier = composed.consumer().frontier_id(&conn).unwrap();
+    // 0_initial: Alice support 2, downstream (1,10) already settled.
+    assert_support(&conn, &[(1, 2)]);
+    assert_visible(&conn, &[(1, 10)]);
+    assert_eq!(grants_delta(&conn), vec![(1, 10, 1)]);
 
-    // One source transaction rolls the whole composed frontier back.
-    conn.execute_batch("BEGIN; INSERT INTO job VALUES (3,10,6);").unwrap();
-    composed.settle(&conn, &[ins(3, 10, 6)]).unwrap();
-    assert_eq!(consumer_view(&conn), vec![(10, 2, 11), (20, 1, 7)]);
-    conn.execute_batch("ROLLBACK;").unwrap();
+    // 1_add_body_c: Bob's first support, only Bob changes downstream.
+    conn.execute_batch("INSERT INTO body_c VALUES (1),(2);").unwrap();
+    assert_support(&conn, &[(1, 3), (2, 1)]);
+    assert_visible(&conn, &[(1, 10), (2, 20)]);
+    assert_eq!(grants_delta(&conn), vec![(2, 20, 1)]);
 
-    assert_eq!(consumer_view(&conn), before);
-    assert_tracks(&conn);
-    assert_eq!(composed.producer().frontier_id(&conn).unwrap(), producer_frontier);
-    assert_eq!(composed.consumer().frontier_id(&conn).unwrap(), consumer_frontier);
+    // 2_remove_body_b: Alice 3->2, visibility unchanged, no downstream delta.
+    conn.execute_batch("DELETE FROM body_b;").unwrap();
+    assert_support(&conn, &[(1, 2), (2, 1)]);
+    assert_visible(&conn, &[(1, 10), (2, 20)]);
+    assert_eq!(grants_delta(&conn), Vec::new());
+
+    // 3_remove_body_c: Bob retracts, Alice keeps one support through A.
+    conn.execute_batch("DELETE FROM body_c;").unwrap();
+    assert_support(&conn, &[(1, 1)]);
+    assert_visible(&conn, &[(1, 10)]);
+    assert_eq!(grants_delta(&conn), vec![(2, 20, -1)]);
+
+    // 4_both_inputs: the union AND the consumer's other join input change in
+    // one transaction; the net downstream change is exactly +(2,21).
+    conn.execute_batch(
+        "BEGIN;
+         INSERT INTO body_a VALUES (2);
+         UPDATE grant_resource SET resource = 21 WHERE person = 2;
+         COMMIT;",
+    )
+    .unwrap();
+    assert_support(&conn, &[(1, 1), (2, 1)]);
+    assert_visible(&conn, &[(1, 10), (2, 21)]);
+    assert_eq!(grants_delta(&conn), vec![(2, 21, 1)]);
+
+    // 5_rollback: a discarded transaction leaves graph and rows unchanged.
+    let (support_before, visible_before) = (support(&conn), visible(&conn));
+    conn.execute_batch(
+        "BEGIN;
+         DELETE FROM body_a WHERE person = 1;
+         INSERT INTO body_c VALUES (9);
+         UPDATE grant_resource SET resource = 99 WHERE person = 1;
+         ROLLBACK;",
+    )
+    .unwrap();
+    assert_eq!(support(&conn), support_before);
+    assert_eq!(visible(&conn), visible_before);
+    assert_eq!(grants_delta(&conn), vec![(2, 21, 1)], "the delta table keeps the last settled frontier");
+
+    composed.teardown(&conn).unwrap();
+    assert_no_program_objects(&conn);
+}
+/// One COMMIT advances both programs exactly once: after a single INSERT the
+/// producer view and the consumer view are both already updated, and each
+/// catalog frontier moved by exactly one (no double settle).
+#[test]
+fn one_commit_settles_both_programs() {
+    let conn = conn();
+    let composed = install(&conn);
+    seed(&conn);
+    assert_eq!(frontier_of(&conn, "bodies"), 1);
+    assert_eq!(frontier_of(&conn, "grants"), 1);
+
+    conn.execute_batch("INSERT INTO body_c VALUES (1);").unwrap();
+
+    assert_eq!(frontier_of(&conn, "bodies"), 2, "producer settled once");
+    assert_eq!(frontier_of(&conn, "grants"), 2, "consumer settled once");
+    assert_support(&conn, &[(1, 3)]);
+    assert_visible(&conn, &[(1, 10)]);
+
+    composed.teardown(&conn).unwrap();
+    assert_no_program_objects(&conn);
 }
 
+/// A settle that fails inside the shared collector's xSync fails the whole
+/// COMMIT and leaves the previous committed state everywhere; the next
+/// ordinary write still settles.
 #[test]
-fn reopen_continues_the_chain_from_the_catalog() {
+fn settle_failure_inside_commit_aborts_everything() {
+    let conn = conn();
+    conn.execute_batch("CREATE TABLE kv(k INTEGER PRIMARY KEY, grp INTEGER NOT NULL, v INTEGER NOT NULL);")
+        .unwrap();
+    let composed = Composition::install(
+        &conn,
+        ("pairs", "SELECT grp, v FROM kv"),
+        (
+            "totals",
+            "SELECT grp, count(*) AS n, sum(v) AS total FROM frontier_pairs GROUP BY grp",
+        ),
+    )
+    .unwrap();
+    conn.execute_batch("INSERT INTO kv VALUES (1, 10, 100);").unwrap();
+    assert_eq!(visible_totals(&conn), vec![(10, 1, 100)]);
+
+    // Two new pairs in one settle: the consumer's stage sum overflows, the
+    // producer settles, the consumer errors, and SQLite rolls the whole
+    // transaction back. (A single +MAX row would not error: the + operator
+    // silently promotes to float, only sum() over the stage errors.)
+    let commit = conn.execute_batch(
+        "BEGIN;
+         INSERT INTO kv VALUES (2, 10, 9223372036854775807);
+         INSERT INTO kv VALUES (3, 10, 5);
+         COMMIT;",
+    );
+    assert!(commit.is_err(), "overflowing consumer settle must fail the COMMIT");
+    let _ = conn.execute_batch("ROLLBACK;");
+    let kv_rows: i64 = conn.query_row("SELECT count(*) FROM kv", [], |r| r.get(0)).unwrap();
+    assert_eq!(kv_rows, 1, "the failed transaction left no rows behind");
+    assert_eq!(visible_totals(&conn), vec![(10, 1, 100)]);
+
+    // The collector survives the failed commit and settles the next one.
+    conn.execute_batch("INSERT INTO kv VALUES (3, 10, 1);").unwrap();
+    assert_eq!(visible_totals(&conn), vec![(10, 2, 101)]);
+
+    composed.teardown(&conn).unwrap();
+    assert_no_program_objects(&conn);
+}
+
+fn visible_totals(conn: &Connection) -> Vec<(i64, i64, i64)> {
+    let mut stmt = conn
+        .prepare("SELECT grp, n, total FROM frontier_totals ORDER BY grp")
+        .unwrap();
+    stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+}
+
+/// Dropping the handles without teardown leaves the schema objects; reopen
+/// re-registers the shared collector and ordinary SQL keeps settling, with
+/// the frontier counters continuing from where they were.
+#[test]
+fn reopen_reregisters_the_shared_collector() {
     let conn = conn();
     {
         let composed = install(&conn);
-        conn.execute_batch("INSERT INTO job VALUES (1,10,5);").unwrap();
-        composed.settle(&conn, &[ins(1, 10, 5)]).unwrap();
-    } // handles dropped: the pair lives only in the connection.
+        seed(&conn);
+        assert_eq!(frontier_of(&conn, "bodies"), 1);
+        drop(composed);
+    }
 
-    let composed = Composition::open(&conn, "job_pairs", "team_cost").unwrap();
-    assert_tracks(&conn);
+    let reopened = Composition::open(&conn, "bodies", "grants").unwrap();
+    conn.execute_batch("INSERT INTO body_c VALUES (3);").unwrap();
+    assert_eq!(frontier_of(&conn, "bodies"), 2, "counter continues across reopen");
+    assert_eq!(frontier_of(&conn, "grants"), 2);
+    assert_support(&conn, &[(1, 2), (3, 1)]);
+    assert_visible(&conn, &[(1, 10), (3, 30)]);
 
-    conn.execute_batch("INSERT INTO job VALUES (2,10,7),(3,20,11);")
-        .unwrap();
-    composed
-        .settle(&conn, &[ins(2, 10, 7), ins(3, 20, 11)])
-        .unwrap();
-    assert_tracks(&conn);
-    assert_eq!(consumer_view(&conn), vec![(10, 2, 12), (20, 1, 11)]);
-    // The frontier counters continued across the reopen, one bump per batch.
-    assert_eq!(composed.producer().frontier_id(&conn).unwrap(), 2);
-    assert_eq!(composed.consumer().frontier_id(&conn).unwrap(), 2);
+    reopened.teardown(&conn).unwrap();
+    assert_no_program_objects(&conn);
 }
 
+/// The measured SQLite behavior that dictates the shared collector: a
+/// virtual-table write fired inside another collector's xSync is rejected
+/// with SQLITE_LOCKED and the whole transaction rolls back. See the
+/// `src/composition.rs` module docs.
 #[test]
-fn sql_writes_alone_do_not_settle_composed_programs() {
-    let conn = conn();
-    let composed = install(&conn);
+fn vtab_write_inside_xsync_is_rejected() {
+    let db = Connection::open_in_memory().unwrap();
+    db.execute_batch(
+        "CREATE TABLE watched(v INTEGER);
+         CREATE TABLE side_effect(v INTEGER);",
+    )
+    .unwrap();
+    watch(&db, "col_writer", &["watched"], WritesOtherTable).unwrap();
+    watch(&db, "col_sink", &["side_effect"], Absorbs).unwrap();
 
-    // No collector: an autocommit write leaves both views untouched until the
-    // caller settles. That is the explicit contract, not a lost update.
-    conn.execute_batch("INSERT INTO job VALUES (1,10,5);").unwrap();
-    assert!(consumer_view(&conn).is_empty());
-    assert_eq!(composed.producer().frontier_id(&conn).unwrap(), 0);
-    assert_eq!(composed.consumer().frontier_id(&conn).unwrap(), 0);
-
-    composed.settle(&conn, &[ins(1, 10, 5)]).unwrap();
-    assert_tracks(&conn);
-    assert_eq!(consumer_view(&conn), vec![(10, 1, 5)]);
+    db.execute_batch("BEGIN; INSERT INTO watched VALUES (1);").unwrap();
+    let commit = db.execute_batch("COMMIT;");
+    let err = commit
+        .err()
+        .expect("COMMIT must fail: a vtab write inside another xSync is rejected");
+    match &err {
+        rusqlite::Error::SqliteFailure(e, _) => {
+            assert_eq!(
+                e.extended_code,
+                rusqlite::ffi::SQLITE_LOCKED,
+                "expected SQLITE_LOCKED, got {err}"
+            );
+        }
+        other => panic!("expected SqliteFailure, got {other:?}"),
+    }
+    let rolled_back: i64 = db
+        .query_row("SELECT count(*) FROM watched", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(rolled_back, 0, "the failed COMMIT rolled the transaction back");
 }
 
-#[test]
-fn union_root_consumer_over_producer_view() {
-    let conn = conn();
-    let composed =
-        Composition::install(&conn, ("job_pairs", PRODUCER_SQL), ("pairs_view", UNION_CONSUMER_SQL))
-            .unwrap();
+struct WritesOtherTable;
 
-    conn.execute_batch("INSERT INTO job VALUES (1,10,5),(2,10,5),(3,20,11);")
-        .unwrap();
-    composed
-        .settle(&conn, &[ins(1, 10, 5), ins(2, 10, 5), ins(3, 20, 11)])
-        .unwrap();
-
-    // The consumer's union root sees exactly the producer's visible rows,
-    // duplicate support collapsed the same way.
-    let mut stmt = conn
-        .prepare("SELECT team, cost FROM frontier_pairs_view ORDER BY team, cost")
-        .unwrap();
-    let view: Vec<(i64, i64)> = stmt
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
-    assert_eq!(view, vec![(10, 5), (20, 11)]);
+impl BulkTrigger for WritesOtherTable {
+    fn on_batch(&mut self, db: &Connection, _batch: &[RowChange]) -> rusqlite::Result<()> {
+        db.execute("INSERT INTO side_effect VALUES (1)", [])?;
+        Ok(())
+    }
 }
 
+struct Absorbs;
+
+impl BulkTrigger for Absorbs {
+    fn on_batch(&mut self, _db: &Connection, _batch: &[RowChange]) -> rusqlite::Result<()> {
+        Ok(())
+    }
+}
+
+/// Every unsupported composition shape fails as explicit `Unsupported` at
+/// install, and a failed install leaves no objects behind.
 #[test]
 fn unsupported_compositions_are_explicit() {
     let conn = conn();
-    let _composed = install(&conn);
+    let composed = install(&conn);
 
-    // A watched program over a program view: rejected with the composition
-    // pointer, never a trigger DDL error.
-    let err = Program::install(&conn, "sneaky", "SELECT team FROM frontier_job_pairs")
-        .unwrap_err();
-    assert!(err.is_unsupported());
-    assert_eq!(err.relation, "frontier_job_pairs");
+    // A plain watched program over a program view.
+    let sneaky = Program::install(&conn, "sneaky", "SELECT person FROM frontier_bodies");
+    assert_unsupported(sneaky, "not a settlement source");
 
-    // A consumer over a plain table is not a composition edge.
-    let err = Composition::install(
+    // The producer of a composition reading a program view.
+    let bad_producer = Composition::install(
         &conn,
-        ("job_pairs2", PRODUCER_SQL),
-        ("plain", "SELECT team, count(*) AS n FROM job GROUP BY team"),
-    )
-    .unwrap_err();
-    assert!(err.is_unsupported());
+        ("bad", "SELECT person FROM frontier_bodies"),
+        ("orphan", "SELECT person FROM grant_resource"),
+    );
+    assert_unsupported(bad_producer, "base tables only");
 
-    // A producer reading another program's view would be a second level.
-    let above_sql = CONSUMER_SQL.replace("frontier_job_pairs", "frontier_chained");
-    let err = Composition::install(
+    // A consumer settling from two program views.
+    let other = Program::install(&conn, "other", "SELECT person FROM body_c").unwrap();
+    let two_views = Composition::install(
         &conn,
-        ("chained", "SELECT team FROM frontier_job_pairs"),
-        ("above", above_sql.as_str()),
-    )
-    .unwrap_err();
-    assert!(err.is_unsupported());
-    assert_eq!(err.relation, "frontier_job_pairs");
+        ("p2", "SELECT person FROM body_a"),
+        (
+            "c2",
+            "SELECT person FROM frontier_p2 UNION SELECT person FROM frontier_other",
+        ),
+    );
+    assert_unsupported(two_views, "at most one producer");
 
-    // The rejected installs left no objects behind.
-    let leftovers: i64 = conn
+    // A consumer that never reads the producer's view.
+    let no_view = Composition::install(
+        &conn,
+        ("p3", "SELECT person FROM body_a"),
+        ("c3", "SELECT person FROM grant_resource"),
+    );
+    assert_unsupported(no_view, "must read the producer's output view");
+
+    // A consumer join input that is a plain view, not a base table.
+    conn.execute_batch("CREATE VIEW helper AS SELECT person, resource FROM grant_resource;")
+        .unwrap();
+    let view_input = Composition::install(
+        &conn,
+        ("p4", "SELECT person FROM body_a"),
+        (
+            "c4",
+            "SELECT v.person, h.resource FROM frontier_p4 v JOIN helper h ON h.person = v.person",
+        ),
+    );
+    assert_unsupported(view_input, "only base tables can be watched");
+
+    composed.teardown(&conn).unwrap();
+    other.teardown(&conn).unwrap();
+    assert_no_program_objects(&conn);
+}
+
+#[track_caller]
+fn assert_unsupported(result: Result<impl std::any::Any, frontier_engine::EngineError>, needle: &str) {
+    let err = result.err().expect("install must be rejected");
+    let text = format!("{err}");
+    assert!(err.is_unsupported(), "not Unsupported: {text}");
+    assert!(text.contains(needle), "message '{text}' lacks '{needle}'");
+}
+
+#[track_caller]
+fn assert_no_program_objects(conn: &Connection) {
+    let left: i64 = conn
         .query_row(
-            "SELECT count(*) FROM frontier_catalog WHERE name IN ('sneaky','job_pairs2','plain','chained','above')",
+            "SELECT count(*) FROM sqlite_master WHERE name LIKE 'frontier_%' \
+             AND name NOT IN ('frontier_catalog', 'frontier_catalog_column')",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(leftovers, 0);
+    assert_eq!(left, 0, "program objects leaked");
 }
 
+/// 40 deterministic randomized transactions over all four base tables; after
+/// each COMMIT both views must equal a fresh SQL recomputation over the base
+/// tables.
 #[test]
-fn paired_stress_composed_pair_tracks_fresh_recomputation() {
-    fn draw(state: &mut u64, modulus: u64) -> u64 {
-        *state = state
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1442695040888963407);
-        (*state >> 33) % modulus
-    }
-
+fn stress_tracks_fresh_recomputation() {
     let conn = conn();
     let composed = install(&conn);
-    let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
-    let mut live: Vec<(i64, i64, i64)> = Vec::new();
-    let mut id_seq: i64 = 0;
+    seed(&conn);
 
-    for _ in 0..40 {
-        let mut batch: Vec<SourceChange> = Vec::new();
-        conn.execute_batch("BEGIN;").unwrap();
-        for _ in 0..1 + draw(&mut state, 6) {
-            if live.len() > 3 && draw(&mut state, 100) < 45 {
-                let at = draw(&mut state, live.len() as u64) as usize;
-                let (id, team, cost) = live.remove(at);
-                conn.execute("DELETE FROM job WHERE id = ?1", [id]).unwrap();
-                batch.push(del(id, team, cost));
-            } else {
-                id_seq += 1;
-                let team = 1 + draw(&mut state, 4) as i64;
-                let cost = 1 + draw(&mut state, 50) as i64;
-                conn.execute(
-                    "INSERT INTO job VALUES (?1, ?2, ?3)",
-                    [id_seq, team, cost],
-                )
-                .unwrap();
-                batch.push(ins(id_seq, team, cost));
-            }
+    let mut state = 0x2545_F491_4F6C_DD1Du64;
+    let mut next = move || {
+        state = state
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (state >> 33) as i64
+    };
+    for step in 0..40 {
+        let mut sql = String::from("BEGIN;");
+        for _ in 0..1 + next() % 3 {
+            match next() % 4 {
+                0 => {
+                    let table = ['a', 'b', 'c'][(next() % 3) as usize];
+                    let person = 1 + next() % 6;
+                    sql.push_str(&format!(
+                        "INSERT INTO body_{table} SELECT {person} WHERE NOT EXISTS \
+                         (SELECT 1 FROM body_{table} WHERE person = {person});"
+                    ));
+                }
+                1 => sql.push_str(&format!(
+                    "DELETE FROM body_{} WHERE person = {};",
+                    ['a', 'b', 'c'][(next() % 3) as usize],
+                    1 + next() % 6
+                )),
+                2 => sql.push_str(&format!(
+                    "UPDATE grant_resource SET resource = {} WHERE person = {};",
+                    10 * (1 + next() % 6),
+                    1 + next() % 6
+                )),
+                _ => {
+                    let person = 1 + next() % 6;
+                    let resource = 10 * (1 + next() % 6);
+                    sql.push_str(&format!(
+                        "INSERT INTO grant_resource SELECT {person}, {resource} WHERE NOT EXISTS \
+                         (SELECT 1 FROM grant_resource WHERE person = {person});"
+                    ));
+                }
+            };
         }
-        composed.settle(&conn, &batch).unwrap();
-        conn.execute_batch("COMMIT;").unwrap();
-        assert_tracks(&conn);
+        sql.push_str("COMMIT;");
+        conn.execute_batch(&sql).unwrap();
+
+        let after = format!("after `{sql}`");
+
+        assert_eq!(
+            visible(&conn),
+            recomputed_visible(&conn),
+            "step {step} {after}: consumer view diverged from fresh recomputation"
+        );
+        assert_eq!(
+            support(&conn),
+            recomputed_support(&conn),
+            "step {step} {after}: support diverged from fresh recomputation"
+        );
     }
 
-    // The randomized walk may drain the table; the frontier counter still
-    // advanced once per settled batch, and every one of them tracked.
-    assert_eq!(composed.producer().frontier_id(&conn).unwrap(), 40);
-    assert_eq!(composed.consumer().frontier_id(&conn).unwrap(), 40);
+    composed.teardown(&conn).unwrap();
+    assert_no_program_objects(&conn);
+}
+
+fn recomputed_support(conn: &Connection) -> Vec<(i64, i64)> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT person, count(*) FROM \
+             (SELECT person FROM body_a UNION ALL SELECT person FROM body_b UNION ALL SELECT person FROM body_c) \
+             GROUP BY person ORDER BY person",
+        )
+        .unwrap();
+    stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+}
+
+fn recomputed_visible(conn: &Connection) -> Vec<(i64, i64)> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT v.person, g.resource FROM \
+             (SELECT person FROM body_a UNION SELECT person FROM body_b UNION SELECT person FROM body_c) v \
+             JOIN grant_resource g ON g.person = v.person ORDER BY v.person, g.resource",
+        )
+        .unwrap();
+    stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
 }

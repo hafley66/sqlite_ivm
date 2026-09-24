@@ -1,68 +1,63 @@
-//! Cross-program composition: one producer frontier view consumed by a
-//! second frontier view.
+//! Composed programs: one producer's frontier view consumed by a second
+//! frontier program, both settled by ordinary SQL on the base tables.
 //!
-//! The consumer's only relation is the producer's visible view
-//! (`frontier_<producer>`); its compile resolves the view's columns, its
-//! install builds its own engine objects, and its settle reads nothing but
-//! signed net rows: the producer's settled [`OutputChange`] delta maps 1:1
-//! onto the consumer's `SourceChange` batch (relation = the producer's view,
-//! row = the producer's output schema). Both programs settle inside one
-//! source transaction, producer first, wrapped in one savepoint, so a
-//! failure at either level leaves the previous committed state everywhere.
+//! One `sqlite_ext::watch` serves the whole composition. It takes the
+//! producer's collector slot `frontier_{producer}_c{install}` and watches the
+//! producer's base sources plus the consumer's own table sources. At COMMIT a
+//! single `xSync` fires; its callback settles the producer first, maps the
+//! producer's net output delta 1:1 onto the consumer's view relation, and
+//! settles the consumer with its directly-watched rows appended. Both settles
+//! run in Rust sequence inside that one callback: exactly one virtual table
+//! exists in the transaction, written only by user SQL during statement
+//! execution — never inside `xSync` — so there is no inter-callback order to
+//! prove and install order is irrelevant.
 //!
-//! Composed programs install without a commit collector. A view carries no
-//! AFTER triggers, and even watching the producer's engine tables cannot
-//! work: their writes land inside the producer collector's `xSync`, where
-//! SQLite forbids virtual-table writes (`SQLITE_LOCKED`). Settlement is
-//! therefore explicit: the caller applies source rows, then settles both
-//! programs with one [`Composition::settle`] call. SQL-write auto-settlement
-//! for composed pairs needs a shared per-group collector and is not built.
+//! Why not one collector per program: the consumer's collector would watch
+//! the producer's engine tables, whose writes fire inside the producer's own
+//! `xSync`. SQLite rejects a virtual-table write while any vtab is mid-sync
+//! (`sqlite3VtabBegin` returns `SQLITE_LOCKED` when `sqlite3VtabInSync`
+//! holds, `vdbeaux.c`/`vtab.c`), so such a commit always fails.
+//! `vtab_write_inside_xsync_is_rejected` in `tests/composition.rs`
+//! reproduces this on the live connection.
+//!
+//! The consumer may join the producer's view with real tables. The join's
+//! live-side reads of the view happen after the producer settle in the same
+//! callback, so they see post-frontier truth and the three-term join
+//! equation `W = dL ⋈ R + L ⋈ dR − dL ⋈ dR` stays valid for the derived
+//! input. A consumer may read at most one program view (this producer's); a
+//! producer may read none at all; both restrictions fail as explicit
+//! `Unsupported`, never as a silent mis-settle.
 
-use crate::catalog;
-use crate::error::{EngineError, Stage};
-use crate::observe;
-use crate::{Frontier, OutputChange, Program, SourceChange};
+use crate::catalog::{self, Installed};
+use crate::engine;
+use crate::error::{EngineError, ErrorKind, Stage};
+use crate::{Frontier, Program, Sign, SourceChange};
 use sqlite_ext::rusqlite::{self, Connection};
+use sqlite_ext::{BulkTrigger, RowChange};
+use std::sync::Arc;
 
-/// One producer frontier view and the consumer frontier view over it.
+/// A producer-consumer pair settling as one graph at COMMIT.
 ///
-/// All state lives in the connection's schema, so the pair survives handle
-/// drops ([`Composition::open`]), transaction rollbacks, and reopen.
+/// All state lives in the connection's schema and catalog; the handle owns no
+/// connection. [`Composition::open`] re-registers the shared collector on the
+/// same connection after the previous handles were dropped.
 pub struct Composition {
     producer: Program,
     consumer: Program,
 }
 
-/// The net signed output change of one composed frontier, per program.
-#[derive(Clone, Debug, PartialEq)]
-pub struct CompositionDelta {
-    /// The producer's net output change.
-    pub producer: Vec<OutputChange>,
-    /// The consumer's net output change over the producer's output.
-    pub consumer: Vec<OutputChange>,
-}
-
-impl std::fmt::Debug for Composition {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Composition")
-            .field("producer", &self.producer.name())
-            .field("consumer", &self.consumer.name())
-            .finish()
-    }
-}
-
 impl Composition {
-    /// Install both programs without collectors and validate the edge: the
-    /// producer must read no program view and the consumer must read exactly
-    /// the producer's view. Any failure tears back what was installed.
+    /// Installs the producer and consumer unwatched, validates the
+    /// composition shape, and registers the one shared commit collector over
+    /// `producer sources ∪ consumer table sources`. Any failure tears back
+    /// everything this call installed.
     pub fn install(
         conn: &Connection,
         producer: (&str, &str),
         consumer: (&str, &str),
     ) -> Result<Self, EngineError> {
         let producer = Program::install_unwatched(conn, producer.0, producer.1)?;
-        // Reject a derived producer before the consumer compiles against it.
-        if let Err(e) = Self::validate_producer(conn, &producer) {
+        if let Err(e) = reject_derived_producer_sources(conn, &producer) {
             let _ = producer.teardown(conn);
             return Err(e);
         }
@@ -73,7 +68,9 @@ impl Composition {
                 return Err(e);
             }
         };
-        if let Err(e) = Self::validate_pair(&producer, &consumer) {
+        if let Err(e) = validate_pair(conn, &producer, &consumer)
+            .and_then(|()| register(conn, producer.handle(), consumer.handle()))
+        {
             let _ = consumer.teardown(conn);
             let _ = producer.teardown(conn);
             return Err(e);
@@ -81,134 +78,189 @@ impl Composition {
         Ok(Self { producer, consumer })
     }
 
-    /// Reload both programs from the connection's catalog and re-validate the
-    /// edge against the stored SQL.
+    /// Reopens both programs from the connection's catalog and re-registers
+    /// the shared collector. Any collector instance left by earlier handles
+    /// on this connection is dropped first; its schema objects (vtab,
+    /// triggers) persist, so `watch` would collide with the live slot
+    /// otherwise.
     pub fn open(conn: &Connection, producer: &str, consumer: &str) -> Result<Self, EngineError> {
         let producer = Program::open(conn, producer)?;
         let consumer = Program::open(conn, consumer)?;
-        Self::validate_chain(conn, &producer, &consumer)?;
+        reject_derived_producer_sources(conn, &producer)?;
+        validate_pair(conn, &producer, &consumer)?;
+        drop_collector(conn, &producer)?;
+        register(conn, producer.handle(), consumer.handle())?;
         Ok(Self { producer, consumer })
     }
 
-    /// Assemble from existing handles. Structural edge check only: use
-    /// [`Composition::install`] or [`Composition::open`] for the full
-    /// validation that the producer reads no program view.
-    pub fn new(producer: Program, consumer: Program) -> Result<Self, EngineError> {
-        Self::validate_pair(&producer, &consumer)?;
-        Ok(Self { producer, consumer })
-    }
-
-    /// The producer program: settles the caller's source batch first.
+    /// The producer program.
     pub fn producer(&self) -> &Program {
         &self.producer
     }
 
-    /// The consumer program: settles from the producer's net output change.
+    /// The consumer program.
     pub fn consumer(&self) -> &Program {
         &self.consumer
     }
 
-    /// Settle one complete source batch through both programs, producer
-    /// first, inside the caller's transaction. Atomic as a unit: a failure at
-    /// either level rolls both programs back to the previous committed state.
-    pub fn settle(
-        &self,
-        conn: &Connection,
-        batch: &[SourceChange],
-    ) -> Result<CompositionDelta, EngineError> {
-        let span = tracing::info_span!(
-            target: observe::TARGET,
-            observe::SETTLE_SPAN,
-            program = %self.producer.name(),
-            consumer = %self.consumer.name(),
-        );
-        let _guard = span.enter();
-        conn.execute_batch("SAVEPOINT frontier_sp_compose;")
-            .map_err(|e| fail("savepoint", self.producer.name(), e))?;
-        match self.settle_inner(conn, batch) {
-            Ok(delta) => {
-                conn.execute_batch("RELEASE frontier_sp_compose;")
-                    .map_err(|e| fail("release", self.producer.name(), e))?;
-                Ok(delta)
-            }
-            Err(e) => {
-                conn.execute_batch("ROLLBACK TO frontier_sp_compose; RELEASE frontier_sp_compose;")
-                    .map_err(|e| fail("rollback", self.producer.name(), e))?;
-                Err(e)
-            }
-        }
-    }
-
-    /// Drop both programs' objects, consumer first. Source tables and rows
-    /// are left untouched.
+    /// Drops the shared collector vtab (its `xDestroy` removes every trigger
+    /// it created, including the consumer's extra tables), then the consumer,
+    /// then the producer.
     pub fn teardown(self, conn: &Connection) -> Result<(), EngineError> {
+        drop_collector(conn, &self.producer)?;
         self.consumer.teardown(conn)?;
         self.producer.teardown(conn)
     }
+}
 
-    fn settle_inner(
-        &self,
-        conn: &Connection,
-        batch: &[SourceChange],
-    ) -> Result<CompositionDelta, EngineError> {
-        let producer_delta = self.producer.settle(conn, batch)?;
-        // The producer's output schema is the view's declared column order,
-        // so each net output row maps 1:1 onto a source change for the view.
-        let consumer_batch: Vec<SourceChange> = producer_delta
-            .iter()
-            .map(|change| SourceChange {
-                relation: self.producer.view(),
-                sign: change.sign,
-                row: change.row.clone(),
-            })
-            .collect();
-        let consumer_delta = self.consumer.settle(conn, &consumer_batch)?;
-        Ok(CompositionDelta {
-            producer: producer_delta,
-            consumer: consumer_delta,
-        })
-    }
-
-    fn validate_pair(producer: &Program, consumer: &Program) -> Result<(), EngineError> {
-        let view = producer.view();
-        let sources = consumer.sources();
-        if sources.len() != 1 || sources[0] != view {
-            return Err(EngineError::unsupported(
-                Stage::Install,
-                consumer.name(),
-                "the consumer must read exactly one relation: the producer's output view",
-            ));
-        }
-        Ok(())
-    }
-
-    fn validate_producer(conn: &Connection, producer: &Program) -> Result<(), EngineError> {
-        for source in producer.sources() {
-            if catalog::derived_view_program(conn, source)?.is_some() {
-                return Err(EngineError::unsupported(
-                    Stage::Install,
-                    source,
-                    "a program view is not a settlement source; only single-level composition is supported",
-                ));
-            }
-        }
-        Ok(())
-    }
-
-    fn validate_chain(
-        conn: &Connection,
-        producer: &Program,
-        consumer: &Program,
-    ) -> Result<(), EngineError> {
-        Self::validate_pair(producer, consumer)?;
-        Self::validate_producer(conn, producer)
+fn reject_derived_producer_sources(conn: &Connection, producer: &Program) -> Result<(), EngineError> {
+    let derived = catalog::scan_derived_sources(conn, &producer.handle())?;
+    match derived.first() {
+        Some(view) => Err(EngineError::unsupported(
+            Stage::Install,
+            view,
+            "the producer of a composition must read base tables only",
+        )),
+        None => Ok(()),
     }
 }
 
-fn fail(what: &str, object: &str, e: rusqlite::Error) -> EngineError {
-    EngineError::new(
-        Stage::Settle,
-        object,
-        crate::ErrorKind::Sqlite(format!("{what}: {e}")),
-    )
+fn validate_pair(
+    conn: &Connection,
+    producer: &Program,
+    consumer: &Program,
+) -> Result<(), EngineError> {
+    let view = producer.view();
+    let mut seen = false;
+    for source in consumer.sources() {
+        if *source == view {
+            if seen {
+                return Err(EngineError::unsupported(
+                    Stage::Install,
+                    source,
+                    "the consumer reads the producer's view more than once",
+                ));
+            }
+            seen = true;
+        } else if catalog::derived_view_program(conn, source)?.is_some() {
+            return Err(EngineError::unsupported(
+                Stage::Install,
+                source,
+                "a consumer may settle from at most one producer; install one Composition per program view",
+            ));
+        } else if !catalog::is_base_table(conn, source)? {
+            return Err(EngineError::unsupported(
+                Stage::Install,
+                source,
+                "only base tables can be watched for the composition collector",
+            ));
+        }
+    }
+    if !seen {
+        return Err(EngineError::unsupported(
+            Stage::Install,
+            &view,
+            "the consumer must read the producer's output view",
+        ));
+    }
+    Ok(())
+}
+
+fn collector_name(producer: &Installed) -> String {
+    catalog::collector(&producer.name, producer.install)
+}
+
+fn drop_collector(conn: &Connection, producer: &Program) -> Result<(), EngineError> {
+    let name = collector_name(&producer.handle());
+    conn.execute_batch(&format!("DROP TABLE IF EXISTS main.{};", catalog::quote(&name)))
+        .map_err(|e| {
+            EngineError::new(Stage::Install, &name, ErrorKind::Sqlite(e.to_string()))
+        })
+}
+
+/// Registers the one shared collector: the producer's slot, watching the
+/// producer's sources plus the consumer's non-view sources. The collector
+/// name matches `catalog::collector(producer)`, so the producer's own
+/// teardown also finds the slot free of leftovers.
+fn register(
+    conn: &Connection,
+    producer: Arc<Installed>,
+    consumer: Arc<Installed>,
+) -> Result<(), EngineError> {
+    let name = collector_name(&producer);
+    let view = catalog::view(&producer.name);
+    let mut watched = producer.sources.clone();
+    for source in &consumer.sources {
+        if *source != view && !watched.contains(source) {
+            watched.push(source.clone());
+        }
+    }
+    let tables: Vec<&str> = watched.iter().map(String::as_str).collect();
+    sqlite_ext::watch(conn, &name, &tables, GroupTrigger { producer, consumer, view })
+        .map_err(|e| EngineError::new(Stage::Install, &name, ErrorKind::Sqlite(e.to_string())))
+}
+
+/// The graph-owned commit callback. One instance per composition.
+pub(crate) struct GroupTrigger {
+    producer: Arc<Installed>,
+    consumer: Arc<Installed>,
+    view: String,
+}
+
+impl BulkTrigger for GroupTrigger {
+    fn on_batch(&mut self, db: &Connection, batch: &[RowChange]) -> rusqlite::Result<()> {
+        let mut producer_rows: Vec<SourceChange> = Vec::new();
+        let mut consumer_rows: Vec<SourceChange> = Vec::new();
+        for change in batch {
+            let change = SourceChange {
+                relation: change.table.clone(),
+                sign: match change.sign {
+                    sqlite_ext::Sign::Insert => Sign::Insert,
+                    sqlite_ext::Sign::Delete => Sign::Delete,
+                },
+                row: change.values.iter().map(catalog::cell_of).collect(),
+            };
+            // One relation may feed both programs.
+            if self.producer.sources.contains(&change.relation) {
+                producer_rows.push(change.clone());
+            }
+            if self.consumer.sources.iter().any(|s| *s == change.relation && *s != self.view) {
+                consumer_rows.push(change);
+            }
+        }
+        if producer_rows.is_empty() && consumer_rows.is_empty() {
+            return Ok(());
+        }
+        self.settle(db, producer_rows, consumer_rows)
+            .map_err(rusqlite::Error::from)
+    }
+}
+
+impl GroupTrigger {
+    /// Producer first, then the consumer with the producer's net output
+    /// delta mapped onto the view relation and the consumer's own rows
+    /// appended. Both settle inside the caller's `xSync`: no savepoints, no
+    /// virtual-table writes. Any error propagates, failing the whole COMMIT.
+    fn settle(
+        &self,
+        conn: &Connection,
+        producer_rows: Vec<SourceChange>,
+        mut consumer_rows: Vec<SourceChange>,
+    ) -> Result<(), EngineError> {
+        let producer_settled = !producer_rows.is_empty();
+        if producer_settled {
+            let delta = engine::settle(conn, &self.producer, &producer_rows, true)?;
+            for change in delta {
+                consumer_rows.push(SourceChange {
+                    relation: self.view.clone(),
+                    sign: change.sign,
+                    row: change.row,
+                });
+            }
+        }
+        if producer_settled || !consumer_rows.is_empty() {
+            engine::settle(conn, &self.consumer, &consumer_rows, true)?;
+        }
+        Ok(())
+    }
 }

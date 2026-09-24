@@ -38,6 +38,9 @@ pub(crate) struct Installed {
     pub output: Vec<OutputColumn>,
     /// Watched source tables, first-use order.
     pub sources: Vec<String>,
+    /// The watched sources that are other programs' output views. Their
+    /// indexes are skipped: a view cannot carry one.
+    pub derived: Vec<String>,
     /// Every statement one settle issues, pregenerated at install.
     pub sqls: SettleSql,
 }
@@ -159,46 +162,49 @@ pub(crate) fn derived_view_program(
     conn: &Connection,
     table: &str,
 ) -> Result<Option<String>, EngineError> {
-    // No catalog table yet means no installed programs and no derived views.
-    let have_catalog: i64 = conn
-        .query_row(
-            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-            [catalog()],
-            |row| row.get(0),
-        )
-        .map_err(|e| EngineError::new(Stage::Install, table, ErrorKind::Sqlite(e.to_string())))?;
-    if have_catalog == 0 {
-        return Ok(None);
-    }
+    // Callers guarantee the catalog exists: install creates it before this
+    // runs, and open only reads installed programs.
     let sql = format!(
         "SELECT name FROM {} WHERE 'frontier_' || name = ?1",
         quote(catalog())
     );
-    let mut meter = Meter::default();
-    let program = meter
-        .one(conn, "install", table, &sql, [table], |row| {
-            row.get::<_, String>(0)
-        })
-        .map_err(|e| EngineError::new(Stage::Install, table, ErrorKind::Sqlite(e.to_string())))?;
-    Ok(program)
+    match conn.query_row(&sql, [table], |row| row.get::<_, String>(0)) {
+        Ok(program) => Ok(Some(program)),
+        Err(sqlite_ext::rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(EngineError::new(Stage::Install, table, ErrorKind::Sqlite(e.to_string()))),
+    }
 }
 
-/// A watched program cannot settle from another program's output view: a
-/// view carries no AFTER triggers for the collector, and writes landing in
-/// that view's engine tables fire inside another program's `xSync`, where
-/// SQLite forbids virtual-table writes. The composition API is the only
-/// supported path; this failure is explicit, never a silent mis-settle.
-fn check_no_derived_sources(conn: &Connection, inst: &Installed) -> Result<(), EngineError> {
+/// Which of an install's sources cannot carry a source index: other
+/// programs' output views and plain user views. Recorded on the install so
+/// program DDL and teardown skip exactly the same index statements.
+pub(crate) fn scan_derived_sources(
+    conn: &Connection,
+    inst: &Installed,
+) -> Result<Vec<String>, EngineError> {
+    let mut derived = Vec::new();
     for source in &inst.sources {
-        if derived_view_program(conn, source)?.is_some() {
-            return Err(EngineError::unsupported(
-                Stage::Install,
-                source,
-                "a program view is not a settlement source; install the producer-consumer pair through Composition",
-            ));
+        if derived_view_program(conn, source)?.is_some() || !is_base_table(conn, source)? {
+            derived.push(source.clone());
         }
     }
-    Ok(())
+    Ok(derived)
+}
+
+/// Whether the relation is a real table in `main` (the only schema the
+/// extension watches). Views of any kind answer false.
+pub(crate) fn is_base_table(conn: &Connection, name: &str) -> Result<bool, EngineError> {
+    match conn.query_row("SELECT type FROM sqlite_master WHERE name = ?1", [name], |row| {
+        row.get::<_, String>(0)
+    }) {
+        Ok(kind) => Ok(kind == "table"),
+        Err(sqlite_ext::rusqlite::Error::QueryReturnedNoRows) => Ok(false),
+        Err(e) => Err(EngineError::new(
+            Stage::Install,
+            name,
+            ErrorKind::Sqlite(e.to_string()),
+        )),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -239,9 +245,16 @@ pub(crate) fn install(
     }
     let install = next_install(conn, &mut meter)?;
     let installed = {
-        let built = build_installed(name, install, compiled);
-        if matches!(watch, Watch::Sources) {
-            check_no_derived_sources(conn, &built)?;
+        let mut built = build_installed(name, install, compiled);
+        built.derived = scan_derived_sources(conn, &built)?;
+        if matches!(watch, Watch::Sources)
+            && !built.derived.is_empty()
+        {
+            return Err(EngineError::unsupported(
+                Stage::Install,
+                built.derived[0].clone(),
+                "a view is not a settlement source; sources must be base tables — install the producer-consumer pair through Composition",
+            ));
         }
         built
     };
@@ -349,6 +362,7 @@ fn build_installed(name: &str, install: u64, mut compiled: Compiled) -> Installe
         install,
         output: compiled.output.clone(),
         sources: compiled.sources.clone(),
+        derived: Vec::new(),
         plan: compiled,
         sqls,
     }
@@ -487,6 +501,9 @@ fn push_program_ddl(inst: &Installed, sql: &mut String) {
             (&left.table, &join.left_key),
             (&right.table, &join.right_key),
         ] {
+            if inst.derived.iter().any(|d| d == table) {
+                continue;
+            }
             if !indexed.iter().any(|(t, c)| t == table && c == cols) {
                 indexed.push((table.clone(), cols.clone()));
             }
@@ -876,7 +893,9 @@ pub(crate) fn open(conn: &Connection, name: &str) -> Result<Arc<Installed>, Engi
         ));
     };
     let compiled = compile(conn, name, &sql)?;
-    Ok(Arc::new(build_installed(name, install, compiled)))
+    let mut installed = build_installed(name, install, compiled);
+    installed.derived = scan_derived_sources(conn, &installed)?;
+    Ok(Arc::new(installed))
 }
 
 pub(crate) fn teardown(conn: &Connection, inst: &Installed) -> Result<(), EngineError> {
@@ -915,6 +934,9 @@ pub(crate) fn teardown(conn: &Connection, inst: &Installed) -> Result<(), Engine
             (&left.table, &join.left_key),
             (&right.table, &join.right_key),
         ] {
+            if inst.derived.iter().any(|d| d == table) {
+                continue;
+            }
             if !indexed.iter().any(|(t, c)| t == table && c == cols) {
                 indexed.push((table.clone(), cols.clone()));
             }
