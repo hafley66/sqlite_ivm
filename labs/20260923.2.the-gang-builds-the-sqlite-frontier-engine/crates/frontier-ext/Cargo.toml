@@ -13,5 +13,5 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-frontier-engine = { path = "../frontier-engine" }
+frontier-engine = { path = "../../../../crates/frontier-engine" }
 sqlite-ext = { path = "/Users/chrishafley/projects/hafley-rs-wt/main-codex-attribution/crates/sqlite-ext", features = ["loadable"] }

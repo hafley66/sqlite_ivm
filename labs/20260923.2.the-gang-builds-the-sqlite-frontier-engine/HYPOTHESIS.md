@@ -1,8 +1,8 @@
 # HYPOTHESIS — an independent SQLite extension engine lane
 
 One reusable SQLite-backed incremental frontier engine as a library crate
-(`frontier-engine`) plus a loadable extension cdylib (`frontier-ext`), inside
-lab `labs/20260923.2.the-gang-builds-the-sqlite-frontier-engine/`. It must
+(`frontier-engine`) plus a loadable extension cdylib (`frontier-ext`). The engine
+was promoted to `crates/frontier-engine/`; the cdylib remains in this lab. It must
 reproduce both oracle TSV pairs from `../../plans/engine-iso/` and leave
 measurements behind.
 
@@ -190,11 +190,11 @@ sqlite3 -separator "$(printf '\t')" :memory: < ../../plans/engine-iso/2_oracle.s
   | diff - ../../plans/engine-iso/3_expected.tsv                 # PRIMARY_ORACLE_OK
 sqlite3 -separator "$(printf '\t')" :memory: < ../../plans/engine-iso/3b_aggregate.sql \
   | diff - ../../plans/engine-iso/3c_aggregate_expected.tsv      # AGGREGATE_ORACLE_OK
-cargo fmt --all -- --check
-cargo test --offline                             # 6 case tests + 1 extension + 1 doc test
+cargo fmt --all --manifest-path ../../crates/frontier-engine/Cargo.toml -- --check
+cargo test --offline --manifest-path ../../crates/frontier-engine/Cargo.toml # 6 case tests + 1 extension + 1 doc test
 cargo test --offline --manifest-path crates/frontier-ext/Cargo.toml
-cargo run --offline --example cases              # 15-frontier walkthrough, self-asserting
-cargo run --offline --example measure            # this report
+cargo run --offline --manifest-path ../../crates/frontier-engine/Cargo.toml --example cases # 15-frontier walkthrough
+cargo run --offline --manifest-path ../../crates/frontier-engine/Cargo.toml --example measure # this report
 ```
 
 All green on the recorded run: both oracle diffs exit 0, `fmt --check` clean,

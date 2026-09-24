@@ -12,7 +12,8 @@ use std::process::Command;
 
 /// Builds the cdylib and returns its path.
 fn extension_path() -> PathBuf {
-    let ext = Path::new(env!("CARGO_MANIFEST_DIR")).join("../frontier-ext");
+    let ext = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../labs/20260923.2.the-gang-builds-the-sqlite-frontier-engine/crates/frontier-ext");
     let built = Command::new("cargo")
         .args(["build", "--offline", "--manifest-path"])
         .arg(ext.join("Cargo.toml"))
