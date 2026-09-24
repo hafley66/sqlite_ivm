@@ -3,7 +3,8 @@
 One reusable SQLite-backed incremental frontier engine as a library crate
 (`frontier-engine`) plus a loadable extension cdylib (`frontier-ext`), inside
 lab `labs/20260923.2.the-gang-builds-the-sqlite-frontier-engine/`. It must
-reproduce both oracle TSV pairs from `PACKET/` and leave measurements behind.
+reproduce both oracle TSV pairs from `../../plans/engine-iso/` and leave
+measurements behind.
 
 ## 1. Public type signatures (the contract, first)
 
@@ -172,6 +173,8 @@ guardrail repeats, 5 aggregate frontiers):
 - Memory: SQLite allocator current 377,968 B, peak 495,984 B; connection
   statements 106,848 B, cache 153,600 B, schema 32,160 B.
 - Process: peak RSS 6,914,048 B (~6.6 MiB), CPU user 0.053 s + system 0.036 s.
+  An independent rerun peaked at 8,404,992 B; statement and allocator counts
+  matched the recorded run.
 - Files: db 4,096 B; WAL 902,312 B before `PRAGMA wal_checkpoint(TRUNCATE)`,
   0 B after (WAL retains every settled frame until checkpointed).
 - **Repeat guardrail** (same-shape settles): vm steps A=490, B=490 —
@@ -183,12 +186,12 @@ guardrail repeats, 5 aggregate frontiers):
 
 ```sh
 cd labs/20260923.2.the-gang-builds-the-sqlite-frontier-engine
-sqlite3 -separator "$(printf '\t')" :memory: < PACKET/2_oracle.sql \
-  | diff - PACKET/3_expected.tsv                 # PRIMARY_ORACLE_OK
-sqlite3 -separator "$(printf '\t')" :memory: < PACKET/3b_aggregate.sql \
-  | diff - PACKET/3c_aggregate_expected.tsv      # AGGREGATE_ORACLE_OK
+sqlite3 -separator "$(printf '\t')" :memory: < ../../plans/engine-iso/2_oracle.sql \
+  | diff - ../../plans/engine-iso/3_expected.tsv                 # PRIMARY_ORACLE_OK
+sqlite3 -separator "$(printf '\t')" :memory: < ../../plans/engine-iso/3b_aggregate.sql \
+  | diff - ../../plans/engine-iso/3c_aggregate_expected.tsv      # AGGREGATE_ORACLE_OK
 cargo fmt --all -- --check
-cargo test --offline                             # 6 lib cases + 1 extension + 0 doc
+cargo test --offline                             # 6 case tests + 1 extension + 1 doc test
 cargo test --offline --manifest-path crates/frontier-ext/Cargo.toml
 cargo run --offline --example cases              # 15-frontier walkthrough, self-asserting
 cargo run --offline --example measure            # this report

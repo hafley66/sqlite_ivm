@@ -84,7 +84,7 @@ fn main() {
     let (fresh_1, cached_1) = prepare_counts(&recorder);
     frontier(&conn, "INSERT INTO direct_grant VALUES (9,901);");
     let cum_2 = settle_vm_steps(&recorder);
-    let (fresh_2, cached_2) = prepare_counts(&recorder);
+    let (_fresh_2, cached_2) = prepare_counts(&recorder);
     frontier(&conn, "INSERT INTO direct_grant VALUES (9,902);");
     let cum_3 = settle_vm_steps(&recorder);
     let (fresh_3, _cached_3) = prepare_counts(&recorder);
