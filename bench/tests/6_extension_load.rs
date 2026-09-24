@@ -194,6 +194,36 @@ fn loaded_extension_composes_two_frontiers_on_commit() -> Result<()> {
 }
 
 #[test]
+fn loaded_extension_bootstraps_preexisting_rows() -> Result<()> {
+    let db = open_loaded()?;
+    db.execute_batch(
+        "PRAGMA recursive_triggers=ON; PRAGMA trusted_schema=ON;
+         CREATE TABLE job(id INTEGER PRIMARY KEY, team INTEGER NOT NULL, cost INTEGER NOT NULL);
+         INSERT INTO job VALUES (1, 10, 5), (2, 10, 7);",
+    )?;
+    let installed: String = db.query_row(
+        "SELECT sqlite_ivm_frontier_install('team_cost',
+            'SELECT team, count(*) AS jobs, sum(cost) AS total_cost FROM job GROUP BY team')",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(installed, "team_cost");
+    let snapshot: (i64, i64) = db.query_row(
+        "SELECT jobs, total_cost FROM frontier_team_cost WHERE team=10",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    assert_eq!(snapshot, (2, 12));
+    let frontier: i64 = db.query_row(
+        "SELECT frontier FROM frontier_catalog WHERE name='team_cost'",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(frontier, 0);
+    Ok(())
+}
+
+#[test]
 fn loaded_extension_retains_preparation_and_execution_events() {
     // A separate process lets the actual dylib install its hafley-observe layer.
     let output = std::process::Command::new(std::env::current_exe().unwrap())
