@@ -20,4 +20,7 @@ rusqlite = { version = "=0.40.2", features = ["bundled", "load_extension"] }
 name = "cases"
 
 [[example]]
+name = "bootstrap"
+
+[[example]]
 name = "measure"

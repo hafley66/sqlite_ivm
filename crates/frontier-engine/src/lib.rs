@@ -163,9 +163,12 @@ impl std::fmt::Debug for Program {
 
 impl Program {
     /// Parse, compile, validate and install `select_sql` under `name`.
-    /// Creates the program's tables, indexes, views and source indexes, and
-    /// registers the transaction collector, so source writes committed through
-    /// SQL settle automatically at commit.
+    /// Creates the program's tables, indexes, views and source indexes,
+    /// materializes the rows the sources already hold (the installed
+    /// snapshot equals a fresh evaluation of `select_sql` over the current
+    /// tables; the frontier counter stays 0 and the delta table stays
+    /// empty), and registers the transaction collector, so source writes
+    /// committed through SQL settle automatically at commit.
     pub fn install(
         conn: &rusqlite::Connection,
         name: &str,
@@ -177,7 +180,8 @@ impl Program {
     }
 
     /// Install without a commit collector: composition's entry for programs
-    /// that settle only through the explicit API.
+    /// that settle only through the explicit API. Materializes the rows the
+    /// sources already hold, exactly like [`Program::install`](Self::install).
     pub(crate) fn install_unwatched(
         conn: &rusqlite::Connection,
         name: &str,

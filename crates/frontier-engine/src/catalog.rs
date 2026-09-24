@@ -21,11 +21,16 @@
 //! on the way in, so cells stay exactly as the source wrote them. Row identity
 //! is the tables' integer rowids; every lookup below runs through the unique
 //! or source indexes.
+//!
+//! Install back-fills the root from the rows the sources already hold — one
+//! set-wise read per source, explicit `Unsupported` on NULL or non-numeric
+//! group-sum storage. The initial delta stays empty and the frontier counter
+//! stays 0; the first committed source transaction is frontier 1.
 
 use crate::error::{EngineError, ErrorKind, Stage};
 use crate::meter::Meter;
 use crate::observe;
-use crate::plan::{self, Compiled, Root};
+use crate::plan::{self, Compiled, Root, ScanSpec};
 use crate::OutputColumn;
 use sqlite_ext::rusqlite::{types::Value, Connection};
 use std::sync::Arc;
@@ -287,6 +292,10 @@ pub(crate) fn install(
     meter
         .batch(conn, "install", name, &sql)
         .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
+    if let Err(e) = bootstrap(conn, &installed, &mut meter) {
+        rollback(conn, "frontier_sp_install");
+        return Err(e);
+    }
     let arc = Arc::new(installed);
     if matches!(watch, Watch::Sources) {
         if let Err(e) = crate::engine::watch_collector(conn, &arc) {
@@ -296,6 +305,161 @@ pub(crate) fn install(
     }
     release(conn, "frontier_sp_install");
     Ok(arc)
+}
+/// Back-fills the root from the rows the sources already hold, so the
+/// installed snapshot equals a fresh evaluation of the defining SELECT.
+/// Entirely set-wise: one `INSERT .. SELECT` per distinct source reads each
+/// source exactly once (a composed consumer stages from the producer's
+/// already-bootstrapped view), then the pregenerated settle statements net
+/// the staged rows through the scan/join deltas into the root. No frontier
+/// occurs: the catalog row keeps `frontier = 0`, the delta table stays
+/// empty, and nothing is emitted. The guards fail the install explicitly
+/// when a source holds cells the engine cannot settle exactly (`NULL`
+/// anywhere in a staged row; non-numeric storage in a group-sum column) —
+/// the same contract `validate_batch` enforces on every later settle. A
+/// failure propagates to [`install`], which rolls the install savepoint
+/// back: no catalog row, no collector, no shadow objects, sources untouched.
+fn bootstrap(conn: &Connection, inst: &Installed, meter: &mut Meter) -> Result<(), EngineError> {
+    let phase = "install";
+    let p = &inst.name;
+
+    // Stage every current source row with sign +1, in declared column
+    // order. The staging columns carry no declared type, so cells keep
+    // their storage classes end to end.
+    let mut sql = String::new();
+    for table in &inst.plan.sources {
+        let scan = source_scan(inst, table);
+        let into: Vec<String> = (0..scan.columns.len()).map(|i| format!("v{i}")).collect();
+        let cols: Vec<String> = scan.columns.iter().map(|c| quote(c)).collect();
+        sql.push_str(&format!(
+            "INSERT INTO {t}(__seq, __table, __sign, {into}) \
+             SELECT 0, '{lit}', 1, {cols} FROM {src};",
+            t = quote(stage(p)),
+            into = into.join(","),
+            cols = cols.join(","),
+            lit = table.replace('\'', "''"),
+            src = quote(table),
+        ));
+    }
+    meter
+        .batch(conn, phase, p, &sql)
+        .map_err(|e| EngineError::new(Stage::Install, p, ErrorKind::Sqlite(e.to_string())))?;
+
+    // The guards read the staged rows, not the sources: they see exactly
+    // what the fills below will consume.
+    let sum_positions: Vec<(String, usize)> = match &inst.plan.root {
+        Root::Group { scan, sums, .. } => {
+            let scan = &inst.plan.scans[*scan];
+            sums.iter()
+                .map(|s| {
+                    let col = &scan.needed[s.take];
+                    let pos = scan
+                        .columns
+                        .iter()
+                        .position(|c| c == col)
+                        .expect("needed columns come from the declared list");
+                    (scan.table.clone(), pos)
+                })
+                .collect()
+        }
+        Root::Union { .. } => Vec::new(),
+    };
+    for table in &inst.plan.sources {
+        let scan = source_scan(inst, table);
+        let nulls = (0..scan.columns.len())
+            .map(|i| format!("v{i} IS NULL"))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let mut filters = vec![format!("count(*) FILTER (WHERE {nulls})")];
+        for (sum_table, pos) in &sum_positions {
+            if sum_table == table {
+                filters.push(format!(
+                    "count(*) FILTER (WHERE typeof(v{pos}) NOT IN ('integer','real'))"
+                ));
+            }
+        }
+        let sql = format!(
+            "SELECT {filters} FROM {t} WHERE __table = '{lit}';",
+            filters = filters.join(","),
+            t = quote(stage(p)),
+            lit = table.replace('\'', "''"),
+        );
+        let width = filters.len();
+        let Some(counts) = meter
+            .one(conn, phase, table, &sql, [], |row| {
+                (0..width)
+                    .map(|i| row.get::<_, i64>(i))
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .map_err(|e| {
+                EngineError::new(Stage::Install, table, ErrorKind::Sqlite(e.to_string()))
+            })?
+        else {
+            return Err(EngineError::new(
+                Stage::Install,
+                table,
+                ErrorKind::Sqlite("bootstrap guard read failed".into()),
+            ));
+        };
+        if counts[0] > 0 {
+            return Err(EngineError::unsupported(
+                Stage::Install,
+                table,
+                "pre-existing rows hold NULL cells; keys and sums over NULL are not a supported shape",
+            ));
+        }
+        if counts[1..].iter().any(|&c| c > 0) {
+            return Err(EngineError::unsupported(
+                Stage::Install,
+                table,
+                "pre-existing group-sum cells hold TEXT/BLOB storage; only INTEGER and REAL settle exactly",
+            ));
+        }
+    }
+
+    // Net the staged rows through the engine's own fill statements.
+    for (object, sql) in &inst.sqls.scan_fills {
+        let span =
+            tracing::info_span!(target: observe::TARGET, observe::SCAN_SPAN, object = %object);
+        let _guard = span.enter();
+        meter
+            .exec(conn, phase, object, sql, [object])
+            .map_err(|e| {
+                EngineError::new(Stage::Install, object, ErrorKind::Sqlite(e.to_string()))
+            })?;
+    }
+    for (object, sql) in &inst.sqls.join_fills {
+        let span =
+            tracing::info_span!(target: observe::TARGET, observe::JOIN_SPAN, object = %object);
+        let _guard = span.enter();
+        meter.exec(conn, phase, object, sql, []).map_err(|e| {
+            EngineError::new(Stage::Install, object, ErrorKind::Sqlite(e.to_string()))
+        })?;
+    }
+    {
+        let span = tracing::info_span!(target: observe::TARGET, observe::ROOT_SPAN, object = p);
+        let _guard = span.enter();
+        meter
+            .exec(conn, phase, p, &inst.sqls.root_upsert, [])
+            .map_err(|e| EngineError::new(Stage::Install, p, ErrorKind::Sqlite(e.to_string())))?;
+    }
+
+    // Leave the transient tables exactly as a settled frontier does.
+    for (object, sql) in &inst.sqls.clears {
+        meter.exec(conn, phase, object, sql, []).map_err(|e| {
+            EngineError::new(Stage::Install, object, ErrorKind::Sqlite(e.to_string()))
+        })?;
+    }
+    Ok(())
+}
+
+/// The plan's scan over one distinct source table.
+fn source_scan<'a>(inst: &'a Installed, table: &str) -> &'a ScanSpec {
+    inst.plan
+        .scans
+        .iter()
+        .find(|s| s.table == table)
+        .expect("every plan source has a scan")
 }
 
 fn compile(conn: &Connection, name: &str, select_sql: &str) -> Result<Compiled, EngineError> {
