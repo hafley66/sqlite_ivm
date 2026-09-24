@@ -36,3 +36,16 @@ CREATE VIEW reach AS WITH RECURSIVE r(x, y) AS (
 + e 20 21
 -- step: f9_rejoin_cycle
 + e 2 3
+-- step: dred_cycle_fed_from_outside
++ e 41 42
++ e 42 41
++ e 43 41
+-- step: dred_feed_removed_rows_self_support_only
+- e 43 41
+-- step: dred_feed_back_cycle_edge_out
++ e 43 41
+- e 41 42
+-- step: dred_cycle_edge_back_other_readded_in_batch
++ e 41 42
+- e 42 41
++ e 42 41

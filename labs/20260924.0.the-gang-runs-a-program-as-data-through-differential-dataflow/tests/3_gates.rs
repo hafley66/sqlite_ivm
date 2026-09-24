@@ -135,7 +135,7 @@ fn k20_two_engines_interleaved_match_solo_runs() {
     }
 }
 
-/// K6, K20, K27: the DD engine source reads no files, holds no global state, links no SQLite, names no test relation.
+/// K6, K20, K27: engine sources read no files, hold no global state, name no test relation; only the SQLite engine links SQLite.
 #[test]
 fn k6_dd_engine_source_gate() {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -144,11 +144,12 @@ fn k6_dd_engine_source_gate() {
         "lazy_static", "rusqlite", "Connection", "\"membership\"", "\"permission\"", "\"direct_grant\"", "\"job\"",
         "\"access\"", "\"team_cost\"",
     ];
-    for file in ["0_ir.rs", "1_rel.rs", "2_dd.rs", "lib.rs"] {
+    for file in ["0_ir.rs", "1_rel.rs", "2_dd.rs", "3_sqlite.rs", "lib.rs"] {
         let text = std::fs::read_to_string(dir.join(file)).unwrap();
         let text: String = text.lines().filter(|l| !l.trim_start().starts_with("//") && !l.contains("cfg(feature")).map(str::trim_start).collect::<Vec<_>>().join("\n");
         for token in forbidden {
-            let allowed = file == "lib.rs" && (token == "rusqlite" || token == "Connection");
+            let links_sqlite = file == "lib.rs" || file == "3_sqlite.rs";
+            let allowed = links_sqlite && (token == "rusqlite" || token == "Connection");
             assert!(allowed || !text.contains(token), "{file} contains {token:?}");
         }
     }
