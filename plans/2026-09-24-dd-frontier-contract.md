@@ -340,6 +340,15 @@ engine or extension source — this lane's only artifact is this file.
    engine crates, canonical `sqlite-ext`): outputs quoted in §2. First run also produced
    the §2 double-apply measurements; corrected run produced the collector-path
    measurements. Probe code is throwaway; not committed.
+5. Canonical checkout, all nine prebuilt release arms, one fixed file-backed fixture:
+   `FRONTIER_EXT_PATH="$PWD/target/frontier-ext/release/libfrontier_ext.dylib"
+   FRONTIER_DD_EXT_PATH="$PWD/target/frontier-dd-ext/release/libfrontier_dd_ext.dylib"
+   target/release/frontier-stress --rows=32 --batch=4 --fanout=2
+   --groups=spread --churn=25 --check-every=1 --reps=1 --storage=file
+   --observe=on`. Exit 0; 18 result rows (access and group × nine arms) are
+   preserved in `plans/costs/57_frontier_all_arms_20260924.tsv`. The harness
+   checked every requested snapshot against the recomputation oracle. The
+   recorded wall times are one-run observations, not paired performance claims.
 
 No performance numbers are claimed beyond the wall-clock of the runs above; the lane
 made no timing comparisons.

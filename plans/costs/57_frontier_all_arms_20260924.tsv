@@ -1,0 +1,19 @@
+shape	rows	batch	fanout	groups	churn	storage	rep	arm	install_ms	seed_ms	batch_ms	churn_ms	read_ms	result_rows	sqlite_allocator_bytes	process_peak_rss_bytes	db_bytes	wal_bytes	batch_vm_steps	batch_statements	batch_fullscan_steps
+access	32	4	2	spread	25	file	0	direct-rust	0.001	0.048	0.013	0.055	0.080	100		2097152					
+access	32	4	2	spread	25	file	0	direct-sqlite	2.034	1.381	0.527	9.816	0.741	100	226992	8208384	4096	2554432	5179	127	103
+access	32	4	2	spread	25	file	0	rust-iso	0.008	0.112	0.030	0.170	0.159	100		2473984					
+access	32	4	2	spread	25	file	0	sqlite-iso	3.106	1.347	0.578	16.647	1.191	100	281520	11747328	4096	2521472	8804	36	185
+access	32	4	2	spread	25	file	0	sqlite-iso-ext	3.249	0.993	0.406	12.941	1.182	100	277584	8617984	4096	2521472	8804	36	185
+access	32	4	2	spread	25	file	0	sqlite-ivm-frontier	1.997	1.347	0.582	16.934	1.188	100	278336	12550144	4096	2521472	8804	36	185
+access	32	4	2	spread	25	file	0	dd-ext	3.317	0.873	0.375	5.533	0.946	100	167568	8306688	4096	1211312	1371	77	0
+access	32	4	2	spread	25	file	0	sqlite-ivm	2.915	3.575	0.839	14.422	12.701	100	537712	35438592	4096	1689232	24132	75	482
+access	32	4	2	spread	25	file	0	dd	0.172	0.176	0.069	1.333	0.398	100		4620288					
+group	32	4	2	spread	25	file	0	direct-rust	0.001	0.022	0.003	0.052	0.020	36		2048000					
+group	32	4	2	spread	25	file	0	direct-sqlite	0.639	0.658	0.180	5.796	0.360	36	147872	6897664	4096	1351392	664	31	9
+group	32	4	2	spread	25	file	0	rust-iso	0.012	0.058	0.009	0.088	0.098	36		2129920					
+group	32	4	2	spread	25	file	0	sqlite-iso	2.176	0.651	0.178	7.798	1.157	36	213968	9584640	4096	1615072	1160	22	21
+group	32	4	2	spread	25	file	0	sqlite-iso-ext	2.698	0.534	0.215	6.451	1.243	36	210032	7782400	4096	1615072	1160	22	21
+group	32	4	2	spread	25	file	0	sqlite-ivm-frontier	1.864	0.707	0.199	8.047	1.252	36	210784	10059776	4096	1615072	1160	22	21
+group	32	4	2	spread	25	file	0	dd-ext	2.378	0.503	0.165	5.548	0.796	36	142528	8388608	4096	947632	291	17	0
+group	32	4	2	spread	25	file	0	sqlite-ivm	2.393	1.747	0.449	14.828	5.701	36	414832	27738112	4096	1244272	2548	47	51
+group	32	4	2	spread	25	file	0	dd	0.149	0.093	0.025	1.151	0.399	36		4374528					
