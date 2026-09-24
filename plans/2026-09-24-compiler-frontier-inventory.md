@@ -211,6 +211,22 @@ The fresh-process snapshot read now returns 4 and 5 rows respectively.
 The fresh-process source mutation still fails with `no such module:
 frontier_p_<prog>_c1`; bootstrap does not reattach the collector.
 
+### Replay after collector reattach
+
+`6_frontier_probe_after_reattach.tsv` uses the native plugin at sqlite_ivm
+`260f1b1` and the correlated `sqlite_ext` commit `e6ada1a7`. The probe now
+reads both the persisted snapshot and a fresh SELECT after opening a new
+process, then commits a source DELETE and compares both again:
+
+| case | reopened snapshot / fresh | after fresh-process DELETE snapshot / fresh | verdict |
+|---|---:|---:|---|
+| `0_union_filter` | 4 / 4 | 3 / 3 | `reopen-mutate` |
+| `1_transitive` | 5 / 5 | 4 / 4 | `reopen-mutate` |
+
+The probe rejects an error-free commit if its post-commit snapshot differs
+from fresh recomputation. Emitted bodies still reject at the grammar stages
+listed above; the executable candidates remain hand-stripped slices.
+
 ## 6. Calibration caveat
 
 All runnable legs (install/update/probe) run on `1_transitive` and

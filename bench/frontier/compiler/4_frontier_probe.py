@@ -63,6 +63,13 @@ def error_text(proc):
     return text.replace("\t", " ").replace("\n", " | ")[:400]
 
 
+def count_pair(proc):
+    lines = proc.stdout.strip().splitlines()
+    if len(lines) < 2 or not all(re.fullmatch(r"[0-9]+", line) for line in lines[-2:]):
+        return None
+    return tuple(int(line) for line in lines[-2:])
+
+
 def probe_one(db, ext, program, candidate, sources):
     """Install, settle, read in ONE connection.
 
@@ -190,9 +197,9 @@ def probe(out, stem, ext, rows):
 
         # Separate gate: install in ONE process (rc asserted), close, then
         # reopen in FRESH processes. The frontier vtab itself persists and a
-        # direct snapshot read can succeed; the canonical fresh-connection
-        # failure is `no such module: frontier_<prog>_c1` when a committed
-        # source write needs the connection-local collector module.
+        # direct snapshot and committed source write must both match fresh
+        # recomputation; neither an error-free commit nor a readable snapshot
+        # alone proves the collector resumed settlement.
         reopen_db = os.path.join(workdir, "reopen.sqlite")
         os.makedirs(workdir, exist_ok=True)
         shutil.copy(store, reopen_db)
@@ -222,6 +229,7 @@ def probe(out, stem, ext, rows):
                 "PRAGMA trusted_schema=ON;",
                 f".load {ext}",
                 f'SELECT count(*) FROM "frontier_{prog}";',
+                f"SELECT count(*) FROM ({minimal});",
                 "",
             ]),
             capture_output=True, text=True,
@@ -229,14 +237,16 @@ def probe(out, stem, ext, rows):
         read_failed = (
             reopen_read.returncode != 0
             or re.search(r"error", reopen_read.stderr + reopen_read.stdout, re.IGNORECASE)
+            or count_pair(reopen_read) is None
         )
         if read_failed:
             rows.append(f"{stem}\treopen_gate\tfresh read after install\t0\treopen-read-failed\t{error_text(reopen_read)}")
             print(f"{stem} reopen_gate read: failed :: {error_text(reopen_read)[:160]}")
         else:
-            count = reopen_read.stdout.strip().splitlines()[-1]
-            rows.append(f"{stem}\treopen_gate\tfresh read after install\t0\treopen-read\tfresh process reads persisted snapshot; count={count} (no back-fill of pre-install base rows)")
-            print(f"{stem} reopen_gate read: reopen-read; count={count}")
+            snapshot, fresh = count_pair(reopen_read)
+            verdict = "reopen-read" if snapshot == fresh else "reopen-read-mismatch"
+            rows.append(f"{stem}\treopen_gate\tfresh read after install\t0\t{verdict}\tsnapshot={snapshot}; fresh recompute={fresh}")
+            print(f"{stem} reopen_gate read: {verdict}; snapshot={snapshot}; fresh={fresh}")
 
         reopen_mut = subprocess.run(
             [SQLITE3, "-batch", reopen_db],
@@ -245,6 +255,8 @@ def probe(out, stem, ext, rows):
                 "PRAGMA trusted_schema=ON;",
                 f".load {ext}",
                 f"BEGIN; DELETE FROM {sources[0]} WHERE __id = 1; COMMIT;",
+                f'SELECT count(*) FROM "frontier_{prog}";',
+                f"SELECT count(*) FROM ({minimal});",
                 "",
             ]),
             capture_output=True, text=True,
@@ -252,14 +264,17 @@ def probe(out, stem, ext, rows):
         mut_failed = (
             reopen_mut.returncode != 0
             or re.search(r"error", reopen_mut.stderr + reopen_mut.stdout, re.IGNORECASE)
+            or count_pair(reopen_mut) is None
         )
         shutil.rmtree(workdir, ignore_errors=True)
         if mut_failed:
             rows.append(f"{stem}\treopen_gate\tfresh committed mutation\t1\treopen-mutate-unsupported\t{error_text(reopen_mut)}")
             print(f"{stem} reopen_gate mutate: reopen-mutate-unsupported :: {error_text(reopen_mut)[:160]}")
         else:
-            rows.append(f"{stem}\treopen_gate\tfresh committed mutation\t1\treopen-mutate\tfresh process settled a committed mutation")
-            print(f"{stem} reopen_gate mutate: reopen-mutate")
+            snapshot, fresh = count_pair(reopen_mut)
+            verdict = "reopen-mutate" if snapshot == fresh else "reopen-mutate-mismatch"
+            rows.append(f"{stem}\treopen_gate\tfresh committed mutation\t1\t{verdict}\tsnapshot={snapshot}; fresh recompute={fresh}")
+            print(f"{stem} reopen_gate mutate: {verdict}; snapshot={snapshot}; fresh={fresh}")
 
 
 def main():
