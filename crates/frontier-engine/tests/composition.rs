@@ -29,8 +29,7 @@ use frontier_engine::{Composition, Frontier, Program};
 use rusqlite::Connection;
 use sqlite_ext::{watch, BulkTrigger, RowChange};
 
-fn conn() -> Connection {
-    let conn = Connection::open_in_memory().unwrap();
+fn create_base_tables(conn: &Connection) {
     conn.execute_batch(
         "CREATE TABLE body_a(person INTEGER PRIMARY KEY);
          CREATE TABLE body_b(person INTEGER PRIMARY KEY);
@@ -38,6 +37,11 @@ fn conn() -> Connection {
          CREATE TABLE grant_resource(person INTEGER PRIMARY KEY, resource INTEGER NOT NULL);",
     )
     .unwrap();
+}
+
+fn conn() -> Connection {
+    let conn = Connection::open_in_memory().unwrap();
+    create_base_tables(&conn);
     conn
 }
 
@@ -269,11 +273,14 @@ fn visible_totals(conn: &Connection) -> Vec<(i64, i64, i64)> {
         .unwrap()
 }
 
-/// Dropping the handles without teardown leaves the schema objects; reopen
-/// re-registers the shared collector and ordinary SQL keeps settling, with
-/// the frontier counters continuing from where they were.
+/// Same-connection handle reopen: dropping the handles without teardown
+/// leaves the schema objects; `Composition::open` re-registers the shared
+/// collector and ordinary SQL keeps settling, with the frontier counters
+/// continuing from where they were. This is NOT process-restart behavior:
+/// a new connection cannot reattach the collector module at all — see
+/// `fresh_connection_reattach_is_blocked_at_sqlite_ext`.
 #[test]
-fn reopen_reregisters_the_shared_collector() {
+fn same_connection_reopen_reregisters_the_shared_collector() {
     let conn = conn();
     {
         let composed = install(&conn);
@@ -296,6 +303,73 @@ fn reopen_reregisters_the_shared_collector() {
 
     reopened.teardown(&conn).unwrap();
     assert_no_program_objects(&conn);
+}
+
+/// The fresh-connection blocker, pinned as the supported-lifecycle
+/// boundary. The collector module `sqlite_ext::watch` registers is
+/// connection-local; the vtab and triggers persist in the database schema,
+/// but a new connection fails schema load with `no such module` before any
+/// statement runs — the composition cannot settle, and neither can a single
+/// program (measured on canonical main in
+/// plans/engine-iso/10_frontier_reopen_probe.md). Recovery belongs at a
+/// reusable sqlite_ext reattach boundary, not as a composition workaround.
+#[test]
+fn fresh_connection_reattach_is_blocked_at_sqlite_ext() {
+    let db = TempDb::new("frontier-composition-reopen");
+    {
+        let conn = Connection::open(&db.path).unwrap();
+        create_base_tables(&conn);
+        let composed = install(&conn);
+        seed(&conn);
+        conn.execute_batch("INSERT INTO body_c VALUES (3);").unwrap();
+        assert_visible(&conn, &[(1, 10), (3, 30)]);
+        drop(composed);
+    }
+
+    let conn = Connection::open(&db.path).unwrap();
+    let open = Composition::open(&conn, "bodies", "grants");
+    let err = open.err().expect("fresh-connection reattach is not supported yet");
+    assert!(
+        format!("{err}").contains("no such module"),
+        "expected the connection-local module error, got {err}"
+    );
+
+    // Statements avoiding the collector's schema objects still run, but any
+    // source write compiles the collector triggers and fails — the restart
+    // gate measured in plans/engine-iso/10_frontier_reopen_probe.md.
+    let write = conn.execute_batch("INSERT INTO body_c VALUES (9);");
+    let err = write
+        .err()
+        .expect("source writes cannot settle on a fresh connection");
+    assert!(
+        format!("{:?}", err).contains("no such module"),
+        "expected the connection-local module error, got {err}"
+    );
+}
+
+/// A unique file-backed database, removed when the test ends.
+struct TempDb {
+    path: std::path::PathBuf,
+}
+
+impl TempDb {
+    fn new(name: &str) -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "{name}-{}-{}.sqlite",
+            std::process::id(),
+            SEQ.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_file(&path);
+        Self { path }
+    }
+}
+
+impl Drop for TempDb {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
 }
 
 /// The measured SQLite behavior that dictates the shared collector: a

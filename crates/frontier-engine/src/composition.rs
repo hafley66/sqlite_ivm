@@ -27,6 +27,22 @@
 //! input. A consumer may read at most one program view (this producer's); a
 //! producer may read none at all; both restrictions fail as explicit
 //! `Unsupported`, never as a silent mis-settle.
+//!
+//! # Connection lifecycle
+//!
+//! Supported: (1) the live connection that installed the pair; (2) the same
+//! connection after the handles were dropped — [`Composition::open`]
+//! re-registers the shared collector and settlement continues. NOT
+//! supported yet: a NEW connection to the same database. The collector
+//! module is connection-local, so schema load on a fresh connection fails
+//! with `no such module: frontier_{producer}_c{install}` before any
+//! statement runs; this is measured for the single-program case in
+//! `plans/engine-iso/10_frontier_reopen_probe.md` and pinned for the
+//! composition by `fresh_connection_reattach_is_blocked_at_sqlite_ext`.
+//! Recovery is an sqlite_ext reattach boundary (register the module under
+//! the persisted collector name, recreate missing triggers, rebind the
+//! collector state) that both `Program::open` and `Composition::open` can
+//! consume; it is deliberately not patched around here.
 
 use crate::catalog::{self, Installed};
 use crate::engine;
@@ -79,10 +95,11 @@ impl Composition {
     }
 
     /// Reopens both programs from the connection's catalog and re-registers
-    /// the shared collector. Any collector instance left by earlier handles
-    /// on this connection is dropped first; its schema objects (vtab,
-    /// triggers) persist, so `watch` would collide with the live slot
-    /// otherwise.
+    /// the shared collector on the SAME connection. Any collector instance
+    /// left by earlier handles here is dropped first; its schema objects
+    /// (vtab, triggers) persist, so `watch` would collide with the live slot
+    /// otherwise. A NEW connection (process restart) cannot reattach yet —
+    /// see the module docs for the sqlite_ext boundary this waits on.
     pub fn open(conn: &Connection, producer: &str, consumer: &str) -> Result<Self, EngineError> {
         let producer = Program::open(conn, producer)?;
         let consumer = Program::open(conn, consumer)?;
