@@ -36,13 +36,16 @@
 use sqlite_ext::rusqlite;
 
 mod catalog;
+mod composition;
 mod engine;
 mod error;
 mod meter;
 mod observe;
 mod plan;
 
+pub use composition::{Composition, CompositionDelta};
 pub use error::{EngineError, ErrorKind, Stage};
+
 
 /// One typed SQLite value. The engine preserves the storage class exactly:
 /// an integer stays an integer, text stays text, across staging, joins and
@@ -170,7 +173,20 @@ impl Program {
         select_sql: &str,
     ) -> Result<Self, EngineError> {
         Ok(Self {
-            inner: catalog::install(conn, name, select_sql)?,
+            inner: catalog::install(conn, name, select_sql, catalog::Watch::Sources)?,
+        })
+    }
+
+
+    /// Install without a commit collector: composition's entry for programs
+    /// that settle only through the explicit API.
+    pub(crate) fn install_unwatched(
+        conn: &rusqlite::Connection,
+        name: &str,
+        select_sql: &str,
+    ) -> Result<Self, EngineError> {
+        Ok(Self {
+            inner: catalog::install(conn, name, select_sql, catalog::Watch::None)?,
         })
     }
 
@@ -194,6 +210,11 @@ impl Program {
     /// The source tables the program watches.
     pub fn sources(&self) -> &[String] {
         &self.inner.sources
+    }
+
+    /// The visible output view this program serves: `frontier_<name>`.
+    pub fn view(&self) -> String {
+        catalog::view(&self.inner.name)
     }
 }
 

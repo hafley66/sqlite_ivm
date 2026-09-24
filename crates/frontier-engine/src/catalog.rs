@@ -153,13 +153,75 @@ pub(crate) fn table_columns(
     Ok(rows)
 }
 
+/// The program whose output view `table` names, if any: the catalog maps
+/// `frontier_<name>` to its installed program.
+pub(crate) fn derived_view_program(
+    conn: &Connection,
+    table: &str,
+) -> Result<Option<String>, EngineError> {
+    // No catalog table yet means no installed programs and no derived views.
+    let have_catalog: i64 = conn
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            [catalog()],
+            |row| row.get(0),
+        )
+        .map_err(|e| EngineError::new(Stage::Install, table, ErrorKind::Sqlite(e.to_string())))?;
+    if have_catalog == 0 {
+        return Ok(None);
+    }
+    let sql = format!(
+        "SELECT name FROM {} WHERE 'frontier_' || name = ?1",
+        quote(catalog())
+    );
+    let mut meter = Meter::default();
+    let program = meter
+        .one(conn, "install", table, &sql, [table], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(|e| EngineError::new(Stage::Install, table, ErrorKind::Sqlite(e.to_string())))?;
+    Ok(program)
+}
+
+/// A watched program cannot settle from another program's output view: a
+/// view carries no AFTER triggers for the collector, and writes landing in
+/// that view's engine tables fire inside another program's `xSync`, where
+/// SQLite forbids virtual-table writes. The composition API is the only
+/// supported path; this failure is explicit, never a silent mis-settle.
+fn check_no_derived_sources(conn: &Connection, inst: &Installed) -> Result<(), EngineError> {
+    for source in &inst.sources {
+        if derived_view_program(conn, source)?.is_some() {
+            return Err(EngineError::unsupported(
+                Stage::Install,
+                source,
+                "a program view is not a settlement source; install the producer-consumer pair through Composition",
+            ));
+        }
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Install
+
+/// Whether install registers the commit collector over the program's source
+/// tables. A composed program settles through
+/// [`crate::Composition::settle`](crate::Composition) instead, so its sources
+/// — another program's output view — get no collector (a view cannot carry
+/// the AFTER triggers, and a trigger firing inside another program's `xSync`
+/// would hit SQLite's `SQLITE_LOCKED` on virtual-table writes during sync).
+pub(crate) enum Watch {
+    /// Watch the program's source tables; SQL writes settle at `COMMIT`.
+    Sources,
+    /// No collector: the program settles only through the explicit API.
+    None,
+}
 
 pub(crate) fn install(
     conn: &Connection,
     name: &str,
     select_sql: &str,
+    watch: Watch,
 ) -> Result<Arc<Installed>, EngineError> {
     validate_program_name(name)?;
     let _guard =
@@ -176,7 +238,13 @@ pub(crate) fn install(
         ));
     }
     let install = next_install(conn, &mut meter)?;
-    let installed = build_installed(name, install, compiled);
+    let installed = {
+        let built = build_installed(name, install, compiled);
+        if matches!(watch, Watch::Sources) {
+            check_no_derived_sources(conn, &built)?;
+        }
+        built
+    };
 
     let mut sql = String::new();
     push_savepoint(&mut sql, "frontier_sp_install");
@@ -202,11 +270,12 @@ pub(crate) fn install(
     meter
         .batch(conn, "install", name, &sql)
         .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
-
     let arc = Arc::new(installed);
-    if let Err(e) = crate::engine::watch_collector(conn, &arc) {
-        rollback(conn, "frontier_sp_install");
-        return Err(e);
+    if matches!(watch, Watch::Sources) {
+        if let Err(e) = crate::engine::watch_collector(conn, &arc) {
+            rollback(conn, "frontier_sp_install");
+            return Err(e);
+        }
     }
     release(conn, "frontier_sp_install");
     Ok(arc)
