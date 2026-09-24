@@ -43,3 +43,8 @@ fn s_n3_topk() {
 fn s_n2_reach() {
     println!("{}", support::run::<Dd>("7_reach"));
 }
+
+#[test]
+fn s_t_s_i_timing_and_cells() {
+    println!("{}", support::run::<Dd>("8_timing_and_cells"));
+}
