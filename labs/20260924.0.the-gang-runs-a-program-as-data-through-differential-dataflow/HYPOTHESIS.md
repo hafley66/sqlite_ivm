@@ -64,7 +64,9 @@ Paired release run, `cargo run --release --offline -j 2 --features sqlite --exam
 | reach_middle (cut and rejoin middle edge) | 300 | 53483 µs | 110310 µs | 117776 | 40096 |
 
 Load of the 1e5 frontier: DD 41-88 ms, SQLite 185-499 ms.
-| K1 | one-row change arranges the same rows at 1e3 and 3e4 loaded; a change keyed to all loaded rows arranged 3002 vs 90002 and failed the gate |
+
+DD K1: a one-row change arranges the same rows at 1e3 and 3e4 loaded; a change keyed to all
+loaded rows arranged 3002 vs 90002 and failed the gate.
 
 Sabotage runs, each turned red then restored: threshold passing weights through (S-A step 0);
 guard forwarding absent deletes (S-W); antijoin without right-side threshold (S-N1 d27); TopK
