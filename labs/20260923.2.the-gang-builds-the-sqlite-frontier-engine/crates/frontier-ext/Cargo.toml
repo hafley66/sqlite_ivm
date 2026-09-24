@@ -1,0 +1,17 @@
+[package]
+name = "frontier-ext"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# A loadable extension cdylib must be its own workspace root: the `loadable`
+# sqlite-ext feature selects rusqlite/loadable_extension, which cannot share a
+# build graph with the test-side rusqlite/bundled.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+frontier-engine = { path = "../frontier-engine" }
+sqlite-ext = { path = "/Users/chrishafley/projects/hafley-rs-wt/main-codex-attribution/crates/sqlite-ext", features = ["loadable"] }

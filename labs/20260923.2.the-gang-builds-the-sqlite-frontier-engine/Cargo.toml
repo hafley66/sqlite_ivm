@@ -1,0 +1,10 @@
+[workspace]
+members = ["crates/frontier-engine"]
+# The loadable extension resolves its own rusqlite feature set
+# (`loadable_extension`); one lockfile cannot hold it next to the bundled
+# host the tests link, so it is its own workspace root.
+exclude = ["crates/frontier-ext"]
+resolver = "2"
+
+[profile.dev.package."*"]
+opt-level = 1
