@@ -194,6 +194,23 @@ reopened):**
   a committed source write is connection-local and not re-registered on
   reopen; the read path persists, the write path does not.
 
+### Replay after frontier bootstrap
+
+The original `frontier_probe.tsv` above records the pre-bootstrap engine.
+`5_frontier_probe_after_bootstrap.tsv` replays the same copied stores and
+candidates against the rebuilt native plugin at sqlite_ivm `89395fc`.
+The emitted SQL still rejects at the same stages, and the hand-stripped
+candidate now matches a fresh recomputation after delete and re-insert:
+
+| case | initial/reopened rows | after delete | after re-insert | fresh SELECT | verdict |
+|---|---:|---:|---:|---:|---|
+| `0_union_filter` | 4 | 3 | 4 | 4 | `accepted-settled` |
+| `1_transitive` | 5 | 4 | 5 | 5 | `accepted-settled` |
+
+The fresh-process snapshot read now returns 4 and 5 rows respectively.
+The fresh-process source mutation still fails with `no such module:
+frontier_p_<prog>_c1`; bootstrap does not reattach the collector.
+
 ## 6. Calibration caveat
 
 All runnable legs (install/update/probe) run on `1_transitive` and
