@@ -197,7 +197,7 @@ leaves it ahead — `tests/0_extension.rs:45-111` forces the generation gap (res
 | snapshot | in-memory map, multiset expansion | `dd_frontier_{name}` tables (keyed) | sorted `Vec<Row>` per output | `frontier_{p}_root` via SELECT, deterministic order | the view itself |
 | state location | process memory only (timely arrangements + maps) | split: worker memory + SQLite result/delta/catalog tables | process memory (arenas, arrangements) | entirely SQLite (staging, deltas, root, catalog); handle is stateless `Arc` | SQLite shadow tables |
 | rollback | not applicable (no SQLite coupling) | generation-gap rebuild from visible source rows (measured §2) | frontier unwound on Err | atomic: settle runs in the committing transaction; `frontier_id` unchanged on rollback (measured §2) | maintenance runs in-transaction; SQLite rollback covers it |
-| reopen | new `Engine` + full re-apply | rebuild on generation mismatch | new `Engine` + re-install | `Program::open` recompiles from `frontier_catalog` row (measured §2) | recreate the vtab |
+| reopen | new `Engine` + full re-apply | rebuild on generation mismatch | new `Engine` + re-install | `Program::open` recompiles from `frontier_catalog` row (measured §2) | `xConnect` rebinds the persisted virtual table |
 | teardown | `Drop` → Stop + join | `dd_frontier_drop` drops tables + catalog row; watcher vtab drop drops the trigger struct (worker `Drop`ped) | `FrontierEngine::uninstall` | `Frontier::teardown` drops every object + collector, sources untouched | `sqlite_ivm_drop` drops the vtab |
 | errors | `Result<_, String>` | `rusqlite::Error::ModuleError(String)` | `EngineError { stage, kind, relation, output }`, `ErrorKind::Unsupported { shape }` | `EngineError { stage, relation, kind }`, 7 stages | SQLite vtab errors |
 | multi-output / generality | one graph per `Engine` | one case per install | many named outputs per program | one output per program; N programs per connection | one view per vtab |
@@ -233,8 +233,8 @@ it unchanged.
 5. **No frontier id in DD.** `frontier_id` (monotone, rollback-stable, reopenable) has
    no DD equivalent; the ext approximates it with `dd_frontier_catalog.generation` plus
    the rebuild protocol.
-6. **Rollback is a protocol, not a property.** Engine: state in SQLite ⇒ atomicity for
-   free. DD: worker ahead of SQLite ⇒ generation compare + full rebuild + visible diff.
+6. **Rollback is a protocol for DD.** The SQLite engine keeps operator state in the
+   source transaction. DD's worker can advance ahead of SQLite ⇒ generation compare + full rebuild + visible diff.
    A generic DD backend either persists operator state in SQLite or formalizes the
    rebuild as part of `settle`'s contract.
 7. **Error contract.** `String` errors (DD) vs stage+relation+kind (engine/ISO). The
