@@ -1,0 +1,15 @@
+[package]
+name = "frontier-dd-ext"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+path = "0_lib.rs"
+
+[dependencies]
+frontier-dd-packet = { path = ".." }
+sqlite-ext = { path = "/Users/chrishafley/projects/hafley-rs-wt/main-codex-attribution/crates/sqlite-ext", features = ["loadable"] }

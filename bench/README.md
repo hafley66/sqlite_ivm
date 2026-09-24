@@ -4,13 +4,31 @@ The Rust harness runs circuit shootouts, scale sweeps, and fixture dumps.
 
 ### Frontier stress: ISO engines, production, and DD
 
-`frontier-stress` replays one generated integer frontier stream through six
-arms: `direct-rust`, `direct-sqlite`, `rust-iso`, `sqlite-iso`, `sqlite-ivm`, and
-`dd`. The access shape is the packet's join under set UNION; the group shape
-is `COUNT/SUM`. Every checked frontier is compared with a fresh recomputation
-from source rows. Writes and settlement are timed together; snapshot reads
+`frontier-stress` replays one generated integer frontier stream through eight
+arms: `direct-rust`, `direct-sqlite`, `rust-iso`, `sqlite-iso`,
+`sqlite-iso-ext`, `dd-ext`, `sqlite-ivm`, and `dd`. The `sqlite-iso-ext` arm loads the
+ISO cdylib and installs it through `frontier_install`; `dd-ext` loads the same
+DD worker used by `dd` into a SQLite extension and settles through the SQLite
+commit collector. `just` builds both cdylibs
+before the run. The access shape is the packet's join under set UNION; the group shape
+is `COUNT/SUM`. Every checked frontier compares its visible rows and, for the
+four matrix cells, its signed output delta with fresh recomputation from
+source rows. Writes and settlement are timed together; snapshot and delta reads
 are measured separately. Each arm and repetition runs in its own process, so
 peak RSS and SQLite allocator readings belong to that arm.
+
+| Incremental engine | Rust caller | SQLite extension caller |
+| --- | --- | --- |
+| DD packet graph | `dd` | `dd-ext` |
+| SQLite ISO frontier engine | `sqlite-iso` | `sqlite-iso-ext` |
+
+`dd` and `dd-ext` use the same `frontier-dd-packet` dataflow graph. The
+SQLite-backed ISO cells use the same `frontier-engine` implementation.
+`sqlite-ivm` is the production extension reference; `direct-rust` and
+`direct-sqlite` are packet-lab controls. The DD extension stores its visible
+rows in SQLite inside the committing transaction. If that transaction rolls
+back after DD advances, the next source batch detects the catalog-generation
+gap and rebuilds DD from the source rows visible to that transaction.
 
 ```sh
 cd /Users/chrishafley/projects/sqlite_ivm

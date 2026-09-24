@@ -2,20 +2,16 @@
 //! Run `just frontier-stress --rows=32,1024 --batch=1,8 --fanout=1,16`.
 
 use anyhow::{bail, Context, Result};
-use differential_dataflow::input::{Input, InputSession};
-use differential_dataflow::operators::CountTotal;
+use frontier_dd_packet as dd_packet;
 use frontier_engine::Program;
 use lab_20260923_0 as direct;
 use lab_20260923_1 as rust_iso;
-use parking_lot::Mutex;
 use rusqlite::Connection;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
-use timely::dataflow::operators::probe::Handle;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 const ACCESS: &str = "SELECT person, resource FROM direct_grant UNION SELECT m.person, p.resource FROM membership AS m JOIN permission AS p ON p.team = m.team";
@@ -58,6 +54,14 @@ impl Drop for TempDb {
 enum Shape {
     Access,
     Group,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum SqliteMode {
+    IsoRust,
+    IsoExtension,
+    DdExtension,
+    Production,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -352,10 +356,26 @@ fn check(
     Ok(got.len())
 }
 
+fn expected_delta(before: Vec<Vec<i64>>, after: &[Vec<i64>]) -> Vec<Vec<i64>> {
+    let before: BTreeSet<_> = before.into_iter().collect();
+    let after: BTreeSet<_> = after.iter().cloned().collect();
+    let mut changes: Vec<_> = before
+        .difference(&after)
+        .map(|row| std::iter::once(-1).chain(row.iter().copied()).collect())
+        .chain(
+            after
+                .difference(&before)
+                .map(|row| std::iter::once(1).chain(row.iter().copied()).collect()),
+        )
+        .collect();
+    changes.sort();
+    changes
+}
+
 fn run_sqlite(
     cell: Cell,
     phases: &[Phase],
-    iso: bool,
+    mode: SqliteMode,
     observe: bool,
     file: bool,
 ) -> Result<Measure> {
@@ -375,7 +395,41 @@ fn run_sqlite(
     } else {
         GROUP
     };
-    let view = if iso {
+    let view = if matches!(mode, SqliteMode::IsoExtension) {
+        let path = std::env::var_os("FRONTIER_EXT_PATH")
+            .context("FRONTIER_EXT_PATH must name the built frontier-ext library")?;
+        unsafe {
+            db.load_extension_enable()?;
+            db.load_extension(path, Some("sqlite3_frontier_ext_init"))?;
+            db.load_extension_disable()?;
+        }
+        let name = if cell.shape == Shape::Access {
+            "access"
+        } else {
+            "team_cost"
+        };
+        db.query_row("SELECT frontier_install(?1, ?2)", (name, query), |row| {
+            row.get::<_, i64>(0)
+        })?;
+        format!("frontier_{name}")
+    } else if matches!(mode, SqliteMode::DdExtension) {
+        let path = std::env::var_os("FRONTIER_DD_EXT_PATH")
+            .context("FRONTIER_DD_EXT_PATH must name the built frontier-dd-ext library")?;
+        unsafe {
+            db.load_extension_enable()?;
+            db.load_extension(path, Some("sqlite3_frontier_dd_ext_init"))?;
+            db.load_extension_disable()?;
+        }
+        let name = if cell.shape == Shape::Access {
+            "access"
+        } else {
+            "team_cost"
+        };
+        db.query_row("SELECT dd_frontier_install(?1)", [name], |row| {
+            row.get::<_, i64>(0)
+        })?;
+        format!("dd_frontier_{name}")
+    } else if matches!(mode, SqliteMode::IsoRust) {
         let name = if cell.shape == Shape::Access {
             "access"
         } else {
@@ -405,6 +459,8 @@ fn run_sqlite(
     };
     let mut oracle = Oracle::default();
     for (step, phase) in phases.iter().enumerate() {
+        let inspect = step < 2 || step as i64 % cell.check_every == 0 || step + 1 == phases.len();
+        let before = inspect.then(|| oracle.snapshot(cell.shape));
         let start = Instant::now();
         let span = tracing::info_span!("stress_phase", phase = phase.name);
         let entered = span.enter();
@@ -426,7 +482,8 @@ fn run_sqlite(
         drop(entered);
         record_apply(&mut measured, phase.name, start.elapsed());
         oracle.apply(phase)?;
-        if step < 2 || step as i64 % cell.check_every == 0 || step + 1 == phases.len() {
+        if inspect {
+            let expected = oracle.snapshot(cell.shape);
             let start = Instant::now();
             let cols = if cell.shape == Shape::Access { 2 } else { 3 };
             let sql = format!(
@@ -444,11 +501,44 @@ fn run_sqlite(
             measured.read += start.elapsed();
             measured.rows = check(
                 got,
-                oracle.snapshot(cell.shape),
-                if iso { "sqlite-iso" } else { "sqlite-ivm" },
+                expected.clone(),
+                match mode {
+                    SqliteMode::IsoRust => "sqlite-iso",
+                    SqliteMode::IsoExtension => "sqlite-iso-ext",
+                    SqliteMode::DdExtension => "dd-ext",
+                    SqliteMode::Production => "sqlite-ivm",
+                },
                 cell,
                 step,
             )?;
+            if !matches!(mode, SqliteMode::Production) {
+                let delta_start = Instant::now();
+                let name = if cell.shape == Shape::Access {
+                    "access"
+                } else {
+                    "team_cost"
+                };
+                let prefix = if matches!(mode, SqliteMode::DdExtension) {
+                    "dd_frontier"
+                } else {
+                    "frontier"
+                };
+                let mut delta = db.prepare(&format!("SELECT * FROM {prefix}_{name}_delta"))?;
+                let got = delta
+                    .query_map([], |row| {
+                        (0..cols + 1)
+                            .map(|column| row.get(column))
+                            .collect::<rusqlite::Result<Vec<i64>>>()
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                measured.read += delta_start.elapsed();
+                let mut got = got;
+                got.sort();
+                let wanted = expected_delta(before.expect("checked frontier"), &expected);
+                if got != wanted {
+                    bail!("{mode:?} signed delta mismatch at step {step}: got {got:?}, expected {wanted:?}");
+                }
+            }
         }
     }
     if let Some(recorder) = recorder {
@@ -657,6 +747,8 @@ fn run_rust_iso(cell: Cell, phases: &[Phase]) -> Result<Measure> {
     };
     let mut oracle = Oracle::default();
     for (step, phase) in phases.iter().enumerate() {
+        let inspect = step < 2 || step as i64 % cell.check_every == 0 || step + 1 == phases.len();
+        let before = inspect.then(|| oracle.snapshot(cell.shape));
         let changes = phase
             .changes
             .iter()
@@ -675,7 +767,7 @@ fn run_rust_iso(cell: Cell, phases: &[Phase]) -> Result<Measure> {
             })
             .collect();
         let start = Instant::now();
-        engine
+        let deltas = engine
             .apply(
                 program,
                 rust_iso::Frontier {
@@ -686,14 +778,33 @@ fn run_rust_iso(cell: Cell, phases: &[Phase]) -> Result<Measure> {
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
         record_apply(&mut measured, phase.name, start.elapsed());
         oracle.apply(phase)?;
-        if step < 2 || step as i64 % cell.check_every == 0 || step + 1 == phases.len() {
+        if inspect {
+            let expected = oracle.snapshot(cell.shape);
+            let mut got_delta: Vec<_> = deltas
+                .into_iter()
+                .flat_map(|output| output.changes)
+                .map(|change| {
+                    std::iter::once(if change.sign == rust_iso::Sign::Plus {
+                        1
+                    } else {
+                        -1
+                    })
+                    .chain(change.row)
+                    .collect::<Vec<_>>()
+                })
+                .collect();
+            got_delta.sort();
+            let wanted = expected_delta(before.expect("checked frontier"), &expected);
+            if got_delta != wanted {
+                bail!("rust-iso signed delta mismatch at step {step}: got {got_delta:?}, expected {wanted:?}");
+            }
             let start = Instant::now();
             let mut got = engine
                 .snapshot(program, "result")
                 .map_err(|error| anyhow::anyhow!(error.to_string()))?;
             got.sort();
             measured.read += start.elapsed();
-            measured.rows = check(got, oracle.snapshot(cell.shape), "rust-iso", cell, step)?;
+            measured.rows = check(got, expected, "rust-iso", cell, step)?;
         }
     }
     measured.rss = hafley_observe::rusage::sample().peak_rss_bytes;
@@ -701,76 +812,56 @@ fn run_rust_iso(cell: Cell, phases: &[Phase]) -> Result<Measure> {
 }
 
 fn run_dd(cell: Cell, phases: &[Phase]) -> Result<Measure> {
-    let output = Arc::new(Mutex::new(BTreeMap::<Vec<i64>, isize>::new()));
-    let output_for_worker = Arc::clone(&output);
-    let phases = phases.to_vec();
-    let mut measured = timely::execute_directly(move |worker| -> Result<Measure> {
-        let mut measured = Measure::default();
-        let mut oracle = Oracle::default();
-        let install_start = Instant::now();
-        let mut probe = Handle::new();
-        let mut inputs: [InputSession<u64, [i64; 3], isize>; 4] =
-            worker.dataflow::<u64, _, _>(|scope| {
-                let (mi, membership) = scope.new_collection::<[i64; 3], isize>();
-                let (pi, permission) = scope.new_collection::<[i64; 3], isize>();
-                let (di, direct) = scope.new_collection::<[i64; 3], isize>();
-                let (ji, job) = scope.new_collection::<[i64; 3], isize>();
-                let result = if cell.shape == Shape::Access {
-                    membership
-                        .map(|[_, person, team]| (team, person))
-                        .join(permission.map(|[_, team, resource]| (team, resource)))
-                        .map(|(_, (person, resource))| vec![person, resource])
-                        .concat(direct.map(|[_, person, resource]| vec![person, resource]))
-                        .distinct()
-                } else {
-                    job.map(|[_, team, cost]| (team, cost))
-                        .explode(|(team, cost)| Some((team, (1isize, cost as isize))))
-                        .count_total()
-                        .map(|(team, (count, sum))| vec![team, count as i64, sum as i64])
-                };
-                result
-                    .consolidate()
-                    .inspect(move |(row, _, diff)| {
-                        let mut output = output_for_worker.lock();
-                        let entry = output.entry(row.clone()).or_default();
-                        *entry += *diff;
-                        if *entry == 0 {
-                            output.remove(row);
-                        }
-                    })
-                    .probe_with(&mut probe);
-                [mi, pi, di, ji]
-            });
-        measured.install = install_start.elapsed();
-        for (step, phase) in phases.iter().enumerate() {
+    let install_start = Instant::now();
+    let engine = dd_packet::Engine::new(if cell.shape == Shape::Access {
+        dd_packet::Shape::Access
+    } else {
+        dd_packet::Shape::Group
+    });
+    let mut measured = Measure {
+        install: install_start.elapsed(),
+        ..Measure::default()
+    };
+    let mut oracle = Oracle::default();
+    for (step, phase) in phases.iter().enumerate() {
+        let inspect = step < 2 || step as i64 % cell.check_every == 0 || step + 1 == phases.len();
+        let before = inspect.then(|| oracle.snapshot(cell.shape));
+        let changes = phase
+            .changes
+            .iter()
+            .map(|change| dd_packet::Change {
+                table: change.table.index(),
+                id: change.id,
+                a: change.a,
+                b: change.b,
+                weight: change.sign as isize,
+            })
+            .collect();
+        let start = Instant::now();
+        let deltas = engine.apply(changes).map_err(anyhow::Error::msg)?;
+        record_apply(&mut measured, phase.name, start.elapsed());
+        oracle.apply(phase)?;
+        if inspect {
+            let expected = oracle.snapshot(cell.shape);
+            let mut got_delta: Vec<_> = deltas
+                .into_iter()
+                .map(|(row, weight)| {
+                    std::iter::once(weight as i64)
+                        .chain(row)
+                        .collect::<Vec<_>>()
+                })
+                .collect();
+            got_delta.sort();
+            let wanted = expected_delta(before.expect("checked frontier"), &expected);
+            if got_delta != wanted {
+                bail!("dd signed delta mismatch at step {step}: got {got_delta:?}, expected {wanted:?}");
+            }
             let start = Instant::now();
-            for change in &phase.changes {
-                inputs[change.table.index()]
-                    .update([change.id, change.a, change.b], change.sign as isize);
-            }
-            let epoch = step as u64 + 1;
-            for input in &mut inputs {
-                input.advance_to(epoch);
-                input.flush();
-            }
-            while probe.less_than(&epoch) {
-                worker.step();
-            }
-            record_apply(&mut measured, phase.name, start.elapsed());
-            oracle.apply(phase)?;
-            if step < 2 || step as i64 % cell.check_every == 0 || step + 1 == phases.len() {
-                let start = Instant::now();
-                let got = output
-                    .lock()
-                    .iter()
-                    .flat_map(|(row, weight)| std::iter::repeat_n(row.clone(), *weight as usize))
-                    .collect();
-                measured.read += start.elapsed();
-                measured.rows = check(got, oracle.snapshot(cell.shape), "dd", cell, step)?;
-            }
+            let got = engine.snapshot().map_err(anyhow::Error::msg)?;
+            measured.read += start.elapsed();
+            measured.rows = check(got, expected, "dd", cell, step)?;
         }
-        Ok(measured)
-    })?;
+    }
     measured.rss = hafley_observe::rusage::sample().peak_rss_bytes;
     Ok(measured)
 }
@@ -801,6 +892,8 @@ fn main() -> Result<()> {
         "direct-sqlite",
         "rust-iso",
         "sqlite-iso",
+        "sqlite-iso-ext",
+        "dd-ext",
         "sqlite-ivm",
         "dd",
     ]
@@ -884,6 +977,8 @@ fn main() -> Result<()> {
             "direct-sqlite",
             "rust-iso",
             "sqlite-iso",
+            "sqlite-iso-ext",
+            "dd-ext",
             "sqlite-ivm",
             "dd",
         ]
@@ -965,8 +1060,26 @@ fn main() -> Result<()> {
                                 "direct-rust" => run_direct(cell, &phases, false, observe, file),
                                 "direct-sqlite" => run_direct(cell, &phases, true, observe, file),
                                 "rust-iso" => run_rust_iso(cell, &phases),
-                                "sqlite-iso" => run_sqlite(cell, &phases, true, observe, file),
-                                "sqlite-ivm" => run_sqlite(cell, &phases, false, observe, file),
+                                "sqlite-iso" => {
+                                    run_sqlite(cell, &phases, SqliteMode::IsoRust, observe, file)
+                                }
+                                "sqlite-iso-ext" => run_sqlite(
+                                    cell,
+                                    &phases,
+                                    SqliteMode::IsoExtension,
+                                    observe,
+                                    file,
+                                ),
+                                "dd-ext" => run_sqlite(
+                                    cell,
+                                    &phases,
+                                    SqliteMode::DdExtension,
+                                    observe,
+                                    file,
+                                ),
+                                "sqlite-ivm" => {
+                                    run_sqlite(cell, &phases, SqliteMode::Production, observe, file)
+                                }
                                 "dd" => run_dd(cell, &phases),
                                 _ => unreachable!(),
                             }?;
@@ -1019,8 +1132,8 @@ mod tests {
             run_direct(cell, &phases, false, false, false)?;
             run_direct(cell, &phases, true, false, false)?;
             run_rust_iso(cell, &phases)?;
-            run_sqlite(cell, &phases, true, false, false)?;
-            run_sqlite(cell, &phases, false, false, false)?;
+            run_sqlite(cell, &phases, SqliteMode::IsoRust, false, false)?;
+            run_sqlite(cell, &phases, SqliteMode::Production, false, false)?;
             run_dd(cell, &phases)?;
         }
         Ok(())
@@ -1038,7 +1151,17 @@ mod tests {
                 churn: 0,
                 check_every: 1,
             };
-            run_sqlite(cell, &fixture(cell), iso, true, false)
+            run_sqlite(
+                cell,
+                &fixture(cell),
+                if iso {
+                    SqliteMode::IsoRust
+                } else {
+                    SqliteMode::Production
+                },
+                true,
+                false,
+            )
         };
         for iso in [true, false] {
             let small = run(32, iso)?;
@@ -1068,7 +1191,17 @@ mod tests {
             check_every: 1,
         };
         for iso in [true, false] {
-            let result = run_sqlite(cell, &fixture(cell), iso, false, true)?;
+            let result = run_sqlite(
+                cell,
+                &fixture(cell),
+                if iso {
+                    SqliteMode::IsoRust
+                } else {
+                    SqliteMode::Production
+                },
+                false,
+                true,
+            )?;
             assert!(result.db_bytes.unwrap_or_default() > 0);
             assert!(result.wal_bytes.unwrap_or_default() > 0);
         }

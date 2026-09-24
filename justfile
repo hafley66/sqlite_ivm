@@ -26,9 +26,9 @@ statement-costs test="3_relational":
 scale *args:
     CARGO_TARGET_DIR="$PWD/target" cargo run --offline --release --locked --manifest-path bench/Cargo.toml --bin bench -- scale {{args}}
 
-# Same access/aggregate frontier stream through SQLite ISO, production, and DD.
+# Same access/aggregate frontier stream through ISO, extension, production, and DD.
 frontier-stress *args:
-    CARGO_TARGET_DIR="$PWD/target" cargo run --offline --release --manifest-path bench/Cargo.toml --bin frontier-stress -- {{args}}
+    bash scripts/15_frontier_stress.sh {{args}}
 
 package:
     bash scripts/10_package.sh
