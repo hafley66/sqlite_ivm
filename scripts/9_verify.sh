@@ -49,7 +49,7 @@ cargo nextest run --locked --manifest-path "$ivm_dir/Cargo.toml" \
 
 status=0
 "$ivm_timeout" --kill-after=5s "$rail_ceiling" \
-  cargo nextest run --locked --no-fail-fast --manifest-path "$ivm_dir/Cargo.toml" \
+  cargo nextest run --locked --no-fail-fast -j 2 --manifest-path "$ivm_dir/Cargo.toml" \
   --config-file "$rail_config" || status=$?
 if [ "$status" -ne 0 ]; then
   if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
