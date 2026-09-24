@@ -34,7 +34,10 @@ These files live in the main checkout `plans/costs/` and predate this lane.
 They are recorded separately so the current emit failure is not silently
 compared against them.
 
-- `56_2partial_138_rule_view.sql` — 88,023 bytes,
+- `56_2partial_138_rule_view.sql` — **committed in this lane at
+  `bench/frontier/compiler/artifacts/history/`, provenance in
+  `history/PROVENANCE.md`**. Source of record: `plans/costs/56_2partial_138_rule_view.sql`
+  in the main sqlite_ivm checkout, copied verbatim: 88,023 bytes,
   sha256 `8e71fe0760f028b4b2a95b6eb13b94631402012a7ec77bed3ab6235af6b6fe1a`,
   captured 2026-09-23 10:11. Shape: ONE whole-program
   `CREATE VIRTUAL TABLE "program" USING sqlite_ivm('WITH RECURSIVE ...')`
@@ -111,34 +114,43 @@ QUERY PLAN
 ## 4. Install / update / read on the real dylib (fail-closed runner)
 
 `3_install_update.py` runs one sqlite3 process per rep with `-bail`; the TSV
-now carries `rc`, `status` (ok / `failed: <first error>`), `hash_valid`, and
+carries `rc`, `status` (ok / `failed: <exact error>`), `hash_valid`, and
 timings are `-` on failure. The seed row is saved to a TEMP table and
 restored with `INSERT INTO src SELECT * FROM ivm_saved` inside the same
-connection — a typed round-trip; the old pipe-delimited CLI reconstruction is
-gone.
+connection — a typed round-trip; no CLI pipe text is ever re-parsed as SQL.
+Subprocess status is fail-closed: `run_cli` returns the process rc, and any
+non-zero rc or error text marks the rep `failed` with blank timings.
+
+**Hashes are INTEGER-ONLY content hashes.** Two fail-closed assertions make
+them exact for these fixtures: (1) every cell of the mutated source table is
+asserted integer before the rep runs (`assert_integer_cells`; the
+round-trip table `Edge_a2` is all INTEGER in both stores); (2) any
+non-integer row in a view's output marks the rep
+`failed: N non-integer output row(s)` instead of hashing it. Read-only TEXT
+inputs the views join (`sym`/`term` arenas) are outside the hash domain; a
+non-integer cell would fail the rep, not silently shift a hash.
 
 | case | install ms (median) | delete ms | insert ms | hash install = hash after re-insert | RSS | sqlite mem cur/peak | db bytes | WAL |
 |---|---|---|---|---|---|---|---|---|
-| 0_union_filter | 65.5 | 0.002 | 0.002 | yes (`04806a5c548f72df`) | 12.0–12.9 M | 5339152 / 5639072 | 7798784 | see note |
-| 1_transitive | 6.4 | 0.046 | 0.003 | yes (`623b911d32fa82ba`) | 8.2–9.0 M | 3345872 / 3609808 | 2490368 | see note |
+| 0_union_filter | 84.4 | 0.002 | 0.002 | yes (`04806a5c548f72df`) | 14.0–14.9 M | 5339152 / 5639072 | 7798784 | see note |
+| 1_transitive | 4.7 | 0.042 | 0.005 | yes (`623b911d32fa82ba`) | 9.7 M | 3345872 / 3609808 | 2490368 | see note |
 | 2_partial | — nothing to install (emit refused) — | | | | | | | |
 
-- `hash_valid = yes` on every rep: every emitted view row is numeric (the
-  stores' cells are term ids), so the digit/pipe hash covers all rows; a
-  non-numeric row would mark the hash `nonnumeric(n)` instead of silently
-  dropping it.
-- Content hashes are identical to the pre-refactor runner — the typed
-  round-trip restored exactly what the old path restored, cross-validating
-  both.
-- **WAL note:** the stores do not use WAL journal mode, so no `-wal` file is
-  ever created; `wal_bytes_post_commit` is 0/absent and **WAL pressure was
-  NOT measured**. The column records the pre-checkpoint file state only.
+- Content hashes are identical to the pre-assertion runner — the typed
+  round-trip restored exactly what the earlier path restored,
+  cross-validating both. `hash_valid = yes` on every rep.
+- **WAL note:** the stores do not use WAL journal mode, so no `-wal` file
+  is ever created; `wal_bytes_post_commit` is 0/absent and **WAL pressure
+  was NOT measured** (the column records the pre-checkpoint file state).
 
 ## 5. Frontier-engine probe (exact accepted/rejected)
 
-`4_frontier_probe.py` drives `sqlite_ivm_frontier_install(name, select)` over
-a real `.load`, per candidate shape (`frontier_probe.tsv` has verbatim
+`4_frontier_probe.py` drives `sqlite_ivm_frontier_install(name, select)`
+over a real `.load`, per candidate shape (`frontier_probe.tsv` has verbatim
 errors). Program names must be plain identifiers → installed as `p_<case>`.
+Source-table candidates are filtered to tables that actually exist in the
+store's `sqlite_master` (a recursive CTE's self-name previously leaked into
+the candidate list).
 
 **Every emitted shape is rejected; none installs as-is:**
 
@@ -218,3 +230,5 @@ set BEFORE `.load` or the extension refuses.
 - `2_inventory.py`, `3_install_update.py`, `4_frontier_probe.py` — inventory,
   fail-closed install/update TSV, frontier probe TSV.
 - `artifacts/` — all receipts; `*.store.sqlite` binaries stay untracked.
+- `artifacts/history/` — the historical whole-program capture
+  (`56_2partial_138_rule_view.sql`) plus `PROVENANCE.md` (§1).

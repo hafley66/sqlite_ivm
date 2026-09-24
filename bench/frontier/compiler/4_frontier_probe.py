@@ -150,8 +150,14 @@ def probe(out, stem, ext, rows):
             sources |= referenced_relations(cte["body"])
         for arm in parsed["arms"]:
             sources |= referenced_relations(arm)
-    sources = sorted(sources - view_names)
     store = os.path.join(out, f"{stem}.store.sqlite")
+    master = subprocess.run(
+        [SQLITE3, "-batch", store,
+         "SELECT name FROM sqlite_master WHERE type = 'table';"],
+        capture_output=True, text=True,
+    )
+    tables = {'"{}"'.format(l) for l in master.stdout.splitlines() if l.strip()}
+    sources = sorted((sources - view_names) & tables)
     # The engine requires plain-identifier program names; fixture stems
     # start with a digit, so prefix a letter and keep the mapping in detail.
     prog = "p_" + stem

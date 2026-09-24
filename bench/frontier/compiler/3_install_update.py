@@ -111,6 +111,26 @@ def source_tables(out, stem, views):
     return unique
 
 
+def assert_integer_cells(db, sources):
+    """Assert every cell of every source table is an integer.
+
+    These fixtures' store cells are arena term ids (INTEGER NOT NULL). The
+    content hashes below are INTEGER-ONLY hashes; this assertion is what
+    makes them exact for the hashed rows. Returns an error string or None.
+    """
+    for source in sources:
+        dump = subprocess.run(
+            [SQLITE3, "-batch", db, f"SELECT * FROM {source};"],
+            capture_output=True, text=True,
+        )
+        if dump.returncode != 0:
+            return f"{source}: unreadable: {dump.stderr.strip()[:80]}"
+        for line in dump.stdout.splitlines():
+            if line.strip() and not re.fullmatch(r"\d+(\|\d+)*", line):
+                return f"{source}: non-integer cells: {line[:80]}"
+    return None
+
+
 def eqp_file(out, stem, store, views):
     with open(os.path.join(out, f"{stem}.eqp.txt"), "w") as handle:
         for name, ddl in views:
@@ -124,6 +144,15 @@ def eqp_file(out, stem, store, views):
                 handle.write(f"-- EQP ERROR: {proc.stderr.strip()}\n")
 
 
+def real_tables(db):
+    """Table names present in the store's sqlite_master (quoted)."""
+    out = subprocess.run(
+        [SQLITE3, "-batch", db, "SELECT name FROM sqlite_master WHERE type = 'table';"],
+        capture_output=True, text=True,
+    )
+    return {'"{}"'.format(line) for line in out.stdout.splitlines() if line.strip()}
+
+
 def case_run(out, stem, ext, reps, rows):
     sql = open(os.path.join(out, f"{stem}.sql")).read()
     if not sql.strip():
@@ -131,7 +160,7 @@ def case_run(out, stem, ext, reps, rows):
         return
     views = views_of(out, stem)
     store = os.path.join(out, f"{stem}.store.sqlite")
-    sources = source_tables(out, stem, views)
+    sources = [s for s in source_tables(out, stem, views) if s in real_tables(store)]
     eqp_file(out, stem, store, views)
 
     for rep in range(1, reps + 1):
@@ -139,7 +168,7 @@ def case_run(out, stem, ext, reps, rows):
         db = os.path.join(workdir, "probe.sqlite")
         shutil.copy(store, db)
 
-        source, first_id, first_row = None, None, None
+        source, first_id = None, None
         for candidate in sources:
             got = subprocess.run(
                 [SQLITE3, "-batch", db,
@@ -149,12 +178,20 @@ def case_run(out, stem, ext, reps, rows):
             if got.returncode == 0 and got.stdout.strip():
                 source = candidate
                 first_id = got.stdout.strip()
-                first_row = subprocess.run(
-                    [SQLITE3, "-batch", db,
-                     f'SELECT * FROM {source} WHERE __id = {first_id};'],
-                    capture_output=True, text=True,
-                ).stdout.strip()
                 break
+
+        # Exactness preconditions for THIS rep: the round-trip source table
+        # (whose rows are hashed via the views) must be integer-only, and the
+        # round trip must run inside SQLite. Other inputs (sym/term TEXT
+        # arenas) are read-only inputs and are not part of the hash domain.
+        if source:
+            int_error = assert_integer_cells(db, [source])
+            if int_error:
+                rows.append(
+                    f"{stem}\t{rep}\t1\tfailed: {int_error}\t" + "\t".join(["-"] * 13)
+                )
+                shutil.rmtree(workdir, ignore_errors=True)
+                continue
 
         # Typed round-trip: the seed row is saved into a TEMP table inside
         # the same connection and restored with SELECT *; no CLI text
@@ -191,8 +228,6 @@ def case_run(out, stem, ext, reps, rows):
                 else:
                     alien += 1
             return rows_out, alien
-
-        n = len(views)
         status = "ok"
         error_match = re.search(
             r"(?:Parse error|Error|Runtime error)[^\n]*", merged, re.MULTILINE
@@ -200,9 +235,15 @@ def case_run(out, stem, ext, reps, rows):
         if rc != 0 or error_match:
             status = "failed: " + (error_match.group(0)[:80] if error_match else f"rc={rc}")
 
+        n = len(views)
         phase, alien_total = [], 0
         reads = 3 if source else 1
+        if len(blocks) < reads * n:
+            status = f"failed: expected {reads * n} view blocks, got {len(blocks)}"
         for read in range(reads):
+            if len(blocks) < reads * n:
+                phase.append("-")
+                continue
             lines, alien = [], 0
             for view in range(n):
                 got, bad = data_lines(blocks[read * n + view])
@@ -210,10 +251,15 @@ def case_run(out, stem, ext, reps, rows):
                 alien += bad
             alien_total += alien
             phase.append(hash_text("\n".join(lines)) if not alien else f"nonnumeric({alien})")
-        hash_install = phase[0]
+        hash_install = phase[0] if phase else "-"
         hash_delete = phase[1] if len(phase) > 1 else "-"
         hash_insert = phase[2] if len(phase) > 2 else "-"
-        hash_valid = "yes" if alien_total == 0 and all(p != "-" for p in phase) else f"no({alien_total} non-numeric rows)"
+        hash_valid = (
+            "yes" if alien_total == 0 and all(p != "-" for p in phase)
+            else f"no({alien_total} non-integer rows)"
+        )
+        if alien_total and status == "ok":
+            status = f"failed: {alien_total} non-integer output row(s); hashes are integer-only"
 
         delete_ms = insert_ms = ""
         if source and status == "ok":
@@ -223,7 +269,6 @@ def case_run(out, stem, ext, reps, rows):
                 delete_ms = times[n + 2]
                 insert_ms = times[n + 4]
         install_ms = round(sum(times[:n]), 3) if status == "ok" else ""
-
 
         mem = re.search(r"Memory Used:\s+(\d+) \(max (\d+)\)", merged)
         mem_current, mem_peak = (mem.group(1), mem.group(2)) if mem else ("", "")
