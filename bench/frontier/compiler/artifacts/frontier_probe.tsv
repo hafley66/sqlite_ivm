@@ -23,8 +23,8 @@ case	kind	view/index	ordinal	verdict	detail
 0_union_filter	outer_arm	"0_union_filter.Touched_v1"	0	rejected	Error near line 4: [parse/] unsupported: a program must start with SELECT | Parse error near line 8: no such table: frontier_p_0_union_filter | Parse error near line 11: no such table: frontier_p_0_union_filter | Parse error near line 13: no such table: Touched_v1
 0_union_filter	minimal_derived	hand-stripped from "0_union_filter.Edge_a2"	0	accepted-mismatch	installed as p_0_union_filter; frontier rows after delete: 0, after re-insert: 1; fresh recompute count: 4
 0_union_filter	note	-	-	-	emitted bodies rejected above; minimal hand-stripped body shows engine liveness	-
-0_union_filter	reopen_gate	fresh read after install	0	reopen-read-failed	Parse error near line 4: no such table: frontier_p_0_union_filter
-0_union_filter	reopen_gate	fresh committed mutation	1	reopen-mutate-vacuous	DELETE ran but the program is not registered in the fresh process, so no IVM settle was expected
+0_union_filter	reopen_gate	fresh read after install	0	reopen-read	fresh process reads persisted snapshot; count=0 (no back-fill of pre-install base rows)
+0_union_filter	reopen_gate	fresh committed mutation	1	reopen-mutate-unsupported	Parse error near line 4: no such module: frontier_p_0_union_filter_c1
 1_transitive	full_ddl		0	rejected	Error near line 4: [parse/CREATE] unsupported: a program must start with SELECT | Parse error near line 9: no such table: frontier_p_1_transitive | Parse error near line 12: no such table: frontier_p_1_transitive | Parse error near line 14: near "CREATE": syntax error |   SELECT count(*) FROM (CREATE VIRTUAL TABLE "1_transitive.Reach_v2" USING sqlit |                         ^--- error here | Pars
 1_transitive	ddl	statement0	0	rejected	Error near line 4: [parse/CREATE] unsupported: a program must start with SELECT | Parse error near line 8: no such table: frontier_p_1_transitive | Parse error near line 11: no such table: frontier_p_1_transitive | Parse error near line 13: near "CREATE": syntax error |   SELECT count(*) FROM (CREATE VIRTUAL TABLE "1_transitive.Reach_v2" USING sqlit |                         ^--- error here
 1_transitive	query	"1_transitive.Reach_v2"	0	rejected	Error near line 4: [parse/WITH] unsupported: a program must start with SELECT | Parse error near line 8: no such table: frontier_p_1_transitive | Parse error near line 11: no such table: frontier_p_1_transitive
@@ -33,6 +33,6 @@ case	kind	view/index	ordinal	verdict	detail
 1_transitive	outer_arm	"1_transitive.Reach_v2"	0	rejected	Error near line 4: [parse/] unsupported: a program must start with SELECT | Parse error near line 8: no such table: frontier_p_1_transitive | Parse error near line 11: no such table: frontier_p_1_transitive | Parse error near line 13: no such table: Reach_v2
 1_transitive	minimal_derived	hand-stripped from "1_transitive.Edge_a2"	0	accepted-mismatch	installed as p_1_transitive; frontier rows after delete: 0, after re-insert: 1; fresh recompute count: 5
 1_transitive	note	-	-	-	emitted bodies rejected above; minimal hand-stripped body shows engine liveness	-
-1_transitive	reopen_gate	fresh read after install	0	reopen-read-failed	Parse error near line 4: no such table: frontier_p_1_transitive
-1_transitive	reopen_gate	fresh committed mutation	1	reopen-mutate-vacuous	DELETE ran but the program is not registered in the fresh process, so no IVM settle was expected
+1_transitive	reopen_gate	fresh read after install	0	reopen-read	fresh process reads persisted snapshot; count=0 (no back-fill of pre-install base rows)
+1_transitive	reopen_gate	fresh committed mutation	1	reopen-mutate-unsupported	Parse error near line 4: no such module: frontier_p_1_transitive_c1
 2_partial	-	-	-	no emitted SQL: nothing to probe	-

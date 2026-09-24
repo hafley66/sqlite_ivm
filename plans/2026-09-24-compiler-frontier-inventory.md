@@ -181,14 +181,18 @@ earlier "accepted-settled" reading was exactly the stale-snapshot illusion
 the review warned about; the mismatch gate now records it as a failure
 verdict, not a pass.
 
-**Fresh-process reopen gates (separate recorded failures):**
-- fresh READ after install: `reopen-read-failed` — exact error
-  `Parse error near line 4: no such table: frontier_p_<case>` (both cases).
-  The frontier snapshot is connection-local; it is not visible to a new
-  process at all.
-- fresh committed mutation: `reopen-mutate-vacuous` — the DELETE runs, but
-  with no program registered in that process there is no IVM settle to
-  exercise; recorded so the leg is not mistaken for a pass.
+**Fresh-process reopen gates (install asserted rc=0, then closed and
+reopened):**
+- fresh READ of the snapshot: **succeeds** — `reopen-read`,
+  `count=0` in both cases. The installed frontier vtab persists in the
+  schema and a new process reads it; `count=0` is direct confirmation that
+  install does not back-fill pre-existing base rows (fresh recompute of the
+  same body: 4 / 5 rows).
+- fresh committed mutation (DELETE on the source): **fails** —
+  `reopen-mutate-unsupported`, exact error `Parse error near line 4: no
+  such module: frontier_p_<prog>_c1` (both cases). The collector module for
+  a committed source write is connection-local and not re-registered on
+  reopen; the read path persists, the write path does not.
 
 ## 6. Calibration caveat
 

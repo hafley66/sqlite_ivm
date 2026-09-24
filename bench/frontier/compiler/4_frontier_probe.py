@@ -188,10 +188,11 @@ def probe(out, stem, ext, rows):
         print(f"{stem} minimal_derived: {verdict} :: {detail[:200]}")
         rows.append(f"{stem}\tnote\t-\t-\t-\temitted bodies rejected above; minimal hand-stripped body shows engine liveness\t-")
 
-        # Separate gate: a FRESH process reopening the same DB cannot read
-        # the frontier snapshot (the install's `frontier_<prog>_cN` vtab
-        # modules are connection-local). This is expected-unsupported, kept
-        # as a recorded failure rather than hidden.
+        # Separate gate: install in ONE process (rc asserted), close, then
+        # reopen in FRESH processes. The frontier vtab itself persists and a
+        # direct snapshot read can succeed; the canonical fresh-connection
+        # failure is `no such module: frontier_<prog>_c1` when a committed
+        # source write needs the connection-local collector module.
         reopen_db = os.path.join(workdir, "reopen.sqlite")
         os.makedirs(workdir, exist_ok=True)
         shutil.copy(store, reopen_db)
@@ -202,6 +203,18 @@ def probe(out, stem, ext, rows):
             f"SELECT sqlite_ivm_frontier_install({sql_literal(prog)}, {sql_literal(minimal)});",
             "",
         ])
+        install = subprocess.run(
+            [SQLITE3, "-batch", reopen_db],
+            input=install_script, capture_output=True, text=True,
+        )
+        if install.returncode != 0 or re.search(
+            r"error", install.stderr + install.stdout, re.IGNORECASE
+        ):
+            rows.append(f"{stem}\treopen_gate\tinstall for reopen\t0\treopen-install-failed\t{error_text(install)}")
+            print(f"{stem} reopen_gate install: FAILED :: {error_text(install)[:160]}")
+            shutil.rmtree(workdir, ignore_errors=True)
+            return
+
         reopen_read = subprocess.run(
             [SQLITE3, "-batch", reopen_db],
             input="\n".join([
@@ -213,16 +226,16 @@ def probe(out, stem, ext, rows):
             ]),
             capture_output=True, text=True,
         )
-        failed = (
+        read_failed = (
             reopen_read.returncode != 0
             or re.search(r"error", reopen_read.stderr + reopen_read.stdout, re.IGNORECASE)
         )
-        if failed:
+        if read_failed:
             rows.append(f"{stem}\treopen_gate\tfresh read after install\t0\treopen-read-failed\t{error_text(reopen_read)}")
             print(f"{stem} reopen_gate read: failed :: {error_text(reopen_read)[:160]}")
         else:
             count = reopen_read.stdout.strip().splitlines()[-1]
-            rows.append(f"{stem}\treopen_gate\tfresh read after install\t0\treopen-read\tfresh process reads snapshot; count={count}")
+            rows.append(f"{stem}\treopen_gate\tfresh read after install\t0\treopen-read\tfresh process reads persisted snapshot; count={count} (no back-fill of pre-install base rows)")
             print(f"{stem} reopen_gate read: reopen-read; count={count}")
 
         reopen_mut = subprocess.run(
@@ -245,8 +258,8 @@ def probe(out, stem, ext, rows):
             rows.append(f"{stem}\treopen_gate\tfresh committed mutation\t1\treopen-mutate-unsupported\t{error_text(reopen_mut)}")
             print(f"{stem} reopen_gate mutate: reopen-mutate-unsupported :: {error_text(reopen_mut)[:160]}")
         else:
-            rows.append(f"{stem}\treopen_gate\tfresh committed mutation\t1\treopen-mutate-vacuous\tDELETE ran but the program is not registered in the fresh process, so no IVM settle was expected")
-            print(f"{stem} reopen_gate mutate: reopen-mutate-vacuous")
+            rows.append(f"{stem}\treopen_gate\tfresh committed mutation\t1\treopen-mutate\tfresh process settled a committed mutation")
+            print(f"{stem} reopen_gate mutate: reopen-mutate")
 
 
 def main():
