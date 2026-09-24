@@ -1,6 +1,6 @@
 use crate::catalog::{error, quote};
 use crate::statements::{self, Phase};
-use frontier_engine::{Frontier, Program};
+use frontier_engine::{Composition, Frontier, Program};
 use rusqlite::{functions::FunctionFlags, Connection, Result};
 const PLUGIN: sqlite_ext::Plugin =
     sqlite_ext::Plugin::new("sqlite_ivm", env!("CARGO_PKG_VERSION"), "warn", install);
@@ -69,6 +69,25 @@ fn install(db: &Connection) -> Result<()> {
 /// The frontier engine's own catalog and commit collector live on this SQLite
 /// connection. No program handle is retained by the extension entry point.
 fn register_frontier(db: &Connection) -> Result<()> {
+    db.create_scalar_function(
+        c"sqlite_ivm_frontier_compose",
+        4,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DIRECTONLY,
+        |ctx| {
+            let producer_name: String = ctx.get(0)?;
+            let producer_sql: String = ctx.get(1)?;
+            let consumer_name: String = ctx.get(2)?;
+            let consumer_sql: String = ctx.get(3)?;
+            let db = unsafe { ctx.get_connection()? };
+            Composition::install(
+                &db,
+                (&producer_name, &producer_sql),
+                (&consumer_name, &consumer_sql),
+            )
+            .map_err(rusqlite::Error::from)?;
+            Ok(consumer_name)
+        },
+    )?;
     db.create_scalar_function(
         c"sqlite_ivm_frontier_install",
         2,

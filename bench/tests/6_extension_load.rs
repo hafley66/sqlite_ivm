@@ -140,6 +140,47 @@ fn loaded_extension_runs_frontier_and_virtual_table_on_one_source() -> Result<()
 }
 
 #[test]
+fn loaded_extension_composes_two_frontiers_on_commit() -> Result<()> {
+    let db = open_loaded()?;
+    db.execute_batch(
+        "PRAGMA recursive_triggers=ON; PRAGMA trusted_schema=ON;
+         CREATE TABLE body_a(person INTEGER PRIMARY KEY);
+         CREATE TABLE body_b(person INTEGER PRIMARY KEY);
+         CREATE TABLE grant_resource(person INTEGER PRIMARY KEY, resource INTEGER NOT NULL);",
+    )?;
+    let installed: String = db.query_row(
+        "SELECT sqlite_ivm_frontier_compose(?1, ?2, ?3, ?4)",
+        [
+            "bodies",
+            "SELECT person FROM body_a UNION SELECT person FROM body_b",
+            "grants",
+            "SELECT b.person, g.resource FROM frontier_bodies b JOIN grant_resource g ON g.person = b.person",
+        ],
+        |row| row.get(0),
+    )?;
+    assert_eq!(installed, "grants");
+    db.execute_batch(
+        "BEGIN;
+         INSERT INTO body_a VALUES (1);
+         INSERT INTO body_b VALUES (1);
+         INSERT INTO grant_resource VALUES (1, 10), (2, 20);
+         COMMIT;",
+    )?;
+    let rows = db
+        .prepare("SELECT person, resource FROM frontier_grants ORDER BY person")?
+        .query_map([], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)))?
+        .collect::<Result<Vec<_>>>()?;
+    assert_eq!(rows, [(1, 10)]);
+    db.execute_batch("DELETE FROM body_a WHERE person = 1")?;
+    let count: i64 = db.query_row("SELECT count(*) FROM frontier_grants", [], |row| row.get(0))?;
+    assert_eq!(count, 1);
+    db.execute_batch("DELETE FROM body_b WHERE person = 1")?;
+    let count: i64 = db.query_row("SELECT count(*) FROM frontier_grants", [], |row| row.get(0))?;
+    assert_eq!(count, 0);
+    Ok(())
+}
+
+#[test]
 fn loaded_extension_retains_preparation_and_execution_events() {
     // A separate process lets the actual dylib install its hafley-observe layer.
     let output = std::process::Command::new(std::env::current_exe().unwrap())
