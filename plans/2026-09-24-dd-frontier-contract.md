@@ -349,6 +349,9 @@ engine or extension source — this lane's only artifact is this file.
    preserved in `plans/costs/57_frontier_all_arms_20260924.tsv`. The harness
    checked every requested snapshot against the recomputation oracle. The
    recorded wall times are one-run observations, not paired performance claims.
+   Rebuilding all three release binaries through `just frontier-stress` with
+   the same arguments also exited 0 with 18 rows; both runs ended with 100
+   access rows and 36 group rows in every arm.
 
 No performance numbers are claimed beyond the wall-clock of the runs above; the lane
 made no timing comparisons.
