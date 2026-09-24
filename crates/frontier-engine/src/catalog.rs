@@ -171,7 +171,11 @@ pub(crate) fn derived_view_program(
     match conn.query_row(&sql, [table], |row| row.get::<_, String>(0)) {
         Ok(program) => Ok(Some(program)),
         Err(sqlite_ext::rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(EngineError::new(Stage::Install, table, ErrorKind::Sqlite(e.to_string()))),
+        Err(e) => Err(EngineError::new(
+            Stage::Install,
+            table,
+            ErrorKind::Sqlite(e.to_string()),
+        )),
     }
 }
 
@@ -194,9 +198,11 @@ pub(crate) fn scan_derived_sources(
 /// Whether the relation is a real table in `main` (the only schema the
 /// extension watches). Views of any kind answer false.
 pub(crate) fn is_base_table(conn: &Connection, name: &str) -> Result<bool, EngineError> {
-    match conn.query_row("SELECT type FROM sqlite_master WHERE name = ?1", [name], |row| {
-        row.get::<_, String>(0)
-    }) {
+    match conn.query_row(
+        "SELECT type FROM sqlite_master WHERE name = ?1",
+        [name],
+        |row| row.get::<_, String>(0),
+    ) {
         Ok(kind) => Ok(kind == "table"),
         Err(sqlite_ext::rusqlite::Error::QueryReturnedNoRows) => Ok(false),
         Err(e) => Err(EngineError::new(
@@ -247,9 +253,7 @@ pub(crate) fn install(
     let installed = {
         let mut built = build_installed(name, install, compiled);
         built.derived = scan_derived_sources(conn, &built)?;
-        if matches!(watch, Watch::Sources)
-            && !built.derived.is_empty()
-        {
+        if matches!(watch, Watch::Sources) && !built.derived.is_empty() {
             return Err(EngineError::unsupported(
                 Stage::Install,
                 built.derived[0].clone(),

@@ -27,7 +27,7 @@
 
 use frontier_engine::{Composition, Frontier, Program};
 use rusqlite::Connection;
-use sqlite_ext::{BulkTrigger, RowChange, watch};
+use sqlite_ext::{watch, BulkTrigger, RowChange};
 
 fn conn() -> Connection {
     let conn = Connection::open_in_memory().unwrap();
@@ -66,7 +66,9 @@ fn seed(conn: &Connection) {
 /// The producer's support: visible output rows with their derivation weights.
 fn support(conn: &Connection) -> Vec<(i64, i64)> {
     let mut stmt = conn
-        .prepare("SELECT person, __weight FROM frontier_bodies_root WHERE __weight > 0 ORDER BY person")
+        .prepare(
+            "SELECT person, __weight FROM frontier_bodies_root WHERE __weight > 0 ORDER BY person",
+        )
         .unwrap();
     stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
         .unwrap()
@@ -129,7 +131,8 @@ fn composed_oracle_from_plans_engine_iso() {
     assert_eq!(grants_delta(&conn), vec![(1, 10, 1)]);
 
     // 1_add_body_c: Bob's first support, only Bob changes downstream.
-    conn.execute_batch("INSERT INTO body_c VALUES (1),(2);").unwrap();
+    conn.execute_batch("INSERT INTO body_c VALUES (1),(2);")
+        .unwrap();
     assert_support(&conn, &[(1, 3), (2, 1)]);
     assert_visible(&conn, &[(1, 10), (2, 20)]);
     assert_eq!(grants_delta(&conn), vec![(2, 20, 1)]);
@@ -171,7 +174,11 @@ fn composed_oracle_from_plans_engine_iso() {
     .unwrap();
     assert_eq!(support(&conn), support_before);
     assert_eq!(visible(&conn), visible_before);
-    assert_eq!(grants_delta(&conn), vec![(2, 21, 1)], "the delta table keeps the last settled frontier");
+    assert_eq!(
+        grants_delta(&conn),
+        vec![(2, 21, 1)],
+        "the delta table keeps the last settled frontier"
+    );
 
     composed.teardown(&conn).unwrap();
     assert_no_program_objects(&conn);
@@ -187,7 +194,8 @@ fn one_commit_settles_both_programs() {
     assert_eq!(frontier_of(&conn, "bodies"), 1);
     assert_eq!(frontier_of(&conn, "grants"), 1);
 
-    conn.execute_batch("INSERT INTO body_c VALUES (1);").unwrap();
+    conn.execute_batch("INSERT INTO body_c VALUES (1);")
+        .unwrap();
 
     assert_eq!(frontier_of(&conn, "bodies"), 2, "producer settled once");
     assert_eq!(frontier_of(&conn, "grants"), 2, "consumer settled once");
@@ -204,8 +212,10 @@ fn one_commit_settles_both_programs() {
 #[test]
 fn settle_failure_inside_commit_aborts_everything() {
     let conn = conn();
-    conn.execute_batch("CREATE TABLE kv(k INTEGER PRIMARY KEY, grp INTEGER NOT NULL, v INTEGER NOT NULL);")
-        .unwrap();
+    conn.execute_batch(
+        "CREATE TABLE kv(k INTEGER PRIMARY KEY, grp INTEGER NOT NULL, v INTEGER NOT NULL);",
+    )
+    .unwrap();
     let composed = Composition::install(
         &conn,
         ("pairs", "SELECT grp, v FROM kv"),
@@ -215,7 +225,8 @@ fn settle_failure_inside_commit_aborts_everything() {
         ),
     )
     .unwrap();
-    conn.execute_batch("INSERT INTO kv VALUES (1, 10, 100);").unwrap();
+    conn.execute_batch("INSERT INTO kv VALUES (1, 10, 100);")
+        .unwrap();
     assert_eq!(visible_totals(&conn), vec![(10, 1, 100)]);
 
     // Two new pairs in one settle: the consumer's stage sum overflows, the
@@ -228,14 +239,20 @@ fn settle_failure_inside_commit_aborts_everything() {
          INSERT INTO kv VALUES (3, 10, 5);
          COMMIT;",
     );
-    assert!(commit.is_err(), "overflowing consumer settle must fail the COMMIT");
+    assert!(
+        commit.is_err(),
+        "overflowing consumer settle must fail the COMMIT"
+    );
     let _ = conn.execute_batch("ROLLBACK;");
-    let kv_rows: i64 = conn.query_row("SELECT count(*) FROM kv", [], |r| r.get(0)).unwrap();
+    let kv_rows: i64 = conn
+        .query_row("SELECT count(*) FROM kv", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(kv_rows, 1, "the failed transaction left no rows behind");
     assert_eq!(visible_totals(&conn), vec![(10, 1, 100)]);
 
     // The collector survives the failed commit and settles the next one.
-    conn.execute_batch("INSERT INTO kv VALUES (3, 10, 1);").unwrap();
+    conn.execute_batch("INSERT INTO kv VALUES (3, 10, 1);")
+        .unwrap();
     assert_eq!(visible_totals(&conn), vec![(10, 2, 101)]);
 
     composed.teardown(&conn).unwrap();
@@ -266,8 +283,13 @@ fn reopen_reregisters_the_shared_collector() {
     }
 
     let reopened = Composition::open(&conn, "bodies", "grants").unwrap();
-    conn.execute_batch("INSERT INTO body_c VALUES (3);").unwrap();
-    assert_eq!(frontier_of(&conn, "bodies"), 2, "counter continues across reopen");
+    conn.execute_batch("INSERT INTO body_c VALUES (3);")
+        .unwrap();
+    assert_eq!(
+        frontier_of(&conn, "bodies"),
+        2,
+        "counter continues across reopen"
+    );
     assert_eq!(frontier_of(&conn, "grants"), 2);
     assert_support(&conn, &[(1, 2), (3, 1)]);
     assert_visible(&conn, &[(1, 10), (3, 30)]);
@@ -291,7 +313,8 @@ fn vtab_write_inside_xsync_is_rejected() {
     watch(&db, "col_writer", &["watched"], WritesOtherTable).unwrap();
     watch(&db, "col_sink", &["side_effect"], Absorbs).unwrap();
 
-    db.execute_batch("BEGIN; INSERT INTO watched VALUES (1);").unwrap();
+    db.execute_batch("BEGIN; INSERT INTO watched VALUES (1);")
+        .unwrap();
     let commit = db.execute_batch("COMMIT;");
     let err = commit
         .err()
@@ -309,7 +332,10 @@ fn vtab_write_inside_xsync_is_rejected() {
     let rolled_back: i64 = db
         .query_row("SELECT count(*) FROM watched", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(rolled_back, 0, "the failed COMMIT rolled the transaction back");
+    assert_eq!(
+        rolled_back, 0,
+        "the failed COMMIT rolled the transaction back"
+    );
 }
 
 struct WritesOtherTable;
@@ -387,7 +413,10 @@ fn unsupported_compositions_are_explicit() {
 }
 
 #[track_caller]
-fn assert_unsupported(result: Result<impl std::any::Any, frontier_engine::EngineError>, needle: &str) {
+fn assert_unsupported(
+    result: Result<impl std::any::Any, frontier_engine::EngineError>,
+    needle: &str,
+) {
     let err = result.err().expect("install must be rejected");
     let text = format!("{err}");
     assert!(err.is_unsupported(), "not Unsupported: {text}");

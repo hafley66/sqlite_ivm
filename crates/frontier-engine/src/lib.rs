@@ -46,7 +46,6 @@ mod plan;
 pub use composition::Composition;
 pub use error::{EngineError, ErrorKind, Stage};
 
-
 /// One typed SQLite value. The engine preserves the storage class exactly:
 /// an integer stays an integer, text stays text, across staging, joins and
 /// output.
@@ -176,7 +175,6 @@ impl Program {
             inner: catalog::install(conn, name, select_sql, catalog::Watch::Sources)?,
         })
     }
-
 
     /// Install without a commit collector: composition's entry for programs
     /// that settle only through the explicit API.

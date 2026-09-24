@@ -113,7 +113,10 @@ impl Composition {
     }
 }
 
-fn reject_derived_producer_sources(conn: &Connection, producer: &Program) -> Result<(), EngineError> {
+fn reject_derived_producer_sources(
+    conn: &Connection,
+    producer: &Program,
+) -> Result<(), EngineError> {
     let derived = catalog::scan_derived_sources(conn, &producer.handle())?;
     match derived.first() {
         Some(view) => Err(EngineError::unsupported(
@@ -172,10 +175,11 @@ fn collector_name(producer: &Installed) -> String {
 
 fn drop_collector(conn: &Connection, producer: &Program) -> Result<(), EngineError> {
     let name = collector_name(&producer.handle());
-    conn.execute_batch(&format!("DROP TABLE IF EXISTS main.{};", catalog::quote(&name)))
-        .map_err(|e| {
-            EngineError::new(Stage::Install, &name, ErrorKind::Sqlite(e.to_string()))
-        })
+    conn.execute_batch(&format!(
+        "DROP TABLE IF EXISTS main.{};",
+        catalog::quote(&name)
+    ))
+    .map_err(|e| EngineError::new(Stage::Install, &name, ErrorKind::Sqlite(e.to_string())))
 }
 
 /// Registers the one shared collector: the producer's slot, watching the
@@ -196,8 +200,17 @@ fn register(
         }
     }
     let tables: Vec<&str> = watched.iter().map(String::as_str).collect();
-    sqlite_ext::watch(conn, &name, &tables, GroupTrigger { producer, consumer, view })
-        .map_err(|e| EngineError::new(Stage::Install, &name, ErrorKind::Sqlite(e.to_string())))
+    sqlite_ext::watch(
+        conn,
+        &name,
+        &tables,
+        GroupTrigger {
+            producer,
+            consumer,
+            view,
+        },
+    )
+    .map_err(|e| EngineError::new(Stage::Install, &name, ErrorKind::Sqlite(e.to_string())))
 }
 
 /// The graph-owned commit callback. One instance per composition.
@@ -224,7 +237,12 @@ impl BulkTrigger for GroupTrigger {
             if self.producer.sources.contains(&change.relation) {
                 producer_rows.push(change.clone());
             }
-            if self.consumer.sources.iter().any(|s| *s == change.relation && *s != self.view) {
+            if self
+                .consumer
+                .sources
+                .iter()
+                .any(|s| *s == change.relation && *s != self.view)
+            {
                 consumer_rows.push(change);
             }
         }
