@@ -48,3 +48,8 @@ fn s_n2_reach() {
 fn s_t_s_i_timing_and_cells() {
     println!("{}", support::run::<Dd>("8_timing_and_cells"));
 }
+
+#[test]
+fn s_n5_depth_cap() {
+    println!("{}", support::run::<Dd>("9_depth_cap"));
+}

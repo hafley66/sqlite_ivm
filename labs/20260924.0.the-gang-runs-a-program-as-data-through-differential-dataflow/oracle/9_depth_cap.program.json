@@ -1,0 +1,16 @@
+{
+  "rels": [
+    {"id": 0, "name": "seed", "cols": ["Int"], "kind": "Source"},
+    {"id": 1, "name": "n", "cols": ["Int"], "kind": "Derived"},
+    {"id": 2, "name": "exceeded", "cols": ["Int"], "kind": "Derived"}
+  ],
+  "nodes": [
+    {"Get": 0},
+    {"Get": 1},
+    {"Mfp": {"input": 1, "filter": [{"Call": ["Lt", [{"Col": 0}, {"Lit": 64}]]}], "map": [{"Call": ["Add", [{"Col": 0}, {"Lit": 1}]]}], "project": [1]}},
+    {"Union": [0, 2]},
+    {"Mfp": {"input": 1, "filter": [{"Call": ["Eq", [{"Col": 0}, {"Lit": 64}]]}]}}
+  ],
+  "strata": [{"LetRec": {"ids": [1], "bodies": [3], "limit": null}}, {"Let": {"id": 2, "body": 4}}],
+  "outputs": [1, 2]
+}
