@@ -132,8 +132,8 @@ non-integer cell would fail the rep, not silently shift a hash.
 
 | case | install ms (median) | delete ms | insert ms | hash install = hash after re-insert | RSS | sqlite mem cur/peak | db bytes | WAL |
 |---|---|---|---|---|---|---|---|---|
-| 0_union_filter | 84.4 | 0.002 | 0.002 | yes (`04806a5c548f72df`) | 14.0–14.9 M | 5339152 / 5639072 | 7798784 | see note |
-| 1_transitive | 4.7 | 0.042 | 0.005 | yes (`623b911d32fa82ba`) | 9.7 M | 3345872 / 3609808 | 2490368 | see note |
+| 0_union_filter | 47.645 | 0.002 | 0.002 | yes (`04806a5c548f72df`) | 12.0 M | 5339152 / 5639072 | 7798784 | see note |
+| 1_transitive | 3.357 | 0.042 | 0.003 | yes (`623b911d32fa82ba`) | 8.2–8.5 M | 3345872 / 3609808 | 2490368 | see note |
 | 2_partial | — nothing to install (emit refused) — | | | | | | | |
 
 - Content hashes are identical to the pre-assertion runner — the typed

@@ -67,8 +67,8 @@ def probe_one(db, ext, program, candidate, sources):
     """Install, settle, read in ONE connection.
 
     install registers per-connection `frontier_<prog>_cN` vtab modules and
-    persists a `frontier_<prog>` virtual table that instantiates them, so a
-    fresh connection cannot read the snapshot. Install returns the program
+    persists a `frontier_<prog>` virtual table that instantiates them. A fresh
+    connection can read the snapshot but cannot settle a source write. Install returns the program
     name on success; rejects carry the engine stage in the error text.
     """
     seed = None
