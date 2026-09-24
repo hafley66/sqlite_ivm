@@ -231,15 +231,28 @@ pub struct Dd {
     thread: Option<JoinHandle<()>>,
 }
 
-impl Engine for Dd {
-    fn install(program: &Program) -> Result<Self, EngineError> {
+/// Runs on the worker before the dataflow is built; tests register timely/differential loggers here.
+pub type Hook = Box<dyn FnOnce(&mut timely::worker::Worker) + Send>;
+
+impl Dd {
+    pub fn install_observed(program: &Program, hook: Hook) -> Result<Self, EngineError> {
+        Self::start(program, Some(hook))
+    }
+
+    fn start(program: &Program, hook: Option<Hook>) -> Result<Self, EngineError> {
         let (tx, rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::channel();
         let program = program.clone();
-        let thread = thread::spawn(move || worker(program, rx, ready_tx));
+        let thread = thread::spawn(move || worker(program, hook, rx, ready_tx));
         let worker_gone = |_| EngineError::new(Stage::Install, None, ErrorKind::Worker("worker exited".into()));
         ready_rx.recv().map_err(worker_gone)??;
         Ok(Self { tx, thread: Some(thread) })
+    }
+}
+
+impl Engine for Dd {
+    fn install(program: &Program) -> Result<Self, EngineError> {
+        Self::start(program, None)
     }
 
     fn settle(&mut self, frontier: Frontier) -> Result<Delta, EngineError> {
@@ -274,9 +287,13 @@ struct Built {
     outputs: BTreeMap<RelId, Trace>,
 }
 
-fn worker(program: Program, rx: mpsc::Receiver<Command>, ready: mpsc::Sender<Result<(), EngineError>>) {
+fn worker(program: Program, hook: Option<Hook>, rx: mpsc::Receiver<Command>, ready: mpsc::Sender<Result<(), EngineError>>) {
     let rx = std::sync::Mutex::new(rx);
+    let hook = std::sync::Mutex::new(hook);
     timely::execute_directly(move |worker| {
+        if let Some(hook) = hook.lock().unwrap().take() {
+            hook(worker);
+        }
         let mut probe = ProbeHandle::new();
         let captured: Rc<RefCell<Vec<(RelId, Row, Time, W)>>> = Rc::default();
         let built = worker.dataflow::<Time, _, _>(|scope| -> Result<Built, EngineError> {

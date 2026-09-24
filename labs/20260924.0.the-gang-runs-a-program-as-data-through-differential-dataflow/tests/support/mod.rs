@@ -1,5 +1,6 @@
 //! Oracle harness, generic over `Engine`: one step file drives both the frontier and the expected delta.
 //! A step body is SQL (frontier = source diff) or raw `+ table cells` / `- table cells` lines (frontier = those lines, in order).
+#![allow(dead_code)]
 
 use lab_20260924_0::{Delta, Engine, Frontier, Program, RelId, RelKind, Row, SourceChange, W};
 use rusqlite::Connection;
@@ -8,6 +9,11 @@ use std::fmt::Write as _;
 use std::path::PathBuf;
 
 type Bag = BTreeMap<Row, W>;
+
+pub fn program(name: &str) -> Program {
+    let json = std::fs::read_to_string(oracle_dir().join(format!("{name}.program.json"))).unwrap();
+    serde_json::from_str(&json).unwrap()
+}
 
 fn oracle_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("oracle")
