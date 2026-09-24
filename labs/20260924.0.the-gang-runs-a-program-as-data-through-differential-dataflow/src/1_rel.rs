@@ -42,6 +42,13 @@ impl fmt::Display for EngineError {
 
 impl std::error::Error for EngineError {}
 
+/// Lifecycle every engine implements; the oracle harness is written against this trait only.
+pub trait Engine: Sized {
+    fn install(program: &Program) -> Result<Self, EngineError>;
+    fn settle(&mut self, frontier: Frontier) -> Result<Delta, EngineError>;
+    fn snapshot(&self, rel: RelId) -> Result<Vec<(Row, W)>, EngineError>;
+}
+
 pub trait Rel {
     type C: Clone;
     fn get(&mut self, rel: RelId) -> Result<Self::C, EngineError>;
@@ -52,6 +59,13 @@ pub trait Rel {
     fn antijoin(&mut self, l: Self::C, r: Self::C, lk: &[ColId], rk: &[ColId]) -> Self::C;
     fn reduce(&mut self, c: Self::C, key: &[ColId], aggs: &[Agg]) -> Self::C;
     fn threshold(&mut self, c: Self::C) -> Self::C;
+    fn topk(&mut self, _c: Self::C, _key: &[ColId], _order: &[Order], _limit: u32) -> Result<Self::C, EngineError> {
+        Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("TopK")))
+    }
+    /// Engine-owned fixpoint: returns one collection per `rec.ids`, built with `lower_node` on the engine's inner algebra.
+    fn letrec(&mut self, _p: &Program, _rec: &LetRec, _defined: &[(RelId, Self::C)]) -> Result<Vec<Self::C>, EngineError> {
+        Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("LetRec")))
+    }
     fn output(&mut self, rel: RelId, c: Self::C);
 }
 
@@ -85,11 +99,12 @@ pub fn lower<A: Rel>(p: &Program, a: &mut A) -> Result<(), EngineError> {
     for stratum in &p.strata {
         match stratum {
             Stratum::Let { id, body } => {
-                let c = node(p, a, &mut nodes, &defined, *body)?;
+                let c = lower_node(p, a, &mut nodes, &defined, *body)?;
                 defined.push((*id, c));
             }
-            Stratum::LetRec(_) => {
-                return Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("LetRec")))
+            Stratum::LetRec(rec) => {
+                let cs = a.letrec(p, rec, &defined)?;
+                defined.extend(rec.ids.iter().copied().zip(cs));
             }
         }
     }
@@ -104,7 +119,7 @@ pub fn lower<A: Rel>(p: &Program, a: &mut A) -> Result<(), EngineError> {
     Ok(())
 }
 
-fn node<A: Rel>(
+pub fn lower_node<A: Rel>(
     p: &Program,
     a: &mut A,
     nodes: &mut Vec<Option<A::C>>,
@@ -118,7 +133,7 @@ fn node<A: Rel>(
         .nodes
         .get(id as usize)
         .ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::UnknownNode(id)))?;
-    let mut sub = |n: NodeId, a: &mut A| node(p, a, nodes, defined, n);
+    let mut sub = |n: NodeId, a: &mut A| lower_node(p, a, nodes, defined, n);
     let c = match op {
         Op::Get(rel) => match defined.iter().find(|(d, _)| d == rel) {
             Some((_, c)) => c.clone(),
@@ -153,7 +168,10 @@ fn node<A: Rel>(
             let c = sub(*input, a)?;
             a.threshold(c)
         }
-        Op::TopK { .. } => return Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("TopK"))),
+        Op::TopK { input, key, order, limit } => {
+            let c = sub(*input, a)?;
+            a.topk(c, key, order, *limit)?
+        }
         Op::Window { .. } => return Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Window"))),
         Op::Delay(_) => return Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Delay"))),
     };

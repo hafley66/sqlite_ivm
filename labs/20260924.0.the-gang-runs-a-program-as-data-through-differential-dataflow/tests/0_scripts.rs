@@ -2,12 +2,24 @@
 
 mod support;
 
+use lab_20260924_0::Dd;
+
 #[test]
 fn s_a_access() {
-    println!("{}", support::run("0_access"));
+    println!("{}", support::run::<Dd>("0_access"));
 }
 
 #[test]
 fn s_g_team_cost() {
-    println!("{}", support::run("1_team_cost"));
+    println!("{}", support::run::<Dd>("1_team_cost"));
+}
+
+#[test]
+fn s_w_weights_access() {
+    println!("{}", support::run::<Dd>("2_weights_access"));
+}
+
+#[test]
+fn s_w_weights_team_cost() {
+    println!("{}", support::run::<Dd>("3_weights_team_cost"));
 }

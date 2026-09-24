@@ -7,4 +7,9 @@ pub mod dd;
 
 pub use dd::Dd;
 pub use ir::*;
-pub use rel::{eval, lower, EngineError, ErrorKind, Rel, Stage};
+pub use rel::{eval, lower, lower_node, Engine, EngineError, ErrorKind, Rel, Stage};
+#[cfg(feature = "sqlite")]
+#[path = "3_sqlite.rs"]
+pub mod sqlite;
+#[cfg(feature = "sqlite")]
+pub use sqlite::Sql;

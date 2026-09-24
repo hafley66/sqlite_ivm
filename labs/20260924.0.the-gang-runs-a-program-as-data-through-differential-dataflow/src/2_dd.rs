@@ -138,8 +138,8 @@ pub struct Dd {
     thread: Option<JoinHandle<()>>,
 }
 
-impl Dd {
-    pub fn install(program: &Program) -> Result<Self, EngineError> {
+impl Engine for Dd {
+    fn install(program: &Program) -> Result<Self, EngineError> {
         let (tx, rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::channel();
         let program = program.clone();
@@ -149,13 +149,13 @@ impl Dd {
         Ok(Self { tx, thread: Some(thread) })
     }
 
-    pub fn settle(&mut self, frontier: Frontier) -> Result<Delta, EngineError> {
+    fn settle(&mut self, frontier: Frontier) -> Result<Delta, EngineError> {
         let (reply, answer) = mpsc::channel();
         self.tx.send(Command::Settle(frontier, reply)).map_err(|e| worker_error(Stage::Settle, e))?;
         answer.recv().map_err(|e| worker_error(Stage::Settle, e))?
     }
 
-    pub fn snapshot(&self, rel: RelId) -> Result<Vec<(Row, W)>, EngineError> {
+    fn snapshot(&self, rel: RelId) -> Result<Vec<(Row, W)>, EngineError> {
         let (reply, answer) = mpsc::channel();
         self.tx.send(Command::Snapshot(rel, reply)).map_err(|e| worker_error(Stage::Snapshot, e))?;
         answer.recv().map_err(|e| worker_error(Stage::Snapshot, e))?
