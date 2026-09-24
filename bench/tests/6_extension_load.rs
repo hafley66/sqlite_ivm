@@ -177,6 +177,19 @@ fn loaded_extension_composes_two_frontiers_on_commit() -> Result<()> {
     db.execute_batch("DELETE FROM body_b WHERE person = 1")?;
     let count: i64 = db.query_row("SELECT count(*) FROM frontier_grants", [], |row| row.get(0))?;
     assert_eq!(count, 0);
+    let dropped: String = db.query_row(
+        "SELECT sqlite_ivm_frontier_drop_composition('bodies', 'grants')",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(dropped, "grants");
+    db.execute_batch("INSERT INTO body_a VALUES (3)")?;
+    let remaining: i64 = db.query_row(
+        "SELECT count(*) FROM sqlite_master WHERE name IN ('frontier_bodies', 'frontier_grants')",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(remaining, 0);
     Ok(())
 }
 

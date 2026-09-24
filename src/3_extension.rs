@@ -89,6 +89,20 @@ fn register_frontier(db: &Connection) -> Result<()> {
         },
     )?;
     db.create_scalar_function(
+        c"sqlite_ivm_frontier_drop_composition",
+        2,
+        FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DIRECTONLY,
+        |ctx| {
+            let producer_name: String = ctx.get(0)?;
+            let consumer_name: String = ctx.get(1)?;
+            let db = unsafe { ctx.get_connection()? };
+            Composition::open(&db, &producer_name, &consumer_name)
+                .and_then(|composition| composition.teardown(&db))
+                .map_err(rusqlite::Error::from)?;
+            Ok(consumer_name)
+        },
+    )?;
+    db.create_scalar_function(
         c"sqlite_ivm_frontier_install",
         2,
         FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DIRECTONLY,
