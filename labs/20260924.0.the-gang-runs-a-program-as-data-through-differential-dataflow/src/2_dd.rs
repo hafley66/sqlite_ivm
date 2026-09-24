@@ -7,7 +7,13 @@ use differential_dataflow::operators::arrange::TraceAgent;
 use differential_dataflow::trace::cursor::Cursor;
 use differential_dataflow::trace::implementations::KeySpine;
 use differential_dataflow::trace::TraceReader;
+use differential_dataflow::lattice::Lattice;
+use differential_dataflow::operators::iterate::Variable;
 use differential_dataflow::VecCollection;
+use std::hash::Hash;
+use timely::dataflow::Scope;
+use timely::order::Product;
+use timely::progress::Timestamp;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -18,20 +24,72 @@ use timely::dataflow::operators::Probe;
 use timely::progress::frontier::AntichainRef;
 
 type Time = u64;
-type Coll<'s> = VecCollection<'s, Time, Row, W>;
+type Coll<'s, T = Time> = VecCollection<'s, T, Row, W>;
 type Trace = TraceAgent<KeySpine<Row, Time, W>>;
+type Inner = Product<Time, u64>;
 
-pub struct DdRel<'s> {
-    sources: BTreeMap<RelId, Coll<'s>>,
-    outputs: Vec<(RelId, Coll<'s>)>,
+/// Timestamps the algebra runs at. Only the top level may open a LetRec scope; this bounds monomorphization.
+pub trait Nest: Timestamp + Lattice + Ord + Hash + Clone + std::fmt::Debug + 'static {
+    fn letrec<'s>(rel: &mut DdRel<'s, Self>, p: &Program, rec: &LetRec, defined: &[(RelId, Coll<'s, Self>)])
+        -> Result<Vec<Coll<'s, Self>>, EngineError>;
+}
+
+impl Nest for Inner {
+    fn letrec<'s>(_: &mut DdRel<'s, Self>, _: &Program, _: &LetRec, _: &[(RelId, Coll<'s, Self>)])
+        -> Result<Vec<Coll<'s, Self>>, EngineError> {
+        Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("LetRec nested in LetRec")))
+    }
+}
+
+impl Nest for Time {
+    fn letrec<'s>(rel: &mut DdRel<'s, Self>, p: &Program, rec: &LetRec, defined: &[(RelId, Coll<'s>)])
+        -> Result<Vec<Coll<'s>>, EngineError> {
+        if rec.limit.is_some() {
+            return Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("LetRec limit")));
+        }
+        let outer = rel.scope;
+        outer.scoped::<Inner, _, _>("LetRec", |sub| {
+            let mut inner = DdRel {
+                scope: sub,
+                sources: rel.sources.iter().map(|(id, c)| (*id, c.clone().enter(sub))).collect(),
+                outputs: Vec::new(),
+            };
+            let mut scope_defined: Vec<(RelId, Coll<'_, Inner>)> =
+                defined.iter().map(|(id, c)| (*id, c.clone().enter(sub))).collect();
+            let mut variables = Vec::new();
+            for id in &rec.ids {
+                let (variable, current) = Variable::new(sub, Product::new(Default::default(), 1));
+                variables.push(variable);
+                scope_defined.push((*id, current));
+            }
+            let mut nodes = vec![None; p.nodes.len()];
+            let mut results = Vec::new();
+            for body in &rec.bodies {
+                let c = lower_node(p, &mut inner, &mut nodes, &scope_defined, *body)?;
+                results.push(inner.threshold(c));
+            }
+            let mut left = Vec::new();
+            for (variable, result) in variables.into_iter().zip(results) {
+                variable.set(result.clone());
+                left.push(result.leave(outer));
+            }
+            Ok(left)
+        })
+    }
+}
+
+pub struct DdRel<'s, T: Nest = Time> {
+    scope: Scope<'s, T>,
+    sources: BTreeMap<RelId, Coll<'s, T>>,
+    outputs: Vec<(RelId, Coll<'s, T>)>,
 }
 
 fn cols(row: &[Cell], cols: &[ColId]) -> Row {
     cols.iter().map(|c| row[*c as usize]).collect()
 }
 
-impl<'s> Rel for DdRel<'s> {
-    type C = Coll<'s>;
+impl<'s, T: Nest> Rel for DdRel<'s, T> {
+    type C = Coll<'s, T>;
 
     fn get(&mut self, rel: RelId) -> Result<Self::C, EngineError> {
         self.sources
@@ -141,6 +199,10 @@ impl<'s> Rel for DdRel<'s> {
             .map(|(_, row)| row))
     }
 
+    fn letrec(&mut self, p: &Program, rec: &LetRec, defined: &[(RelId, Self::C)]) -> Result<Vec<Self::C>, EngineError> {
+        T::letrec(self, p, rec, defined)
+    }
+
     fn output(&mut self, rel: RelId, c: Self::C) {
         self.outputs.push((rel, c));
     }
@@ -229,7 +291,7 @@ fn worker(program: Program, rx: mpsc::Receiver<Command>, ready: mpsc::Sender<Res
                 guards.insert(rel.id, guard.trace);
                 sources.insert(rel.id, c);
             }
-            let mut rel = DdRel { sources, outputs: Vec::new() };
+            let mut rel = DdRel { scope, sources, outputs: Vec::new() };
             lower(&program, &mut rel)?;
             let mut outputs = BTreeMap::new();
             for (id, c) in rel.outputs {

@@ -103,7 +103,23 @@ fn apply_raw(conn: &Connection, raw: &[(String, Row, W)]) -> Result<(), rusqlite
 }
 
 /// Runs every step in file order and returns the marble transcript `step tick rel row w`.
-pub fn run<E: Engine>(name: &str) -> String {
+/// A script that does not finish in 10s fails; a diverging fixpoint must not hang the suite.
+pub fn run<E: Engine + 'static>(name: &str) -> String {
+    let (done, finished) = std::sync::mpsc::channel();
+    let owned = name.to_string();
+    let worker = std::thread::spawn(move || {
+        let marbles = run_steps::<E>(&owned);
+        let _ = done.send(());
+        marbles
+    });
+    match finished.recv_timeout(std::time::Duration::from_secs(10)) {
+        Ok(()) => worker.join().unwrap(),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => std::panic::resume_unwind(worker.join().unwrap_err()),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => panic!("{name}: no result within 10s"),
+    }
+}
+
+fn run_steps<E: Engine>(name: &str) -> String {
     let text = std::fs::read_to_string(oracle_dir().join(format!("{name}.sql"))).unwrap();
     let (program_name, setup, steps) = parse(&text);
     let program_name = program_name.unwrap_or_else(|| name.to_string());

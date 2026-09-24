@@ -38,3 +38,8 @@ fn s_n4_self_join() {
 fn s_n3_topk() {
     println!("{}", support::run::<Dd>("6_topk"));
 }
+
+#[test]
+fn s_n2_reach() {
+    println!("{}", support::run::<Dd>("7_reach"));
+}

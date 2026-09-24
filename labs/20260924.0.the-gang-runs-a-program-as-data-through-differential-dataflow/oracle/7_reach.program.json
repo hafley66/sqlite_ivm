@@ -1,0 +1,18 @@
+{
+  "rels": [
+    {"id": 0, "name": "e", "cols": ["Int", "Int"], "kind": "Source"},
+    {"id": 1, "name": "blocked", "cols": ["Int"], "kind": "Source"},
+    {"id": 2, "name": "reach", "cols": ["Int", "Int"], "kind": "Derived"}
+  ],
+  "nodes": [
+    {"Get": 0},
+    {"Get": 1},
+    {"Antijoin": {"l": 0, "r": 1, "lk": [1], "rk": [0]}},
+    {"Get": 2},
+    {"Join": {"inputs": [3, 2], "equivalences": [[[0, 1], [1, 0]]]}},
+    {"Mfp": {"input": 4, "project": [0, 3]}},
+    {"Union": [2, 5]}
+  ],
+  "strata": [{"LetRec": {"ids": [2], "bodies": [6], "limit": null}}],
+  "outputs": [2]
+}
