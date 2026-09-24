@@ -321,14 +321,17 @@ fn fresh_connection_reattach_is_blocked_at_sqlite_ext() {
         create_base_tables(&conn);
         let composed = install(&conn);
         seed(&conn);
-        conn.execute_batch("INSERT INTO body_c VALUES (3);").unwrap();
+        conn.execute_batch("INSERT INTO body_c VALUES (3);")
+            .unwrap();
         assert_visible(&conn, &[(1, 10), (3, 30)]);
         drop(composed);
     }
 
     let conn = Connection::open(&db.path).unwrap();
     let open = Composition::open(&conn, "bodies", "grants");
-    let err = open.err().expect("fresh-connection reattach is not supported yet");
+    let err = open
+        .err()
+        .expect("fresh-connection reattach is not supported yet");
     assert!(
         format!("{err}").contains("no such module"),
         "expected the connection-local module error, got {err}"
