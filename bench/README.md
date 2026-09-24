@@ -1,6 +1,40 @@
 # sqlite-ivm-bench
 
 The Rust harness runs circuit shootouts, scale sweeps, and fixture dumps.
+
+### Frontier stress: ISO engines, production, and DD
+
+`frontier-stress` replays one generated integer frontier stream through six
+arms: `direct-rust`, `direct-sqlite`, `rust-iso`, `sqlite-iso`, `sqlite-ivm`, and
+`dd`. The access shape is the packet's join under set UNION; the group shape
+is `COUNT/SUM`. Every checked frontier is compared with a fresh recomputation
+from source rows. Writes and settlement are timed together; snapshot reads
+are measured separately. Each arm and repetition runs in its own process, so
+peak RSS and SQLite allocator readings belong to that arm.
+
+```sh
+cd /Users/chrishafley/projects/sqlite_ivm
+just frontier-stress --rows=32,1024,8192 --batch=8 --fanout=1 --reps=3
+just frontier-stress --rows=32 --batch=1,8,128 --fanout=1,16 --churn=100 --storage=file
+just frontier-stress --shapes=access --rows=32,1024 --batch=8 --fanout=1 --observe=on
+```
+
+`--shapes=access,group`, `--rows`, `--batch`, `--fanout`, and
+`--groups=hot,spread` select the workload. `fanout` controls how many existing
+membership and permission rows share a join key. `batch` adds rows to both
+join inputs in one transaction, including their cross-term. `churn=N` adds
+and removes a direct grant, or changes and restores one job cost, in `2N`
+committed frontiers. `--check-every=N` controls full snapshot comparison during
+churn; the seed, batch, and final frontier are always checked.
+
+The TSV prints install, seed, batch, churn, and read milliseconds; result
+rows; SQLite allocator bytes; process peak RSS; and file database/WAL bytes
+when `--storage=file`. `--observe=on` also collects batch VM, statement, and
+fullscan counts through hafley-observe. This tracing adds overhead, so use
+`--observe=off` for wall comparisons. `--max-batch-vm=N` and
+`--max-batch-fullscan=N` turn observed counters into failing ceilings for
+SQLite arms. Empty counter cells mean the measure does not apply to that arm.
+
 `crossover/` preserves the earlier sprefa fixture generator and DD consumer,
 with an adapter for the current native plugin.
 

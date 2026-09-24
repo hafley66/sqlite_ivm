@@ -357,6 +357,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "frontier-engine"
+version = "0.1.0"
+dependencies = [
+ "hafley-observe",
+ "sqlite-ext",
+ "tracing",
+]
+
+[[package]]
 name = "futures-channel"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -774,6 +783,25 @@ dependencies = [
  "cfg-if",
  "futures-util",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "lab_20260923_0"
+version = "0.0.0"
+dependencies = [
+ "hafley-observe",
+ "rusqlite",
+ "sqlite-ext",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "lab_20260923_1"
+version = "0.0.0"
+dependencies = [
+ "hafley-observe",
+ "tracing",
 ]
 
 [[package]]
@@ -1478,7 +1506,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "differential-dataflow",
+ "frontier-engine",
  "hafley-observe",
+ "lab_20260923_0",
+ "lab_20260923_1",
  "libc",
  "parking_lot",
  "postgres",

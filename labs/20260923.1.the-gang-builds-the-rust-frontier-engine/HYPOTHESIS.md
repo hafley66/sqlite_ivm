@@ -7,9 +7,12 @@ join maintenance, transactional rollback, and `hafley-observe` observability.
 Everything below is what was built, what the oracle proves, and what remains
 open.
 
-Revisions: sqlite_ivm worktree `51d16a54489473284dafdb1303cfeefd8a38d4b1`
+Initial run: sqlite_ivm worktree `51d16a54489473284dafdb1303cfeefd8a38d4b1`
 (branch `feature/iso-rust-frontier`), hafley-observe `e81d2812ad50457567ee41042d67b06c3b02d726`
-(v0.1.2, path dependency, default features off).
+(v0.1.2, default features off). The shared stress runner now resolves
+hafley-observe from the same correlated checkout as production,
+`/Users/chrishafley/projects/hafley-rs-wt/main-codex-attribution` at `0371e48f`;
+all 23 lab tests passed after this dependency-path change.
 
 ---
 
@@ -263,11 +266,10 @@ Totals: `cargo fmt --check` clean; `cargo test --offline` — **23 passed,
 
 ## 8. Decisions worth remembering
 
-- **Absolute path dependency** for `hafley-observe` (`default-features =
-  false`): relative `../..` chains from this lab resolve wrong under the
-  `.boop-worktrees/feature/` nesting; the absolute path pins
-  `/Users/chrishafley/projects/hafley-rs/crates/hafley-observe` @
-  `e81d2812`. If the worktree moves, update `Cargo.toml`.
+- **Correlated path dependency** for `hafley-observe` (`default-features =
+  false`): the stress runner links this lab with production and SQLite ISO in
+  one Cargo package. All three must resolve the same path and package ID, so
+  this lab uses `/Users/chrishafley/projects/hafley-rs-wt/main-codex-attribution/crates/hafley-observe`.
 - **`PlanNode::Project` added**: the grant oracle arm projects the 4-column
   join to (person, resource) before the union; without projection the union
   would combine 2-column and 4-column rows (arity error). Projection maps

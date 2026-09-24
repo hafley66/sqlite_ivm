@@ -9,7 +9,7 @@ publish = false
 
 [dependencies]
 tracing = "0.1"
-hafley-observe = { path = "/Users/chrishafley/projects/hafley-rs/crates/hafley-observe", default-features = false }
+hafley-observe = { path = "/Users/chrishafley/projects/hafley-rs-wt/main-codex-attribution/crates/hafley-observe", default-features = false }
 
 [dev-dependencies]
 tracing-subscriber = "0.3"
