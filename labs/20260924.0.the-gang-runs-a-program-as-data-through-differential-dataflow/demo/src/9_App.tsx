@@ -1,9 +1,10 @@
 import { MotionConfig, useReducedMotion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Trace } from "./0_trace";
 import { HoverStyle, rootHoverHandlers } from "./2_hover";
 import { TraceContext } from "./3_Mention";
 import { PulseStyle, SPEEDS, useWaveState, WaveContext, type Speed } from "./3a_wave";
+import { PlanContext, schedule } from "./3b_schedule";
 import { Graph } from "./4_Graph";
 import { Answer, Cast, Story } from "./5_Side";
 import { Inspector } from "./6_Inspector";
@@ -44,8 +45,9 @@ const Scenario = ({ trace, header, settings }: { trace: Trace; header: (scrubber
   const reduced = useReducedMotion() ?? false;
   const wave = useWaveState(trace, stepIndex, settings.speed, reduced);
   const last = trace.steps.length - 1;
-  const waveKeys = useRef(wave.controls);
-  waveKeys.current = wave.controls;
+  const plan = useMemo(() => schedule(trace, wave), [trace, wave.from, wave.to, wave.depth, wave.max_depth]);
+  const waveKeys = useRef({ controls: wave.controls, stops: plan.stops });
+  waveKeys.current = { controls: wave.controls, stops: plan.stops };
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -53,8 +55,8 @@ const Scenario = ({ trace, header, settings }: { trace: Trace; header: (scrubber
       if (event.key === "ArrowRight") setStepIndex((index) => Math.min(last, index + 1));
       if (event.key === " ") {
         event.preventDefault();
-        if (settings.speed === "step") waveKeys.current.advance();
-        else waveKeys.current.toggle();
+        if (settings.speed === "step") waveKeys.current.controls.advance(waveKeys.current.stops);
+        else waveKeys.current.controls.toggle();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -64,6 +66,7 @@ const Scenario = ({ trace, header, settings }: { trace: Trace; header: (scrubber
   return (
     <TraceContext.Provider value={trace}>
       <WaveContext.Provider value={wave}>
+      <PlanContext.Provider value={plan}>
         <PulseStyle trace={trace} />
         {header(
           <>
@@ -92,6 +95,7 @@ const Scenario = ({ trace, header, settings }: { trace: Trace; header: (scrubber
         <footer className="max-h-[32vh] overflow-y-auto">
           <Engines stepIndex={stepIndex} onStep={setStepIndex} />
         </footer>
+      </PlanContext.Provider>
       </WaveContext.Provider>
     </TraceContext.Provider>
   );

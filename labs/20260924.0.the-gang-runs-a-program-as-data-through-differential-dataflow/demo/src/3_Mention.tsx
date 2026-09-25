@@ -79,14 +79,14 @@ export const ReasonsChip = ({ w }: { w: number }) => (
 // strike through, fade red and collapse, reordered rows move (motion layout / FLIP).
 export const Rows = ({ children }: { children: ReactNode }) => <AnimatePresence initial={false}>{children}</AnimatePresence>;
 
-export const Row = ({ children, className = "" }: { children: ReactNode; className?: string }) => {
+export const Row = ({ children, className = "", delay = 0 }: { children: ReactNode; className?: string; delay?: number }) => {
   const reduced = useReducedMotion();
   const instant = { duration: 0 };
   return (
     <motion.div
       layout={reduced ? false : "position"}
       initial={{ opacity: 0, x: -12, backgroundColor: "rgba(16,185,129,0.35)" }}
-      animate={{ opacity: 1, x: 0, height: "auto", backgroundColor: "rgba(16,185,129,0)", transition: reduced ? instant : { duration: 0.35, backgroundColor: { duration: 1.2 } } }}
+      animate={{ opacity: 1, x: 0, height: "auto", backgroundColor: "rgba(16,185,129,0)", transition: reduced ? instant : { duration: 0.35, delay, backgroundColor: { duration: 1.2, delay } } }}
       exit={{ opacity: 0, height: 0, color: "#e11d48", textDecorationLine: "line-through", backgroundColor: "rgba(244,63,94,0.2)", transition: reduced ? instant : { duration: 0.5, height: { delay: 0.2, duration: 0.3 } } }}
       className="overflow-hidden rounded"
     >

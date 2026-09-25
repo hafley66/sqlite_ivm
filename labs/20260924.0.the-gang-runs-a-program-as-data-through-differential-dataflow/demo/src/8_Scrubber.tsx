@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { Trace } from "./0_trace";
 import { nodeTitle, tokens } from "./1_labels";
 import { SPEEDS, stageUnit, unitSeconds, useWave, type Speed, type Wave } from "./3a_wave";
+import { usePlan } from "./3b_schedule";
 
 export const ScenarioTabs = ({ traces, current, onPick }: { traces: Trace[]; current: string; onPick: (scenario: string) => void }) => (
   <nav className="flex flex-wrap gap-1">
@@ -68,6 +69,7 @@ const stageWords = { story: "Story", answer: "Answer", engines: "Engines" } as c
 
 export const WaveBar = ({ trace }: { trace: Trace }) => {
   const wave = useWave();
+  const plan = usePlan();
   const seconds = unitSeconds(wave);
   const width = useTransform(wave.clock, (value) => `${(Math.min(value, wave.end) / wave.end) * 100}%`);
   const elapsed = useTransform(wave.clock, (value) => `${(Math.min(value, wave.end) * seconds).toFixed(1)} s / ${(wave.end * seconds).toFixed(1)} s`);
@@ -78,7 +80,7 @@ export const WaveBar = ({ trace }: { trace: Trace }) => {
         {wave.playing ? "❚❚ pause" : "▶ play"}
       </button>
       {wave.speed === "step" && (
-        <button className="rounded border border-sky-400 px-2 py-0.5 whitespace-nowrap text-sky-800" onClick={wave.controls.advance}>
+        <button className="rounded border border-sky-400 px-2 py-0.5 whitespace-nowrap text-sky-800" onClick={() => wave.controls.advance(plan.stops)}>
           next stage ⏎
         </button>
       )}
@@ -103,6 +105,16 @@ export const WaveBar = ({ trace }: { trace: Trace }) => {
             );
           })}
         </div>
+        {plan.groups.map((group) => (
+          <button
+            key={group.id}
+            data-concept={[group.source, group.target].filter((id) => id !== null).map((id) => tokens.node(id!)).join(" ")}
+            title={`${group.label} (${group.packets.length} ${group.packets.length === 1 ? "row" : "rows"})`}
+            onClick={() => wave.controls.jump(group.start)}
+            className={`absolute bottom-0 h-2.5 w-1.5 -translate-x-1/2 rounded-t ${wave.clock.get() >= group.start && wave.clock.get() < group.end ? "bg-sky-700" : "bg-slate-400 hover:bg-sky-600"}`}
+            style={{ left: `${(group.start / wave.end) * 100}%` }}
+          />
+        ))}
       </div>
       <motion.span key={String(wave.speed)} className="w-24 text-right font-mono text-slate-600">{elapsed}</motion.span>
     </div>

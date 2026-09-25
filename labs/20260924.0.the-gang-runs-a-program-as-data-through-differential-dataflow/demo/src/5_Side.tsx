@@ -1,6 +1,7 @@
 import type { Trace, TraceStep } from "./0_trace";
 import { castGroups, compareRows, consolidate, errorWords, forRelation, rowKey, tokens, weightOf } from "./1_labels";
-import { shownIndex, useWave } from "./3a_wave";
+import { shownIndex, stageUnit, unitSeconds, useWave } from "./3a_wave";
+import { usePlan } from "./3b_schedule";
 import { ChangeLine, Chip, Entity, ReasonsChip, RelName, Row, Rows, RowSentence, Section, useTrace } from "./3_Mention";
 
 export const Cast = () => {
@@ -27,7 +28,15 @@ const columnsOf = (trace: Trace, relation: number) => trace.relations.find((cand
 export const Story = () => {
   const trace = useTrace();
   const wave = useWave();
+  const plan = usePlan();
   const step: TraceStep | undefined = trace.steps[shownIndex(wave, "story")];
+  // Frontier rows enter in the order their packets leave for the graph.
+  const storyStart = stageUnit(wave, "story");
+  const delayOf = (relation: number, row: TraceStep["frontier"][number]["row"]) => {
+    const node = trace.nodes.find((candidate) => candidate.op === "Get" && candidate.relation === relation);
+    const packet = plan.groups.find((group) => group.kind === "story" && group.target === node?.id)?.packets.find((candidate) => candidate.row && rowKey(candidate.row) === rowKey(row));
+    return packet ? Math.max(0, (packet.start - storyStart) * unitSeconds(wave)) : 0;
+  };
   return (
     <Section title="Story">
       <p className="mb-2 text-sm font-medium">{trace.question}</p>
@@ -40,7 +49,7 @@ export const Story = () => {
       <div className="text-sm">
         <Rows>
           {step?.frontier.map((change) => (
-            <Row key={`${change.relation}:${rowKey(change.row)}`}>
+            <Row key={`${change.relation}:${rowKey(change.row)}`} delay={delayOf(change.relation, change.row)}>
               <ChangeLine
                 change={change}
                 columns={columnsOf(trace, change.relation)}

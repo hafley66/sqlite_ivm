@@ -20,7 +20,7 @@ export type Stage = "story" | "answer" | "engines" | { node: number };
 export type WaveControls = {
   toggle: () => void;            // play / pause; replays the last wave when it has finished
   jump: (unit: number) => void;  // move the wave to the start of `unit` and pause there
-  advance: () => void;           // one unit forward, paused (step-through mode)
+  advance: (stops: number[]) => void; // to the next stop (sub-step) after the clock, paused
 };
 
 export type Wave = {
@@ -148,11 +148,11 @@ export const useWaveState = (trace: Trace, stepIndex: number, speed: Speed, redu
       }
     },
     jump: (unit) => run(Math.max(0, Math.min(end, unit)), true),
-    advance: () => {
-      const unit = Math.floor(clock.get() + 1e-6);
-      if (unit >= end) return;
-      run(unit + 1, true);
-      if (unit + 1 >= end) clock.set(end);
+    advance: (stops) => {
+      const now = clock.get();
+      if (now >= end) return;
+      const next = stops.find((stop) => stop > now + 1e-6) ?? end;
+      run(next, true);
     },
   };
 
