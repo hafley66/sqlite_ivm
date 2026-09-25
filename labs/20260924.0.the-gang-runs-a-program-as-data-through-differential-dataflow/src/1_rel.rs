@@ -67,6 +67,10 @@ pub trait Rel {
         Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("LetRec")))
     }
     fn output(&mut self, rel: RelId, c: Self::C);
+    /// Called by `lower_node` on every node it builds, before memoizing; traced engines tap `c` here.
+    fn observe(&mut self, _id: NodeId, c: Self::C) -> Self::C {
+        c
+    }
 }
 
 /// Scalar semantics shared by every engine: comparisons and logic yield 0 or 1.
@@ -175,6 +179,7 @@ pub fn lower_node<A: Rel>(
         Op::Window { .. } => return Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Window"))),
         Op::Delay(_) => return Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Delay"))),
     };
+    let c = a.observe(id, c);
     nodes[id as usize] = Some(c.clone());
     Ok(c)
 }

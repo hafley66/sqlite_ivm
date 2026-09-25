@@ -1,0 +1,18 @@
+{
+  "rels": [
+    {"id": 0, "name": "party_slot", "cols": ["Int", "Int", "Int"], "kind": "Source"},
+    {"id": 1, "name": "lead", "cols": ["Int", "Int", "Int"], "kind": "Derived"},
+    {"id": 2, "name": "top_level", "cols": ["Int", "Int"], "kind": "Derived"},
+    {"id": 3, "name": "double_battle_pair", "cols": ["Int", "Int", "Int"], "kind": "Derived"}
+  ],
+  "nodes": [
+    {"Get": 0},
+    {"TopK": {"input": 0, "key": [1], "order": [{"col": 2, "desc": true}, {"col": 0, "desc": false}], "limit": 1}},
+    {"TopK": {"input": 0, "key": [1], "order": [{"col": 2, "desc": true}], "limit": 1}},
+    {"Mfp": {"input": 2, "project": [1, 2]}},
+    {"Threshold": 3},
+    {"TopK": {"input": 0, "key": [1], "order": [{"col": 2, "desc": true}, {"col": 0, "desc": false}], "limit": 2}}
+  ],
+  "strata": [{"Let": {"id": 1, "body": 1}}, {"Let": {"id": 2, "body": 4}}, {"Let": {"id": 3, "body": 5}}],
+  "outputs": [1, 2, 3]
+}

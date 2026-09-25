@@ -58,6 +58,13 @@ pub struct SqlRel {
     sccs: Vec<SccPlan>,
     active: Option<Active>,
     err: Option<EngineError>,
+    /// Traced mode: `observe` records which SQL nodes each IR node built, and Join keeps its terms.
+    traced: bool,
+    /// SQL node count when the last observed node returned; nodes pushed after it belong to the next one.
+    mark: usize,
+    tags: Vec<(NodeId, bool, Vec<usize>)>,
+    /// Join SQL node -> its three delta terms, each consolidated: Δa⋈Δb, I⁻a⋈Δb, Δa⋈I⁻b.
+    terms: Vec<(usize, Vec<String>)>,
 }
 
 fn list(alias: &str, cols: impl IntoIterator<Item = usize>) -> String {
@@ -145,13 +152,25 @@ fn of_touched(c: &SqlC, key: &[usize], table: &str, at: &[usize], arity: usize, 
 }
 
 impl SqlRel {
-    fn new(p: &Program) -> Self {
-        let mut rel = Self { nodes: Vec::new(), sources: Vec::new(), outputs: Vec::new(), sccs: Vec::new(), active: None, err: None };
+    fn new(p: &Program, traced: bool) -> Self {
+        let mut rel = Self {
+            nodes: Vec::new(),
+            sources: Vec::new(),
+            outputs: Vec::new(),
+            sccs: Vec::new(),
+            active: None,
+            err: None,
+            traced,
+            mark: 0,
+            tags: Vec::new(),
+            terms: Vec::new(),
+        };
         for r in p.rels.iter().filter(|r| r.kind == RelKind::Source) {
             let c = rel.push(r.cols.len(), false, |_| None);
             rel.integrate(&c, (0..c.arity).collect());
             rel.sources.push((r.id, c));
         }
+        rel.mark = rel.nodes.len();
         rel
     }
 
@@ -292,8 +311,18 @@ impl Rel for SqlRel {
                 on(la, &lk, ra, &rk)
             )
         };
-        let body = [term(&a.d, &b.d, true), term(&a.i, &b.d, false), term(&a.d, &b.i, true)].join(" UNION ALL ");
-        Ok(self.push(a.arity + b.arity, a.rec || b.rec, |_| Some(body)))
+        let terms = [term(&a.d, &b.d, true), term(&a.i, &b.d, false), term(&a.d, &b.i, true)];
+        let body = terms.join(" UNION ALL ");
+        let out = self.push(a.arity + b.arity, a.rec || b.rec, |_| Some(body));
+        if self.traced {
+            let cols = list("", 0..out.arity);
+            let terms = terms
+                .iter()
+                .map(|t| format!("SELECT {cols}, SUM(w) FROM ({t}) WHERE true GROUP BY {cols} HAVING SUM(w) <> 0 ORDER BY {cols}"))
+                .collect();
+            self.terms.push((out.node, terms));
+        }
+        Ok(out)
     }
 
     /// `l - l⋉threshold(π_rk r)`, built from this algebra's own join, threshold, negate and union.
@@ -459,6 +488,7 @@ impl Rel for SqlRel {
             scope.push((*id, v.clone()));
             vs.push(v);
         }
+        self.mark = self.nodes.len();
         let mut nodes = vec![None; p.nodes.len()];
         let mut bs = Vec::new();
         for body in &rec.bodies {
@@ -479,6 +509,7 @@ impl Rel for SqlRel {
         }
         let rs = vars.iter().map(|(_, _, r)| r.clone()).collect();
         self.sccs.push(SccPlan { vars, at });
+        self.mark = self.nodes.len();
         Ok(rs)
     }
 
@@ -486,6 +517,46 @@ impl Rel for SqlRel {
         self.integrate(&c, Vec::new());
         self.outputs.push((rel, c));
     }
+
+    /// The returned SQL node is the IR node's own delta; SQL nodes pushed since the previous observe are its internals.
+    fn observe(&mut self, id: NodeId, c: Self::C) -> Self::C {
+        if !self.traced {
+            return c;
+        }
+        let mut sql = vec![c.node];
+        sql.extend((self.mark..self.nodes.len()).filter(|n| *n != c.node));
+        self.mark = self.nodes.len();
+        self.tags.push((id, self.active.is_some(), sql));
+        c
+    }
+}
+
+/// One observation of an IR node by the traced SQLite engine. An IR node lowered both outside and
+/// inside a LetRec has one tag per lowering.
+#[derive(Clone, Debug)]
+pub struct SqlTag {
+    pub id: NodeId,
+    /// Lowered inside a LetRec; its tables may be cleared by the round loop before the trace reads them.
+    pub in_loop: bool,
+    /// Own delta table first, then internal ones.
+    pub tables: Vec<String>,
+    /// Fill statements per table, same order; a node with several fills has them joined by `;\n`.
+    pub fills: Vec<String>,
+    delta: String,
+    totals: Option<String>,
+    terms: Vec<String>,
+}
+
+/// What one tag's tables held after the fills of a settle and before integration.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SqlSeen {
+    pub id: NodeId,
+    pub in_loop: bool,
+    pub changes: Vec<(Row, W)>,
+    /// The own `_i` table before this settle integrates; empty when the node keeps none.
+    pub totals_before: Vec<(Row, W)>,
+    /// Join only: Δa⋈Δb, I⁻a⋈Δb, Δa⋈I⁻b, each consolidated.
+    pub terms: Vec<Vec<(Row, W)>>,
 }
 
 struct Source {
@@ -543,6 +614,8 @@ pub struct Sql {
     integrates: Vec<String>,
     clears: Vec<String>,
     outputs: Vec<Output>,
+    /// Empty unless installed with `install_traced`.
+    pub tags: Vec<SqlTag>,
 }
 
 fn read(conn: &Connection, sql: &str, arity: usize) -> rusqlite::Result<Vec<(Row, W)>> {
@@ -564,7 +637,34 @@ impl Sql {
     }
 
     pub fn install_on(conn: Connection, p: &Program) -> Result<Self, EngineError> {
-        let mut rel = SqlRel::new(p);
+        Self::install_with(conn, p, false)
+    }
+
+    /// Tags every IR node with its SQL nodes; `settle_traced` reads their tables before integration.
+    pub fn install_traced(program: &Program) -> Result<Self, EngineError> {
+        let conn = Connection::open_in_memory().map_err(sql_err(Stage::Install))?;
+        Self::install_with(conn, program, true)
+    }
+
+    /// `settle` plus one `SqlSeen` per tag; empty unless installed with `install_traced`.
+    pub fn settle_traced(&mut self, frontier: Frontier) -> Result<(Delta, Vec<SqlSeen>), EngineError> {
+        let settle = sql_err(Stage::Settle);
+        self.conn.execute_batch("BEGIN").map_err(&settle)?;
+        match self.run(&frontier) {
+            Ok((changes, seen)) => {
+                self.conn.execute_batch("COMMIT").map_err(&settle)?;
+                self.tick += 1;
+                Ok((Delta { tick: self.tick - 1, changes }, seen))
+            }
+            Err(e) => {
+                self.conn.execute_batch("ROLLBACK").map_err(&settle)?;
+                Err(e)
+            }
+        }
+    }
+
+    fn install_with(conn: Connection, p: &Program, traced: bool) -> Result<Self, EngineError> {
+        let mut rel = SqlRel::new(p, traced);
         lower(p, &mut rel)?;
         if let Some(e) = rel.err {
             return Err(e);
@@ -678,8 +778,25 @@ impl Sql {
                 }
             })
             .collect();
+        let tags = rel
+            .tags
+            .iter()
+            .map(|(id, in_loop, sql)| {
+                let own = &rel.nodes[sql[0]];
+                let cols = list("", 0..own.c.arity);
+                SqlTag {
+                    id: *id,
+                    in_loop: *in_loop,
+                    tables: sql.iter().map(|n| rel.nodes[*n].c.d.clone()).collect(),
+                    fills: sql.iter().map(|n| rel.nodes[*n].fill.join(";\n")).collect(),
+                    delta: format!("SELECT {cols}, SUM(w) FROM {} GROUP BY {cols} HAVING SUM(w) <> 0 ORDER BY {cols}", own.c.d),
+                    totals: own.integrated.then(|| format!("SELECT {cols}, w FROM {} WHERE w <> 0 ORDER BY {cols}", own.c.i)),
+                    terms: rel.terms.iter().find(|(n, _)| *n == sql[0]).map(|(_, t)| t.clone()).unwrap_or_default(),
+                }
+            })
+            .collect();
         conn.execute_batch(&ddl.join(";\n")).map_err(sql_err(Stage::Install))?;
-        let engine = Self { conn, tick: 0, sources, steps, sccs, integrates, clears, outputs };
+        let engine = Self { conn, tick: 0, sources, steps, sccs, integrates, clears, outputs, tags };
         let mut all = engine.statements();
         all.extend(engine.outputs.iter().map(|o| &o.snapshot));
         engine.conn.set_prepared_statement_cache_capacity(all.len() + 8);
@@ -787,7 +904,7 @@ impl Sql {
         Ok(())
     }
 
-    fn run(&self, frontier: &Frontier) -> Result<Vec<(RelId, Row, W)>, EngineError> {
+    fn run(&self, frontier: &Frontier) -> Result<(Vec<(RelId, Row, W)>, Vec<SqlSeen>), EngineError> {
         self.guard(frontier)?;
         for step in &self.steps {
             match step {
@@ -800,8 +917,31 @@ impl Sql {
             let rows = read(&self.conn, &out.delta, out.arity).map_err(sql_err(Stage::Settle))?;
             changes.extend(rows.into_iter().map(|(row, w)| (out.rel, row, w)));
         }
+        let seen = self.seen().map_err(sql_err(Stage::Settle))?;
         self.exec_all(self.integrates.iter().chain(&self.clears))?;
-        Ok(changes)
+        Ok((changes, seen))
+    }
+
+    /// Trace reads use uncached statements so the engine's statement cache is untouched.
+    fn seen(&self) -> rusqlite::Result<Vec<SqlSeen>> {
+        let read_once = |sql: &str| -> rusqlite::Result<Vec<(Row, W)>> {
+            let mut stmt = self.conn.prepare(sql)?;
+            let arity = stmt.column_count() - 1;
+            let rows = stmt.query_map([], |r| Ok(((0..arity).map(|i| r.get(i)).collect::<Result<Row, _>>()?, r.get(arity)?)))?;
+            rows.collect()
+        };
+        self.tags
+            .iter()
+            .map(|tag| {
+                Ok(SqlSeen {
+                    id: tag.id,
+                    in_loop: tag.in_loop,
+                    changes: read_once(&tag.delta)?,
+                    totals_before: tag.totals.as_deref().map(read_once).transpose()?.unwrap_or_default(),
+                    terms: tag.terms.iter().map(|t| read_once(t)).collect::<Result<_, _>>()?,
+                })
+            })
+            .collect()
     }
 }
 
@@ -812,19 +952,7 @@ impl Engine for Sql {
     }
 
     fn settle(&mut self, frontier: Frontier) -> Result<Delta, EngineError> {
-        let settle = sql_err(Stage::Settle);
-        self.conn.execute_batch("BEGIN").map_err(&settle)?;
-        match self.run(&frontier) {
-            Ok(changes) => {
-                self.conn.execute_batch("COMMIT").map_err(&settle)?;
-                self.tick += 1;
-                Ok(Delta { tick: self.tick - 1, changes })
-            }
-            Err(e) => {
-                self.conn.execute_batch("ROLLBACK").map_err(&settle)?;
-                Err(e)
-            }
-        }
+        self.settle_traced(frontier).map(|(delta, _)| delta)
     }
 
     fn snapshot(&self, rel: RelId) -> Result<Vec<(Row, W)>, EngineError> {

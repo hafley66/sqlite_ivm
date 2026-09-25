@@ -58,3 +58,43 @@ fn s_n5_depth_cap() {
 fn s_g_accumulable_team_sum() {
     println!("{}", support::run::<Dd>("10_team_sum"));
 }
+
+#[test]
+fn pokemon_0_can_surf() {
+    println!("{}", support::run::<Dd>("pokemon/0_can_surf"));
+}
+
+#[test]
+fn pokemon_1_party_stats() {
+    println!("{}", support::run::<Dd>("pokemon/1_party_stats"));
+}
+
+#[test]
+fn pokemon_2_party_size() {
+    println!("{}", support::run::<Dd>("pokemon/2_party_size"));
+}
+
+#[test]
+fn pokemon_3_rematch() {
+    println!("{}", support::run::<Dd>("pokemon/3_rematch"));
+}
+
+#[test]
+fn pokemon_4_two_roads() {
+    println!("{}", support::run::<Dd>("pokemon/4_two_roads"));
+}
+
+#[test]
+fn pokemon_5_leads() {
+    println!("{}", support::run::<Dd>("pokemon/5_leads"));
+}
+
+#[test]
+fn pokemon_6_walk() {
+    println!("{}", support::run::<Dd>("pokemon/6_walk"));
+}
+
+#[test]
+fn pokemon_7_rare_candy() {
+    println!("{}", support::run::<Dd>("pokemon/7_rare_candy"));
+}

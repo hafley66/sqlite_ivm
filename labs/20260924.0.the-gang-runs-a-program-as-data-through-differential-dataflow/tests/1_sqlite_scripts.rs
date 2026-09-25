@@ -151,3 +151,43 @@ fn s_n5_depth_cap() {
 fn s_t_s_i_timing_and_cells() {
     println!("{}", support::run::<Sql>("8_timing_and_cells"));
 }
+
+#[test]
+fn pokemon_0_can_surf() {
+    println!("{}", support::run::<Sql>("pokemon/0_can_surf"));
+}
+
+#[test]
+fn pokemon_1_party_stats() {
+    println!("{}", support::run::<Sql>("pokemon/1_party_stats"));
+}
+
+#[test]
+fn pokemon_2_party_size() {
+    println!("{}", support::run::<Sql>("pokemon/2_party_size"));
+}
+
+#[test]
+fn pokemon_3_rematch() {
+    println!("{}", support::run::<Sql>("pokemon/3_rematch"));
+}
+
+#[test]
+fn pokemon_4_two_roads() {
+    println!("{}", support::run::<Sql>("pokemon/4_two_roads"));
+}
+
+#[test]
+fn pokemon_5_leads() {
+    println!("{}", support::run::<Sql>("pokemon/5_leads"));
+}
+
+#[test]
+fn pokemon_6_walk() {
+    println!("{}", support::run::<Sql>("pokemon/6_walk"));
+}
+
+#[test]
+fn pokemon_7_rare_candy() {
+    println!("{}", support::run::<Sql>("pokemon/7_rare_candy"));
+}

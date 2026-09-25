@@ -1,0 +1,19 @@
+{
+  "rels": [
+    {"id": 0, "name": "party", "cols": ["Int", "Int"], "kind": "Source"},
+    {"id": 1, "name": "knows", "cols": ["Int", "Int"], "kind": "Source"},
+    {"id": 2, "name": "ride_pager", "cols": ["Int", "Int"], "kind": "Source"},
+    {"id": 3, "name": "can_use", "cols": ["Int", "Int"], "kind": "Derived"}
+  ],
+  "nodes": [
+    {"Get": 2},
+    {"Get": 0},
+    {"Get": 1},
+    {"Join": {"inputs": [1, 2], "equivalences": [[[0, 1], [1, 0]]]}},
+    {"Mfp": {"input": 3, "project": [0, 3]}},
+    {"Union": [0, 4]},
+    {"Threshold": 5}
+  ],
+  "strata": [{"Let": {"id": 3, "body": 6}}],
+  "outputs": [3]
+}

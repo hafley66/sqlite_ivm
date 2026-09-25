@@ -1,0 +1,14 @@
+{
+  "rels": [
+    {"id": 0, "name": "party_slot", "cols": ["Int", "Int", "Int"], "kind": "Source"},
+    {"id": 1, "name": "party_stats", "cols": ["Int", "Int", "Int", "Int", "Int"], "kind": "Derived"},
+    {"id": 2, "name": "pokemon_count", "cols": ["Int"], "kind": "Derived"}
+  ],
+  "nodes": [
+    {"Get": 0},
+    {"Reduce": {"input": 0, "key": [1], "aggs": ["Count", {"Sum": 2}, {"Min": 2}, {"Max": 2}]}},
+    {"Reduce": {"input": 0, "key": [], "aggs": ["Count"]}}
+  ],
+  "strata": [{"Let": {"id": 1, "body": 1}}, {"Let": {"id": 2, "body": 2}}],
+  "outputs": [1, 2]
+}

@@ -30,11 +30,16 @@ type Inner = Product<Time, u64>;
 
 /// Timestamps the algebra runs at. Only the top level may open a LetRec scope; this bounds monomorphization.
 pub trait Nest: Timestamp + Lattice + Ord + Hash + Clone + std::fmt::Debug + 'static {
+    /// `(outer tick, loop round)`; the round is `None` outside a LetRec.
+    fn split(&self) -> (Time, Option<u64>);
     fn letrec<'s>(rel: &mut DdRel<'s, Self>, p: &Program, rec: &LetRec, defined: &[(RelId, Coll<'s, Self>)])
         -> Result<Vec<Coll<'s, Self>>, EngineError>;
 }
 
 impl Nest for Inner {
+    fn split(&self) -> (Time, Option<u64>) {
+        (self.outer, Some(self.inner))
+    }
     fn letrec<'s>(_: &mut DdRel<'s, Self>, _: &Program, _: &LetRec, _: &[(RelId, Coll<'s, Self>)])
         -> Result<Vec<Coll<'s, Self>>, EngineError> {
         Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("LetRec nested in LetRec")))
@@ -42,6 +47,9 @@ impl Nest for Inner {
 }
 
 impl Nest for Time {
+    fn split(&self) -> (Time, Option<u64>) {
+        (*self, None)
+    }
     fn letrec<'s>(rel: &mut DdRel<'s, Self>, p: &Program, rec: &LetRec, defined: &[(RelId, Coll<'s>)])
         -> Result<Vec<Coll<'s>>, EngineError> {
         if rec.limit.is_some() {
@@ -53,6 +61,7 @@ impl Nest for Time {
                 scope: sub,
                 sources: rel.sources.iter().map(|(id, c)| (*id, c.clone().enter(sub))).collect(),
                 outputs: Vec::new(),
+                taps: rel.taps.clone(),
             };
             let mut scope_defined: Vec<(RelId, Coll<'_, Inner>)> =
                 defined.iter().map(|(id, c)| (*id, c.clone().enter(sub))).collect();
@@ -82,6 +91,19 @@ pub struct DdRel<'s, T: Nest = Time> {
     scope: Scope<'s, T>,
     sources: BTreeMap<RelId, Coll<'s, T>>,
     outputs: Vec<(RelId, Coll<'s, T>)>,
+    /// Traced mode only: every observed node's records land here.
+    taps: Option<Rc<RefCell<Vec<DdTap>>>>,
+}
+
+/// One record seen on an IR node's output collection in traced mode.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DdTap {
+    pub node: NodeId,
+    pub tick: u64,
+    /// Inner timestamp of the LetRec scope; `None` outside a loop.
+    pub round: Option<u64>,
+    pub row: Row,
+    pub w: W,
 }
 
 fn cols(row: &[Cell], cols: &[ColId]) -> Row {
@@ -209,6 +231,15 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
     fn output(&mut self, rel: RelId, c: Self::C) {
         self.outputs.push((rel, c));
     }
+
+    fn observe(&mut self, id: NodeId, c: Self::C) -> Self::C {
+        let Some(sink) = &self.taps else { return c };
+        let sink = Rc::clone(sink);
+        c.inspect(move |(row, t, w)| {
+            let (tick, round) = t.split();
+            sink.borrow_mut().push(DdTap { node: id, tick, round, row: row.clone(), w: *w });
+        })
+    }
 }
 
 /// Count and Sum ride in the diff (`[count, sums..]`), so a group is one record and a change costs O(1) in group size.
@@ -256,7 +287,7 @@ fn rank(order: &[Order], a: &Row, b: &Row) -> std::cmp::Ordering {
 }
 
 enum Command {
-    Settle(Frontier, mpsc::Sender<Result<Delta, EngineError>>),
+    Settle(Frontier, mpsc::Sender<Result<(Delta, Vec<DdTap>), EngineError>>),
     Snapshot(RelId, mpsc::Sender<Result<Vec<(Row, W)>, EngineError>>),
     Stop,
 }
@@ -271,14 +302,27 @@ pub type Hook = Box<dyn FnOnce(&mut timely::worker::Worker) + Send>;
 
 impl Dd {
     pub fn install_observed(program: &Program, hook: Hook) -> Result<Self, EngineError> {
-        Self::start(program, Some(hook))
+        Self::start(program, Some(hook), false)
     }
 
-    fn start(program: &Program, hook: Option<Hook>) -> Result<Self, EngineError> {
+    /// Every IR node's output collection gets an `inspect`; `settle_traced` returns what they saw.
+    pub fn install_traced(program: &Program) -> Result<Self, EngineError> {
+        Self::start(program, None, true)
+    }
+
+    /// `settle` plus the node records of this step, consolidated per `(node, tick, round, row)`.
+    /// Empty unless installed with `install_traced`.
+    pub fn settle_traced(&mut self, frontier: Frontier) -> Result<(Delta, Vec<DdTap>), EngineError> {
+        let (reply, answer) = mpsc::channel();
+        self.tx.send(Command::Settle(frontier, reply)).map_err(|e| worker_error(Stage::Settle, e))?;
+        answer.recv().map_err(|e| worker_error(Stage::Settle, e))?
+    }
+
+    fn start(program: &Program, hook: Option<Hook>, traced: bool) -> Result<Self, EngineError> {
         let (tx, rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::channel();
         let program = program.clone();
-        let thread = thread::spawn(move || worker(program, hook, rx, ready_tx));
+        let thread = thread::spawn(move || worker(program, hook, traced, rx, ready_tx));
         let worker_gone = |_| EngineError::new(Stage::Install, None, ErrorKind::Worker("worker exited".into()));
         ready_rx.recv().map_err(worker_gone)??;
         Ok(Self { tx, thread: Some(thread) })
@@ -287,13 +331,11 @@ impl Dd {
 
 impl Engine for Dd {
     fn install(program: &Program) -> Result<Self, EngineError> {
-        Self::start(program, None)
+        Self::start(program, None, false)
     }
 
     fn settle(&mut self, frontier: Frontier) -> Result<Delta, EngineError> {
-        let (reply, answer) = mpsc::channel();
-        self.tx.send(Command::Settle(frontier, reply)).map_err(|e| worker_error(Stage::Settle, e))?;
-        answer.recv().map_err(|e| worker_error(Stage::Settle, e))?
+        self.settle_traced(frontier).map(|(delta, _)| delta)
     }
 
     fn snapshot(&self, rel: RelId) -> Result<Vec<(Row, W)>, EngineError> {
@@ -322,7 +364,7 @@ struct Built {
     outputs: BTreeMap<RelId, Trace>,
 }
 
-fn worker(program: Program, hook: Option<Hook>, rx: mpsc::Receiver<Command>, ready: mpsc::Sender<Result<(), EngineError>>) {
+fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver<Command>, ready: mpsc::Sender<Result<(), EngineError>>) {
     let rx = std::sync::Mutex::new(rx);
     let hook = std::sync::Mutex::new(hook);
     timely::execute_directly(move |worker| {
@@ -331,6 +373,7 @@ fn worker(program: Program, hook: Option<Hook>, rx: mpsc::Receiver<Command>, rea
         }
         let mut probe = ProbeHandle::new();
         let captured: Rc<RefCell<Vec<(RelId, Row, Time, W)>>> = Rc::default();
+        let taps: Option<Rc<RefCell<Vec<DdTap>>>> = traced.then(Rc::default);
         let built = worker.dataflow::<Time, _, _>(|scope| -> Result<Built, EngineError> {
             let mut inputs = BTreeMap::new();
             let mut guards = BTreeMap::new();
@@ -343,7 +386,7 @@ fn worker(program: Program, hook: Option<Hook>, rx: mpsc::Receiver<Command>, rea
                 guards.insert(rel.id, guard.trace);
                 sources.insert(rel.id, c);
             }
-            let mut rel = DdRel { scope, sources, outputs: Vec::new() };
+            let mut rel = DdRel { scope, sources, outputs: Vec::new(), taps: taps.clone() };
             lower(&program, &mut rel)?;
             let mut outputs = BTreeMap::new();
             for (id, c) in rel.outputs {
@@ -402,7 +445,16 @@ fn worker(program: Program, hook: Option<Hook>, rx: mpsc::Receiver<Command>, rea
                         })
                         .collect();
                     changes.sort();
-                    let _ = reply.send(Ok(Delta { tick: epoch - 1, changes }));
+                    let mut seen: BTreeMap<(NodeId, u64, Option<u64>, Row), W> = BTreeMap::new();
+                    for tap in taps.iter().flat_map(|t| t.borrow_mut().drain(..).collect::<Vec<_>>()) {
+                        *seen.entry((tap.node, tap.tick, tap.round, tap.row)).or_default() += tap.w;
+                    }
+                    let seen = seen
+                        .into_iter()
+                        .filter(|(_, w)| *w != 0)
+                        .map(|((node, tick, round, row), w)| DdTap { node, tick, round, row, w })
+                        .collect();
+                    let _ = reply.send(Ok((Delta { tick: epoch - 1, changes }, seen)));
                 }
                 Command::Snapshot(rel, reply) => {
                     let answer = built

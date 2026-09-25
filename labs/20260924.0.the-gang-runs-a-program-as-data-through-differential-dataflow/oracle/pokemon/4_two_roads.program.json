@@ -1,0 +1,13 @@
+{
+  "rels": [
+    {"id": 0, "name": "road", "cols": ["Int", "Int"], "kind": "Source"},
+    {"id": 1, "name": "two_roads", "cols": ["Int", "Int"], "kind": "Derived"}
+  ],
+  "nodes": [
+    {"Get": 0},
+    {"Join": {"inputs": [0, 0], "equivalences": [[[0, 1], [1, 0]]]}},
+    {"Mfp": {"input": 1, "project": [0, 3]}}
+  ],
+  "strata": [{"Let": {"id": 1, "body": 2}}],
+  "outputs": [1]
+}

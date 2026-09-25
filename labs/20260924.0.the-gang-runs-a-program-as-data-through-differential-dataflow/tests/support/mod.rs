@@ -2,7 +2,7 @@
 //! A step body is SQL (frontier = source diff) or raw `+ table cells` / `- table cells` lines (frontier = those lines, in order).
 #![allow(dead_code)]
 
-use lab_20260924_0::{Delta, Engine, Frontier, Program, RelId, RelKind, Row, SourceChange, W};
+use lab_20260924_0::{Delta, Engine, Frontier, NodeId, Program, RelId, RelKind, Row, SourceChange, W};
 use rusqlite::Connection;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -19,7 +19,7 @@ fn oracle_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("oracle")
 }
 
-fn read(conn: &Connection, table: &str) -> Bag {
+pub fn read(conn: &Connection, table: &str) -> Bag {
     let mut stmt = conn.prepare(&format!("SELECT * FROM \"{table}\"")).unwrap();
     let width = stmt.column_count();
     let rows = stmt
@@ -32,7 +32,7 @@ fn read(conn: &Connection, table: &str) -> Bag {
     bag
 }
 
-fn columns(conn: &Connection, table: &str) -> Vec<String> {
+pub fn columns(conn: &Connection, table: &str) -> Vec<String> {
     let mut stmt = conn.prepare(&format!("SELECT name FROM pragma_table_info('{table}') ORDER BY cid")).unwrap();
     stmt.query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect()
 }
@@ -53,6 +53,111 @@ struct Step {
     sql: String,
     raw: Vec<(String, Row, W)>,
     expect_error: Option<String>,
+}
+
+/// A script read from `oracle/<name>.sql` with its program and header comments.
+pub struct Script {
+    pub name: String,
+    pub program: Program,
+    pub setup: String,
+    /// `-- title:`, `-- question:`; "" when absent.
+    pub title: String,
+    pub question: String,
+    /// `-- name: <value> <label>`, file order.
+    pub names: Vec<(String, String)>,
+    /// `-- node: <ir node id> <caption>`, file order.
+    pub captions: Vec<(NodeId, String)>,
+    steps: Vec<Step>,
+}
+
+/// One step as the SQLite oracle saw it; engine independent.
+pub struct OracleStep {
+    pub caption: String,
+    pub frontier: Frontier,
+    pub expect_error: Option<String>,
+    /// Output view diff sorted by `(rel, row)`, or the oracle SQL error.
+    pub oracle: Result<Vec<(RelId, Row, W)>, String>,
+    /// Output views after the step, in `program.outputs` order.
+    after: Vec<Bag>,
+}
+
+/// `name` is relative to `oracle/`, without `.sql`, e.g. `pokemon/0_can_surf`.
+pub fn script(name: &str) -> Script {
+    let text = std::fs::read_to_string(oracle_dir().join(format!("{name}.sql"))).unwrap();
+    let (program_name, setup, steps) = parse(&text);
+    let program_name = program_name.unwrap_or_else(|| name.to_string());
+    let json = std::fs::read_to_string(oracle_dir().join(format!("{program_name}.program.json"))).unwrap();
+    let program: Program = serde_json::from_str(&json).unwrap();
+    let header = |key: &str| setup.lines().find_map(|l| l.strip_prefix(key)).map(|v| v.trim().to_string()).unwrap_or_default();
+    let pairs = |key: &str| -> Vec<(String, String)> {
+        setup
+            .lines()
+            .filter_map(|l| l.strip_prefix(key))
+            .map(|v| {
+                let (k, label) = v.trim().split_once(' ').unwrap_or((v.trim(), ""));
+                (k.to_string(), label.trim().to_string())
+            })
+            .collect()
+    };
+    Script {
+        name: name.to_string(),
+        title: header("-- title: "),
+        question: header("-- question: "),
+        names: pairs("-- name: "),
+        captions: pairs("-- node: ").into_iter().map(|(k, c)| (k.parse().unwrap(), c)).collect(),
+        program,
+        setup,
+        steps,
+    }
+}
+
+/// Runs setup and every step against SQLite; returns the connection after the last step.
+pub fn oracle(script: &Script) -> (Connection, Vec<OracleStep>) {
+    let program = &script.program;
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(&script.setup).unwrap();
+    let rel_of = |table: &str| program.rels.iter().find(|r| r.name == table).unwrap().id;
+    let sources: Vec<(RelId, String)> = program
+        .rels
+        .iter()
+        .filter(|r| r.kind == RelKind::Source)
+        .map(|r| (r.id, r.name.clone()))
+        .collect();
+    let outputs: Vec<(RelId, String)> = program
+        .outputs
+        .iter()
+        .map(|id| (*id, program.rel(*id).unwrap().name.clone()))
+        .collect();
+    let snap = |rels: &[(RelId, String)]| -> Vec<Bag> { rels.iter().map(|(_, t)| read(&conn, t)).collect() };
+    let mut out = Vec::new();
+    for step in &script.steps {
+        let (src0, out0) = (snap(&sources), snap(&outputs));
+        let oracle = if step.raw.is_empty() { conn.execute_batch(&step.sql) } else { apply_raw(&conn, &step.raw) };
+        let (src1, out1) = (snap(&sources), snap(&outputs));
+
+        let mut frontier = Frontier::default();
+        if step.raw.is_empty() {
+            for (i, (rel, _)) in sources.iter().enumerate() {
+                for (row, w) in diff(&src0[i], &src1[i]) {
+                    frontier.changes.push(SourceChange { rel: *rel, row, w });
+                }
+            }
+        } else {
+            for (table, row, w) in &step.raw {
+                frontier.changes.push(SourceChange { rel: rel_of(table), row: row.clone(), w: *w });
+            }
+        }
+        let oracle = oracle.map_err(|e| e.to_string()).map(|()| {
+            let mut expected: Vec<(RelId, Row, W)> = Vec::new();
+            for (i, (rel, _)) in outputs.iter().enumerate() {
+                expected.extend(diff(&out0[i], &out1[i]).into_iter().map(|(row, w)| (*rel, row, w)));
+            }
+            expected.sort();
+            expected
+        });
+        out.push(OracleStep { caption: step.name.clone(), frontier, expect_error: step.expect_error.clone(), oracle, after: out1 });
+    }
+    (conn, out)
 }
 
 fn parse(text: &str) -> (Option<String>, String, Vec<Step>) {
@@ -126,67 +231,27 @@ pub fn run<E: Engine + 'static>(name: &str) -> String {
 }
 
 fn run_steps<E: Engine>(name: &str) -> String {
-    let text = std::fs::read_to_string(oracle_dir().join(format!("{name}.sql"))).unwrap();
-    let (program_name, setup, steps) = parse(&text);
-    let program_name = program_name.unwrap_or_else(|| name.to_string());
-    let json = std::fs::read_to_string(oracle_dir().join(format!("{program_name}.program.json"))).unwrap();
-    let program: Program = serde_json::from_str(&json).unwrap();
-    assert!(!steps.is_empty(), "{name}: no steps");
+    let script = script(name);
+    let program = &script.program;
+    assert!(!script.steps.is_empty(), "{name}: no steps");
+    let (_conn, steps) = oracle(&script);
 
-    let conn = Connection::open_in_memory().unwrap();
-    conn.execute_batch(&setup).unwrap();
-    let rel_of = |table: &str| program.rels.iter().find(|r| r.name == table).unwrap().id;
-    let sources: Vec<(RelId, String)> = program
-        .rels
-        .iter()
-        .filter(|r| r.kind == RelKind::Source)
-        .map(|r| (r.id, r.name.clone()))
-        .collect();
-    let outputs: Vec<(RelId, String)> = program
-        .outputs
-        .iter()
-        .map(|id| (*id, program.rel(*id).unwrap().name.clone()))
-        .collect();
-    let snap = |rels: &[(RelId, String)]| -> Vec<Bag> { rels.iter().map(|(_, t)| read(&conn, t)).collect() };
-
-    let mut engine = E::install(&program).unwrap();
+    let mut engine = E::install(program).unwrap();
     let mut marbles = String::from("step\ttick\trel\trow\tw\n");
-    for step in &steps {
-        let at = format!("{name}/{}", step.name);
-        let (src0, out0) = (snap(&sources), snap(&outputs));
-        let oracle = if step.raw.is_empty() { conn.execute_batch(&step.sql) } else { apply_raw(&conn, &step.raw) };
-        let (src1, out1) = (snap(&sources), snap(&outputs));
-
-        let mut frontier = Frontier::default();
-        if step.raw.is_empty() {
-            for (i, (rel, _)) in sources.iter().enumerate() {
-                for (row, w) in diff(&src0[i], &src1[i]) {
-                    frontier.changes.push(SourceChange { rel: *rel, row, w });
-                }
-            }
-        } else {
-            for (table, row, w) in &step.raw {
-                frontier.changes.push(SourceChange { rel: rel_of(table), row: row.clone(), w: *w });
-            }
-        }
-
-        let settled = engine.settle(frontier);
-        match (&step.expect_error, oracle, settled) {
+    for step in steps {
+        let at = format!("{name}/{}", step.caption);
+        let settled = engine.settle(step.frontier);
+        match (&step.expect_error, step.oracle, settled) {
             (Some(kind), Err(_), Err(e)) => {
                 assert!(format!("{:?}", e.kind).starts_with(kind.as_str()), "{at}: expected {kind}, got {e}");
-                writeln!(marbles, "{}\t-\t-\terror {kind}\t0", step.name).unwrap();
+                writeln!(marbles, "{}\t-\t-\terror {kind}\t0", step.caption).unwrap();
             }
             (Some(kind), oracle, settled) => panic!("{at}: expected {kind} from both; oracle {oracle:?}, engine {settled:?}"),
             (None, Err(e), _) => panic!("{at}: oracle SQL failed: {e}"),
-            (None, Ok(()), Err(e)) => panic!("{at}: {e}\n{marbles}"),
-            (None, Ok(()), Ok(Delta { tick, changes })) => {
-                let mut expected: Vec<(RelId, Row, W)> = Vec::new();
-                for (i, (rel, _)) in outputs.iter().enumerate() {
-                    expected.extend(diff(&out0[i], &out1[i]).into_iter().map(|(row, w)| (*rel, row, w)));
-                }
-                expected.sort();
+            (None, Ok(_), Err(e)) => panic!("{at}: {e}\n{marbles}"),
+            (None, Ok(expected), Ok(Delta { tick, changes })) => {
                 for (rel, row, w) in &changes {
-                    writeln!(marbles, "{}\t{tick}\t{rel}\t{row:?}\t{w}", step.name).unwrap();
+                    writeln!(marbles, "{}\t{tick}\t{rel}\t{row:?}\t{w}", step.caption).unwrap();
                 }
                 let mut keys: Vec<(RelId, &Row)> = changes.iter().map(|(rel, row, _)| (*rel, row)).collect();
                 keys.dedup();
@@ -195,10 +260,10 @@ fn run_steps<E: Engine>(name: &str) -> String {
                 assert_eq!(changes, expected, "{at}: delta\n{marbles}");
             }
         }
-        for (i, (rel, _)) in outputs.iter().enumerate() {
+        for (i, rel) in program.outputs.iter().enumerate() {
             let mut got = engine.snapshot(*rel).unwrap();
             got.sort();
-            let want: Vec<(Row, W)> = out1[i].clone().into_iter().collect();
+            let want: Vec<(Row, W)> = step.after[i].clone().into_iter().collect();
             assert_eq!(got, want, "{at}: snapshot of rel {rel}\n{marbles}");
         }
     }
