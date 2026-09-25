@@ -1,7 +1,9 @@
+import { MotionConfig, useReducedMotion } from "motion/react";
 import { useEffect, useState } from "react";
 import type { Trace } from "./0_trace";
 import { HoverStyle, rootHoverHandlers } from "./2_hover";
 import { TraceContext } from "./3_Mention";
+import { useWaveState, WaveContext } from "./3a_wave";
 import { Graph } from "./4_Graph";
 import { Answer, Cast, Story } from "./5_Side";
 import { Inspector } from "./6_Inspector";
@@ -12,12 +14,13 @@ import { ScenarioTabs, Scrubber } from "./8_Scrubber";
 const modules = import.meta.glob<Trace>("../traces/*.json", { eager: true, import: "default" });
 export const traces = Object.values(modules).sort((left, right) => left.scenario.localeCompare(right.scenario, undefined, { numeric: true }));
 
-export const App = () => {
-  const [scenario, setScenario] = useState(traces[0]?.scenario ?? "");
+// One scenario; remounted per scenario so switching tabs does not animate rows across traces.
+const Scenario = ({ trace, header }: { trace: Trace; header: (scrubber: React.ReactNode) => React.ReactNode }) => {
   const [stepIndex, setStepIndex] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
-  const trace = traces.find((candidate) => candidate.scenario === scenario);
-  const last = (trace?.steps.length ?? 1) - 1;
+  const reduced = useReducedMotion() ?? false;
+  const wave = useWaveState(trace, stepIndex, reduced);
+  const last = trace.steps.length - 1;
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -28,6 +31,35 @@ export const App = () => {
     return () => window.removeEventListener("keydown", onKey);
   }, [last]);
 
+  return (
+    <TraceContext.Provider value={trace}>
+      <WaveContext.Provider value={wave}>
+        {header(<Scrubber trace={trace} stepIndex={stepIndex} onStep={setStepIndex} />)}
+        <main className="grid min-h-0 flex-1 grid-cols-[minmax(240px,1fr)_minmax(360px,2fr)_minmax(300px,1.3fr)] gap-2">
+          <aside className="flex min-h-0 flex-col gap-2 overflow-y-auto">
+            <Cast />
+            <Story />
+            <Answer />
+          </aside>
+          <div className="min-h-0 rounded-lg border border-slate-200 bg-white shadow-sm">
+            <Graph trace={trace} selected={selected} onSelect={setSelected} reduced={reduced} />
+          </div>
+          <aside className="min-h-0 overflow-y-auto">
+            <Inspector key={selected ?? "none"} selected={selected} />
+          </aside>
+        </main>
+        <footer className="max-h-[32vh] overflow-y-auto">
+          <Engines stepIndex={stepIndex} onStep={setStepIndex} />
+        </footer>
+      </WaveContext.Provider>
+    </TraceContext.Provider>
+  );
+};
+
+export const App = () => {
+  const [scenario, setScenario] = useState(traces[0]?.scenario ?? "");
+  const trace = traces.find((candidate) => candidate.scenario === scenario);
+
   if (!trace) {
     return (
       <div className="p-8 text-slate-600">
@@ -35,38 +67,22 @@ export const App = () => {
       </div>
     );
   }
-  const step = trace.steps[stepIndex];
-  const pick = (next: string) => {
-    setScenario(next);
-    setStepIndex(0);
-    setSelected(null);
-  };
 
   return (
-    <TraceContext.Provider value={trace}>
+    <MotionConfig reducedMotion="user">
       <HoverStyle />
       <div {...rootHoverHandlers} className="flex h-screen flex-col gap-2 p-3">
-        <header>
-          <ScenarioTabs traces={traces} current={trace.scenario} onPick={pick} />
-          <Scrubber trace={trace} stepIndex={stepIndex} onStep={setStepIndex} />
-        </header>
-        <main className="grid min-h-0 flex-1 grid-cols-[minmax(240px,1fr)_minmax(360px,2fr)_minmax(300px,1.3fr)] gap-2">
-          <aside className="flex min-h-0 flex-col gap-2 overflow-y-auto">
-            <Cast />
-            <Story step={step} />
-            <Answer stepIndex={stepIndex} />
-          </aside>
-          <div className="min-h-0 rounded-lg border border-slate-200 bg-white shadow-sm">
-            <Graph trace={trace} step={step} selected={selected} onSelect={setSelected} />
-          </div>
-          <aside className="min-h-0 overflow-y-auto">
-            <Inspector selected={selected} stepIndex={stepIndex} />
-          </aside>
-        </main>
-        <footer className="max-h-[32vh] overflow-y-auto">
-          <Engines stepIndex={stepIndex} onStep={setStepIndex} />
-        </footer>
+        <Scenario
+          key={trace.scenario}
+          trace={trace}
+          header={(scrubber) => (
+            <header>
+              <ScenarioTabs traces={traces} current={trace.scenario} onPick={setScenario} />
+              {scrubber}
+            </header>
+          )}
+        />
       </div>
-    </TraceContext.Provider>
+    </MotionConfig>
   );
 };

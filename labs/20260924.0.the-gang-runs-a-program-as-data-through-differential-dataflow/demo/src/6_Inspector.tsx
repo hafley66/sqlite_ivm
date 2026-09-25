@@ -1,7 +1,8 @@
 import type { Change, Trace, TraceNode, TraceStep } from "./0_trace";
 import { consolidate, errorWords, opWord, reasons, rowConcept, rowKey, sameChanges, tokens, weightOf } from "./1_labels";
+import { ChangeList, Chip, NodeName, ReasonsChip, Row, Rows, RowSentence, Section, signed, Tween, useTrace } from "./3_Mention";
+import { shownIndex, useWave } from "./3a_wave";
 import { emitted } from "./4_Graph";
-import { ChangeList, Chip, NodeName, ReasonsChip, RowSentence, Section, useTrace } from "./3_Mention";
 
 // Loop nodes: SQLite clears their tables every round, so only the output delta is compared.
 const MatchBadge = ({ same, inLoop }: { same: boolean; inLoop: boolean }) =>
@@ -9,46 +10,43 @@ const MatchBadge = ({ same, inLoop }: { same: boolean; inLoop: boolean }) =>
 
 const ChangesTable = ({ sqlite, dd, columns, inLoop }: { sqlite: Change[]; dd: Change[]; columns: string[]; inLoop: boolean }) => {
   const rows = consolidate([...sqlite.map((change) => ({ row: change.row, w: 1 })), ...dd.map((change) => ({ row: change.row, w: 1 }))]);
-  if (rows.length === 0) return <div className="text-sm text-slate-400 italic">nothing changed here this step</div>;
   return (
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="text-left text-xs text-slate-500">
-          <th className="font-normal">row</th>
-          <th className="font-normal">SQLite</th>
-          <th className="font-normal">dataflow</th>
-        </tr>
-      </thead>
-      <tbody>
+    <div className="text-sm">
+      <div className="flex text-xs text-slate-500">
+        <span className="flex-1">row</span>
+        <span className="w-16">SQLite</span>
+        <span className="w-16">dataflow</span>
+      </div>
+      <Rows>
         {rows.map(({ row }) => {
           const left = weightOf(sqlite, row);
           const right = weightOf(dd, row);
           return (
-            <tr key={rowKey(row)} className={left === right || inLoop ? "" : "bg-rose-50"}>
-              <td><RowSentence row={row} columns={columns} /></td>
-              <td className="font-mono">{left > 0 ? `+${left}` : left < 0 ? `−${-left}` : "·"}</td>
-              <td className="font-mono">{right > 0 ? `+${right}` : right < 0 ? `−${-right}` : "·"}</td>
-            </tr>
+            <Row key={rowKey(row)} className={`flex ${left === right || inLoop ? "" : "bg-rose-50"}`}>
+              <span className="flex-1"><RowSentence row={row} columns={columns} /></span>
+              <span className="w-16 font-mono"><Tween value={left} format={signed} /></span>
+              <span className="w-16 font-mono"><Tween value={right} format={signed} /></span>
+            </Row>
           );
         })}
-      </tbody>
-    </table>
+      </Rows>
+      {rows.length === 0 && <div className="text-slate-400 italic">nothing changed here this step</div>}
+    </div>
   );
 };
 
 const Totals = ({ label, changes, columns }: { label: string; changes: Change[]; columns: string[] }) => (
-  <div className="min-w-0 flex-1">
+  <div className="min-w-0 flex-1 text-sm">
     <div className="text-xs text-slate-500">{label}</div>
-    {changes.length === 0 ? (
-      <div className="text-sm text-slate-400 italic">empty</div>
-    ) : (
-      changes.map((change) => (
-        <div key={rowKey(change.row)} className="text-sm">
+    <Rows>
+      {changes.map((change) => (
+        <Row key={rowKey(change.row)}>
           <RowSentence row={change.row} columns={columns} />
           {change.w !== 1 && <ReasonsChip w={change.w} />}
-        </div>
-      ))
-    )}
+        </Row>
+      ))}
+    </Rows>
+    {changes.length === 0 && <div className="text-slate-400 italic">empty</div>}
   </div>
 );
 
@@ -58,25 +56,29 @@ const ThresholdView = ({ trace, node, stepIndex }: { trace: Trace; node: TraceNo
   if (input === undefined) return null;
   const before = consolidate(trace.steps.slice(0, stepIndex).flatMap((past) => emitted(past, input)));
   const delta = emitted(trace.steps[stepIndex], input);
-  if (delta.length === 0) return <div className="text-sm text-slate-400 italic">no reasons changed this step</div>;
   return (
     <div className="text-sm">
-      {delta.map((change) => {
-        const was = weightOf(before, change.row);
-        const now = was + change.w;
-        const event = was <= 0 && now > 0 ? "granted" : was > 0 && now <= 0 ? "revoked" : null;
-        return (
-          <div key={rowKey(change.row)} className="py-0.5">
-            <RowSentence row={change.row} columns={node.columns} />
-            <span className="text-slate-500"> was {reasons(was)} → now {reasons(now)}</span>
-            {event && (
-              <Chip tone={event === "granted" ? "green" : "red"} concept={`${tokens.event(event)} ${rowConcept(trace.names, change.row, node.columns)}`}>
-                {event === "granted" ? "granted: crosses above zero" : "revoked: drops to zero"}
-              </Chip>
-            )}
-          </div>
-        );
-      })}
+      <Rows>
+        {delta.map((change) => {
+          const was = weightOf(before, change.row);
+          const now = was + change.w;
+          const event = was <= 0 && now > 0 ? "granted" : was > 0 && now <= 0 ? "revoked" : null;
+          return (
+            <Row key={rowKey(change.row)} className="py-0.5">
+              <RowSentence row={change.row} columns={node.columns} />
+              <span className="text-slate-500">
+                {" "}was <Tween value={was} format={reasons} /> → now <Tween value={now} format={reasons} />
+              </span>
+              {event && (
+                <Chip tone={event === "granted" ? "green" : "red"} concept={`${tokens.event(event)} ${rowConcept(trace.names, change.row, node.columns)}`}>
+                  {event === "granted" ? "granted: crosses above zero" : "revoked: drops to zero"}
+                </Chip>
+              )}
+            </Row>
+          );
+        })}
+      </Rows>
+      {delta.length === 0 && <div className="text-slate-400 italic">no reasons changed this step</div>}
     </div>
   );
 };
@@ -114,8 +116,10 @@ export const EngineDrawer = ({ node }: { node: TraceNode }) => (
   </details>
 );
 
-export const Inspector = ({ selected, stepIndex }: { selected: number | null; stepIndex: number }) => {
+export const Inspector = ({ selected }: { selected: number | null }) => {
   const trace = useTrace();
+  const wave = useWave();
+  const stepIndex = shownIndex(wave, "answer");
   const node = trace.nodes.find((candidate) => candidate.id === selected);
   if (!node) {
     return (

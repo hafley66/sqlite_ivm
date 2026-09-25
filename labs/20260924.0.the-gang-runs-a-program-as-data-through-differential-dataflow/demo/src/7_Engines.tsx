@@ -1,6 +1,7 @@
 import type { Trace, TraceStep } from "./0_trace";
-import { consolidate, errorWords, forRelation, sameChanges, tokens } from "./1_labels";
-import { ChangeLine, Chip, RelName, Section, useTrace } from "./3_Mention";
+import { consolidate, errorWords, forRelation, rowKey, sameChanges, tokens } from "./1_labels";
+import { shownIndex, useWave } from "./3a_wave";
+import { ChangeLine, Chip, RelName, Row, Rows, Section, useTrace } from "./3_Mention";
 
 type Delta = TraceStep["dd"];
 
@@ -18,24 +19,31 @@ const DeltaColumn = ({ title, delta, agrees }: { title: string; delta: Delta; ag
         {title}
         {agrees !== null && (agrees ? <Chip tone="green">✓ matches expected</Chip> : <Chip tone="red">✗ differs from expected</Chip>)}
       </div>
-      {relations.length === 0 && <div className="text-sm text-slate-400 italic">no change to the answer</div>}
+      <Rows>
       {relations.map((relation) => (
-        <div key={relation.id} className="text-sm">
+        <Row key={relation.id} className="text-sm">
           <div className="text-xs text-slate-500">
             <RelName relation={relation.id} />
           </div>
-          {consolidate(forRelation(delta, relation.id)).map((change, index) => (
-            <ChangeLine key={index} change={change} columns={relation.columns} />
-          ))}
-        </div>
+          <Rows>
+            {consolidate(forRelation(delta, relation.id)).map((change) => (
+              <Row key={rowKey(change.row)}>
+                <ChangeLine change={change} columns={relation.columns} />
+              </Row>
+            ))}
+          </Rows>
+        </Row>
       ))}
+      </Rows>
+      {relations.length === 0 && <div className="text-sm text-slate-400 italic">no change to the answer</div>}
     </div>
   );
 };
 
 export const Engines = ({ stepIndex, onStep }: { stepIndex: number; onStep: (index: number) => void }) => {
   const trace = useTrace();
-  const step = trace.steps[stepIndex];
+  const wave = useWave();
+  const step = trace.steps[shownIndex(wave, "engines")];
   return (
     <Section
       title={
