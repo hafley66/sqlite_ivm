@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import type { Trace } from "./0_trace";
 import { HoverStyle, rootHoverHandlers } from "./2_hover";
 import { TraceContext } from "./3_Mention";
-import { useWaveState, WaveContext } from "./3a_wave";
+import { PulseStyle, useWaveState, WaveContext } from "./3a_wave";
 import { Graph } from "./4_Graph";
 import { Answer, Cast, Story } from "./5_Side";
 import { Inspector } from "./6_Inspector";
@@ -34,6 +34,7 @@ const Scenario = ({ trace, header }: { trace: Trace; header: (scrubber: React.Re
   return (
     <TraceContext.Provider value={trace}>
       <WaveContext.Provider value={wave}>
+        <PulseStyle trace={trace} />
         {header(<Scrubber trace={trace} stepIndex={stepIndex} onStep={setStepIndex} />)}
         <main className="grid min-h-0 flex-1 grid-cols-[minmax(240px,1fr)_minmax(360px,2fr)_minmax(300px,1.3fr)] gap-2">
           <aside className="flex min-h-0 flex-col gap-2 overflow-y-auto">

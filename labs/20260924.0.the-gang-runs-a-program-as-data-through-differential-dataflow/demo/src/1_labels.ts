@@ -75,6 +75,13 @@ export const weightOf = (changes: Change[], row: Row) =>
 export const forRelation = (changes: TraceStep["frontier"], relation: number): Change[] =>
   changes.filter((change) => change.relation === relation).map(({ row, w }) => ({ row, w }));
 
+// The changes a node emitted this step: the SQLite delta table, or the dd changes when SQLite kept none.
+export const emitted = (step: TraceStep | undefined, id: number): Change[] => {
+  const stepNode = step?.nodes.find((candidate) => candidate.id === id);
+  if (!stepNode) return [];
+  return consolidate(stepNode.sqlite_changes.length ? stepNode.sqlite_changes : stepNode.dd_changes);
+};
+
 // ---- words for the learner ----
 
 const opWords: Record<string, string> = {

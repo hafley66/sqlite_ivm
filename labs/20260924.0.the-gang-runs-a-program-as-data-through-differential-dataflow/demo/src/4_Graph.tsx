@@ -2,21 +2,15 @@ import cytoscape, { type Core, type StylesheetJson } from "cytoscape";
 import dagre from "cytoscape-dagre";
 import { useEffect, useRef } from "react";
 import { animate } from "motion/react";
-import type { Change, Trace, TraceStep } from "./0_trace";
-import { consolidate, isEntity, nodeConcept, nodeTitle, opWord, tokens } from "./1_labels";
+import type { Change, Trace } from "./0_trace";
+import { emitted, isEntity, nodeConcept, nodeTitle, opWord, tokens } from "./1_labels";
 import { hover, useHover } from "./2_hover";
-import { isActive, shownIndex, UNIT_SECONDS, useWave } from "./3a_wave";
+import { isActive, pulseOf, shownIndex, UNIT_SECONDS, useWave } from "./3a_wave";
 
 cytoscape.use(dagre);
 
 const loopParent = "loop";
 
-// The changes a node emitted this step: the SQLite delta table, or the dd changes when SQLite kept none.
-export const emitted = (step: TraceStep | undefined, id: number): Change[] => {
-  const stepNode = step?.nodes.find((candidate) => candidate.id === id);
-  if (!stepNode) return [];
-  return consolidate(stepNode.sqlite_changes.length ? stepNode.sqlite_changes : stepNode.dd_changes);
-};
 
 const changeTokens = (names: Trace["names"], changes: Change[]) =>
   changes.flatMap((change) => [tokens.row(change.row), ...change.row.filter((value) => isEntity(names, value)).map(tokens.entity)]);
@@ -75,6 +69,9 @@ const stylesheet = (reduced: boolean): StylesheetJson => [
   },
   { selector: "node.changed", style: { "underlay-opacity": 0.45, "border-color": "#d97706", "border-width": 2 } },
   { selector: "node.active", style: { "underlay-color": "#0ea5e9", "underlay-opacity": 0.6, "underlay-padding": 13, "border-color": "#0284c7", "border-width": 3 } },
+  { selector: "node.pulse-plus", style: { "underlay-color": "#10b981", "underlay-opacity": 0.6, "underlay-padding": 11 } },
+  { selector: "node.pulse-minus", style: { "underlay-color": "#f43f5e", "underlay-opacity": 0.6, "underlay-padding": 11 } },
+  { selector: "node.pulse-node", style: { "underlay-color": "#0ea5e9", "underlay-opacity": 0.6, "underlay-padding": 13 } },
   { selector: "node.selected-node", style: { "border-color": "#1d4ed8", "border-width": 3 } },
   { selector: "node.lit", style: { "background-color": "#fde047" } },
   {
@@ -98,6 +95,8 @@ const stylesheet = (reduced: boolean): StylesheetJson => [
   },
   { selector: "edge.flowing", style: { width: 3, "line-color": "#f59e0b", "target-arrow-color": "#f59e0b" } },
   { selector: "edge.marching", style: { width: 4, "line-style": "dashed", "line-dash-pattern": [9, 5], "line-color": "#0ea5e9", "target-arrow-color": "#0ea5e9" } },
+  { selector: "edge.pulse-plus", style: { width: 5, "line-color": "#10b981", "target-arrow-color": "#10b981" } },
+  { selector: "edge.pulse-minus", style: { width: 5, "line-color": "#f43f5e", "target-arrow-color": "#f43f5e" } },
   { selector: "edge.lit", style: { width: 5, "line-color": "#eab308", "target-arrow-color": "#eab308", "text-background-color": "#fde047" } },
 ];
 
@@ -189,9 +188,10 @@ export const Graph = ({ trace, selected, onSelect, reduced }: { trace: Trace; se
       }
     });
     cy.edges().forEach((edge) => {
-      const stage = { node: edge.data("node") as number };
-      const shown = shownIndex(wave, stage);
+      // An edge carries its source node's output, so it changes, marches and pulses at the source's stage.
       const input = edge.data("input") as number;
+      const stage = { node: input };
+      const shown = shownIndex(wave, stage);
       const changes = emitted(trace.steps[shown], input);
       edge.data("concept", changeTokens(trace.names, changes).join(" "));
       edge.toggleClass("flowing", changes.length > 0);
@@ -236,6 +236,21 @@ export const Graph = ({ trace, selected, onSelect, reduced }: { trace: Trace; se
         );
       }
     });
+    // Pulse: elements carrying a token the wave pulses this unit; removing the class next unit fades it out.
+    const pulse = reduced ? { plus: [], minus: [], node: [] as string[] } : pulseOf(trace, wave);
+    // The graph pulses on row and node tokens; entity tokens would flash every edge that ever carried that name.
+    const plus = new Set(pulse.plus.filter((token) => token.startsWith("row:")));
+    const minus = new Set(pulse.minus.filter((token) => token.startsWith("row:")));
+    const nodeTokens = new Set(pulse.node);
+    cy.batch(() =>
+      cy.elements().forEach((element) => {
+        const concept = String(element.data("concept") ?? "").split(" ");
+        const isNode = concept.some((token) => nodeTokens.has(token));
+        element.toggleClass("pulse-node", isNode);
+        element.toggleClass("pulse-minus", !isNode && concept.some((token) => minus.has(token)));
+        element.toggleClass("pulse-plus", !isNode && concept.some((token) => plus.has(token)));
+      }),
+    );
   }, [trace, wave, reduced]);
 
   useEffect(() => {

@@ -28,7 +28,7 @@ export const rootHoverHandlers = {
   onPointerOut: (event: PointerEvent) => hover.set(conceptTokens(event.relatedTarget)),
 };
 
-const quote = (token: string) => `"${token.replace(/["\\]/g, (match) => `\\${match}`)}"`;
+export const quote = (token: string) => `"${token.replace(/["\\]/g, (match) => `\\${match}`)}"`;
 
 // Column tokens match every row of the same shape, so they get a faint mark; every other token a strong one.
 export const HoverStyle = () => {

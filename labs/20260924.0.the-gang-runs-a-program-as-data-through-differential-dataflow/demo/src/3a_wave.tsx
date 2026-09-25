@@ -1,10 +1,12 @@
-import { animate } from "motion/react";
+import { animate, useReducedMotion } from "motion/react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { Trace } from "./0_trace";
+import type { Change, Trace } from "./0_trace";
+import { emitted, isEntity, tokens } from "./1_labels";
+import { quote, useHover } from "./2_hover";
 
 // A step change travels through the page as a wave: one unit per dependency depth of the IR graph.
-// Forward:  story (unit 0) → graph nodes by depth (1 + depth) → answer + inspector → engines.
-// Backward: answer + inspector (unit 0) → graph nodes, deepest first → story → engines.
+// Forward:  story (unit 0) → graph nodes by depth (1 + depth; the inspector follows its node) → answer → engines.
+// Backward: answer (unit 0) → graph nodes, deepest first → story → engines.
 // Until the wave reaches a stage, that stage keeps showing the step it showed before.
 
 export const UNIT_SECONDS = 0.3;
@@ -80,4 +82,74 @@ export const useWaveState = (trace: Trace, stepIndex: number, reduced: boolean):
   }, [stepIndex, reduced, end]);
 
   return { ...state, end, depth, max_depth };
+};
+
+// ---- pulse: the wave's own linked highlight ----
+// When the wave reaches a stage, the tokens of the rows changing there pulse everywhere they are
+// mentioned, like hover. `id` changes every unit so the keyframes restart.
+
+export type Pulse = { id: string; plus: string[]; minus: string[]; node: string[] };
+
+const signedTokens = (names: Trace["names"], changes: Change[], pulse: Pulse) => {
+  for (const change of changes) {
+    const bucket = change.w > 0 ? pulse.plus : pulse.minus;
+    bucket.push(tokens.row(change.row), ...change.row.filter((value) => isEntity(names, value)).map(tokens.entity));
+  }
+};
+
+export const pulseOf = (trace: Trace, wave: Wave): Pulse => {
+  const pulse: Pulse = { id: `${wave.from}-${wave.to}-u${wave.unit + 1}`, plus: [], minus: [], node: [] };
+  if (wave.from === wave.to) return pulse;
+  const step = trace.steps[wave.to];
+  if (!step) return pulse;
+  const outputs = (delta: typeof step.oracle) => delta.map(({ row, w }) => ({ row, w }));
+  if (isActive(wave, "story")) signedTokens(trace.names, outputs(step.frontier), pulse);
+  for (const node of trace.nodes) {
+    if (!isActive(wave, { node: node.id })) continue;
+    const changes = emitted(step, node.id);
+    if (changes.length === 0) continue;
+    pulse.node.push(tokens.node(node.id));
+    signedTokens(trace.names, changes, pulse);
+  }
+  if (isActive(wave, "answer")) signedTokens(trace.names, outputs(step.oracle), pulse);
+  if (isActive(wave, "engines")) signedTokens(trace.names, outputs(step.dd), pulse);
+  // A token both added and removed in one stage (an entity in two rows) pulses as removed.
+  pulse.plus = [...new Set(pulse.plus)].filter((token) => !pulse.minus.includes(token));
+  pulse.minus = [...new Set(pulse.minus)];
+  pulse.node = [...new Set(pulse.node)];
+  return pulse;
+};
+
+
+// Entity tokens pulse only the name itself (an element whose whole concept is that entity), so a
+// row that merely mentions Red does not flash; row and node tokens pulse every element carrying them.
+const pulseSelector = (token: string) => (token.startsWith("entity:") ? `[data-concept=${quote(token)}]` : `[data-concept~=${quote(token)}]`);
+
+// Same pattern as HoverStyle: rules only for the pulsed tokens; hovered elements are excluded so hover wins.
+export const PulseStyle = ({ trace }: { trace: Trace }) => {
+  const wave = useWave();
+  const hovered = useHover();
+  const reduced = useReducedMotion();
+  if (reduced) return null;
+  const pulse = pulseOf(trace, wave);
+  const notHovered = hovered
+    .filter((token) => !token.startsWith("column:"))
+    .map((token) => `:not([data-concept~=${quote(token)}])`)
+    .join("");
+  const tones = [
+    { name: "plus", list: pulse.plus, color: "16 185 129" },
+    { name: "minus", list: pulse.minus, color: "244 63 94" },
+    { name: "node", list: pulse.node, color: "14 165 233" },
+  ];
+  const rules = tones
+    .filter((tone) => tone.list.length > 0)
+    .map((tone) => {
+      const animation = `pulse-${tone.name}-${pulse.id}`;
+      return [
+        `@keyframes ${animation}{0%{background-color:rgb(${tone.color}/.45);box-shadow:0 0 0 3px rgb(${tone.color}/.8)}100%{background-color:rgb(${tone.color}/0);box-shadow:0 0 0 3px rgb(${tone.color}/0)}}`,
+        `${tone.list.map((token) => `${pulseSelector(token)}${notHovered}`).join(",")}{animation:${animation} 750ms ease-out;border-radius:4px}`,
+      ].join("\n");
+    })
+    .join("\n");
+  return <style>{rules}</style>;
 };

@@ -1,8 +1,7 @@
 import type { Change, Trace, TraceNode, TraceStep } from "./0_trace";
-import { consolidate, errorWords, opWord, reasons, rowConcept, rowKey, sameChanges, tokens, weightOf } from "./1_labels";
+import { consolidate, emitted, errorWords, opWord, reasons, rowConcept, rowKey, sameChanges, tokens, weightOf } from "./1_labels";
 import { ChangeList, Chip, NodeName, ReasonsChip, Row, Rows, RowSentence, Section, signed, Tween, useTrace } from "./3_Mention";
 import { shownIndex, useWave } from "./3a_wave";
-import { emitted } from "./4_Graph";
 
 // Loop nodes: SQLite clears their tables every round, so only the output delta is compared.
 const MatchBadge = ({ same, inLoop }: { same: boolean; inLoop: boolean }) =>
@@ -119,7 +118,8 @@ export const EngineDrawer = ({ node }: { node: TraceNode }) => (
 export const Inspector = ({ selected }: { selected: number | null }) => {
   const trace = useTrace();
   const wave = useWave();
-  const stepIndex = shownIndex(wave, "answer");
+  // The inspected node updates when the wave reaches that node.
+  const stepIndex = shownIndex(wave, selected === null ? "answer" : { node: selected });
   const node = trace.nodes.find((candidate) => candidate.id === selected);
   if (!node) {
     return (
