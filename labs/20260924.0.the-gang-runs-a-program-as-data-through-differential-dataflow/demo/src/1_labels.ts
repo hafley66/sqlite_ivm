@@ -41,6 +41,14 @@ export const cells = (names: Trace["names"], row: Row, columns: string[]): Cell[
     )
     .filter((_, index) => !row.some((value, earlier) => earlier < index && value === row[index] && columnName(columns, earlier) === columnName(columns, index)));
 
+// Plain-text row sentence for places that cannot render spans (graph edge labels).
+export const rowText = (names: Trace["names"], row: Row, columns: string[]) =>
+  cells(names, row, columns)
+    .map((cell, index) =>
+      (index > 0 ? (cell.kind === "entity" ? " → " : ", ") : "") + (cell.kind === "entity" ? cell.label : `${cell.column.replaceAll("_", " ")} ${cell.value}`),
+    )
+    .join("");
+
 // ---- multiset arithmetic over changes ----
 
 export const consolidate = (changes: Change[]): Change[] => {

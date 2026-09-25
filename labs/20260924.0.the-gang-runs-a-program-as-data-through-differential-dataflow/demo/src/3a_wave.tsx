@@ -1,4 +1,4 @@
-import { animate, useReducedMotion } from "motion/react";
+import { animate, useMotionValue, useMotionValueEvent, useReducedMotion, type AnimationPlaybackControls, type MotionValue } from "motion/react";
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Change, Trace } from "./0_trace";
 import { emitted, isEntity, tokens } from "./1_labels";
@@ -9,17 +9,31 @@ import { quote, useHover } from "./2_hover";
 // Backward: answer (unit 0) → graph nodes, deepest first → story → engines.
 // Until the wave reaches a stage, that stage keeps showing the step it showed before.
 
-export const UNIT_SECONDS = 0.3;
+// Seconds per wave unit at 1×.
+export const UNIT_SECONDS = 1;
+
+export type Speed = 0.25 | 0.5 | 1 | 2 | 4 | "step";
+export const SPEEDS: Speed[] = [0.25, 0.5, 1, 2, 4, "step"];
 
 export type Stage = "story" | "answer" | "engines" | { node: number };
 
+export type WaveControls = {
+  toggle: () => void;            // play / pause; replays the last wave when it has finished
+  jump: (unit: number) => void;  // move the wave to the start of `unit` and pause there
+  advance: () => void;           // one unit forward, paused (step-through mode)
+};
+
 export type Wave = {
   from: number;          // step shown by stages the wave has not reached
-  to: number;            // step shown by stages the wave has reached
-  unit: number;          // current wave position; `end` when idle
+  to: number;            // step shown by stages the wave has reached (from = to before the first step change)
+  unit: number;          // current wave position; `end` when finished
   end: number;
   depth: Map<number, number>;
   max_depth: number;
+  clock: MotionValue<number>; // continuous wave position in units, 0 → end
+  playing: boolean;
+  speed: Speed;
+  controls: WaveControls;
 };
 
 // Longest path from a node with no inputs.
@@ -39,7 +53,9 @@ export const depths = (trace: Trace) => {
   return { depth, max_depth: Math.max(0, ...depth.values()) };
 };
 
-export const stageUnit = (wave: Wave, stage: Stage) => {
+type WaveShape = Pick<Wave, "from" | "to" | "unit" | "depth" | "max_depth">;
+
+export const stageUnit = (wave: WaveShape, stage: Stage) => {
   const forward = wave.to >= wave.from;
   if (stage === "engines") return wave.max_depth + 3;
   if (stage === "story") return forward ? 0 : wave.max_depth + 2;
@@ -48,40 +64,99 @@ export const stageUnit = (wave: Wave, stage: Stage) => {
   return 1 + (forward ? depth : wave.max_depth - depth);
 };
 
-export const reached = (wave: Wave, stage: Stage) => wave.unit >= stageUnit(wave, stage);
-export const isActive = (wave: Wave, stage: Stage) => wave.from !== wave.to && wave.unit === stageUnit(wave, stage);
-export const shownIndex = (wave: Wave, stage: Stage) => (reached(wave, stage) ? wave.to : wave.from);
+export const reached = (wave: WaveShape, stage: Stage) => wave.unit >= stageUnit(wave, stage);
+export const isActive = (wave: WaveShape, stage: Stage) => wave.from !== wave.to && wave.unit === stageUnit(wave, stage);
+export const shownIndex = (wave: WaveShape, stage: Stage) => (reached(wave, stage) ? wave.to : wave.from);
+
+// Wall-clock seconds of one unit at the current speed; step-through uses 1×.
+export const unitSeconds = (wave: Pick<Wave, "speed">) => UNIT_SECONDS / (wave.speed === "step" ? 1 : wave.speed);
 
 export const WaveContext = createContext<Wave>(null as unknown as Wave);
 export const useWave = () => useContext(WaveContext);
 
-// The wave clock is a motion tween from 0 to `end`; a new step stops the running one, and the new
-// wave starts from the step the old one was heading to.
-export const useWaveState = (trace: Trace, stepIndex: number, reduced: boolean): Wave => {
+// The wave clock is a motion value tweened from 0 to `end`; the tween's playback controls give
+// pause, play, speed and seeking. A new step stops the running tween; the new wave starts from
+// the step the old one was heading to.
+export const useWaveState = (trace: Trace, stepIndex: number, speed: Speed, reduced: boolean): Wave => {
   const { depth, max_depth } = useMemo(() => depths(trace), [trace]);
   const end = max_depth + 4;
   const [state, setState] = useState({ from: stepIndex, to: stepIndex, unit: end });
+  const [playing, setPlaying] = useState(false);
+  const clock = useMotionValue(end);
+  const tween = useRef<AnimationPlaybackControls | null>(null);
   const target = useRef(stepIndex);
+  const speedRef = useRef(speed);
+  speedRef.current = speed;
+
+  useMotionValueEvent(clock, "change", (value) => {
+    const unit = Math.min(end, Math.floor(value + 1e-6));
+    setState((current) => (current.unit === unit ? current : { ...current, unit }));
+  });
+
+  const run = (start: number, paused: boolean) => {
+    tween.current?.stop();
+    if (reduced) {
+      clock.set(end);
+      setPlaying(false);
+      return;
+    }
+    clock.set(start);
+    const controls = animate(clock, end, {
+      duration: (end - start) * UNIT_SECONDS,
+      ease: "linear",
+      onComplete: () => setPlaying(false),
+    });
+    controls.speed = speedRef.current === "step" ? 1 : speedRef.current;
+    if (paused) controls.pause();
+    tween.current = controls;
+    setPlaying(!paused);
+  };
 
   useEffect(() => {
     const from = target.current;
     target.current = stepIndex;
     if (from === stepIndex) return;
-    if (reduced) {
-      setState({ from: stepIndex, to: stepIndex, unit: end });
-      return;
-    }
-    setState({ from, to: stepIndex, unit: -1 });
-    const controls = animate(0, end, {
-      duration: end * UNIT_SECONDS,
-      ease: "linear",
-      onUpdate: (value) => setState((current) => (Math.floor(value) === current.unit ? current : { ...current, unit: Math.floor(value) })),
-      onComplete: () => setState({ from: stepIndex, to: stepIndex, unit: end }),
-    });
-    return () => controls.stop();
-  }, [stepIndex, reduced, end]);
+    setState({ from, to: stepIndex, unit: 0 });
+    run(0, speedRef.current === "step");
+  }, [stepIndex]);
 
-  return { ...state, end, depth, max_depth };
+  useEffect(() => () => tween.current?.stop(), []);
+
+  // Speed changes apply to the running tween; entering step-through pauses it.
+  useEffect(() => {
+    const controls = tween.current;
+    if (!controls) return;
+    if (speed === "step") {
+      controls.pause();
+      setPlaying(false);
+    } else {
+      controls.speed = speed;
+    }
+  }, [speed]);
+
+  const controls: WaveControls = {
+    toggle: () => {
+      const running = tween.current;
+      if (!running || clock.get() >= end) return run(0, false);
+      if (playing) {
+        running.pause();
+        setPlaying(false);
+      } else {
+        if (speedRef.current === "step") return;
+        running.play();
+        setPlaying(true);
+      }
+    },
+    jump: (unit) => run(Math.max(0, Math.min(end, unit)), true),
+    advance: () => {
+      const unit = Math.floor(clock.get() + 1e-6);
+      if (unit >= end) return;
+      run(unit + 1, true);
+      if (unit + 1 >= end) clock.set(end);
+    },
+  };
+
+  return { ...state, end, depth, max_depth, clock, playing, speed, controls };
 };
 
 // ---- pulse: the wave's own linked highlight ----
@@ -147,7 +222,7 @@ export const PulseStyle = ({ trace }: { trace: Trace }) => {
       const animation = `pulse-${tone.name}-${pulse.id}`;
       return [
         `@keyframes ${animation}{0%{background-color:rgb(${tone.color}/.45);box-shadow:0 0 0 3px rgb(${tone.color}/.8)}100%{background-color:rgb(${tone.color}/0);box-shadow:0 0 0 3px rgb(${tone.color}/0)}}`,
-        `${tone.list.map((token) => `${pulseSelector(token)}${notHovered}`).join(",")}{animation:${animation} 750ms ease-out;border-radius:4px}`,
+        `${tone.list.map((token) => `${pulseSelector(token)}${notHovered}`).join(",")}{animation:${animation} ${Math.round(unitSeconds(wave) * 800)}ms ease-out;border-radius:4px}`,
       ].join("\n");
     })
     .join("\n");
