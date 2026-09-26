@@ -8,6 +8,7 @@ readme = "README.md"
 
 [workspace]
 members = ["crates/ivm-ir", "crates/ivm-engine", "crates/ivm-dd", "crates/ivm-sqlite"]
+exclude = ["hafley-rs/crates/hafley-observe", "hafley-rs/crates/sqlite-ext"]
 resolver = "2"
 
 [workspace.package]

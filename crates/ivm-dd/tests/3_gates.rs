@@ -3,8 +3,8 @@
 mod support;
 
 use differential_dataflow::logging::{DifferentialEvent, DifferentialEventBuilder};
-use lab_20260924_0::{Agg, Dd, Engine, Frontier, LetRec, Op, Program, SourceChange, Stratum};
-use lab_20260924_0::dd::ReduceReadEventBuilder;
+use ivm_dd::{Agg, Dd, Engine, Frontier, LetRec, Op, Program, SourceChange, Stratum};
+use ivm_dd::ReduceReadEventBuilder;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use timely::logging::{TimelyEvent, TimelyEventBuilder};
@@ -102,7 +102,7 @@ fn k2_no_operator_created_after_install() {
         let (mut dd, seen) = observed(&program);
         dd.settle(Frontier::default()).unwrap();
         let installed = seen.lock().unwrap().operates.len();
-        let source = program.rels.iter().find(|r| r.kind == lab_20260924_0::RelKind::Source).unwrap();
+        let source = program.rels.iter().find(|r| r.kind == ivm_dd::RelKind::Source).unwrap();
         for i in 0..5 {
             let row = vec![i; source.cols.len()];
             dd.settle(Frontier { changes: vec![insert(source.id, row)] }).unwrap();
@@ -224,14 +224,20 @@ fn k20_two_engines_interleaved_match_solo_runs() {
 /// K6, K20, K27: engine sources read no files, hold no global state, name no test relation; only the SQLite engine links SQLite.
 #[test]
 fn k6_dd_engine_source_gate() {
-    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let forbidden = [
         "include_str!", "include_bytes!", "std::fs", ".tsv", "plans/", "\nstatic ", "\npub static ", "thread_local!", "OnceLock",
         "lazy_static", "rusqlite", "Connection", "\"membership\"", "\"permission\"", "\"direct_grant\"", "\"job\"",
         "\"access\"", "\"team_cost\"",
     ];
-    for file in ["0_ir.rs", "1_rel.rs", "2_dd.rs", "3_sqlite.rs", "lib.rs"] {
-        let text = std::fs::read_to_string(dir.join(file)).unwrap();
+    for (file, path) in [
+        ("0_ir.rs", "../ivm-ir/src/0_ir.rs"),
+        ("1_rel.rs", "../ivm-engine/src/1_rel.rs"),
+        ("2_dd.rs", "src/2_dd.rs"),
+        ("3_sqlite.rs", "../../labs/20260924.0.the-gang-runs-a-program-as-data-through-differential-dataflow/src/3_sqlite.rs"),
+        ("lib.rs", "src/lib.rs"),
+    ] {
+        let text = std::fs::read_to_string(dir.join(path)).unwrap();
         let text: String = text.lines().filter(|l| !l.trim_start().starts_with("//") && !l.contains("cfg(feature")).map(str::trim_start).collect::<Vec<_>>().join("\n");
         for token in forbidden {
             let links_sqlite = file == "lib.rs" || file == "3_sqlite.rs";

@@ -2,7 +2,7 @@
 
 mod support;
 
-use lab_20260924_0::Dd;
+use ivm_dd::Dd;
 
 #[test]
 fn s_a_access() {

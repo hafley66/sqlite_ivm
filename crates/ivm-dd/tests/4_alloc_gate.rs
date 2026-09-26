@@ -2,7 +2,7 @@
 
 mod support;
 
-use lab_20260924_0::{Dd, Engine, Frontier, SourceChange};
+use ivm_dd::{Dd, Engine, Frontier, SourceChange};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
