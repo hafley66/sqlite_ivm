@@ -45,6 +45,11 @@ fn s_n2_reach() {
 }
 
 #[test]
+fn s5_recursive_antijoin_outer_input() {
+    println!("{}", support::run::<Dd>("11_recursive_antijoin"));
+}
+
+#[test]
 fn s_t_s_i_timing_and_cells() {
     println!("{}", support::run::<Dd>("8_timing_and_cells"));
 }

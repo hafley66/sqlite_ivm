@@ -327,6 +327,8 @@ impl Rel for SqlRel {
 
     /// `l - l⋉threshold(π_rk r)`, built from this algebra's own join, threshold, negate and union.
     fn antijoin(&mut self, l: Self::C, r: Self::C, lk: &[ColId], rk: &[ColId]) -> Self::C {
+        // With recursive `l`, an outer insertion into `r` removes derivations. The SCC loop
+        // stashes positive outer deltas until after over-delete, so its rounds cannot seed that loss.
         self.flat(&l, "Antijoin over a LetRec variable");
         let unit = [r.arity as ColId];
         let keys = if rk.is_empty() { self.mfp(r, &[], &[Expr::Lit(0)], &unit) } else { self.mfp(r, &[], &[], rk) };

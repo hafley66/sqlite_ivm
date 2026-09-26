@@ -88,6 +88,14 @@ one-row `settle`, forcing a full snapshot of the loaded output trace. Allocation
 378,964 bytes at 1e3 rows to 10,286,036 bytes at 1e5 rows; the 4× gate failed. The snapshot
 call was removed after the run.
 
+S5 `11_recursive_antijoin`: `reach = seed ∪ (π_y(reach ⋈ edge) ▷ blocked)`;
+inserting `blocked(2)` deletes `reach(2)` and `reach(3)`, and deleting it restores both.
+DD matches the SQL recursive view on all five steps. SQLite rejects at install with
+`Unsupported("Antijoin over a LetRec variable")`. Its SCC round loop stashes positive outer
+deltas until after over-delete, so those rounds cannot seed the loss caused by an outer
+insertion into the negated input. The script header's `-- expect-error:` checks that install
+boundary in the SQLite suite; the DD suite runs the oracle steps.
+
 Sabotage runs, each turned red then restored: threshold passing weights through (S-A step 0);
 guard forwarding absent deletes (S-W); antijoin without right-side threshold (S-N1 d27); TopK
 ignoring `desc` (S-N3 f0); LetRec without in-loop threshold (S-N2 diverges, 10s watchdog).
@@ -99,7 +107,7 @@ ignoring `desc` (S-N3 f0); LetRec without in-loop threshold (S-N2 diverges, 10s 
 | `LetRec.limit`, nested LetRec, Window, Delay | explicit `Unsupported` |
 | K26 multi-worker | engine uses `execute_directly`; the boundary guard reads one worker's trace |
 | DD Min/Max | general reduce re-reads the group (118 µs at groups of 1000); hierarchical reduce not built |
-| SQLite DRed | assumes the recursive body is monotone in outer inputs; a Negate of an outer relation into an SCC is not detected |
+| SQLite DRed | recursive Antijoin with an outer negated input is rejected at install |
 | random harness | no Negate in generated programs; recursive generation covers linear graph steps over finite keys |
 
 ## Invalidates

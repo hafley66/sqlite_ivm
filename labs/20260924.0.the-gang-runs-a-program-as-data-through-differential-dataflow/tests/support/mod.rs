@@ -230,6 +230,16 @@ pub fn run<E: Engine + 'static>(name: &str) -> String {
     }
 }
 
+/// A script header's `-- expect-error:` names an install error for an engine that cannot run it.
+pub fn expect_install_error<E: Engine>(name: &str) {
+    let script = script(name);
+    let kind = script.setup.lines().find_map(|line| line.strip_prefix("-- expect-error: ")).expect("missing install error expectation");
+    match E::install(&script.program) {
+        Ok(_) => panic!("{name}: expected install error {kind}"),
+        Err(e) => assert!(format!("{:?}", e.kind).starts_with(kind), "{name}: expected {kind}, got {e}"),
+    }
+}
+
 fn run_steps<E: Engine>(name: &str) -> String {
     let script = script(name);
     let program = &script.program;

@@ -45,6 +45,11 @@ fn s_n2_reach() {
     println!("{}", support::run::<Sql>("7_reach"));
 }
 
+#[test]
+fn s5_recursive_antijoin_outer_input_rejected_at_install() {
+    support::expect_install_error::<Sql>("11_recursive_antijoin");
+}
+
 /// DRed case absent from the oracle: 3→1 feeds the 1⇄2 cycle, so after `-e(3,1)` row (3,1) is derivable only from itself.
 #[test]
 fn dred_self_supporting_cycle_matches_dd() {
