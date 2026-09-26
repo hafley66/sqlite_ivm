@@ -61,6 +61,7 @@ Random recursion/TopK extension, recorded 2026-09-26, debug build with `--featur
 | seeds 0..999, `SEEDS=1000 cargo test --offline -j 4 --features sqlite --test 2_random k5_oracle` | DD and SQLite recompute oracle on the K5 program: 2 passed; 69.72 s wall; maximum RSS 42,090,496 bytes |
 | generator coverage, seeds 0..999 | 262 one-relation LetRec; 245 two-relation LetRec; 731 programs with TopK |
 | full lab gate, `cargo test --offline -j 4 --features sqlite` | all suites green |
+| K11 allocation gate, one-row `settle` after 1e3 vs 1e5 loaded rows | 294,996 vs 294,996 bytes allocated; 4× limit |
 
 Each recursive case starts with a two-edge cycle and then deletes an edge. Recursive keys
 range over `0..3`, so each generated SCC has a finite fixpoint. The independent SQL printer
@@ -82,6 +83,11 @@ Load of the 1e5 frontier: DD 41-88 ms, SQLite 185-499 ms.
 DD K1: a one-row change arranges the same rows at 1e3 and 3e4 loaded; a change keyed to all
 loaded rows arranged 3002 vs 90002 and failed the gate.
 
+K11 sabotage: temporarily included `dd.snapshot(3)` inside the measured interval after the
+one-row `settle`, forcing a full snapshot of the loaded output trace. Allocations rose from
+378,964 bytes at 1e3 rows to 10,286,036 bytes at 1e5 rows; the 4× gate failed. The snapshot
+call was removed after the run.
+
 Sabotage runs, each turned red then restored: threshold passing weights through (S-A step 0);
 guard forwarding absent deletes (S-W); antijoin without right-side threshold (S-N1 d27); TopK
 ignoring `desc` (S-N3 f0); LetRec without in-loop threshold (S-N2 diverges, 10s watchdog).
@@ -92,7 +98,6 @@ ignoring `desc` (S-N3 f0); LetRec without in-loop threshold (S-N2 diverges, 10s 
 |---|---|
 | `LetRec.limit`, nested LetRec, Window, Delay | explicit `Unsupported` |
 | K26 multi-worker | engine uses `execute_directly`; the boundary guard reads one worker's trace |
-| K11 allocation scaling | not measured |
 | DD Min/Max | general reduce re-reads the group (118 µs at groups of 1000); hierarchical reduce not built |
 | SQLite DRed | assumes the recursive body is monotone in outer inputs; a Negate of an outer relation into an SCC is not detected |
 | random harness | no Negate in generated programs; recursive generation covers linear graph steps over finite keys |
