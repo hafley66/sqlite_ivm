@@ -15,7 +15,9 @@ fn extension_path() -> PathBuf {
     let ext = Path::new(env!("CARGO_MANIFEST_DIR")).join(
         "../../labs/20260923.2.the-gang-builds-the-sqlite-frontier-engine/crates/frontier-ext",
     );
-    let target = PathBuf::from(std::env::var("CARGO_TARGET_DIR").expect("CARGO_TARGET_DIR for isolated extension build"))
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("ivm-sqlite-extension-target"))
         .join("frontier-ext");
     let built = Command::new("cargo")
         .args(["build", "--offline", "-j", "4", "--manifest-path"])
