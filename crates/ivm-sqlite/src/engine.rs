@@ -171,6 +171,42 @@ fn settle_inner(
             )
             .map_err(|e| fail("stage", &change.relation, e))?;
     }
+    if let crate::plan::Root::Nodes(nodes) = &inst.plan.root {
+        let changes = nodes
+            .run(conn)
+            .map_err(|e| fail("node settle", &inst.name, e))?;
+        let cols = inst
+            .output
+            .iter()
+            .map(|c| catalog::quote(&c.name))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "INSERT INTO {}(__sign,{cols}) VALUES ({})",
+            catalog::quote(catalog::delta(&inst.name)),
+            (0..=inst.output.len())
+                .map(|_| "?")
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        for (row, weight) in changes {
+            let params = std::iter::once(weight)
+                .chain(row.into_iter())
+                .collect::<Vec<_>>();
+            conn.execute(&sql, rusqlite::params_from_iter(params))
+                .map_err(|e| fail("node delta", &inst.name, e))?;
+        }
+        meter
+            .exec(
+                conn,
+                phase,
+                catalog::catalog(),
+                &inst.sqls.bump,
+                [inst.name.as_str()],
+            )
+            .map_err(|e| fail("frontier bump", catalog::catalog(), e))?;
+        return read_delta(conn, inst, meter);
+    }
 
     for (object, sql) in &inst.sqls.scan_fills {
         let span =

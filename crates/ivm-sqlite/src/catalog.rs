@@ -410,7 +410,7 @@ fn bootstrap(conn: &Connection, inst: &Installed, meter: &mut Meter) -> Result<(
                 })
                 .collect()
         }
-        Root::Union { .. } => Vec::new(),
+        Root::Union { .. } | Root::Nodes(_) => Vec::new(),
     };
     for table in &inst.plan.sources {
         let scan = source_scan(inst, table);
@@ -466,6 +466,14 @@ fn bootstrap(conn: &Connection, inst: &Installed, meter: &mut Meter) -> Result<(
     }
 
     // Net the staged rows through the engine's own fill statements.
+    if let Root::Nodes(nodes) = &inst.plan.root {
+        nodes
+            .run(conn)
+            .map_err(|e| EngineError::new(Stage::Install, p, ErrorKind::Sqlite(e.to_string())))?;
+        conn.execute(&format!("DELETE FROM {}", quote(stage(p))), [])
+            .map_err(|e| EngineError::new(Stage::Install, p, ErrorKind::Sqlite(e.to_string())))?;
+        return Ok(());
+    }
     for (object, sql) in &inst.sqls.scan_fills {
         let span =
             tracing::info_span!(target: observe::TARGET, observe::SCAN_SPAN, object = %object);
@@ -745,6 +753,34 @@ fn push_program_ddl(inst: &Installed, sql: &mut String) {
         t = quote(stage(p)),
         v = stage_cols.join(","),
     ));
+    if let Root::Nodes(nodes) = &plan.root {
+        for ddl in &nodes.ddl {
+            sql.push_str(ddl);
+            sql.push(';');
+        }
+        let names = plan
+            .output
+            .iter()
+            .map(|c| quote(&c.name))
+            .collect::<Vec<_>>();
+        sql.push_str(&format!(
+            "CREATE TABLE IF NOT EXISTS {d}(__sign INTEGER NOT NULL,{cols});",
+            d = quote(delta(p)),
+            cols = names.join(",")
+        ));
+        let select = names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| format!("c{i} AS {name}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        sql.push_str(&format!(
+            "CREATE VIEW IF NOT EXISTS {v} AS SELECT {select} FROM ({snapshot});",
+            v = quote(view(p)),
+            snapshot = nodes.output_snapshot
+        ));
+        return;
+    }
     // One netted-delta table per scan.
     for scan in &plan.scans {
         let cols: Vec<String> = scan.needed.iter().map(|c| quote(c)).collect();
@@ -782,6 +818,7 @@ fn push_program_ddl(inst: &Installed, sql: &mut String) {
     // Root, its key index, the touch table and the delta table.
     let key_cols: Vec<String> = plan.output.iter().map(|c| quote(&c.name)).collect();
     match &plan.root {
+        Root::Nodes(_) => unreachable!(),
         Root::Union { .. } => {
             sql.push_str(&format!(
                 "CREATE TABLE IF NOT EXISTS {r}({keys}, __weight INTEGER NOT NULL);\
@@ -841,6 +878,7 @@ fn push_program_ddl(inst: &Installed, sql: &mut String) {
     ));
     // The visible-output view.
     match &plan.root {
+        Root::Nodes(_) => unreachable!(),
         Root::Union { .. } => {
             sql.push_str(&format!(
                 "CREATE VIEW IF NOT EXISTS {v} AS SELECT {cols} FROM {r} WHERE __weight > 0;",
@@ -1049,6 +1087,59 @@ fn build_topk_sql(topk: &TopKSpec, plan: &Compiled) -> String {
 }
 
 fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
+    if let Root::Nodes(_) = &plan.root {
+        let width = plan.stage_width.max(1);
+        let vals = (0..width)
+            .map(|i| format!("v{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let placeholders = (0..width)
+            .map(|i| format!("?{}", i + 4))
+            .collect::<Vec<_>>()
+            .join(",");
+        let names = plan
+            .output
+            .iter()
+            .map(|c| quote(&c.name))
+            .collect::<Vec<_>>()
+            .join(",");
+        return SettleSql {
+            clears: [stage(p), delta(p)]
+                .into_iter()
+                .map(|o| {
+                    let sql = format!("DELETE FROM {};", quote(&o));
+                    (o, sql)
+                })
+                .collect(),
+            stage_insert: format!(
+                "INSERT INTO {}(__seq,__table,__sign,{vals}) VALUES (?1,?2,?3,{placeholders});",
+                quote(stage(p))
+            ),
+            scan_fills: Vec::new(),
+            join_fills: Vec::new(),
+            anti_fills: Vec::new(),
+            topk_fills: Vec::new(),
+            root_touch: String::new(),
+            root_upsert: String::new(),
+            root_extrema: None,
+            root_delete: String::new(),
+            root_delta: String::new(),
+            bump: format!(
+                "UPDATE {} SET frontier=frontier+1 WHERE name=?1;",
+                quote(catalog())
+            ),
+            read_frontier: format!("SELECT frontier FROM {} WHERE name=?1;", quote(catalog())),
+            read_delta: format!(
+                "SELECT __sign,{names} FROM {} ORDER BY {names},__sign;",
+                quote(delta(p))
+            ),
+            weight_delta: Some(format!(
+                "SELECT {names},__sign FROM {} ORDER BY {names};",
+                quote(delta(p))
+            )),
+            snapshot: format!("SELECT {names} FROM {} ORDER BY {names};", quote(view(p))),
+        };
+    }
     let mut clears = Vec::new();
     for object in [stage(p), touch(p), delta(p)] {
         clears.push((object.clone(), format!("DELETE FROM {};", quote(&object))));
@@ -1377,6 +1468,7 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
     };
 
     let (root_touch, root_upsert, root_delete, root_delta, snapshot) = match &plan.root {
+        Root::Nodes(_) => unreachable!(),
         Root::Union { .. } => {
             let d = branch_sql(plan);
             let key_cond: Vec<String> = plan
@@ -1688,6 +1780,11 @@ pub(crate) fn teardown(conn: &Connection, inst: &Installed) -> Result<(), Engine
     sql.push_str(&format!("DROP TABLE IF EXISTS {};", quote(&collector_name)));
     sql.push_str(&format!("DROP VIEW IF EXISTS {};", quote(view(p))));
     sql.push_str(&format!("DROP TABLE IF EXISTS {};", quote(delta(p))));
+    if let Root::Nodes(nodes) = &inst.plan.root {
+        for (kind, object) in nodes.objects.iter().rev() {
+            sql.push_str(&format!("DROP {kind} IF EXISTS {};", quote(object)));
+        }
+    }
     sql.push_str(&format!("DROP TABLE IF EXISTS {};", quote(touch(p))));
     for scan in &inst.plan.scans {
         sql.push_str(&format!("DROP TABLE IF EXISTS {};", quote(&scan.stage)));

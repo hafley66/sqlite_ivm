@@ -40,6 +40,8 @@ mod composition;
 mod engine;
 mod error;
 mod meter;
+#[path = "3_nodes.rs"]
+mod nodes;
 mod observe;
 mod plan;
 

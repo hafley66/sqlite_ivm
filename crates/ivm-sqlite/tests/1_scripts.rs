@@ -27,3 +27,8 @@ fn self_join_script_through_promoted_sqlite_engine() {
 fn timing_and_cells_script_through_promoted_sqlite_engine() {
     println!("{}", support::run::<Sqlite>("8_timing_and_cells"));
 }
+
+#[test]
+fn reach_script_through_promoted_sqlite_engine() {
+    println!("{}", support::run::<Sqlite>("7_reach"));
+}

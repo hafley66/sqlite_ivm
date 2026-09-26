@@ -12,6 +12,7 @@
 //! operators only.
 
 use crate::error::{EngineError, ErrorKind, Stage};
+use crate::nodes::NodesPlan;
 use crate::OutputColumn;
 use ivm_ir::{
     Agg, ColId, Expr, Func, NodeId, Op, Order, Program as IrProgram, RelId, RelKind, Relation,
@@ -36,8 +37,11 @@ pub(crate) struct Compiled {
 }
 
 pub(crate) enum Root {
+    Nodes(Box<NodesPlan>),
     /// Set-union root: weight per output row = total derivation support.
-    Union { branches: Vec<BranchRef> },
+    Union {
+        branches: Vec<BranchRef>,
+    },
     /// Aggregate root over one scan.
     Group {
         scan: usize,
@@ -416,6 +420,13 @@ pub(crate) fn lower_ir(plan: &Compiled) -> Result<IrProgram, EngineError> {
         scan_nodes.push(scan_node);
     }
     let body = match &plan.root {
+        Root::Nodes(_) => {
+            return Err(EngineError::unsupported(
+                Stage::Plan,
+                "",
+                "typed node plan already has IR",
+            ))
+        }
         Root::Union { branches } => {
             let mut branch_nodes = Vec::new();
             for branch in branches {
@@ -546,6 +557,41 @@ pub(crate) fn compile_ir(
     output: Vec<OutputColumn>,
     schema: &Schema<'_>,
 ) -> Result<Compiled, EngineError> {
+    if ir
+        .strata
+        .iter()
+        .any(|stratum| matches!(stratum, Stratum::LetRec { .. }))
+    {
+        let nodes = NodesPlan::compile(name, ir)
+            .map_err(|e| EngineError::new(Stage::Plan, name, ErrorKind::State(e.to_string())))?;
+        let mut scans = Vec::new();
+        for source in ir.rels.iter().filter(|rel| rel.kind == RelKind::Source) {
+            let columns = schema(&source.name).ok_or_else(|| {
+                EngineError::unsupported(Stage::Plan, name, "source table missing")
+            })?;
+            scans.push(ScanSpec {
+                table: source.name.clone(),
+                needed: columns.clone(),
+                columns,
+                stage: String::new(),
+            });
+        }
+        let stage_width = scans
+            .iter()
+            .map(|scan| scan.columns.len())
+            .max()
+            .unwrap_or(0);
+        return Ok(Compiled {
+            root: Root::Nodes(Box::new(nodes)),
+            sources: scans.iter().map(|scan| scan.table.clone()).collect(),
+            scans,
+            joins: Vec::new(),
+            antis: Vec::new(),
+            topks: Vec::new(),
+            output,
+            stage_width,
+        });
+    }
     let unsupported = || {
         EngineError::unsupported(
             Stage::Plan,

@@ -224,6 +224,7 @@ impl Engine for Sqlite {
         let plan = &self.program.inner.plan;
         let width = plan.output.len();
         let sql = match &plan.root {
+            crate::plan::Root::Nodes(nodes) => nodes.output_snapshot.clone(),
             crate::plan::Root::Union { .. } => {
                 let cols = plan
                     .output
