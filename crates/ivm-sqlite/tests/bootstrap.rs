@@ -8,7 +8,7 @@
 //! failed install rolls back to a schema with no program objects and sources
 //! byte-identical to before. Cells keep their storage classes end to end.
 
-use frontier_engine::{Cell, Composition, EngineError, Frontier, Program, Tuple};
+use ivm_sqlite::{Cell, Composition, EngineError, Frontier, Program, Tuple};
 use rusqlite::types::Value;
 use rusqlite::Connection;
 

@@ -7,7 +7,7 @@
 //!
 //! Run: `cargo run --offline --release --example measure`
 
-use frontier_engine::{Cell, Frontier, Program};
+use ivm_sqlite::{Cell, Frontier, Program};
 use hafley_observe::rusage;
 use hafley_observe::sqlite_memory;
 use hafley_observe::CountRecorder;

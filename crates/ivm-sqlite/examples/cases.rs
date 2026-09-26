@@ -3,7 +3,7 @@
 //! Self-asserting: every frontier checks its required net output change and
 //! visible snapshot. Run with `cargo run --offline --example cases`.
 
-use frontier_engine::{Cell, Frontier, Program};
+use ivm_sqlite::{Cell, Frontier, Program};
 use rusqlite::Connection;
 
 fn setup() -> Connection {

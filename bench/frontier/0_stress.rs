@@ -3,7 +3,7 @@
 
 use anyhow::{bail, Context, Result};
 use frontier_dd_packet as dd_packet;
-use frontier_engine::Program;
+use ivm_sqlite::Program;
 use lab_20260923_0 as direct;
 use lab_20260923_1 as rust_iso;
 use rusqlite::Connection;

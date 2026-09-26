@@ -25,7 +25,7 @@
 //! the supported write surface; enabling `PRAGMA recursive_triggers` on the
 //! connection restores correct REPLACE handling.
 
-use frontier_engine::{Composition, Frontier, Program};
+use ivm_sqlite::{Composition, Frontier, Program};
 use rusqlite::Connection;
 use sqlite_ext::{watch, BulkTrigger, RowChange};
 
@@ -496,7 +496,7 @@ fn unsupported_compositions_are_explicit() {
 
 #[track_caller]
 fn assert_unsupported(
-    result: Result<impl std::any::Any, frontier_engine::EngineError>,
+    result: Result<impl std::any::Any, ivm_sqlite::EngineError>,
     needle: &str,
 ) {
     let err = result.err().expect("install must be rejected");

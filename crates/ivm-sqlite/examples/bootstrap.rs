@@ -9,7 +9,7 @@
 //!
 //! Run: `cargo run --offline --release --example bootstrap`
 
-use frontier_engine::{Frontier, Program};
+use ivm_sqlite::{Frontier, Program};
 use hafley_observe::rusage;
 use hafley_observe::sqlite_memory;
 use rusqlite::Connection;

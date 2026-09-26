@@ -6,7 +6,7 @@
 //! direct-batch tests drive `Frontier::settle` with `SourceChange` values, the
 //! linked-caller path.
 
-use frontier_engine::{Cell, Frontier, Program, Sign, SourceChange};
+use ivm_sqlite::{Cell, Frontier, Program, Sign, SourceChange};
 use rusqlite::Connection;
 
 fn conn() -> Connection {
@@ -365,7 +365,7 @@ fn direct_settle_batch_contracts() {
         .unwrap_err();
     assert!(matches!(
         err.kind,
-        frontier_engine::ErrorKind::UnknownRelation(_)
+        ivm_sqlite::ErrorKind::UnknownRelation(_)
     ));
 
     // Arity mismatch.
@@ -374,7 +374,7 @@ fn direct_settle_batch_contracts() {
         .unwrap_err();
     assert!(matches!(
         err.kind,
-        frontier_engine::ErrorKind::Arity {
+        ivm_sqlite::ErrorKind::Arity {
             expected: 2,
             got: 1,
             ..
@@ -453,11 +453,11 @@ fn unsupported_program_shapes_are_explicit() {
     let _program = install_access(&conn);
     let err = Program::install(&conn, "access", ACCESS_SQL).unwrap_err();
     assert!(!err.is_unsupported());
-    assert!(matches!(err.kind, frontier_engine::ErrorKind::State(_)));
+    assert!(matches!(err.kind, ivm_sqlite::ErrorKind::State(_)));
 
     // Unknown program on open.
     let err = Program::open(&conn, "missing").unwrap_err();
-    assert!(matches!(err.kind, frontier_engine::ErrorKind::State(_)));
+    assert!(matches!(err.kind, ivm_sqlite::ErrorKind::State(_)));
 }
 
 #[test]

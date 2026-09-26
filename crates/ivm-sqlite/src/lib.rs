@@ -8,10 +8,10 @@
 //! their storage class; no JSON, no stringified row keys.
 //!
 //! ```no_run
-//! use frontier_engine::{Cell, Frontier, Program, Sign, SourceChange};
+//! use ivm_sqlite::{Cell, Frontier, Program, Sign, SourceChange};
 //! use sqlite_ext::rusqlite::Connection;
 //!
-//! # fn main() -> Result<(), frontier_engine::EngineError> {
+//! # fn main() -> Result<(), ivm_sqlite::EngineError> {
 //! let conn = Connection::open_in_memory().unwrap();
 //! conn.execute_batch(
 //!     "CREATE TABLE job(id INTEGER PRIMARY KEY, team INTEGER NOT NULL, cost INTEGER NOT NULL)",

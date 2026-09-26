@@ -12,7 +12,7 @@
 
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
-use frontier_engine::{Frontier, Program};
+use ivm_sqlite::{Frontier, Program};
 use sqlite_ext::Plugin;
 use sqlite_ext::rusqlite::{functions::FunctionFlags, Connection, Error, Result};
 

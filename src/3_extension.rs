@@ -1,6 +1,6 @@
 use crate::catalog::{error, quote};
 use crate::statements::{self, Phase};
-use frontier_engine::{Composition, Frontier, Program};
+use ivm_sqlite::{Composition, Frontier, Program};
 use rusqlite::{functions::FunctionFlags, Connection, Result};
 const PLUGIN: sqlite_ext::Plugin =
     sqlite_ext::Plugin::new("sqlite_ivm", env!("CARGO_PKG_VERSION"), "warn", install);
@@ -127,7 +127,7 @@ fn register_frontier(db: &Connection) -> Result<()> {
             Ok(name)
         },
     )?;
-    frontier_engine::reattach_database(db).map_err(rusqlite::Error::from)
+    ivm_sqlite::reattach_database(db).map_err(rusqlite::Error::from)
 }
 
 #[cfg(feature = "extension")]

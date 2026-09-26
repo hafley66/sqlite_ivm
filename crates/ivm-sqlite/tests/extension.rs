@@ -15,13 +15,15 @@ fn extension_path() -> PathBuf {
     let ext = Path::new(env!("CARGO_MANIFEST_DIR")).join(
         "../../labs/20260923.2.the-gang-builds-the-sqlite-frontier-engine/crates/frontier-ext",
     );
+    let target = PathBuf::from(std::env::var("CARGO_TARGET_DIR").expect("CARGO_TARGET_DIR for isolated extension build"))
+        .join("frontier-ext");
     let built = Command::new("cargo")
-        .args(["build", "--offline", "--manifest-path"])
+        .args(["build", "--offline", "-j", "4", "--manifest-path"])
         .arg(ext.join("Cargo.toml"))
         // A fixed target dir pins the artifact path even when the ambient
         // CARGO_TARGET_DIR points elsewhere.
         .arg("--target-dir")
-        .arg(ext.join("target"))
+        .arg(&target)
         .output()
         .expect("cargo builds the frontier-ext cdylib");
     assert!(
@@ -34,7 +36,7 @@ fn extension_path() -> PathBuf {
     } else {
         "so"
     };
-    ext.join("target/debug")
+    target.join("debug")
         .join(format!("libfrontier_ext.{suffix}"))
 }
 
