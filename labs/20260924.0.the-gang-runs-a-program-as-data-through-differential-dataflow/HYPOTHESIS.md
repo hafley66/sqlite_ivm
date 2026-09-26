@@ -8,8 +8,9 @@ frontiers incrementally, and match a SQLite recompute oracle on every step. A SQ
 written against the same `Rel`/`Engine` traits, using relational SQL over delta and state
 tables, can then be proven equivalent to it on the same oracles.
 
-Falsified by: any oracle step where the delta or snapshot differs; any gate showing work that
-grows with loaded size for a constant-size change; any operator built after install.
+Falsified by: any oracle step where the delta or snapshot differs; any access or Count/Sum gate
+showing work that grows with loaded size for a constant-size change; Min/Max work growing faster
+than logarithmically with group size; any operator built after install.
 
 ## Knob
 
@@ -68,17 +69,42 @@ range over `0..3`, so each generated SCC has a finite fixpoint. The independent 
 uses a tagged `WITH RECURSIVE` CTE and `UNION` set semantics for either SCC size. K5 maps keys
 through `[2, 0, 1]`, scales costs and Sum by 3, and leaves Count unchanged.
 
-Paired release run, `cargo run --release --offline -j 2 --features sqlite --example 0_paired -- <engine> <workload> <n>`:
+Paired release run, `cargo run --release --offline --features sqlite --example 0_paired -- <engine> <workload> <n>`;
+the updated team_cost row used `-j 4`, while the original rows used `-j 2`:
 
 | workload | n | DD churn p50 | SQLite churn p50 | DD RSS KiB | SQLite RSS KiB |
 |---|---|---|---|---|---|
 | access | 1e5 | 36 µs | 32 µs | 82704 | 48800 |
-| team_cost (Min/Max, groups of 1000) | 1e5 | 118 µs | 49 µs | 63008 | 26672 |
+| team_cost (Min/Max, groups of 1000) | 1e5 | 134 → 102 µs | 48 µs | 82368 | 25168 |
 | team_sum (Count/Sum) | 1e5 | 25 µs | 28 µs | 45360 | 21808 |
 | reach_tail (append edge to 300-chain) | 300 | 6521 µs | 1690 µs | 35696 | 14416 |
 | reach_middle (cut and rejoin middle edge) | 300 | 53483 µs | 110310 µs | 117776 | 40096 |
 
 Load of the 1e5 frontier: DD 41-88 ms, SQLite 185-499 ms.
+
+Hierarchical Min/Max run, 2026-09-26, release, `--offline -j 4 --features sqlite`,
+`0_paired <engine> team_cost 100000`, three separate processes per variant:
+
+| variant | churn p50, µs (runs 1/2/3) | median, µs |
+|---|---:|---:|
+| DD before, general reduce | 133 / 141 / 134 | 134 |
+| DD after, hierarchical reduce | 101 / 102 / 102 | 102 |
+| SQLite reference | 49 / 48 / 48 | 48 |
+
+The DD target below SQLite's 49 µs was not reached. Min/Max projects distinct aggregate
+value tuples from live input rows, then uses 16 hash bucket levels of 4 bits and a final group
+reduce. Count/Sum stays accumulable; mixed reductions join both outputs and preserve aggregate
+order. A group count gate keeps Min/Max-only reductions empty when total signed weight is
+nonpositive. K1's
+one-row insertion into a group read 38 arrangement records at 100 rows and 64 at 10,000
+rows, with 56 and 60 arrangement batch records respectively. Temporarily changing the
+bucket loop from 15 shifts to zero left one bucket level; the same gate read 102 and
+10,002 records and failed its 240-record bound. The 15 shifts were restored.
+The signed-input gate inserts positive rows with values 5 and 10 and a distinct negated row
+with value 5. Both mixed and Min-only reductions retain 5 as the minimum; thresholding
+projected values before testing full-row liveness had incorrectly returned 10.
+Final gate: `RANDOM_CASES=1000 cargo test --offline -j 4 --features sqlite`, all suites green
+(20 DD scripts, 23 SQLite scripts, 9 random tests, 8 DD gates, 1 allocation gate).
 
 DD K1: a one-row change arranges the same rows at 1e3 and 3e4 loaded; a change keyed to all
 loaded rows arranged 3002 vs 90002 and failed the gate.
@@ -106,7 +132,7 @@ ignoring `desc` (S-N3 f0); LetRec without in-loop threshold (S-N2 diverges, 10s 
 |---|---|
 | `LetRec.limit`, nested LetRec, Window, Delay | explicit `Unsupported` |
 | K26 multi-worker | engine uses `execute_directly`; the boundary guard reads one worker's trace |
-| DD Min/Max | general reduce re-reads the group (118 µs at groups of 1000); hierarchical reduce not built |
+| DD Min/Max | hierarchical reduce built; 102 µs median at groups of 1000 versus 48 µs SQLite; below-SQLite target remains open |
 | SQLite DRed | recursive Antijoin with an outer negated input is rejected at install |
 | random harness | no Negate in generated programs; recursive generation covers linear graph steps over finite keys |
 
@@ -117,4 +143,4 @@ parser front end (`plan.rs`) is replaceable by `lower` over this IR.
 
 ## Verdict
 
-Holds. Both engines match the SQLite recompute oracle on 11 scripts and thousands of random programs, and each other on the DRed cycle case. Both do constant work per constant-size change on access and aggregates. On recursion SQLite is ahead for appends (1.7 ms vs 6.5 ms) and behind for a middle cut (110 ms vs 53 ms).
+Holds. Both engines match the SQLite recompute oracle on 11 scripts and thousands of random programs, and each other on the DRed cycle case. Access and Count/Sum do constant work per constant-size change; DD Min/Max passes the logarithmic group-size gate. On recursion SQLite is ahead for appends (1.7 ms vs 6.5 ms) and behind for a middle cut (110 ms vs 53 ms).

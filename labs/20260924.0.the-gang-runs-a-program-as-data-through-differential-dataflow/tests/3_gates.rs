@@ -3,7 +3,8 @@
 mod support;
 
 use differential_dataflow::logging::{DifferentialEvent, DifferentialEventBuilder};
-use lab_20260924_0::{Dd, Engine, Frontier, Op, Program, SourceChange, Stratum};
+use lab_20260924_0::{Agg, Dd, Engine, Frontier, LetRec, Op, Program, SourceChange, Stratum};
+use lab_20260924_0::dd::ReduceReadEventBuilder;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use timely::logging::{TimelyEvent, TimelyEventBuilder};
@@ -14,11 +15,12 @@ const PROGRAMS: [&str; 6] = ["0_access", "1_team_cost", "4_antijoin", "5_self_jo
 struct Seen {
     operates: Vec<String>,
     batch_rows: usize,
+    reduce_reads: usize,
 }
 
 fn observed(program: &Program) -> (Dd, Arc<Mutex<Seen>>) {
     let seen = Arc::new(Mutex::new(Seen::default()));
-    let (timely_seen, arrange_seen) = (Arc::clone(&seen), Arc::clone(&seen));
+    let (timely_seen, arrange_seen, reduce_seen) = (Arc::clone(&seen), Arc::clone(&seen), Arc::clone(&seen));
     let hook = Box::new(move |worker: &mut timely::worker::Worker| {
         let mut registry = worker.log_register().unwrap();
         registry.insert::<TimelyEventBuilder, _>("timely", move |_, data| {
@@ -33,6 +35,11 @@ fn observed(program: &Program) -> (Dd, Arc<Mutex<Seen>>) {
                 if let DifferentialEvent::Batch(batch) = event {
                     arrange_seen.lock().unwrap().batch_rows += batch.length;
                 }
+            }
+        });
+        registry.insert::<ReduceReadEventBuilder, _>("lab/reduce_reads", move |_, data| {
+            for (_, rows) in data.iter().flat_map(|d| d.iter()) {
+                reduce_seen.lock().unwrap().reduce_reads += rows;
             }
         });
     });
@@ -57,7 +64,15 @@ fn k9_operator_census_matches_op_list() {
                     *want.entry("Threshold").or_default() += 1;
                 }
                 Op::Threshold(_) => *want.entry("Threshold").or_default() += 1,
-                Op::Reduce { .. } | Op::TopK { .. } => *want.entry("Reduce").or_default() += 1,
+                Op::Reduce { aggs, .. } => {
+                    let extrema = aggs.iter().any(|a| matches!(a, Agg::Min(_) | Agg::Max(_)));
+                    *want.entry("Reduce").or_default() += if extrema { 18 } else { 1 };
+                    if extrema {
+                        *want.entry("Threshold").or_default() += 2;
+                        *want.entry("Join").or_default() += 1;
+                    }
+                }
+                Op::TopK { .. } => *want.entry("Reduce").or_default() += 1,
                 _ => {}
             }
         }
@@ -114,6 +129,77 @@ fn k1_one_row_change_work_is_independent_of_loaded_size() {
     let large = arranged_by_one_change(30_000);
     assert!(small > 0, "logger saw no batches");
     assert!(large <= small * 2, "one-row change arranged {small} rows at 1e3 loaded, {large} at 3e4");
+}
+
+/// K1: count arrangement records actually read by every hierarchical reduce closure.
+/// The logger fires for each affected bucket, including buckets whose extrema do not change.
+#[test]
+fn k1_team_cost_reduce_reads_grow_logarithmically() {
+    let program = support::program("1_team_cost");
+    let work = |group_size: i64| -> (usize, usize) {
+        let (mut dd, seen) = observed(&program);
+        let load = (0..group_size).map(|id| insert(0, vec![id, 0, id + 1])).collect();
+        dd.settle(Frontier { changes: load }).unwrap();
+        {
+            let mut seen = seen.lock().unwrap();
+            seen.batch_rows = 0;
+            seen.reduce_reads = 0;
+        }
+        dd.settle(Frontier { changes: vec![insert(0, vec![-1, 0, 0])] }).unwrap();
+        let seen = seen.lock().unwrap();
+        (seen.reduce_reads, seen.batch_rows)
+    };
+    let small = work(100);
+    let large = work(10_000);
+    println!("team_cost K1 group=100 reads={} batch_rows={}; group=10000 reads={} batch_rows={}", small.0, small.1, large.0, large.1);
+    assert!(small.0 > 0 && small.1 > 0, "loggers saw no reduce reads or arrangement batches");
+    assert!(large.0 <= 16 * 15, "10k-row group read {} arrangement records", large.0);
+    assert!(large.0 <= small.0 * 2, "reduce reads at group sizes 100 and 10000: {small:?}, {large:?}");
+}
+
+#[test]
+fn hierarchical_reduce_inside_letrec_matches_top_level() {
+    let plain = support::program("1_team_cost");
+    let mut nested = plain.clone();
+    nested.strata[0] = Stratum::LetRec(LetRec { ids: vec![1], bodies: vec![1], limit: None });
+    let mut top = Dd::install(&plain).unwrap();
+    let mut inner = Dd::install(&nested).unwrap();
+    let steps = [
+        Frontier { changes: vec![insert(0, vec![1, 0, 4]), insert(0, vec![2, 0, 9]), insert(0, vec![3, 1, 6])] },
+        Frontier { changes: vec![insert(0, vec![4, 0, 2])] },
+        Frontier { changes: vec![SourceChange { rel: 0, row: vec![1, 0, 4], w: -1 }] },
+    ];
+    for frontier in steps {
+        assert_eq!(inner.settle(frontier.clone()).unwrap(), top.settle(frontier).unwrap());
+        assert_eq!(inner.snapshot(1).unwrap(), top.snapshot(1).unwrap());
+    }
+}
+
+#[test]
+fn hierarchical_reduce_preserves_live_rows_with_signed_inputs() {
+    let program: Program = serde_json::from_str(r#"{
+        "rels": [
+            {"id": 0, "name": "positive", "cols": ["Int", "Int", "Int"], "kind": "Source"},
+            {"id": 1, "name": "negative", "cols": ["Int", "Int", "Int"], "kind": "Source"},
+            {"id": 2, "name": "mixed", "cols": ["Int", "Int", "Int", "Int", "Int"], "kind": "Derived"},
+            {"id": 3, "name": "extrema", "cols": ["Int", "Int"], "kind": "Derived"}
+        ],
+        "nodes": [
+            {"Get": 0}, {"Get": 1}, {"Negate": 1}, {"Union": [0, 2]},
+            {"Reduce": {"input": 3, "key": [1], "aggs": ["Count", {"Sum": 2}, {"Min": 2}, {"Max": 2}]}},
+            {"Reduce": {"input": 3, "key": [1], "aggs": [{"Min": 2}]}}
+        ],
+        "strata": [{"Let": {"id": 2, "body": 4}}, {"Let": {"id": 3, "body": 5}}],
+        "outputs": [2, 3]
+    }"#).unwrap();
+    let mut dd = Dd::install(&program).unwrap();
+    dd.settle(Frontier { changes: vec![
+        insert(0, vec![1, 0, 5]),
+        insert(0, vec![3, 0, 10]),
+        insert(1, vec![2, 0, 5]),
+    ] }).unwrap();
+    assert_eq!(dd.snapshot(2).unwrap(), vec![(vec![0, 1, 10, 5, 10], 1)]);
+    assert_eq!(dd.snapshot(3).unwrap(), vec![(vec![0, 5], 1)]);
 }
 
 /// K20: two engines with different programs, settles interleaved, each equals its solo run.

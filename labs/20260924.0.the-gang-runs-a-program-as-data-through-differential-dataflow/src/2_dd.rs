@@ -10,7 +10,7 @@ use differential_dataflow::trace::TraceReader;
 use differential_dataflow::lattice::Lattice;
 use differential_dataflow::operators::iterate::Variable;
 use differential_dataflow::VecCollection;
-use std::hash::Hash;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use timely::dataflow::Scope;
 use timely::order::Product;
 use timely::progress::Timestamp;
@@ -22,11 +22,15 @@ use std::thread::{self, JoinHandle};
 use timely::dataflow::operators::probe::Handle as ProbeHandle;
 use timely::dataflow::operators::Probe;
 use timely::progress::frontier::AntichainRef;
+use std::time::Duration;
 
 type Time = u64;
 type Coll<'s, T = Time> = VecCollection<'s, T, Row, W>;
 type Trace = TraceAgent<KeySpine<Row, Time, W>>;
 type Inner = Product<Time, u64>;
+/// Rows supplied by an arrangement to a hierarchical reduce closure.
+pub type ReduceReadEventBuilder = timely::container::CapacityContainerBuilder<Vec<(Duration, usize)>>;
+type ReduceReadLogger = timely::logging_core::Logger<ReduceReadEventBuilder>;
 
 /// Timestamps the algebra runs at. Only the top level may open a LetRec scope; this bounds monomorphization.
 pub trait Nest: Timestamp + Lattice + Ord + Hash + Clone + std::fmt::Debug + 'static {
@@ -62,6 +66,7 @@ impl Nest for Time {
                 sources: rel.sources.iter().map(|(id, c)| (*id, c.clone().enter(sub))).collect(),
                 outputs: Vec::new(),
                 taps: rel.taps.clone(),
+                reduce_reads: rel.reduce_reads.clone(),
             };
             let mut scope_defined: Vec<(RelId, Coll<'_, Inner>)> =
                 defined.iter().map(|(id, c)| (*id, c.clone().enter(sub))).collect();
@@ -93,6 +98,7 @@ pub struct DdRel<'s, T: Nest = Time> {
     outputs: Vec<(RelId, Coll<'s, T>)>,
     /// Traced mode only: every observed node's records land here.
     taps: Option<Rc<RefCell<Vec<DdTap>>>>,
+    reduce_reads: Option<ReduceReadLogger>,
 }
 
 /// One record seen on an IR node's output collection in traced mode.
@@ -174,31 +180,29 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
 
     fn reduce(&mut self, c: Self::C, key: &[ColId], aggs: &[Agg]) -> Self::C {
         let (key, aggs) = (key.to_vec(), aggs.to_vec());
-        if aggs.iter().all(|a| matches!(a, Agg::Count | Agg::Sum(_))) {
-            return accumulable(c, key, aggs);
-        }
-        c.map(move |row| (cols(&row, &key), row))
-            .reduce(move |_k, input: &[(&Row, W)], output: &mut Vec<(Row, W)>| {
-                let count: W = input.iter().map(|(_, w)| *w).sum();
-                if count <= 0 {
-                    return;
-                }
-                let live = || input.iter().filter(|(_, w)| *w > 0).map(|(row, _)| *row);
-                let values = aggs
-                    .iter()
-                    .map(|agg| match agg {
-                        Agg::Count => count,
-                        Agg::Sum(c) => input.iter().map(|(row, w)| row[*c as usize] * w).sum(),
-                        Agg::Min(c) => live().map(|row| row[*c as usize]).min().unwrap(),
-                        Agg::Max(c) => live().map(|row| row[*c as usize]).max().unwrap(),
-                    })
-                    .collect();
-                output.push((values, 1));
-            })
-            .map(|(mut k, values)| {
-                k.extend(values);
-                k
-            })
+        let linear: Vec<Agg> = aggs.iter().filter(|a| matches!(a, Agg::Count | Agg::Sum(_))).cloned().collect();
+        let extrema: Vec<Agg> = aggs.iter().filter(|a| matches!(a, Agg::Min(_) | Agg::Max(_))).cloned().collect();
+        let values = match (linear.is_empty(), extrema.is_empty()) {
+            (false, true) => accumulable_values(c, key, linear),
+            (true, false) => accumulable_values(c.clone(), key.clone(), vec![Agg::Count])
+                .join(hierarchical_extrema(c, key, extrema, self.reduce_reads.clone()))
+                .map(|(group, (_, values))| (group, values)),
+            (false, false) => accumulable_values(c.clone(), key.clone(), linear)
+                .join(hierarchical_extrema(c, key, extrema, self.reduce_reads.clone()))
+                .map(move |(group, (linear, extrema))| {
+                    let (mut li, mut ei) = (linear.into_iter(), extrema.into_iter());
+                    let values = aggs.iter().map(|a| match a {
+                        Agg::Count | Agg::Sum(_) => li.next().unwrap(),
+                        Agg::Min(_) | Agg::Max(_) => ei.next().unwrap(),
+                    }).collect();
+                    (group, values)
+                }),
+            (true, true) => accumulable_values(c, key, linear),
+        };
+        values.map(|(mut group, values)| {
+            group.extend(values);
+            group
+        })
     }
 
     fn threshold(&mut self, c: Self::C) -> Self::C {
@@ -243,7 +247,7 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
 }
 
 /// Count and Sum ride in the diff (`[count, sums..]`), so a group is one record and a change costs O(1) in group size.
-fn accumulable<'s, T: Nest>(c: Coll<'s, T>, key: Vec<ColId>, aggs: Vec<Agg>) -> Coll<'s, T> {
+fn accumulable_values<'s, T: Nest>(c: Coll<'s, T>, key: Vec<ColId>, aggs: Vec<Agg>) -> VecCollection<'s, T, (Row, Row), W> {
     let sums: Vec<ColId> = aggs.iter().filter_map(|a| if let Agg::Sum(c) = a { Some(*c) } else { None }).collect();
     c.explode(move |row: Row| {
         let mut acc = vec![1 as W];
@@ -268,10 +272,56 @@ fn accumulable<'s, T: Nest>(c: Coll<'s, T>, key: Vec<ColId>, aggs: Vec<Agg>) -> 
             .collect();
         output.push((values, 1));
     })
-    .map(|(mut k, values)| {
-        k.extend(values);
-        k
-    })
+}
+
+/// Each level replaces up to 16 child buckets with their extrema. The final group reduce
+/// sees only the 16 possible high hash nibbles, regardless of the group's row count.
+fn hierarchical_extrema<'s, T: Nest>(
+    c: Coll<'s, T>, key: Vec<ColId>, aggs: Vec<Agg>, reduce_reads: Option<ReduceReadLogger>,
+) -> VecCollection<'s, T, (Row, Row), W> {
+    let columns: Vec<ColId> = aggs.iter().map(|a| match a { Agg::Min(c) | Agg::Max(c) => *c, _ => unreachable!() }).collect();
+    // Test row liveness before collapsing rows with equal aggregate values.
+    let mut buckets = c.threshold(|_, w: &W| if *w > 0 { 1 } else { 0 })
+        .map(move |row| (cols(&row, &key), cols(&row, &columns)))
+        .threshold(|_, w: &W| if *w > 0 { 1 } else { 0 })
+        .map(move |(group, values)| {
+            let mut hasher = DefaultHasher::new();
+            values.hash(&mut hasher);
+            ((group, hasher.finish()), values)
+        });
+    for _ in 0..15 {
+        let level_aggs = aggs.clone();
+        let level_reads = reduce_reads.clone();
+        buckets = buckets
+            .reduce(move |_, input: &[(&Row, W)], output: &mut Vec<(Row, W)>| {
+                if let Some(logger) = &level_reads { logger.log(input.len()); }
+                extrema(input, &level_aggs, output)
+            })
+            .map(|((group, bucket), values)| ((group, bucket >> 4), values));
+    }
+    let level_aggs = aggs.clone();
+    let level_reads = reduce_reads.clone();
+    buckets
+        .reduce(move |_, input: &[(&Row, W)], output: &mut Vec<(Row, W)>| {
+            if let Some(logger) = &level_reads { logger.log(input.len()); }
+            extrema(input, &level_aggs, output)
+        })
+        .map(|((group, _), values)| (group, values))
+        .reduce(move |_, input: &[(&Row, W)], output: &mut Vec<(Row, W)>| {
+            if let Some(logger) = &reduce_reads { logger.log(input.len()); }
+            extrema(input, &aggs, output)
+        })
+}
+
+fn extrema(input: &[(&Row, W)], aggs: &[Agg], output: &mut Vec<(Row, W)>) {
+    let mut live = input.iter().filter(|(_, w)| *w > 0).map(|(row, _)| *row).peekable();
+    if live.peek().is_none() { return; }
+    let values = aggs.iter().enumerate().map(|(i, agg)| match agg {
+        Agg::Min(_) => live.clone().map(|row| row[i]).min().unwrap(),
+        Agg::Max(_) => live.clone().map(|row| row[i]).max().unwrap(),
+        _ => unreachable!(),
+    }).collect();
+    output.push((values, 1));
 }
 
 /// `order` first, then the whole row ascending, so ties resolve the same way in every engine.
@@ -371,6 +421,7 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
         if let Some(hook) = hook.lock().unwrap().take() {
             hook(worker);
         }
+        let reduce_reads = worker.log_register().and_then(|registry| registry.get::<ReduceReadEventBuilder>("lab/reduce_reads"));
         let mut probe = ProbeHandle::new();
         let captured: Rc<RefCell<Vec<(RelId, Row, Time, W)>>> = Rc::default();
         let taps: Option<Rc<RefCell<Vec<DdTap>>>> = traced.then(Rc::default);
@@ -386,7 +437,7 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                 guards.insert(rel.id, guard.trace);
                 sources.insert(rel.id, c);
             }
-            let mut rel = DdRel { scope, sources, outputs: Vec::new(), taps: taps.clone() };
+            let mut rel = DdRel { scope, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone() };
             lower(&program, &mut rel)?;
             let mut outputs = BTreeMap::new();
             for (id, c) in rel.outputs {
@@ -432,6 +483,7 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                         input.flush();
                     }
                     worker.step_while(|| probe.less_than(&epoch));
+                    if let Some(logger) = &reduce_reads { logger.flush(); }
                     for trace in built.guards.values_mut().chain(built.outputs.values_mut()) {
                         trace.set_logical_compaction(AntichainRef::new(&[epoch]));
                         trace.set_physical_compaction(AntichainRef::new(&[epoch]));
