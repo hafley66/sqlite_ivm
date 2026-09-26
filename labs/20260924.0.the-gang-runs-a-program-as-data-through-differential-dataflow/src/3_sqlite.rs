@@ -957,11 +957,11 @@ impl Engine for Sql {
         Self::install(program)
     }
 
-    fn settle(&mut self, frontier: Frontier) -> Result<Delta, EngineError> {
+    fn settle(&mut self, frontier: Frontier, _host: &mut impl Host) -> Result<Delta, EngineError> {
         self.settle_traced(frontier).map(|(delta, _)| delta)
     }
 
-    fn snapshot(&self, rel: RelId) -> Result<Vec<(Row, W)>, EngineError> {
+    fn snapshot(&self, rel: RelId, _host: &mut impl Host) -> Result<Vec<(Row, W)>, EngineError> {
         let out = self
             .outputs
             .iter()

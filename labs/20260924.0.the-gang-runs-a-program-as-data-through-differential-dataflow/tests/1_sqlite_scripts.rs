@@ -66,8 +66,8 @@ fn dred_self_supporting_cycle_matches_dd() {
     ];
     for changes in steps {
         let frontier = Frontier { changes };
-        assert_eq!(sql.settle(frontier.clone()).unwrap(), dd.settle(frontier).unwrap());
-        assert_eq!(sql.snapshot(2).unwrap(), dd.snapshot(2).unwrap());
+        assert_eq!(sql.settle(frontier.clone(), &mut lab_20260924_0::rel::Raw::default()).unwrap(), dd.settle(frontier, &mut lab_20260924_0::rel::Raw::default()).unwrap());
+        assert_eq!(sql.snapshot(2, &mut lab_20260924_0::rel::Raw::default()).unwrap(), dd.snapshot(2, &mut lab_20260924_0::rel::Raw::default()).unwrap());
     }
 }
 
@@ -87,9 +87,9 @@ fn steps_of_one_change(program: &lab_20260924_0::Program, load: Vec<lab_20260924
         rusqlite::ffi::sqlite3_progress_handler(conn.handle(), 1, Some(tick), counter)
     });
     let mut sql = Sql::install_observed(program, hook).unwrap();
-    sql.settle(Frontier { changes: load }).unwrap();
+    sql.settle(Frontier { changes: load }, &mut lab_20260924_0::rel::Raw::default()).unwrap();
     steps.store(0, Ordering::Relaxed);
-    sql.settle(Frontier { changes: vec![change] }).unwrap();
+    sql.settle(Frontier { changes: vec![change] }, &mut lab_20260924_0::rel::Raw::default()).unwrap();
     let n = steps.load(Ordering::Relaxed);
     drop(sql);
     n

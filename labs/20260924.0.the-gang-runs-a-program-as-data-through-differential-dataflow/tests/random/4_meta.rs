@@ -49,7 +49,7 @@ fn permuted(p: &Program, rng: &mut Rng) -> (Program, BTreeMap<RelId, RelId>) {
 }
 
 fn settle<E: Engine>(e: &mut E, f: &Frontier, at: usize) -> Result<Vec<(RelId, Row, W)>, String> {
-    let d = e.settle(f.clone()).map_err(|e| format!("frontier {at}: settle: {e}"))?;
+    let d = e.settle(f.clone(), &mut lab_20260924_0::rel::Raw::default()).map_err(|e| format!("frontier {at}: settle: {e}"))?;
     raw(&d).map_err(|e| format!("frontier {at}: {e}"))?;
     Ok(d.changes)
 }

@@ -83,7 +83,7 @@ fn k9_operator_census_matches_op_list() {
             }
         }
         let (mut dd, seen) = observed(&program);
-        dd.settle(Frontier::default()).unwrap();
+        dd.settle(Frontier::default(), &mut ivm_dd::Raw::default()).unwrap();
         let mut got: BTreeMap<&str, usize> = BTreeMap::new();
         for op in &seen.lock().unwrap().operates {
             if let Some(k) = ["Join", "Threshold", "Reduce", "LetRec"].into_iter().find(|k| op == k) {
@@ -100,12 +100,12 @@ fn k2_no_operator_created_after_install() {
     for name in PROGRAMS {
         let program = support::program(name);
         let (mut dd, seen) = observed(&program);
-        dd.settle(Frontier::default()).unwrap();
+        dd.settle(Frontier::default(), &mut ivm_dd::Raw::default()).unwrap();
         let installed = seen.lock().unwrap().operates.len();
         let source = program.rels.iter().find(|r| r.kind == ivm_dd::RelKind::Source).unwrap();
         for i in 0..5 {
             let row = vec![i; source.cols.len()];
-            dd.settle(Frontier { changes: vec![insert(source.id, row)] }).unwrap();
+            dd.settle(Frontier { changes: vec![insert(source.id, row)] }, &mut ivm_dd::Raw::default()).unwrap();
         }
         assert_eq!(seen.lock().unwrap().operates.len(), installed, "{name}: operators created during settle");
     }
@@ -119,9 +119,9 @@ fn k1_one_row_change_work_is_independent_of_loaded_size() {
         let (mut dd, seen) = observed(&program);
         let mut load = vec![insert(1, vec![10, 100])];
         load.extend((0..loaded).map(|person| insert(0, vec![person, 10])));
-        dd.settle(Frontier { changes: load }).unwrap();
+        dd.settle(Frontier { changes: load }, &mut ivm_dd::Raw::default()).unwrap();
         seen.lock().unwrap().batch_rows = 0;
-        dd.settle(Frontier { changes: vec![insert(2, vec![-1, 7])] }).unwrap();
+        dd.settle(Frontier { changes: vec![insert(2, vec![-1, 7])] }, &mut ivm_dd::Raw::default()).unwrap();
         let rows = seen.lock().unwrap().batch_rows;
         rows
     };
@@ -139,13 +139,13 @@ fn k1_team_cost_reduce_reads_grow_logarithmically() {
     let work = |group_size: i64| -> (usize, usize) {
         let (mut dd, seen) = observed(&program);
         let load = (0..group_size).map(|id| insert(0, vec![id, 0, id + 1])).collect();
-        dd.settle(Frontier { changes: load }).unwrap();
+        dd.settle(Frontier { changes: load }, &mut ivm_dd::Raw::default()).unwrap();
         {
             let mut seen = seen.lock().unwrap();
             seen.batch_rows = 0;
             seen.reduce_reads = 0;
         }
-        dd.settle(Frontier { changes: vec![insert(0, vec![-1, 0, 0])] }).unwrap();
+        dd.settle(Frontier { changes: vec![insert(0, vec![-1, 0, 0])] }, &mut ivm_dd::Raw::default()).unwrap();
         let seen = seen.lock().unwrap();
         (seen.reduce_reads, seen.batch_rows)
     };
@@ -170,8 +170,8 @@ fn hierarchical_reduce_inside_letrec_matches_top_level() {
         Frontier { changes: vec![SourceChange { rel: 0, row: vec![1, 0, 4], w: -1 }] },
     ];
     for frontier in steps {
-        assert_eq!(inner.settle(frontier.clone()).unwrap(), top.settle(frontier).unwrap());
-        assert_eq!(inner.snapshot(1).unwrap(), top.snapshot(1).unwrap());
+        assert_eq!(inner.settle(frontier.clone(), &mut ivm_dd::Raw::default()).unwrap(), top.settle(frontier, &mut ivm_dd::Raw::default()).unwrap());
+        assert_eq!(inner.snapshot(1, &mut ivm_dd::Raw::default()).unwrap(), top.snapshot(1, &mut ivm_dd::Raw::default()).unwrap());
     }
 }
 
@@ -197,9 +197,9 @@ fn hierarchical_reduce_preserves_live_rows_with_signed_inputs() {
         insert(0, vec![1, 0, 5]),
         insert(0, vec![3, 0, 10]),
         insert(1, vec![2, 0, 5]),
-    ] }).unwrap();
-    assert_eq!(dd.snapshot(2).unwrap(), vec![(vec![0, 1, 10, 5, 10], 1)]);
-    assert_eq!(dd.snapshot(3).unwrap(), vec![(vec![0, 5], 1)]);
+    ] }, &mut ivm_dd::Raw::default()).unwrap();
+    assert_eq!(dd.snapshot(2, &mut ivm_dd::Raw::default()).unwrap(), vec![(vec![0, 1, 10, 5, 10], 1)]);
+    assert_eq!(dd.snapshot(3, &mut ivm_dd::Raw::default()).unwrap(), vec![(vec![0, 5], 1)]);
 }
 
 /// K20: two engines with different programs, settles interleaved, each equals its solo run.
@@ -211,13 +211,13 @@ fn k20_two_engines_interleaved_match_solo_runs() {
     let r_steps: Vec<Frontier> = (0..4).map(|i| Frontier { changes: vec![insert(0, vec![i, i + 1])] }).collect();
     let solo = |program: &Program, steps: &[Frontier]| -> Vec<Vec<(u32, Vec<i64>, i64)>> {
         let mut dd = Dd::install(program).unwrap();
-        steps.iter().map(|f| dd.settle(f.clone()).unwrap().changes).collect()
+        steps.iter().map(|f| dd.settle(f.clone(), &mut ivm_dd::Raw::default()).unwrap().changes).collect()
     };
     let (want_a, want_r) = (solo(&access, &a_steps), solo(&reach, &r_steps));
     let (mut a, mut r) = (Dd::install(&access).unwrap(), Dd::install(&reach).unwrap());
     for i in 0..4 {
-        assert_eq!(a.settle(a_steps[i].clone()).unwrap().changes, want_a[i], "access step {i}");
-        assert_eq!(r.settle(r_steps[i].clone()).unwrap().changes, want_r[i], "reach step {i}");
+        assert_eq!(a.settle(a_steps[i].clone(), &mut ivm_dd::Raw::default()).unwrap().changes, want_a[i], "access step {i}");
+        assert_eq!(r.settle(r_steps[i].clone(), &mut ivm_dd::Raw::default()).unwrap().changes, want_r[i], "reach step {i}");
     }
 }
 

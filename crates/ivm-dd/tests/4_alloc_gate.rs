@@ -53,11 +53,11 @@ fn one_change_bytes(loaded: i64) -> usize {
     let mut dd = Dd::install(&program).unwrap();
     let mut load = vec![insert(1, vec![10, 100])];
     load.extend((0..loaded).map(|person| insert(0, vec![person, 10])));
-    dd.settle(Frontier { changes: load }).unwrap();
+    dd.settle(Frontier { changes: load }, &mut ivm_dd::Raw::default()).unwrap();
 
     ALLOCATED.store(0, Ordering::Relaxed);
     COUNTING.store(true, Ordering::SeqCst);
-    dd.settle(Frontier { changes: vec![insert(2, vec![-1, 7])] }).unwrap();
+    dd.settle(Frontier { changes: vec![insert(2, vec![-1, 7])] }, &mut ivm_dd::Raw::default()).unwrap();
     COUNTING.store(false, Ordering::SeqCst);
     ALLOCATED.load(Ordering::Relaxed)
 }

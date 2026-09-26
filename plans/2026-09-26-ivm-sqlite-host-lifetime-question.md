@@ -11,14 +11,12 @@ the caller's `Connection`, and the extension's `Plugin` borrows its callback
 connection. Neither borrow can be stored safely in the returned `Self` under
 the current trait signature.
 
-**Boop-Ask:** May `Engine::settle` and `Engine::snapshot` also receive a host
-reference? The proposed signatures are `settle(&mut self, frontier: Frontier,
-host: &mut impl Host)` and `snapshot(&self, rel: RelId, host: &impl Host)`. `Dd`
-would ignore that argument; `ivm-sqlite` would resolve the connection for each
-call. This keeps `Raw` caller-owned and lets `Plugin` use the extension's
-connection without retaining an unsafe pointer. The alternative is a
-lifetime-bound SQLite handle API outside the common `Engine` trait.
+Decision, delegated to the coordinator on 2026-09-26: pass `&mut impl Host`
+to both `Engine::settle` and `Engine::snapshot`. `Host::conn(&mut self)` exposes
+the caller-owned or extension connection through an engine-neutral `Any`
+reference. `Dd` ignores the host. `ivm-sqlite` resolves the connection for each
+call and retains no borrowed pointer or owned connection.
 
-The answer affects the SQLite `Engine` implementation, the shared runtime,
-and the promoted two-engine lab harness. It does not affect the committed
+The decision affects the SQLite `Engine` implementation, the shared runtime,
+and the promoted two-engine lab harness. It does not change the committed
 collector path or the existing SQLite tests.

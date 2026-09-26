@@ -107,7 +107,7 @@ pub fn raw(d: &Delta) -> Result<(), String> {
 }
 
 pub fn snapshot<E: Engine>(e: &E, rel: RelId) -> Result<Vec<(Row, W)>, String> {
-    let mut rows = e.snapshot(rel).map_err(|e| format!("snapshot: {e}"))?;
+    let mut rows = e.snapshot(rel, &mut lab_20260924_0::rel::Raw::default()).map_err(|e| format!("snapshot: {e}"))?;
     rows.sort();
     Ok(rows)
 }
@@ -121,7 +121,7 @@ pub fn oracle<E: Engine>(case: &Case) -> Result<(), String> {
     for (i, f) in case.frontiers.iter().enumerate() {
         oracle.apply(p, f)?;
         let after = oracle.bags()?;
-        let delta = engine.settle(f.clone()).map_err(|e| format!("frontier {i}: settle: {e}"))?;
+        let delta = engine.settle(f.clone(), &mut lab_20260924_0::rel::Raw::default()).map_err(|e| format!("frontier {i}: settle: {e}"))?;
         raw(&delta).map_err(|e| format!("frontier {i}: {e}"))?;
         let mut expected = Vec::new();
         for (k, (rel, _)) in oracle.outputs.iter().enumerate() {

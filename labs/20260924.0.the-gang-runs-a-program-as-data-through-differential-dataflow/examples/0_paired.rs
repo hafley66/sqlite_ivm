@@ -63,13 +63,13 @@ fn run<E: Engine>(engine: &str, name: &str, n: i64) {
     let mut e = E::install(&program, &mut lab_20260924_0::rel::Raw::default()).unwrap();
     let installed = t0.elapsed();
     let t1 = Instant::now();
-    let loaded_rows = e.settle(load).unwrap().changes.len();
+    let loaded_rows = e.settle(load, &mut lab_20260924_0::rel::Raw::default()).unwrap().changes.len();
     let load_time = t1.elapsed();
     let mut times: Vec<Duration> = churn
         .into_iter()
         .map(|f| {
             let t = Instant::now();
-            e.settle(f).unwrap();
+            e.settle(f, &mut lab_20260924_0::rel::Raw::default()).unwrap();
             t.elapsed()
         })
         .collect();

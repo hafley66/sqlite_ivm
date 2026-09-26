@@ -6,7 +6,7 @@ use std::any::Any;
 use std::collections::VecDeque;
 
 pub trait Host {
-    fn connection(&self) -> Option<&dyn Any>;
+    fn conn(&mut self) -> Option<&dyn Any>;
     fn next(&mut self) -> Option<Frontier>;
     fn sink(&mut self, delta: &Delta) -> Result<(), EngineError>;
 }
@@ -30,7 +30,7 @@ impl<'a> Raw<'a> {
 }
 
 impl Host for Raw<'_> {
-    fn connection(&self) -> Option<&dyn Any> {
+    fn conn(&mut self) -> Option<&dyn Any> {
         self.connection
     }
 
@@ -52,7 +52,7 @@ pub struct Plugin<'a> {
 }
 
 impl Host for Plugin<'_> {
-    fn connection(&self) -> Option<&dyn Any> {
+    fn conn(&mut self) -> Option<&dyn Any> {
         Some(self.connection)
     }
 
@@ -80,7 +80,7 @@ impl<E: Engine, H: Host> Runtime<E, H> {
         let Some(frontier) = self.host.next() else {
             return Ok(false);
         };
-        let delta = self.engine.settle(frontier)?;
+        let delta = self.engine.settle(frontier, &mut self.host)?;
         self.host.sink(&delta)?;
         Ok(true)
     }
