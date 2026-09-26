@@ -16,7 +16,9 @@ pub fn program(name: &str) -> Program {
 }
 
 fn oracle_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("oracle")
+    let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let own = crate_dir.join("oracle");
+    if own.exists() { own } else { crate_dir.join("../ivm-dd/oracle") }
 }
 
 pub fn read(conn: &Connection, table: &str) -> Bag {
@@ -234,7 +236,8 @@ pub fn run<E: Engine + 'static>(name: &str) -> String {
 pub fn expect_install_error<E: Engine>(name: &str) {
     let script = script(name);
     let kind = script.setup.lines().find_map(|line| line.strip_prefix("-- expect-error: ")).expect("missing install error expectation");
-    match E::install(&script.program, &mut ivm_dd::Raw::default()) {
+    let db = Connection::open_in_memory().unwrap();
+    match E::install(&script.program, &mut ivm_dd::Raw::with_connection(&db)) {
         Ok(_) => panic!("{name}: expected install error {kind}"),
         Err(e) => assert!(format!("{:?}", e.kind).starts_with(kind), "{name}: expected {kind}, got {e}"),
     }
@@ -246,7 +249,8 @@ fn run_steps<E: Engine>(name: &str) -> String {
     assert!(!script.steps.is_empty(), "{name}: no steps");
     let (_conn, steps) = oracle(&script);
 
-    let mut host = ivm_dd::Raw::default();
+    let engine_db = Connection::open_in_memory().unwrap();
+    let mut host = ivm_dd::Raw::with_connection(&engine_db);
     let mut engine = E::install(program, &mut host).unwrap();
     let mut marbles = String::from("step\ttick\trel\trow\tw\n");
     for step in steps {

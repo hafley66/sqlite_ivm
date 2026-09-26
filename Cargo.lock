@@ -659,6 +659,7 @@ name = "ivm-sqlite"
 version = "0.1.0"
 dependencies = [
  "hafley-observe",
+ "ivm-dd",
  "ivm-engine",
  "ivm-ir",
  "rusqlite",
