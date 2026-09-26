@@ -557,10 +557,11 @@ pub(crate) fn compile_ir(
     output: Vec<OutputColumn>,
     schema: &Schema<'_>,
 ) -> Result<Compiled, EngineError> {
-    if ir
-        .strata
-        .iter()
-        .any(|stratum| matches!(stratum, Stratum::LetRec { .. }))
+    if ir.strata.len() != 1
+        || ir
+            .strata
+            .iter()
+            .any(|stratum| matches!(stratum, Stratum::LetRec { .. }))
     {
         let nodes = NodesPlan::compile(name, ir)
             .map_err(|e| EngineError::new(Stage::Plan, name, ErrorKind::State(e.to_string())))?;

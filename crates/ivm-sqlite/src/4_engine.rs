@@ -8,11 +8,15 @@ use ivm_ir::{Delta, Frontier, Op, Program, RelId, RelKind, Row, Stratum, W};
 use sqlite_ext::rusqlite::{self, Connection};
 
 pub struct Sqlite {
-    program: SqlProgram,
+    programs: Vec<OutputProgram>,
     ir: Program,
-    output: RelId,
-    threshold: bool,
     tick: u64,
+}
+
+struct OutputProgram {
+    rel: RelId,
+    program: SqlProgram,
+    threshold: bool,
 }
 
 fn error(stage: Stage, e: impl std::fmt::Display) -> EngineError {
@@ -38,13 +42,13 @@ fn row_of(row: &rusqlite::Row<'_>, width: usize) -> rusqlite::Result<Row> {
 impl Engine for Sqlite {
     fn install(ir: &Program, host: &mut impl Host) -> Result<Self, EngineError> {
         let db = conn(host, Stage::Install)?;
-        let &[output] = ir.outputs.as_slice() else {
+        if ir.outputs.is_empty() {
             return Err(EngineError::new(
                 Stage::Install,
                 None,
-                ErrorKind::Unsupported("one output relation"),
+                ErrorKind::Unsupported("output relation required"),
             ));
-        };
+        }
         for source in ir.rels.iter().filter(|r| r.kind == RelKind::Source) {
             let columns = (0..source.cols.len())
                 .map(|i| format!("c{i} INTEGER NOT NULL"))
@@ -56,21 +60,29 @@ impl Engine for Sqlite {
             ))
             .map_err(|e| error(Stage::Install, e))?;
         }
-        let name = ir
-            .rel(output)
-            .map(|r| r.name.as_str())
-            .filter(|name| !name.is_empty())
-            .map(str::to_owned)
-            .unwrap_or_else(|| format!("ivm_output_{output}"));
-        let program = SqlProgram::install_ir_unwatched(db, &name, ir)
-            .map_err(|e| error(Stage::Install, e))?;
-        let threshold = matches!(ir.strata.as_slice(), [Stratum::Let { id, body }]
-            if *id == output && matches!(ir.nodes.get(*body as usize), Some(Op::Threshold(_))));
+        let mut programs = Vec::new();
+        for &output in &ir.outputs {
+            let name = ir
+                .rel(output)
+                .map(|r| r.name.as_str())
+                .filter(|name| !name.is_empty())
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("ivm_output_{output}"));
+            let mut single = ir.clone();
+            single.outputs = vec![output];
+            let program = SqlProgram::install_ir_unwatched(db, &name, &single)
+                .map_err(|e| error(Stage::Install, e))?;
+            let threshold = matches!(ir.strata.as_slice(), [Stratum::Let { id, body }]
+                if *id == output && matches!(ir.nodes.get(*body as usize), Some(Op::Threshold(_))));
+            programs.push(OutputProgram {
+                rel: output,
+                program,
+                threshold,
+            });
+        }
         Ok(Self {
-            program,
+            programs,
             ir: ir.clone(),
-            output,
-            threshold,
             tick: 0,
         })
     }
@@ -110,7 +122,7 @@ impl Engine for Sqlite {
                         ErrorKind::Unsupported("weight other than +1/-1"),
                     ));
                 }
-                let names = self
+                let names = self.programs[0]
                     .program
                     .inner
                     .plan
@@ -162,39 +174,40 @@ impl Engine for Sqlite {
                     row: change.row.iter().copied().map(Cell::Integer).collect(),
                 });
             }
-            let visible = self
-                .program
-                .settle(db, &batch)
-                .map_err(|e| error(Stage::Settle, e))?;
-            if self.threshold || self.program.inner.sqls.weight_delta.is_none() {
-                return visible
-                    .into_iter()
-                    .map(|c| {
-                        let row = c
+            let mut changes = Vec::new();
+            for output in &self.programs {
+                let visible = output
+                    .program
+                    .settle(db, &batch)
+                    .map_err(|e| error(Stage::Settle, e))?;
+                if output.threshold || output.program.inner.sqls.weight_delta.is_none() {
+                    for change in visible {
+                        let row = change
                             .row
                             .into_iter()
-                            .map(|c| match c {
+                            .map(|cell| match cell {
                                 Cell::Integer(v) => Ok(v),
                                 _ => Err(error(Stage::Settle, "non-integer output")),
                             })
                             .collect::<Result<Row, _>>()?;
-                        Ok((self.output, row, c.sign.as_integer()))
-                    })
-                    .collect();
+                        changes.push((output.rel, row, change.sign.as_integer()));
+                    }
+                } else {
+                    let width = output.program.inner.output.len();
+                    let mut stmt = db
+                        .prepare(output.program.inner.sqls.weight_delta.as_deref().unwrap())
+                        .map_err(|e| error(Stage::Settle, e))?;
+                    let rows = stmt
+                        .query_map([], |r| Ok((row_of(r, width)?, r.get::<_, W>(width)?)))
+                        .map_err(|e| error(Stage::Settle, e))?;
+                    for row in rows {
+                        let (row, weight) = row.map_err(|e| error(Stage::Settle, e))?;
+                        changes.push((output.rel, row, weight));
+                    }
+                }
             }
-            let width = self.program.inner.output.len();
-            let mut stmt = db
-                .prepare(self.program.inner.sqls.weight_delta.as_deref().unwrap())
-                .map_err(|e| error(Stage::Settle, e))?;
-            let result = stmt
-                .query_map([], |r| Ok((row_of(r, width)?, r.get::<_, W>(width)?)))
-                .map_err(|e| error(Stage::Settle, e))?
-                .map(|row| {
-                    row.map(|(row, w)| (self.output, row, w))
-                        .map_err(|e| error(Stage::Settle, e))
-                })
-                .collect();
-            result
+            changes.sort();
+            Ok(changes)
         };
         match run() {
             Ok(changes) => {
@@ -213,15 +226,15 @@ impl Engine for Sqlite {
     }
 
     fn snapshot(&self, rel: RelId, host: &mut impl Host) -> Result<Vec<(Row, W)>, EngineError> {
-        if rel != self.output {
-            return Err(EngineError::new(
-                Stage::Snapshot,
-                Some(rel),
-                ErrorKind::UnknownRel(rel),
-            ));
-        }
+        let output = self
+            .programs
+            .iter()
+            .find(|output| output.rel == rel)
+            .ok_or_else(|| {
+                EngineError::new(Stage::Snapshot, Some(rel), ErrorKind::UnknownRel(rel))
+            })?;
         let db = conn(host, Stage::Snapshot)?;
-        let plan = &self.program.inner.plan;
+        let plan = &output.program.inner.plan;
         let width = plan.output.len();
         let sql = match &plan.root {
             crate::plan::Root::Nodes(nodes) => nodes.output_snapshot.clone(),
@@ -234,11 +247,11 @@ impl Engine for Sqlite {
                     .join(",");
                 format!(
                     "SELECT {cols},__weight FROM {} WHERE __weight>0 ORDER BY {cols}",
-                    catalog::quote(catalog::root(&self.program.inner.name))
+                    catalog::quote(catalog::root(&output.program.inner.name))
                 )
             }
             crate::plan::Root::Group { .. } => {
-                let snapshot = self.program.inner.sqls.snapshot.trim_end_matches(';');
+                let snapshot = output.program.inner.sqls.snapshot.trim_end_matches(';');
                 format!("SELECT *,1 FROM ({snapshot})")
             }
         };
@@ -249,7 +262,7 @@ impl Engine for Sqlite {
                 let weight: W = r.get(width)?;
                 Ok((
                     row,
-                    if self.threshold {
+                    if output.threshold {
                         weight.min(1)
                     } else {
                         weight
