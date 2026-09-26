@@ -11,6 +11,7 @@ sqlite-ext = { path = "../../hafley-rs/crates/sqlite-ext" }
 hafley-observe = { path = "../../hafley-rs/crates/hafley-observe" }
 tracing = "0.1"
 ivm-ir = { path = "../ivm-ir" }
+ivm-engine = { path = "../ivm-engine" }
 serde_json = "1"
 
 [dev-dependencies]

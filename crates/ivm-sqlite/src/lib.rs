@@ -153,6 +153,10 @@ pub struct Program {
     inner: std::sync::Arc<catalog::Installed>,
 }
 
+#[path = "4_engine.rs"]
+mod trait_engine;
+pub use trait_engine::Sqlite;
+
 impl std::fmt::Debug for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Program")
@@ -170,7 +174,19 @@ impl Program {
         name: &str,
         program: &ivm_ir::Program,
     ) -> Result<Self, EngineError> {
-        Ok(Self { inner: catalog::install_ir(conn, name, program, catalog::Watch::Sources)? })
+        Ok(Self {
+            inner: catalog::install_ir(conn, name, program, catalog::Watch::Sources)?,
+        })
+    }
+
+    pub(crate) fn install_ir_unwatched(
+        conn: &rusqlite::Connection,
+        name: &str,
+        program: &ivm_ir::Program,
+    ) -> Result<Self, EngineError> {
+        Ok(Self {
+            inner: catalog::install_ir(conn, name, program, catalog::Watch::None)?,
+        })
     }
 
     /// Parse, compile, validate and install `select_sql` under `name`.

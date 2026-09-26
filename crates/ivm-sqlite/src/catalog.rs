@@ -68,6 +68,7 @@ pub(crate) struct SettleSql {
     pub bump: String,
     pub read_frontier: String,
     pub read_delta: String,
+    pub weight_delta: Option<String>,
     pub snapshot: String,
 }
 
@@ -1594,6 +1595,14 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
     } else {
         None
     };
+    let weight_delta = if matches!(plan.root, Root::Union { .. }) {
+        Some(format!(
+            "SELECT {cols}, SUM(__mult) FROM ({d}) GROUP BY {group} HAVING SUM(__mult)<>0 ORDER BY {cols}",
+            cols = out_cols.join(","), d = branch_sql(plan), group = group_ord.join(","),
+        ))
+    } else {
+        None
+    };
 
     SettleSql {
         clears,
@@ -1620,6 +1629,7 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
             d = quote(delta(p)),
             cols = out_cols.join(","),
         ),
+        weight_delta,
         snapshot,
     }
 }
