@@ -58,6 +58,7 @@ pub(crate) struct SettleSql {
     pub stage_insert: String,
     pub scan_fills: Vec<(String, String)>,
     pub join_fills: Vec<(String, String)>,
+    pub anti_fills: Vec<(String, String)>,
     pub root_touch: String,
     pub root_upsert: String,
     pub root_delete: String,
@@ -89,6 +90,10 @@ pub(crate) fn scan_stage(p: &str, i: usize) -> String {
 
 pub(crate) fn join_delta(p: &str, i: usize) -> String {
     format!("frontier_{p}_j{i}")
+}
+
+pub(crate) fn anti_delta(p: &str, i: usize) -> String {
+    format!("frontier_{p}_a{i}")
 }
 
 pub(crate) fn root(p: &str) -> String {
@@ -255,10 +260,16 @@ pub(crate) fn install_ir(
     let output_id = *program.outputs.first().ok_or_else(|| {
         EngineError::unsupported(Stage::Plan, name, "a typed program needs one output")
     })?;
-    let width = program.rel(output_id).ok_or_else(|| {
-        EngineError::unsupported(Stage::Plan, name, "output relation is missing")
-    })?.cols.len();
-    let output = (0..width).map(|i| OutputColumn { name: format!("c{i}") }).collect();
+    let width = program
+        .rel(output_id)
+        .ok_or_else(|| EngineError::unsupported(Stage::Plan, name, "output relation is missing"))?
+        .cols
+        .len();
+    let output = (0..width)
+        .map(|i| OutputColumn {
+            name: format!("c{i}"),
+        })
+        .collect();
     install_program(conn, name, program, output, watch)
 }
 
@@ -302,9 +313,8 @@ fn install_program(
     push_catalog_ddl(&mut sql);
     push_program_ddl(&installed, &mut sql);
     // Persist the typed program; SQL text is only an install-time input.
-    let program_json = serde_json::to_string(&program).map_err(|e| {
-        EngineError::new(Stage::Install, name, ErrorKind::State(e.to_string()))
-    })?;
+    let program_json = serde_json::to_string(&program)
+        .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::State(e.to_string())))?;
     sql.push_str(&format!(
         "INSERT INTO {c}(name, program, frontier, install) VALUES ('{n}', '{s}', 0, {i});",
         c = quote(catalog()),
@@ -467,6 +477,11 @@ fn bootstrap(conn: &Connection, inst: &Installed, meter: &mut Meter) -> Result<(
             EngineError::new(Stage::Install, object, ErrorKind::Sqlite(e.to_string()))
         })?;
     }
+    for (object, sql) in &inst.sqls.anti_fills {
+        meter.exec(conn, phase, object, sql, []).map_err(|e| {
+            EngineError::new(Stage::Install, object, ErrorKind::Sqlite(e.to_string()))
+        })?;
+    }
     {
         let span = tracing::info_span!(target: observe::TARGET, observe::ROOT_SPAN, object = p);
         let _guard = span.enter();
@@ -511,7 +526,9 @@ fn compile_ir(
 ) -> Result<Compiled, EngineError> {
     let columns = |table: &str| -> Option<Vec<String>> {
         let mut fresh = Meter::default();
-        table_columns(conn, table, &mut fresh).ok().filter(|cols| !cols.is_empty())
+        table_columns(conn, table, &mut fresh)
+            .ok()
+            .filter(|cols| !cols.is_empty())
     };
     plan::compile_ir(name, program, output, &columns)
 }
@@ -567,6 +584,9 @@ fn build_installed(name: &str, install: u64, mut compiled: Compiled) -> Installe
     }
     for (i, join) in compiled.joins.iter_mut().enumerate() {
         join.delta = join_delta(name, i);
+    }
+    for (i, anti) in compiled.antis.iter_mut().enumerate() {
+        anti.delta = anti_delta(name, i);
     }
     let sqls = build_settle_sql(name, &compiled);
     Installed {
@@ -628,6 +648,14 @@ fn push_program_ddl(inst: &Installed, sql: &mut String) {
         sql.push_str(&format!(
             "CREATE TABLE IF NOT EXISTS {t}({cols}, __mult INTEGER NOT NULL);",
             t = quote(&join.delta),
+            cols = cols.join(","),
+        ));
+    }
+    for anti in &plan.antis {
+        let cols: Vec<String> = plan.scans[anti.left].needed.iter().map(quote).collect();
+        sql.push_str(&format!(
+            "CREATE TABLE IF NOT EXISTS {t}({cols}, __mult INTEGER NOT NULL);",
+            t = quote(&anti.delta),
             cols = cols.join(","),
         ));
     }
@@ -721,6 +749,21 @@ fn push_program_ddl(inst: &Installed, sql: &mut String) {
             }
         }
     }
+    for anti in &plan.antis {
+        let left = &plan.scans[anti.left];
+        let right = &plan.scans[anti.right];
+        for (table, cols) in [
+            (&left.table, &anti.left_key),
+            (&right.table, &anti.right_key),
+        ] {
+            if cols.is_empty() || inst.derived.iter().any(|d| d == table) {
+                continue;
+            }
+            if !indexed.iter().any(|(t, c)| t == table && c == cols) {
+                indexed.push((table.clone(), cols.clone()));
+            }
+        }
+    }
     for (i, (table, cols)) in indexed.iter().enumerate() {
         let cols: Vec<String> = cols.iter().map(|c| quote(c)).collect();
         sql.push_str(&format!(
@@ -767,6 +810,12 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
         clears.push((
             join.delta.clone(),
             format!("DELETE FROM {};", quote(&join.delta)),
+        ));
+    }
+    for anti in &plan.antis {
+        clears.push((
+            anti.delta.clone(),
+            format!("DELETE FROM {};", quote(&anti.delta)),
         ));
     }
 
@@ -857,6 +906,92 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
         ));
     }
 
+    let mut anti_fills = Vec::new();
+    for anti in &plan.antis {
+        let left = &plan.scans[anti.left];
+        let right = &plan.scans[anti.right];
+        let cols: Vec<String> = left.needed.iter().map(quote).collect();
+        let lcols = cols
+            .iter()
+            .map(|c| format!("l.{c}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let ccols = cols
+            .iter()
+            .map(|c| format!("c.{c}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let same_row = cols
+            .iter()
+            .map(|c| format!("lp.{c}=c.{c}"))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        let same_delta = cols
+            .iter()
+            .map(|c| format!("ld.{c}=c.{c}"))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        let key_match = |alias: &str| -> String {
+            let terms: Vec<String> = anti
+                .left_key
+                .iter()
+                .zip(&anti.right_key)
+                .map(|(lk, rk)| format!("{alias}.{}=c.{}", quote(rk), quote(lk)))
+                .collect();
+            if terms.is_empty() {
+                "1".into()
+            } else {
+                terms.join(" AND ")
+            }
+        };
+        let touched_key = anti
+            .left_key
+            .iter()
+            .zip(&anti.right_key)
+            .map(|(lk, rk)| format!("rd.{}=l.{}", quote(rk), quote(lk)))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        let touched_key = if touched_key.is_empty() {
+            "1"
+        } else {
+            &touched_key
+        };
+        let filters = if anti.filters.is_empty() {
+            "1".into()
+        } else {
+            anti.filters.join(" AND ")
+        };
+        let sql = format!(
+            "INSERT INTO {into}({cols}, __mult) \
+             WITH candidates AS (SELECT DISTINCT {lcols} FROM {ld} l \
+               UNION SELECT DISTINCT {lcols} FROM {lt} l \
+               WHERE EXISTS (SELECT 1 FROM {rd} rd WHERE {touched_key})), \
+             counts AS (SELECT {ccols}, \
+               (SELECT count(*) FROM {lt} lp WHERE {same_row}) AS ln, \
+               (SELECT coalesce(sum(__mult),0) FROM {ld} ld WHERE {same_delta}) AS ld, \
+               (SELECT count(*) FROM {rt} rp WHERE {post_key}) AS rn, \
+               (SELECT coalesce(sum(__mult),0) FROM {rd} rd WHERE {delta_key}) AS rd \
+               FROM candidates c WHERE {filters}) \
+             SELECT {cols}, ln * (rn=0) - (ln-ld) * (rn-rd=0) AS __mult \
+             FROM counts WHERE ln * (rn=0) != (ln-ld) * (rn-rd=0);",
+            into = quote(&anti.delta),
+            cols = cols.join(","),
+            lcols = lcols,
+            ld = quote(&left.stage),
+            lt = quote(&left.table),
+            rd = quote(&right.stage),
+            rt = quote(&right.table),
+            touched_key = touched_key,
+            ccols = ccols,
+            same_row = same_row,
+            same_delta = same_delta,
+            post_key = key_match("rp"),
+            delta_key = key_match("rd"),
+            filters = filters,
+        );
+        anti_fills.push((anti.delta.clone(), sql));
+    }
+
     let arity = plan.output.len();
     let out_cols: Vec<String> = plan.output.iter().map(|c| quote(&c.name)).collect();
     let group_ord: Vec<String> = (1..=arity).map(|i| i.to_string()).collect();
@@ -869,32 +1004,66 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
                 match branch {
                     plan::BranchRef::Scan { scan, takes } => {
                         let scan = &plan.scans[*scan];
-                        let cols: Vec<String> = takes.iter().enumerate().map(|(pos, i)| {
-                            format!("{} AS {}", quote(&scan.needed[*i]), quote(&plan.output[pos].name))
-                        }).collect();
+                        let cols: Vec<String> = takes
+                            .iter()
+                            .enumerate()
+                            .map(|(pos, i)| {
+                                format!(
+                                    "{} AS {}",
+                                    quote(&scan.needed[*i]),
+                                    quote(&plan.output[pos].name)
+                                )
+                            })
+                            .collect();
                         parts.push(format!(
                             "SELECT {cols}, __mult FROM {t}",
                             cols = cols.join(","),
                             t = quote(&scan.stage),
                         ));
                     }
-                    plan::BranchRef::MfpScan { scan, select, filters } => {
+                    plan::BranchRef::MfpScan {
+                        scan,
+                        select,
+                        filters,
+                    } => {
                         let scan = &plan.scans[*scan];
-                        let cols = select.iter().enumerate().map(|(pos, expr)| {
-                            format!("{expr} AS {}", quote(&plan.output[pos].name))
-                        }).collect::<Vec<_>>().join(",");
-                        let where_sql = if filters.is_empty() { "1".into() } else { filters.join(" AND ") };
+                        let cols = select
+                            .iter()
+                            .enumerate()
+                            .map(|(pos, expr)| {
+                                format!("{expr} AS {}", quote(&plan.output[pos].name))
+                            })
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        let where_sql = if filters.is_empty() {
+                            "1".into()
+                        } else {
+                            filters.join(" AND ")
+                        };
                         parts.push(format!(
                             "SELECT {cols}, __mult FROM {t} WHERE {where_sql}",
                             t = quote(&scan.stage),
                         ));
                     }
-                    plan::BranchRef::MfpJoin { join, select, filters } => {
+                    plan::BranchRef::MfpJoin {
+                        join,
+                        select,
+                        filters,
+                    } => {
                         let join = &plan.joins[*join];
-                        let cols = select.iter().enumerate().map(|(pos, expr)| {
-                            format!("{expr} AS {}", quote(&plan.output[pos].name))
-                        }).collect::<Vec<_>>().join(",");
-                        let where_sql = if filters.is_empty() { "1".into() } else { filters.join(" AND ") };
+                        let cols = select
+                            .iter()
+                            .enumerate()
+                            .map(|(pos, expr)| {
+                                format!("{expr} AS {}", quote(&plan.output[pos].name))
+                            })
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        let where_sql = if filters.is_empty() {
+                            "1".into()
+                        } else {
+                            filters.join(" AND ")
+                        };
                         parts.push(format!(
                             "SELECT {cols}, __mult FROM {t} WHERE {where_sql}",
                             t = quote(&join.delta),
@@ -908,6 +1077,20 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
                             cols = cols.join(","),
                             t = quote(&join.delta),
                         ));
+                    }
+                    plan::BranchRef::Anti(i) => {
+                        let anti = &plan.antis[*i];
+                        let scan = &plan.scans[anti.left];
+                        let cols = scan
+                            .needed
+                            .iter()
+                            .enumerate()
+                            .map(|(pos, name)| {
+                                format!("{} AS {}", quote(name), quote(&plan.output[pos].name))
+                            })
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        parts.push(format!("SELECT {cols}, __mult FROM {}", quote(&anti.delta)));
                     }
                 }
             }
@@ -1093,6 +1276,7 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
         stage_insert,
         scan_fills,
         join_fills,
+        anti_fills,
         root_touch,
         root_upsert,
         root_delete,
@@ -1128,16 +1312,22 @@ pub(crate) fn open(conn: &Connection, name: &str) -> Result<Arc<Installed>, Engi
         ));
     };
     let program: IrProgram = serde_json::from_str(&json).map_err(|e| {
-        EngineError::new(Stage::Install, name, ErrorKind::State(format!("stored program: {e}")))
+        EngineError::new(
+            Stage::Install,
+            name,
+            ErrorKind::State(format!("stored program: {e}")),
+        )
     })?;
-    let output = meter.rows(
-        conn,
-        "install",
-        name,
-        "SELECT col FROM frontier_catalog_column WHERE name = ?1 ORDER BY pos",
-        [name],
-        |row| row.get::<_, String>(0).map(|name| OutputColumn { name }),
-    ).map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
+    let output = meter
+        .rows(
+            conn,
+            "install",
+            name,
+            "SELECT col FROM frontier_catalog_column WHERE name = ?1 ORDER BY pos",
+            [name],
+            |row| row.get::<_, String>(0).map(|name| OutputColumn { name }),
+        )
+        .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
     let compiled = compile_ir(conn, name, &program, output)?;
     let mut installed = build_installed(name, install, compiled);
     installed.derived = scan_derived_sources(conn, &installed)?;
@@ -1169,6 +1359,9 @@ pub(crate) fn teardown(conn: &Connection, inst: &Installed) -> Result<(), Engine
     for join in &inst.plan.joins {
         sql.push_str(&format!("DROP TABLE IF EXISTS {};", quote(&join.delta)));
     }
+    for anti in &inst.plan.antis {
+        sql.push_str(&format!("DROP TABLE IF EXISTS {};", quote(&anti.delta)));
+    }
     sql.push_str(&format!("DROP TABLE IF EXISTS {};", quote(root(p))));
     sql.push_str(&format!("DROP TABLE IF EXISTS {};", quote(stage(p))));
     // Source indexes: every distinct (table, columns) pair this program made.
@@ -1181,6 +1374,21 @@ pub(crate) fn teardown(conn: &Connection, inst: &Installed) -> Result<(), Engine
             (&right.table, &join.right_key),
         ] {
             if inst.derived.iter().any(|d| d == table) {
+                continue;
+            }
+            if !indexed.iter().any(|(t, c)| t == table && c == cols) {
+                indexed.push((table.clone(), cols.clone()));
+            }
+        }
+    }
+    for anti in &inst.plan.antis {
+        let left = &inst.plan.scans[anti.left];
+        let right = &inst.plan.scans[anti.right];
+        for (table, cols) in [
+            (&left.table, &anti.left_key),
+            (&right.table, &anti.right_key),
+        ] {
+            if cols.is_empty() || inst.derived.iter().any(|d| d == table) {
                 continue;
             }
             if !indexed.iter().any(|(t, c)| t == table && c == cols) {

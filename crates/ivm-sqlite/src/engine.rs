@@ -189,6 +189,11 @@ fn settle_inner(
             .exec(conn, phase, object, sql, [])
             .map_err(|e| fail("join delta", object, e))?;
     }
+    for (object, sql) in &inst.sqls.anti_fills {
+        meter
+            .exec(conn, phase, object, sql, [])
+            .map_err(|e| fail("antijoin delta", object, e))?;
+    }
 
     {
         let span =
