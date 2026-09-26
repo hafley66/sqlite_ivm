@@ -30,7 +30,7 @@
 use crate::error::{EngineError, ErrorKind, Stage};
 use crate::meter::Meter;
 use crate::observe;
-use crate::plan::{self, Compiled, Root, ScanSpec};
+use crate::plan::{self, Compiled, Root, ScanSpec, TopKSpec};
 use crate::OutputColumn;
 use ivm_ir::Program as IrProgram;
 use sqlite_ext::rusqlite::{types::Value, Connection};
@@ -59,6 +59,7 @@ pub(crate) struct SettleSql {
     pub scan_fills: Vec<(String, String)>,
     pub join_fills: Vec<(String, String)>,
     pub anti_fills: Vec<(String, String)>,
+    pub topk_fills: Vec<(String, String)>,
     pub root_touch: String,
     pub root_upsert: String,
     pub root_delete: String,
@@ -94,6 +95,10 @@ pub(crate) fn join_delta(p: &str, i: usize) -> String {
 
 pub(crate) fn anti_delta(p: &str, i: usize) -> String {
     format!("frontier_{p}_a{i}")
+}
+
+pub(crate) fn topk_delta(p: &str, i: usize) -> String {
+    format!("frontier_{p}_k{i}")
 }
 
 pub(crate) fn root(p: &str) -> String {
@@ -482,6 +487,11 @@ fn bootstrap(conn: &Connection, inst: &Installed, meter: &mut Meter) -> Result<(
             EngineError::new(Stage::Install, object, ErrorKind::Sqlite(e.to_string()))
         })?;
     }
+    for (object, sql) in &inst.sqls.topk_fills {
+        meter.exec(conn, phase, object, sql, []).map_err(|e| {
+            EngineError::new(Stage::Install, object, ErrorKind::Sqlite(e.to_string()))
+        })?;
+    }
     {
         let span = tracing::info_span!(target: observe::TARGET, observe::ROOT_SPAN, object = p);
         let _guard = span.enter();
@@ -588,6 +598,9 @@ fn build_installed(name: &str, install: u64, mut compiled: Compiled) -> Installe
     for (i, anti) in compiled.antis.iter_mut().enumerate() {
         anti.delta = anti_delta(name, i);
     }
+    for (i, topk) in compiled.topks.iter_mut().enumerate() {
+        topk.delta = topk_delta(name, i);
+    }
     let sqls = build_settle_sql(name, &compiled);
     Installed {
         name: name.to_string(),
@@ -656,6 +669,14 @@ fn push_program_ddl(inst: &Installed, sql: &mut String) {
         sql.push_str(&format!(
             "CREATE TABLE IF NOT EXISTS {t}({cols}, __mult INTEGER NOT NULL);",
             t = quote(&anti.delta),
+            cols = cols.join(","),
+        ));
+    }
+    for topk in &plan.topks {
+        let cols: Vec<String> = plan.scans[topk.scan].needed.iter().map(quote).collect();
+        sql.push_str(&format!(
+            "CREATE TABLE IF NOT EXISTS {t}({cols}, __mult INTEGER NOT NULL);",
+            t = quote(&topk.delta),
             cols = cols.join(","),
         ));
     }
@@ -764,6 +785,17 @@ fn push_program_ddl(inst: &Installed, sql: &mut String) {
             }
         }
     }
+    for topk in &plan.topks {
+        if topk.key.is_empty() {
+            continue;
+        }
+        let table = &plan.scans[topk.scan].table;
+        if !inst.derived.iter().any(|d| d == table)
+            && !indexed.iter().any(|(t, c)| t == table && c == &topk.key)
+        {
+            indexed.push((table.clone(), topk.key.clone()));
+        }
+    }
     for (i, (table, cols)) in indexed.iter().enumerate() {
         let cols: Vec<String> = cols.iter().map(|c| quote(c)).collect();
         sql.push_str(&format!(
@@ -795,6 +827,86 @@ impl Installed {
 // ---------------------------------------------------------------------------
 // Settle SQL generation
 
+fn build_topk_sql(topk: &TopKSpec, plan: &Compiled) -> String {
+    let scan = &plan.scans[topk.scan];
+    let cols: Vec<String> = scan.needed.iter().map(quote).collect();
+    let col_list = cols.join(",");
+    let select = |alias: &str| {
+        cols.iter()
+            .map(|c| format!("{alias}.{c}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let same = |alias: &str| {
+        cols.iter()
+            .map(|c| format!("{alias}.{c}=c.{c}"))
+            .collect::<Vec<_>>()
+            .join(" AND ")
+    };
+    let touched = topk
+        .key
+        .iter()
+        .map(|k| format!("d.{}=s.{}", quote(k), quote(k)))
+        .collect::<Vec<_>>()
+        .join(" AND ");
+    let touched = if touched.is_empty() { "1" } else { &touched };
+    let partition = if topk.key.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "PARTITION BY {} ",
+            topk.key.iter().map(quote).collect::<Vec<_>>().join(",")
+        )
+    };
+    let order = topk
+        .order
+        .iter()
+        .map(|o| {
+            format!(
+                "{}{}",
+                cols[o.col as usize],
+                if o.desc { " DESC" } else { " ASC" }
+            )
+        })
+        .chain(cols.iter().map(|c| format!("{c} ASC")))
+        .collect::<Vec<_>>()
+        .join(",");
+    let window =
+        format!("{partition}ORDER BY {order} ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING");
+    let delta = format!(
+        "max(0,min(nw,{limit}-nb))-max(0,min(ow,{limit}-ob))",
+        limit = topk.limit,
+    );
+    format!(
+        "INSERT INTO {into}({cols},__mult) \
+         WITH candidates AS (SELECT DISTINCT {stage_cols} FROM {stage} s \
+           UNION SELECT DISTINCT {source_cols} FROM {source} s \
+           WHERE EXISTS (SELECT 1 FROM {stage} d WHERE {touched})), \
+         raw AS (SELECT {candidate_cols}, \
+           (SELECT count(*) FROM {source} p WHERE {post_same}) AS nw, \
+           (SELECT coalesce(sum(__mult),0) FROM {stage} d WHERE {delta_same}) AS dw \
+           FROM candidates c), \
+         counts AS (SELECT {cols},nw,nw-dw AS ow FROM raw), \
+         ranked AS (SELECT {cols},nw,ow, \
+           coalesce(sum(nw) OVER ({window}),0) AS nb, \
+           coalesce(sum(ow) OVER ({window}),0) AS ob FROM counts), \
+         changes AS (SELECT {cols},{delta} AS __mult FROM ranked) \
+         SELECT {cols},__mult FROM changes WHERE __mult<>0;",
+        into = quote(&topk.delta),
+        cols = col_list,
+        stage_cols = select("s"),
+        source_cols = select("s"),
+        stage = quote(&scan.stage),
+        source = quote(&scan.table),
+        touched = touched,
+        candidate_cols = select("c"),
+        post_same = same("p"),
+        delta_same = same("d"),
+        window = window,
+        delta = delta,
+    )
+}
+
 fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
     let mut clears = Vec::new();
     for object in [stage(p), touch(p), delta(p)] {
@@ -816,6 +928,12 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
         clears.push((
             anti.delta.clone(),
             format!("DELETE FROM {};", quote(&anti.delta)),
+        ));
+    }
+    for topk in &plan.topks {
+        clears.push((
+            topk.delta.clone(),
+            format!("DELETE FROM {};", quote(&topk.delta)),
         ));
     }
 
@@ -991,6 +1109,11 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
         );
         anti_fills.push((anti.delta.clone(), sql));
     }
+    let topk_fills = plan
+        .topks
+        .iter()
+        .map(|topk| (topk.delta.clone(), build_topk_sql(topk, plan)))
+        .collect();
 
     let arity = plan.output.len();
     let out_cols: Vec<String> = plan.output.iter().map(|c| quote(&c.name)).collect();
@@ -1091,6 +1214,20 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
                             .collect::<Vec<_>>()
                             .join(",");
                         parts.push(format!("SELECT {cols}, __mult FROM {}", quote(&anti.delta)));
+                    }
+                    plan::BranchRef::TopK(i) => {
+                        let topk = &plan.topks[*i];
+                        let scan = &plan.scans[topk.scan];
+                        let cols = scan
+                            .needed
+                            .iter()
+                            .enumerate()
+                            .map(|(pos, name)| {
+                                format!("{} AS {}", quote(name), quote(&plan.output[pos].name))
+                            })
+                            .collect::<Vec<_>>()
+                            .join(",");
+                        parts.push(format!("SELECT {cols}, __mult FROM {}", quote(&topk.delta)));
                     }
                 }
             }
@@ -1277,6 +1414,7 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
         scan_fills,
         join_fills,
         anti_fills,
+        topk_fills,
         root_touch,
         root_upsert,
         root_delete,
@@ -1362,6 +1500,9 @@ pub(crate) fn teardown(conn: &Connection, inst: &Installed) -> Result<(), Engine
     for anti in &inst.plan.antis {
         sql.push_str(&format!("DROP TABLE IF EXISTS {};", quote(&anti.delta)));
     }
+    for topk in &inst.plan.topks {
+        sql.push_str(&format!("DROP TABLE IF EXISTS {};", quote(&topk.delta)));
+    }
     sql.push_str(&format!("DROP TABLE IF EXISTS {};", quote(root(p))));
     sql.push_str(&format!("DROP TABLE IF EXISTS {};", quote(stage(p))));
     // Source indexes: every distinct (table, columns) pair this program made.
@@ -1394,6 +1535,17 @@ pub(crate) fn teardown(conn: &Connection, inst: &Installed) -> Result<(), Engine
             if !indexed.iter().any(|(t, c)| t == table && c == cols) {
                 indexed.push((table.clone(), cols.clone()));
             }
+        }
+    }
+    for topk in &inst.plan.topks {
+        if topk.key.is_empty() {
+            continue;
+        }
+        let table = &inst.plan.scans[topk.scan].table;
+        if !inst.derived.iter().any(|d| d == table)
+            && !indexed.iter().any(|(t, c)| t == table && c == &topk.key)
+        {
+            indexed.push((table.clone(), topk.key.clone()));
         }
     }
     for (i, _) in indexed.iter().enumerate() {

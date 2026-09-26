@@ -304,6 +304,53 @@ fn typed_antijoin_tracks_right_key_and_left_filter() {
     .unwrap();
     assert_eq!(rows(&reopened), vec![tuple(1, 11), tuple(1, 13)]);
 }
+
+#[test]
+fn typed_topk_reranks_touched_groups() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE job(id INTEGER NOT NULL, team INTEGER NOT NULL, cost INTEGER NOT NULL); \
+        INSERT INTO job VALUES (1,10,100),(2,10,90),(3,20,50);",
+    )
+    .unwrap();
+    let mut ir: ivm_ir::Program =
+        serde_json::from_str(include_str!("../../ivm-dd/oracle/6_topk.program.json")).unwrap();
+    ir.strata.truncate(1);
+    ir.outputs.truncate(1);
+    let installed = Program::install_ir(&conn, "top_job", &ir).unwrap();
+    let row = |id, team, cost| {
+        ivm_sqlite::Tuple(vec![
+            Cell::Integer(id),
+            Cell::Integer(team),
+            Cell::Integer(cost),
+        ])
+    };
+    assert_eq!(
+        installed.snapshot(&conn).unwrap(),
+        vec![row(1, 10, 100), row(3, 20, 50)]
+    );
+    conn.execute_batch("BEGIN; INSERT INTO job VALUES (4,10,110),(5,20,40); COMMIT;")
+        .unwrap();
+    assert_eq!(
+        installed.snapshot(&conn).unwrap(),
+        vec![row(3, 20, 50), row(4, 10, 110)]
+    );
+    conn.execute_batch(
+        "BEGIN; DELETE FROM job WHERE id=4; INSERT INTO job VALUES (6,10,100); COMMIT;",
+    )
+    .unwrap();
+    let reopened = Program::open(&conn, "top_job").unwrap();
+    assert_eq!(
+        reopened.snapshot(&conn).unwrap(),
+        vec![row(1, 10, 100), row(3, 20, 50)]
+    );
+    conn.execute_batch("BEGIN; DELETE FROM job WHERE id=1; COMMIT;")
+        .unwrap();
+    assert_eq!(
+        reopened.snapshot(&conn).unwrap(),
+        vec![row(3, 20, 50), row(6, 10, 100)]
+    );
+}
 fn visible_pairs(conn: &Connection) -> Vec<(i64, i64)> {
     let mut stmt = conn
         .prepare("SELECT person, resource FROM frontier_access ORDER BY person, resource")

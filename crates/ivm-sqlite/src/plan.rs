@@ -14,7 +14,8 @@
 use crate::error::{EngineError, ErrorKind, Stage};
 use crate::OutputColumn;
 use ivm_ir::{
-    Agg, ColId, Expr, Func, NodeId, Op, Program as IrProgram, RelId, RelKind, Relation, Stratum, Ty,
+    Agg, ColId, Expr, Func, NodeId, Op, Order, Program as IrProgram, RelId, RelKind, Relation,
+    Stratum, Ty,
 };
 
 /// The compiled plan. Field-for-field the storage layout: one staging table
@@ -24,6 +25,7 @@ pub(crate) struct Compiled {
     pub scans: Vec<ScanSpec>,
     pub joins: Vec<JoinSpec>,
     pub antis: Vec<AntiSpec>,
+    pub topks: Vec<TopKSpec>,
     /// Output schema in output order. Value columns carry no declared type:
     /// they store storage classes as-is, exactly like the source cells.
     pub output: Vec<OutputColumn>,
@@ -62,6 +64,7 @@ pub(crate) enum BranchRef {
         filters: Vec<String>,
     },
     Anti(usize),
+    TopK(usize),
     /// A join branch: its output order is the union output order.
     Join(usize),
 }
@@ -182,6 +185,14 @@ pub(crate) struct AntiSpec {
     pub left_key: Vec<String>,
     pub right_key: Vec<String>,
     pub filters: Vec<String>,
+    pub delta: String,
+}
+
+pub(crate) struct TopKSpec {
+    pub scan: usize,
+    pub key: Vec<String>,
+    pub order: Vec<Order>,
+    pub limit: u32,
     pub delta: String,
 }
 
@@ -328,6 +339,7 @@ fn finish(c: Compiler<'_>, root: Root, output: Vec<OutputColumn>) -> Result<Comp
         scans: c.scans,
         joins: c.joins,
         antis: Vec::new(),
+        topks: Vec::new(),
         output,
         sources: c.sources,
         stage_width,
@@ -408,6 +420,13 @@ pub(crate) fn lower_ir(plan: &Compiled) -> Result<IrProgram, EngineError> {
                             Stage::Plan,
                             "",
                             "SQL lowering cannot reconstruct Antijoin",
+                        ))
+                    }
+                    BranchRef::TopK(_) => {
+                        return Err(EngineError::unsupported(
+                            Stage::Plan,
+                            "",
+                            "SQL lowering cannot reconstruct TopK",
                         ))
                     }
                     BranchRef::Join(join_id) => {
@@ -519,6 +538,7 @@ pub(crate) fn compile_ir(
     let mut scan_nodes = Vec::<(NodeId, usize)>::new();
     let mut joins = Vec::new();
     let mut antis = Vec::new();
+    let mut topks = Vec::new();
 
     fn scan_at(
         id: NodeId,
@@ -574,12 +594,50 @@ pub(crate) fn compile_ir(
         _ => *body,
     };
     let root_op = ir.nodes.get(root_node as usize).ok_or_else(unsupported)?;
-    let wrapped = matches!(root_op, Op::Get(_) | Op::Mfp { .. } | Op::Antijoin { .. })
-        .then(|| Op::Union(vec![root_node]));
+    let wrapped = matches!(
+        root_op,
+        Op::Get(_) | Op::Mfp { .. } | Op::Antijoin { .. } | Op::TopK { .. }
+    )
+    .then(|| Op::Union(vec![root_node]));
     let mut branches = Vec::new();
     let root = match wrapped.as_ref().unwrap_or(root_op) {
         Op::Union(inputs) => {
             for &branch in inputs {
+                if let Some(Op::TopK {
+                    input,
+                    key,
+                    order,
+                    limit,
+                }) = ir.nodes.get(branch as usize)
+                {
+                    let scan = scan_at(*input, ir, schema, &mut scans, &mut scan_nodes)
+                        .ok_or_else(unsupported)?;
+                    if scans[scan].needed.len() != output.len()
+                        || order.iter().any(|o| o.col as usize >= output.len())
+                    {
+                        return Err(unsupported());
+                    }
+                    let key = key
+                        .iter()
+                        .map(|&col| {
+                            scans[scan]
+                                .needed
+                                .get(col as usize)
+                                .cloned()
+                                .ok_or_else(unsupported)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let index = topks.len();
+                    topks.push(TopKSpec {
+                        scan,
+                        key,
+                        order: order.clone(),
+                        limit: *limit,
+                        delta: String::new(),
+                    });
+                    branches.push(BranchRef::TopK(index));
+                    continue;
+                }
                 if let Some(Op::Antijoin { l, r, lk, rk }) = ir.nodes.get(branch as usize) {
                     if lk.len() != rk.len() {
                         return Err(unsupported());
@@ -816,6 +874,7 @@ pub(crate) fn compile_ir(
         scans,
         joins,
         antis,
+        topks,
         output,
         sources,
         stage_width,
