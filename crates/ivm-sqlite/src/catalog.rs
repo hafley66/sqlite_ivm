@@ -561,12 +561,101 @@ fn catalog_row(
             quote(catalog_column()),
         ))
         .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
+    migrate_legacy_catalog(conn, meter)?;
     let row = meter
         .one(conn, "install", name, &sql, [name], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
         })
         .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
     Ok(row)
+}
+
+/// Previous extension files stored SQL in `frontier_catalog.sql`. Convert
+/// every row before renaming the column so the schema change and all values
+/// become visible together. Collector tables and frontier counters stay put.
+fn migrate_legacy_catalog(conn: &Connection, meter: &mut Meter) -> Result<(), EngineError> {
+    let columns: Vec<String> = meter
+        .rows(
+            conn,
+            "install",
+            catalog(),
+            "PRAGMA table_info(frontier_catalog)",
+            [],
+            |row| row.get(1),
+        )
+        .map_err(|e| {
+            EngineError::new(Stage::Install, catalog(), ErrorKind::Sqlite(e.to_string()))
+        })?;
+    if columns.iter().any(|c| c == "program") {
+        return Ok(());
+    }
+    if !columns.iter().any(|c| c == "sql") {
+        return Err(EngineError::new(
+            Stage::Install,
+            catalog(),
+            ErrorKind::State("catalog has neither program nor sql column".into()),
+        ));
+    }
+    let rows: Vec<(String, String)> = meter
+        .rows(
+            conn,
+            "install",
+            catalog(),
+            "SELECT name, sql FROM frontier_catalog ORDER BY name",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| {
+            EngineError::new(Stage::Install, catalog(), ErrorKind::Sqlite(e.to_string()))
+        })?;
+    let converted: Vec<(String, String)> = rows
+        .into_iter()
+        .map(|(name, sql)| {
+            let compiled = compile(conn, &name, &sql)?;
+            let ir = plan::lower_ir(&compiled)?;
+            let json = serde_json::to_string(&ir).map_err(|e| {
+                EngineError::new(Stage::Install, &name, ErrorKind::State(e.to_string()))
+            })?;
+            Ok((name, json))
+        })
+        .collect::<Result<_, EngineError>>()?;
+
+    let mut convert = || -> Result<(), EngineError> {
+        meter.batch(conn, "install", catalog(),
+            "SAVEPOINT frontier_sp_catalog_migrate; PRAGMA writable_schema=ON; \
+             ALTER TABLE frontier_catalog RENAME COLUMN sql TO program; PRAGMA writable_schema=OFF;"
+        ).map_err(|e| EngineError::new(Stage::Install, catalog(), ErrorKind::Sqlite(e.to_string())))?;
+        for (name, json) in &converted {
+            meter
+                .exec(
+                    conn,
+                    "install",
+                    catalog(),
+                    "UPDATE frontier_catalog SET program = ?1 WHERE name = ?2",
+                    (json, name),
+                )
+                .map_err(|e| {
+                    EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string()))
+                })?;
+        }
+        meter
+            .batch(
+                conn,
+                "install",
+                catalog(),
+                "RELEASE frontier_sp_catalog_migrate;",
+            )
+            .map_err(|e| {
+                EngineError::new(Stage::Install, catalog(), ErrorKind::Sqlite(e.to_string()))
+            })?;
+        Ok(())
+    };
+    if let Err(error) = convert() {
+        let _ = conn.execute_batch("PRAGMA writable_schema=OFF;");
+        rollback(conn, "frontier_sp_catalog_migrate");
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn next_install(conn: &Connection, meter: &mut Meter) -> Result<u64, EngineError> {

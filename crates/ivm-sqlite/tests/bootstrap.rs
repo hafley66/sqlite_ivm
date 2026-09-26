@@ -33,6 +33,66 @@ const JOIN_SQL: &str =
 const TEAM_COST_SQL: &str =
     "SELECT team, count(*) AS jobs, sum(cost) AS total_cost FROM job GROUP BY team";
 
+#[test]
+fn old_sql_catalog_reattaches_as_persisted_ir() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let path = std::env::temp_dir().join(format!(
+        "ivm-sqlite-old-catalog-{}-{}.sqlite",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed),
+    ));
+    let _ = std::fs::remove_file(&path);
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE membership(person INTEGER NOT NULL, team INTEGER NOT NULL, PRIMARY KEY(person, team));
+             CREATE TABLE permission(team INTEGER NOT NULL, resource INTEGER NOT NULL, PRIMARY KEY(team, resource));
+             CREATE TABLE direct_grant(person INTEGER NOT NULL, resource INTEGER NOT NULL, PRIMARY KEY(person, resource));",
+        ).unwrap();
+        let installed = Program::install(&conn, "access", ACCESS_SQL).unwrap();
+        conn.execute_batch("INSERT INTO direct_grant VALUES (1,100);")
+            .unwrap();
+        assert_eq!(installed.frontier_id(&conn).unwrap(), 1);
+        conn.execute_batch("ALTER TABLE frontier_catalog RENAME COLUMN program TO sql;")
+            .unwrap();
+        conn.execute(
+            "UPDATE frontier_catalog SET sql = ?1 WHERE name = 'access'",
+            [ACCESS_SQL],
+        )
+        .unwrap();
+    }
+    {
+        let conn = Connection::open(&path).unwrap();
+        let attached = Program::reattach(&conn, "access").unwrap();
+        assert_eq!(attached.frontier_id(&conn).unwrap(), 1);
+        assert_snapshot(
+            &conn,
+            &attached,
+            "SELECT person, resource FROM direct_grant ORDER BY person, resource",
+        );
+        let json: String = conn
+            .query_row(
+                "SELECT program FROM frontier_catalog WHERE name='access'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let ir: ivm_ir::Program = serde_json::from_str(&json).unwrap();
+        assert_eq!(ir.outputs.len(), 1);
+        conn.execute_batch("INSERT INTO direct_grant VALUES (2,200);")
+            .unwrap();
+        assert_eq!(attached.frontier_id(&conn).unwrap(), 2);
+        assert_snapshot(
+            &conn,
+            &attached,
+            "SELECT person, resource FROM direct_grant ORDER BY person, resource",
+        );
+        attached.teardown(&conn).unwrap();
+    }
+    std::fs::remove_file(path).unwrap();
+}
+
 /// A fresh evaluation of `sql` over the live tables, as typed cells: the
 /// oracle every snapshot is compared against. Both sides use SQLite's own
 /// `ORDER BY`, so mixed storage classes order identically.
