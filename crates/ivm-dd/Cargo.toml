@@ -1,0 +1,12 @@
+[package]
+name = "ivm-dd"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+ivm-ir = { path = "../ivm-ir" }
+ivm-engine = { path = "../ivm-engine" }
+differential-dataflow = "=0.25.1"
+timely = "=0.31.0"
+tracing = "0.1"

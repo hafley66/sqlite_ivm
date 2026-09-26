@@ -14,6 +14,7 @@ path = "src/lib.rs"
 [dependencies]
 ivm-ir = { path = "../../crates/ivm-ir" }
 ivm-engine = { path = "../../crates/ivm-engine" }
+ivm-dd = { path = "../../crates/ivm-dd" }
 differential-dataflow = "=0.25.1"
 timely = "=0.31.0"
 serde = { version = "1", features = ["derive"] }

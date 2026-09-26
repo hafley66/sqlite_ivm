@@ -1,7 +1,7 @@
 //! differential-dataflow engine: `lower` runs once inside `worker.dataflow`; each `settle` is one epoch.
 
-use crate::ir::*;
-use crate::rel::*;
+use ivm_ir::*;
+use ivm_engine::*;
 use differential_dataflow::input::{Input, InputSession};
 use differential_dataflow::operators::arrange::TraceAgent;
 use differential_dataflow::trace::cursor::Cursor;

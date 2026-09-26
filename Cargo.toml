@@ -7,7 +7,7 @@ description = "Transactional incremental SQL views for SQLite using persistent v
 readme = "README.md"
 
 [workspace]
-members = ["crates/ivm-ir", "crates/ivm-engine", "crates/frontier-engine"]
+members = ["crates/ivm-ir", "crates/ivm-engine", "crates/ivm-dd", "crates/frontier-engine"]
 resolver = "2"
 
 [workspace.package]

@@ -4,8 +4,9 @@ pub mod ir {
 pub mod rel {
     pub use ivm_engine::*;
 }
-#[path = "2_dd.rs"]
-pub mod dd;
+pub mod dd {
+    pub use ivm_dd::*;
+}
 
 pub use dd::{Dd, DdTap};
 pub use ir::*;
