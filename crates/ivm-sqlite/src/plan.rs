@@ -444,10 +444,22 @@ pub(crate) fn compile_ir(
         Some(index)
     }
 
+    let root_node = match ir.nodes.get(*body as usize).ok_or_else(unsupported)? {
+        Op::Threshold(input) => *input,
+        _ => *body,
+    };
+    let root_op = ir.nodes.get(root_node as usize).ok_or_else(unsupported)?;
+    let wrapped = matches!(root_op, Op::Get(_) | Op::Mfp { .. })
+        .then(|| Op::Union(vec![root_node]));
     let mut branches = Vec::new();
-    let root = match ir.nodes.get(*body as usize).ok_or_else(unsupported)? {
+    let root = match wrapped.as_ref().unwrap_or(root_op) {
         Op::Union(inputs) => {
             for &branch in inputs {
+                if matches!(ir.nodes.get(branch as usize), Some(Op::Get(_))) {
+                    let scan = scan_at(branch, ir, schema, &mut scans, &mut scan_nodes).ok_or_else(unsupported)?;
+                    branches.push(BranchRef::Scan { scan, takes: (0..scans[scan].needed.len()).collect() });
+                    continue;
+                }
                 let Op::Mfp { input, filter, map, project } = ir.nodes.get(branch as usize).ok_or_else(unsupported)?
                     else { return Err(unsupported()); };
                 match ir.nodes.get(*input as usize).ok_or_else(unsupported)? {

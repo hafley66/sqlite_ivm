@@ -131,6 +131,49 @@ fn typed_map_filter_over_join_uses_join_delta() {
     assert_eq!(Program::open(&conn, "mapped").unwrap().snapshot(&conn).unwrap(),
         vec![ivm_sqlite::Tuple(vec![Cell::Integer(1), Cell::Integer(103)])]);
 }
+
+#[test]
+fn typed_threshold_tracks_duplicate_support() {
+    let conn = conn();
+    let ir: ivm_ir::Program = serde_json::from_str(include_str!("../../ivm-dd/oracle/0_access.program.json")).unwrap();
+    let installed = Program::install_ir(&conn, "access", &ir).unwrap();
+    conn.execute_batch(
+        "BEGIN;
+         INSERT INTO membership VALUES (1,10);
+         INSERT INTO permission VALUES (10,100);
+         INSERT INTO direct_grant VALUES (1,100);
+         COMMIT;",
+    ).unwrap();
+    let want = vec![ivm_sqlite::Tuple(vec![Cell::Integer(1), Cell::Integer(100)])];
+    assert_eq!(installed.snapshot(&conn).unwrap(), want);
+    conn.execute_batch("BEGIN; DELETE FROM direct_grant; COMMIT;").unwrap();
+    assert_eq!(Program::open(&conn, "access").unwrap().snapshot(&conn).unwrap(), want);
+    conn.execute_batch("BEGIN; DELETE FROM permission; COMMIT;").unwrap();
+    assert!(installed.snapshot(&conn).unwrap().is_empty());
+}
+
+#[test]
+fn typed_threshold_over_source_preserves_one_visible_row() {
+    use ivm_ir::{Op, RelKind, Relation, Stratum, Ty};
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch("CREATE TABLE t(a INTEGER NOT NULL); INSERT INTO t VALUES (7),(7);").unwrap();
+    let ir = ivm_ir::Program {
+        rels: vec![
+            Relation { id: 0, name: "t".into(), cols: vec![Ty::Int], kind: RelKind::Source },
+            Relation { id: 1, name: "distinct_t".into(), cols: vec![Ty::Int], kind: RelKind::Derived },
+        ],
+        nodes: vec![Op::Get(0), Op::Threshold(0)],
+        strata: vec![Stratum::Let { id: 1, body: 1 }],
+        outputs: vec![1],
+    };
+    let installed = Program::install_ir(&conn, "distinct_t", &ir).unwrap();
+    let want = vec![ivm_sqlite::Tuple(vec![Cell::Integer(7)])];
+    assert_eq!(installed.snapshot(&conn).unwrap(), want);
+    conn.execute_batch("BEGIN; DELETE FROM t WHERE rowid=(SELECT min(rowid) FROM t); COMMIT;").unwrap();
+    assert_eq!(installed.snapshot(&conn).unwrap(), want);
+    conn.execute_batch("BEGIN; DELETE FROM t; COMMIT;").unwrap();
+    assert!(installed.snapshot(&conn).unwrap().is_empty());
+}
 fn visible_pairs(conn: &Connection) -> Vec<(i64, i64)> {
     let mut stmt = conn
         .prepare("SELECT person, resource FROM frontier_access ORDER BY person, resource")
