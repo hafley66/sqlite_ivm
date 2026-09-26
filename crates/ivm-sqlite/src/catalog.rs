@@ -241,13 +241,39 @@ pub(crate) fn install(
     select_sql: &str,
     watch: Watch,
 ) -> Result<Arc<Installed>, EngineError> {
+    let parsed = compile(conn, name, select_sql)?;
+    let program = plan::lower_ir(&parsed)?;
+    install_program(conn, name, &program, parsed.output, watch)
+}
+
+pub(crate) fn install_ir(
+    conn: &Connection,
+    name: &str,
+    program: &IrProgram,
+    watch: Watch,
+) -> Result<Arc<Installed>, EngineError> {
+    let output_id = *program.outputs.first().ok_or_else(|| {
+        EngineError::unsupported(Stage::Plan, name, "a typed program needs one output")
+    })?;
+    let width = program.rel(output_id).ok_or_else(|| {
+        EngineError::unsupported(Stage::Plan, name, "output relation is missing")
+    })?.cols.len();
+    let output = (0..width).map(|i| OutputColumn { name: format!("c{i}") }).collect();
+    install_program(conn, name, program, output, watch)
+}
+
+fn install_program(
+    conn: &Connection,
+    name: &str,
+    program: &IrProgram,
+    output: Vec<OutputColumn>,
+    watch: Watch,
+) -> Result<Arc<Installed>, EngineError> {
     validate_program_name(name)?;
     let _guard =
         tracing::info_span!(target: observe::TARGET, observe::INSTALL_SPAN, program = name)
             .entered();
-    let parsed = compile(conn, name, select_sql)?;
-    let program = plan::lower_ir(&parsed)?;
-    let compiled = compile_ir(conn, name, &program, parsed.output.clone())?;
+    let compiled = compile_ir(conn, name, program, output)?;
     let mut meter = Meter::default();
 
     if catalog_row(conn, name, &mut meter)?.is_some() {
@@ -843,8 +869,9 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
                 match branch {
                     plan::BranchRef::Scan { scan, takes } => {
                         let scan = &plan.scans[*scan];
-                        let cols: Vec<String> =
-                            takes.iter().map(|i| quote(&scan.needed[*i])).collect();
+                        let cols: Vec<String> = takes.iter().enumerate().map(|(pos, i)| {
+                            format!("{} AS {}", quote(&scan.needed[*i]), quote(&plan.output[pos].name))
+                        }).collect();
                         parts.push(format!(
                             "SELECT {cols}, __mult FROM {t}",
                             cols = cols.join(","),

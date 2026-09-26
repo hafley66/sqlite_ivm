@@ -162,6 +162,17 @@ impl std::fmt::Debug for Program {
 }
 
 impl Program {
+    /// Install a typed IR program in the database's persistent catalog.
+    /// The current compiler accepts the scan/join/union/group subset; later
+    /// operator ports extend the same compiled plan and catalog shape.
+    pub fn install_ir(
+        conn: &rusqlite::Connection,
+        name: &str,
+        program: &ivm_ir::Program,
+    ) -> Result<Self, EngineError> {
+        Ok(Self { inner: catalog::install_ir(conn, name, program, catalog::Watch::Sources)? })
+    }
+
     /// Parse, compile, validate and install `select_sql` under `name`.
     /// Creates the program's tables, indexes, views and source indexes,
     /// materializes the rows the sources already hold (the installed

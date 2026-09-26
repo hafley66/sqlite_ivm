@@ -34,6 +34,36 @@ fn install_access(conn: &Connection) -> Program {
 fn install_team_cost(conn: &Connection) -> Program {
     Program::install(conn, "team_cost", TEAM_COST_SQL).unwrap()
 }
+
+#[test]
+fn typed_program_reinstalls_from_catalog_ir() {
+    let conn = conn();
+    let sql_program = install_access(&conn);
+    let json: String = conn.query_row(
+        "SELECT program FROM frontier_catalog WHERE name='access'",
+        [],
+        |row| row.get(0),
+    ).unwrap();
+    let ir: ivm_ir::Program = serde_json::from_str(&json).unwrap();
+    sql_program.teardown(&conn).unwrap();
+
+    let typed = Program::install_ir(&conn, "access", &ir).unwrap();
+    conn.execute_batch(
+        "BEGIN;
+         INSERT INTO membership VALUES (1, 10);
+         INSERT INTO permission VALUES (10, 100);
+         COMMIT;",
+    ).unwrap();
+    let rows: Vec<(i64, i64)> = conn.prepare("SELECT c0, c1 FROM frontier_access")
+        .unwrap()
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>().unwrap();
+    assert_eq!(rows, [(1, 100)]);
+    assert_eq!(typed.frontier_id(&conn).unwrap(), 1);
+    let reopened = Program::open(&conn, "access").unwrap();
+    assert_eq!(reopened.snapshot(&conn).unwrap(), typed.snapshot(&conn).unwrap());
+}
 fn visible_pairs(conn: &Connection) -> Vec<(i64, i64)> {
     let mut stmt = conn
         .prepare("SELECT person, resource FROM frontier_access ORDER BY person, resource")
