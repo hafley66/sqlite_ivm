@@ -60,7 +60,7 @@ fn rss_kib() -> u64 {
 fn run<E: Engine>(engine: &str, name: &str, n: i64) {
     let (program, load, churn) = workload(name, n);
     let t0 = Instant::now();
-    let mut e = E::install(&program).unwrap();
+    let mut e = E::install(&program, &mut lab_20260924_0::rel::Raw::default()).unwrap();
     let installed = t0.elapsed();
     let t1 = Instant::now();
     let loaded_rows = e.settle(load).unwrap().changes.len();

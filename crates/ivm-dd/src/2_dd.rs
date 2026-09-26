@@ -351,6 +351,10 @@ pub struct Dd {
 pub type Hook = Box<dyn FnOnce(&mut timely::worker::Worker) + Send>;
 
 impl Dd {
+    pub fn install(program: &Program) -> Result<Self, EngineError> {
+        Self::start(program, None, false)
+    }
+
     pub fn install_observed(program: &Program, hook: Hook) -> Result<Self, EngineError> {
         Self::start(program, Some(hook), false)
     }
@@ -380,7 +384,7 @@ impl Dd {
 }
 
 impl Engine for Dd {
-    fn install(program: &Program) -> Result<Self, EngineError> {
+    fn install(program: &Program, _host: &mut impl Host) -> Result<Self, EngineError> {
         Self::start(program, None, false)
     }
 

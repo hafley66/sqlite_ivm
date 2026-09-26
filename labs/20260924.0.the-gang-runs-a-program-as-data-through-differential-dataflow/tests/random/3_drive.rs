@@ -116,7 +116,7 @@ pub fn snapshot<E: Engine>(e: &E, rel: RelId) -> Result<Vec<(Row, W)>, String> {
 pub fn oracle<E: Engine>(case: &Case) -> Result<(), String> {
     let p = &case.program;
     let oracle = Oracle::new(p)?;
-    let mut engine = E::install(p).map_err(|e| format!("install: {e}"))?;
+    let mut engine = E::install(p, &mut lab_20260924_0::rel::Raw::default()).map_err(|e| format!("install: {e}"))?;
     let mut before = oracle.bags()?;
     for (i, f) in case.frontiers.iter().enumerate() {
         oracle.apply(p, f)?;

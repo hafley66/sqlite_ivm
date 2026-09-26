@@ -1,6 +1,7 @@
 //! The operator algebra each engine implements, and the one lowering written against it.
 
 use ivm_ir::*;
+use crate::Host;
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -44,7 +45,7 @@ impl std::error::Error for EngineError {}
 
 /// Lifecycle every engine implements; the oracle harness is written against this trait only.
 pub trait Engine: Sized {
-    fn install(program: &Program) -> Result<Self, EngineError>;
+    fn install(program: &Program, host: &mut impl Host) -> Result<Self, EngineError>;
     fn settle(&mut self, frontier: Frontier) -> Result<Delta, EngineError>;
     fn snapshot(&self, rel: RelId) -> Result<Vec<(Row, W)>, EngineError>;
 }

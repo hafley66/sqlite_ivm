@@ -631,6 +631,11 @@ fn decl(arity: usize) -> String {
 }
 
 impl Sql {
+    pub fn install(program: &Program) -> Result<Self, EngineError> {
+        let conn = Connection::open_in_memory().map_err(sql_err(Stage::Install))?;
+        Self::install_on(conn, program)
+    }
+
     /// Runs `hook` on the fresh connection before any DDL; the engine keeps no counters itself.
     pub fn install_observed(program: &Program, hook: Box<dyn FnOnce(&Connection)>) -> Result<Self, EngineError> {
         let conn = Connection::open_in_memory().map_err(sql_err(Stage::Install))?;
@@ -948,9 +953,8 @@ impl Sql {
 }
 
 impl Engine for Sql {
-    fn install(program: &Program) -> Result<Self, EngineError> {
-        let conn = Connection::open_in_memory().map_err(sql_err(Stage::Install))?;
-        Self::install_on(conn, program)
+    fn install(program: &Program, _host: &mut impl Host) -> Result<Self, EngineError> {
+        Self::install(program)
     }
 
     fn settle(&mut self, frontier: Frontier) -> Result<Delta, EngineError> {

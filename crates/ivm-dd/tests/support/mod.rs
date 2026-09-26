@@ -234,7 +234,7 @@ pub fn run<E: Engine + 'static>(name: &str) -> String {
 pub fn expect_install_error<E: Engine>(name: &str) {
     let script = script(name);
     let kind = script.setup.lines().find_map(|line| line.strip_prefix("-- expect-error: ")).expect("missing install error expectation");
-    match E::install(&script.program) {
+    match E::install(&script.program, &mut ivm_dd::Raw::default()) {
         Ok(_) => panic!("{name}: expected install error {kind}"),
         Err(e) => assert!(format!("{:?}", e.kind).starts_with(kind), "{name}: expected {kind}, got {e}"),
     }
@@ -246,7 +246,7 @@ fn run_steps<E: Engine>(name: &str) -> String {
     assert!(!script.steps.is_empty(), "{name}: no steps");
     let (_conn, steps) = oracle(&script);
 
-    let mut engine = E::install(program).unwrap();
+    let mut engine = E::install(program, &mut ivm_dd::Raw::default()).unwrap();
     let mut marbles = String::from("step\ttick\trel\trow\tw\n");
     for step in steps {
         let at = format!("{name}/{}", step.caption);

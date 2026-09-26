@@ -1,5 +1,18 @@
 # Typed IR state layout for ivm-sqlite
 
+Decision: option 2, delegated by the user to the coordinator on 2026-09-26.
+Extend the existing `Compiled`, `Root`, `SettleSql`, and `frontier_catalog` path
+to cover typed nodes and SCC rounds. `ivm-sqlite` ends with one persisted
+program representation: typed IR. SQL text lowers to that IR through
+`ivm-sql-frontend`, including on reattach. Keep the existing SQL program,
+composition, collector, and reattach tests green during the transition.
+
+`Engine::install(program, host: &mut impl Host)` is the lifecycle boundary.
+`Raw` holds a caller-owned SQLite connection; `Plugin` uses the extension's
+connection. The operator port is committed one group at a time. The lab
+SQLite script and 1,000-seed random gates run against `ivm-sqlite` before the
+lab directory is removed.
+
 The promotion has moved the IR, relational algebra, DD engine, and the existing
 SQLite frontier engine into workspace crates. The SQLite operator port requires
 one storage decision before code changes to `plan.rs` and `catalog.rs`.
@@ -20,7 +33,7 @@ accepts only `&Program`, while the persistent engine needs the host's SQLite
 connection. The host boundary and the persisted program representation must be
 settled together.
 
-## Boop-Ask
+## Options considered
 
 Which layout should the typed IR port use?
 
@@ -32,5 +45,5 @@ Which layout should the typed IR port use?
    typed nodes and SCC rounds. Persist typed IR in the existing catalog, and
    define how SQL-text programs map into that representation on reattach.
 
-Both choices require a host-aware install entry point so `Plugin` can provide
-the database connection and `Raw` can provide a caller-owned one.
+The second option is selected. The first option is retained here as the
+alternative that was considered.

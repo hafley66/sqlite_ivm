@@ -59,8 +59,8 @@ pub fn permute<E: Engine>(case: &Case) -> Result<(), String> {
     let mut rng = Rng(case.seed ^ 0x9e4d_0001);
     let p = &case.program;
     let (q, map) = permuted(p, &mut rng);
-    let mut a = E::install(p).map_err(|e| format!("install: {e}"))?;
-    let mut b = E::install(&q).map_err(|e| format!("install permuted: {e}"))?;
+    let mut a = E::install(p, &mut lab_20260924_0::rel::Raw::default()).map_err(|e| format!("install: {e}"))?;
+    let mut b = E::install(&q, &mut lab_20260924_0::rel::Raw::default()).map_err(|e| format!("install permuted: {e}"))?;
     for (i, f) in case.frontiers.iter().enumerate() {
         let g = Frontier { changes: f.changes.iter().map(|c| SourceChange { rel: map[&c.rel], ..c.clone() }).collect() };
         let da = settle(&mut a, f, i)?;
@@ -97,8 +97,8 @@ fn k5_row(p: &Program, rel: RelId, row: &Row) -> Row {
 /// K5: transform every source frontier, then compare transformed deltas and snapshots.
 pub fn values<E: Engine>(case: &Case) -> Result<(), String> {
     let p = &case.program;
-    let mut a = E::install(p).map_err(|e| format!("install: {e}"))?;
-    let mut b = E::install(p).map_err(|e| format!("install transformed: {e}"))?;
+    let mut a = E::install(p, &mut lab_20260924_0::rel::Raw::default()).map_err(|e| format!("install: {e}"))?;
+    let mut b = E::install(p, &mut lab_20260924_0::rel::Raw::default()).map_err(|e| format!("install transformed: {e}"))?;
     for (i, f) in case.frontiers.iter().enumerate() {
         let transformed = Frontier { changes: f.changes.iter().map(|c| SourceChange {
             rel: c.rel, row: k5_row(p, c.rel, &c.row), w: c.w,
@@ -128,8 +128,8 @@ pub fn values<E: Engine>(case: &Case) -> Result<(), String> {
 pub fn split<E: Engine>(case: &Case) -> Result<(), String> {
     let mut rng = Rng(case.seed ^ 0x5b17_0002);
     let p = &case.program;
-    let mut a = E::install(p).map_err(|e| format!("install: {e}"))?;
-    let mut b = E::install(p).map_err(|e| format!("install split: {e}"))?;
+    let mut a = E::install(p, &mut lab_20260924_0::rel::Raw::default()).map_err(|e| format!("install: {e}"))?;
+    let mut b = E::install(p, &mut lab_20260924_0::rel::Raw::default()).map_err(|e| format!("install split: {e}"))?;
     let mut chunked = Vec::new();
     for (i, f) in case.frontiers.iter().enumerate() {
         let whole = settle(&mut a, f, i)?;
