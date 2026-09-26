@@ -1,6 +1,6 @@
 //! The operator algebra each engine implements, and the one lowering written against it.
 
-use crate::ir::*;
+use ivm_ir::*;
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

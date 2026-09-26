@@ -1,8 +1,9 @@
 pub mod ir {
     pub use ivm_ir::*;
 }
-#[path = "1_rel.rs"]
-pub mod rel;
+pub mod rel {
+    pub use ivm_engine::*;
+}
 #[path = "2_dd.rs"]
 pub mod dd;
 
