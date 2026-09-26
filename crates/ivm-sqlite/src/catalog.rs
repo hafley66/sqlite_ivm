@@ -5,7 +5,7 @@
 //!
 //! | object | shape |
 //! | --- | --- |
-//! | `frontier_catalog` | `name TEXT PK, sql TEXT, frontier INTEGER, install INTEGER` |
+//! | `frontier_catalog` | `name TEXT PK, program TEXT, frontier INTEGER, install INTEGER` |
 //! | `frontier_catalog_column` | `name, pos, col` — output schema rows, no JSON |
 //! | `frontier_P_stage` | `__seq, __table, __sign, v0..vW-1` — the transaction's collected batch |
 //! | `frontier_P_s<i>` | one per scan: netted signed delta over the scan's needed columns |
@@ -32,6 +32,7 @@ use crate::meter::Meter;
 use crate::observe;
 use crate::plan::{self, Compiled, Root, ScanSpec};
 use crate::OutputColumn;
+use ivm_ir::Program as IrProgram;
 use sqlite_ext::rusqlite::{types::Value, Connection};
 use std::sync::Arc;
 
@@ -244,7 +245,9 @@ pub(crate) fn install(
     let _guard =
         tracing::info_span!(target: observe::TARGET, observe::INSTALL_SPAN, program = name)
             .entered();
-    let compiled = compile(conn, name, select_sql)?;
+    let parsed = compile(conn, name, select_sql)?;
+    let program = plan::lower_ir(&parsed)?;
+    let compiled = compile_ir(conn, name, &program, parsed.output.clone())?;
     let mut meter = Meter::default();
 
     if catalog_row(conn, name, &mut meter)?.is_some() {
@@ -272,13 +275,15 @@ pub(crate) fn install(
     push_savepoint(&mut sql, "frontier_sp_install");
     push_catalog_ddl(&mut sql);
     push_program_ddl(&installed, &mut sql);
-    // The program's catalog row: SQL text for reopen, frontier counter, and
-    // one row per output column instead of any JSON payload.
+    // Persist the typed program; SQL text is only an install-time input.
+    let program_json = serde_json::to_string(&program).map_err(|e| {
+        EngineError::new(Stage::Install, name, ErrorKind::State(e.to_string()))
+    })?;
     sql.push_str(&format!(
-        "INSERT INTO {c}(name, sql, frontier, install) VALUES ('{n}', '{s}', 0, {i});",
+        "INSERT INTO {c}(name, program, frontier, install) VALUES ('{n}', '{s}', 0, {i});",
         c = quote(catalog()),
         n = name.replace('\'', "''"),
-        s = select_sql.replace('\'', "''"),
+        s = program_json.replace('\'', "''"),
         i = install,
     ));
     for (pos, col) in installed.output.iter().enumerate() {
@@ -472,19 +477,32 @@ fn compile(conn: &Connection, name: &str, select_sql: &str) -> Result<Compiled, 
     plan::compile(name, select_sql, &columns)
 }
 
+fn compile_ir(
+    conn: &Connection,
+    name: &str,
+    program: &IrProgram,
+    output: Vec<OutputColumn>,
+) -> Result<Compiled, EngineError> {
+    let columns = |table: &str| -> Option<Vec<String>> {
+        let mut fresh = Meter::default();
+        table_columns(conn, table, &mut fresh).ok().filter(|cols| !cols.is_empty())
+    };
+    plan::compile_ir(name, program, output, &columns)
+}
+
 fn catalog_row(
     conn: &Connection,
     name: &str,
     meter: &mut Meter,
 ) -> Result<Option<(String, u64)>, EngineError> {
     let sql = format!(
-        "SELECT sql, install FROM {} WHERE name = ?1",
+        "SELECT program, install FROM {} WHERE name = ?1",
         quote(catalog())
     );
     // First install on a database has no catalog yet; create it before reads.
     meter
         .batch(conn, "install", name, &format!(
-            "CREATE TABLE IF NOT EXISTS {}(name TEXT PRIMARY KEY, sql TEXT NOT NULL, frontier INTEGER NOT NULL DEFAULT 0, install INTEGER NOT NULL);\
+            "CREATE TABLE IF NOT EXISTS {}(name TEXT PRIMARY KEY, program TEXT NOT NULL, frontier INTEGER NOT NULL DEFAULT 0, install INTEGER NOT NULL);\
              CREATE TABLE IF NOT EXISTS {}(name TEXT NOT NULL, pos INTEGER NOT NULL, col TEXT NOT NULL, PRIMARY KEY(name, pos))",
             quote(catalog()),
             quote(catalog_column()),
@@ -550,7 +568,7 @@ fn rollback(conn: &Connection, sp: &str) {
 
 fn push_catalog_ddl(sql: &mut String) {
     sql.push_str(&format!(
-        "CREATE TABLE IF NOT EXISTS {c}(name TEXT PRIMARY KEY, sql TEXT NOT NULL, frontier INTEGER NOT NULL DEFAULT 0, install INTEGER NOT NULL);\
+        "CREATE TABLE IF NOT EXISTS {c}(name TEXT PRIMARY KEY, program TEXT NOT NULL, frontier INTEGER NOT NULL DEFAULT 0, install INTEGER NOT NULL);\
          CREATE TABLE IF NOT EXISTS {cc}(name TEXT NOT NULL, pos INTEGER NOT NULL, col TEXT NOT NULL, PRIMARY KEY(name, pos));",
         c = quote(catalog()),
         cc = quote(catalog_column()),
@@ -1053,14 +1071,25 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
 pub(crate) fn open(conn: &Connection, name: &str) -> Result<Arc<Installed>, EngineError> {
     validate_program_name(name)?;
     let mut meter = Meter::default();
-    let Some((sql, install)) = catalog_row(conn, name, &mut meter)? else {
+    let Some((json, install)) = catalog_row(conn, name, &mut meter)? else {
         return Err(EngineError::new(
             Stage::Install,
             name,
             ErrorKind::State("no program with this name is installed".into()),
         ));
     };
-    let compiled = compile(conn, name, &sql)?;
+    let program: IrProgram = serde_json::from_str(&json).map_err(|e| {
+        EngineError::new(Stage::Install, name, ErrorKind::State(format!("stored program: {e}")))
+    })?;
+    let output = meter.rows(
+        conn,
+        "install",
+        name,
+        "SELECT col FROM frontier_catalog_column WHERE name = ?1 ORDER BY pos",
+        [name],
+        |row| row.get::<_, String>(0).map(|name| OutputColumn { name }),
+    ).map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
+    let compiled = compile_ir(conn, name, &program, output)?;
     let mut installed = build_installed(name, install, compiled);
     installed.derived = scan_derived_sources(conn, &installed)?;
     Ok(Arc::new(installed))
