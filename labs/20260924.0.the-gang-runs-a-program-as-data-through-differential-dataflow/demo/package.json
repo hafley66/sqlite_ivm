@@ -4,16 +4,18 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "vitest run && tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "shot": "pnpm dlx playwright@1.62.0 screenshot --viewport-size=1600,1000 --wait-for-timeout=1500 file://$PWD/dist/index.html dist/shot.png"
+    "shot": "pnpm dlx playwright@1.62.0 screenshot --viewport-size=1600,1000 --wait-for-timeout=1500 file://$PWD/dist/index.html dist/shot.png",
+    "test": "vitest run"
   },
   "dependencies": {
     "cytoscape": "^3.34.3",
     "cytoscape-dagre": "^4.0.1",
     "motion": "^13.4.4",
     "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "react-dom": "^19.3.0",
+    "shiki": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -24,6 +26,7 @@
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite": "^8.3.1",
-    "vite-plugin-singlefile": "^2.3.3"
+    "vite-plugin-singlefile": "^2.3.3",
+    "vitest": "^5.0.2"
   }
 }

@@ -5,8 +5,16 @@ import { nodeTitle, tokens } from "./1_labels";
 import { SPEEDS, stageUnit, unitSeconds, useWave, type Speed, type Wave } from "./3a_wave";
 import { usePlan } from "./3b_schedule";
 
+export const CODE_TAB = "code";
+
 export const ScenarioTabs = ({ traces, current, onPick }: { traces: Trace[]; current: string; onPick: (scenario: string) => void }) => (
   <nav className="flex flex-wrap gap-1">
+    <button
+      onClick={() => onPick(CODE_TAB)}
+      className={`mr-2 rounded-t-md border border-b-0 px-3 py-1.5 text-sm ${current === CODE_TAB ? "border-slate-300 bg-white font-semibold" : "border-transparent bg-indigo-100 text-indigo-800 hover:bg-indigo-50"}`}
+    >
+      Code: RxJS-style ↔ DD
+    </button>
     {traces.map((trace) => (
       <button
         key={trace.scenario}
