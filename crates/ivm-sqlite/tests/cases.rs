@@ -64,6 +64,73 @@ fn typed_program_reinstalls_from_catalog_ir() {
     let reopened = Program::open(&conn, "access").unwrap();
     assert_eq!(reopened.snapshot(&conn).unwrap(), typed.snapshot(&conn).unwrap());
 }
+
+#[test]
+fn typed_map_filter_settles_and_reattaches() {
+    use ivm_ir::{Expr, Func, Op, RelKind, Relation, Stratum, Ty};
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch("CREATE TABLE t(a INTEGER NOT NULL, b INTEGER NOT NULL)").unwrap();
+    conn.execute_batch("INSERT INTO t VALUES (1,10)").unwrap();
+    let program = ivm_ir::Program {
+        rels: vec![
+            Relation { id: 0, name: "t".into(), cols: vec![Ty::Int, Ty::Int], kind: RelKind::Source },
+            Relation { id: 1, name: "mapped".into(), cols: vec![Ty::Int, Ty::Int], kind: RelKind::Derived },
+        ],
+        nodes: vec![
+            Op::Get(0),
+            Op::Mfp {
+                input: 0,
+                filter: vec![Expr::Call(Func::Eq, vec![Expr::Col(0), Expr::Lit(1)])],
+                map: vec![Expr::Call(Func::Add, vec![Expr::Col(1), Expr::Lit(5)])],
+                project: vec![0, 2],
+            },
+            Op::Union(vec![1]),
+        ],
+        strata: vec![Stratum::Let { id: 1, body: 2 }],
+        outputs: vec![1],
+    };
+    let installed = Program::install_ir(&conn, "mapped", &program).unwrap();
+    let snapshot = |p: &Program| p.snapshot(&conn).unwrap();
+    assert_eq!(snapshot(&installed), vec![ivm_sqlite::Tuple(vec![Cell::Integer(1), Cell::Integer(15)])]);
+    conn.execute_batch("BEGIN; INSERT INTO t VALUES (2,20); COMMIT;").unwrap();
+    assert_eq!(snapshot(&installed), vec![ivm_sqlite::Tuple(vec![Cell::Integer(1), Cell::Integer(15)])]);
+    conn.execute_batch("BEGIN; DELETE FROM t WHERE a=1; INSERT INTO t VALUES (1,11); COMMIT;").unwrap();
+    let reopened = Program::open(&conn, "mapped").unwrap();
+    assert_eq!(snapshot(&reopened), vec![ivm_sqlite::Tuple(vec![Cell::Integer(1), Cell::Integer(16)])]);
+}
+
+#[test]
+fn typed_map_filter_over_join_uses_join_delta() {
+    use ivm_ir::{Expr, Func, Op, RelKind, Relation, Stratum, Ty};
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch("CREATE TABLE l(a INTEGER NOT NULL, k INTEGER NOT NULL); CREATE TABLE r(k INTEGER NOT NULL, b INTEGER NOT NULL);").unwrap();
+    let program = ivm_ir::Program {
+        rels: vec![
+            Relation { id: 0, name: "l".into(), cols: vec![Ty::Int, Ty::Int], kind: RelKind::Source },
+            Relation { id: 1, name: "r".into(), cols: vec![Ty::Int, Ty::Int], kind: RelKind::Source },
+            Relation { id: 2, name: "mapped".into(), cols: vec![Ty::Int, Ty::Int], kind: RelKind::Derived },
+        ],
+        nodes: vec![
+            Op::Get(0), Op::Get(1),
+            Op::Join { inputs: vec![0, 1], equivalences: vec![vec![(0, 1), (1, 0)]] },
+            Op::Mfp {
+                input: 2,
+                filter: vec![Expr::Call(Func::Eq, vec![Expr::Col(0), Expr::Lit(1)])],
+                map: vec![Expr::Call(Func::Add, vec![Expr::Col(3), Expr::Lit(2)])],
+                project: vec![0, 4],
+            },
+            Op::Union(vec![3]),
+        ],
+        strata: vec![Stratum::Let { id: 2, body: 4 }],
+        outputs: vec![2],
+    };
+    let installed = Program::install_ir(&conn, "mapped", &program).unwrap();
+    conn.execute_batch("BEGIN; INSERT INTO l VALUES (1,10),(2,10); INSERT INTO r VALUES (10,100); COMMIT;").unwrap();
+    assert_eq!(installed.snapshot(&conn).unwrap(), vec![ivm_sqlite::Tuple(vec![Cell::Integer(1), Cell::Integer(102)])]);
+    conn.execute_batch("BEGIN; DELETE FROM r WHERE b=100; INSERT INTO r VALUES (10,101); COMMIT;").unwrap();
+    assert_eq!(Program::open(&conn, "mapped").unwrap().snapshot(&conn).unwrap(),
+        vec![ivm_sqlite::Tuple(vec![Cell::Integer(1), Cell::Integer(103)])]);
+}
 fn visible_pairs(conn: &Connection) -> Vec<(i64, i64)> {
     let mut stmt = conn
         .prepare("SELECT person, resource FROM frontier_access ORDER BY person, resource")

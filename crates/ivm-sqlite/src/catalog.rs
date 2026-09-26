@@ -878,6 +878,28 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
                             t = quote(&scan.stage),
                         ));
                     }
+                    plan::BranchRef::MfpScan { scan, select, filters } => {
+                        let scan = &plan.scans[*scan];
+                        let cols = select.iter().enumerate().map(|(pos, expr)| {
+                            format!("{expr} AS {}", quote(&plan.output[pos].name))
+                        }).collect::<Vec<_>>().join(",");
+                        let where_sql = if filters.is_empty() { "1".into() } else { filters.join(" AND ") };
+                        parts.push(format!(
+                            "SELECT {cols}, __mult FROM {t} WHERE {where_sql}",
+                            t = quote(&scan.stage),
+                        ));
+                    }
+                    plan::BranchRef::MfpJoin { join, select, filters } => {
+                        let join = &plan.joins[*join];
+                        let cols = select.iter().enumerate().map(|(pos, expr)| {
+                            format!("{expr} AS {}", quote(&plan.output[pos].name))
+                        }).collect::<Vec<_>>().join(",");
+                        let where_sql = if filters.is_empty() { "1".into() } else { filters.join(" AND ") };
+                        parts.push(format!(
+                            "SELECT {cols}, __mult FROM {t} WHERE {where_sql}",
+                            t = quote(&join.delta),
+                        ));
+                    }
                     plan::BranchRef::Join(j) => {
                         let join = &plan.joins[*j];
                         let cols: Vec<String> = join.out_names.iter().map(|c| quote(c)).collect();
