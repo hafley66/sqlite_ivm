@@ -557,14 +557,17 @@ pub(crate) fn compile_ir(
     output: Vec<OutputColumn>,
     schema: &Schema<'_>,
 ) -> Result<Compiled, EngineError> {
-    if ir.strata.len() != 1
-        || ir
-            .strata
-            .iter()
-            .any(|stratum| matches!(stratum, Stratum::LetRec { .. }))
+    if ir.strata.len() == 1
+        && !ir.strata.iter().any(|stratum| matches!(stratum, Stratum::LetRec { .. }))
     {
-        let nodes = NodesPlan::compile(name, ir)
-            .map_err(|e| EngineError::new(Stage::Plan, name, ErrorKind::State(e.to_string())))?;
+        if let Ok(compiled) = compile_ir_legacy(name, ir, output.clone(), schema) {
+            return Ok(compiled);
+        }
+    }
+    let nodes = NodesPlan::compile(name, ir).map_err(|e| match e.kind {
+        ivm_engine::ErrorKind::Unsupported(why) => EngineError::unsupported(Stage::Plan, name, why),
+        _ => EngineError::new(Stage::Plan, name, ErrorKind::State(e.to_string())),
+    })?;
         let mut scans = Vec::new();
         for source in ir.rels.iter().filter(|rel| rel.kind == RelKind::Source) {
             let columns = schema(&source.name).ok_or_else(|| {
@@ -582,7 +585,7 @@ pub(crate) fn compile_ir(
             .map(|scan| scan.columns.len())
             .max()
             .unwrap_or(0);
-        return Ok(Compiled {
+        Ok(Compiled {
             root: Root::Nodes(Box::new(nodes)),
             sources: scans.iter().map(|scan| scan.table.clone()).collect(),
             scans,
@@ -591,8 +594,15 @@ pub(crate) fn compile_ir(
             topks: Vec::new(),
             output,
             stage_width,
-        });
-    }
+        })
+}
+
+fn compile_ir_legacy(
+    name: &str,
+    ir: &IrProgram,
+    output: Vec<OutputColumn>,
+    schema: &Schema<'_>,
+) -> Result<Compiled, EngineError> {
     let unsupported = || {
         EngineError::unsupported(
             Stage::Plan,
@@ -945,6 +955,11 @@ pub(crate) fn compile_ir(
         }
         _ => return Err(unsupported()),
     };
+    for source in ir.rels.iter().filter(|r| r.kind == RelKind::Source) {
+        if scans.iter().any(|scan| scan.table == source.name) { continue; }
+        let columns = schema(&source.name).ok_or_else(unsupported)?;
+        scans.push(ScanSpec { table: source.name.clone(), needed: columns.clone(), columns, stage: String::new() });
+    }
     let sources = ir
         .rels
         .iter()

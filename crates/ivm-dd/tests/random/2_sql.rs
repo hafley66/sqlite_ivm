@@ -1,7 +1,7 @@
 //! IR to SQLite DDL with bag semantics, written from the IR docs alone; shares no code with any engine.
 //! Every relation exposes columns c0..cN; every node prints as one SELECT over aliased subqueries.
 
-use lab_20260924_0::*;
+use ivm_dd::*;
 use std::fmt::Write as _;
 
 pub fn arity(p: &Program, n: NodeId) -> usize {

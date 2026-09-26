@@ -3,8 +3,8 @@
 
 mod random;
 
-use lab_20260924_0::Dd;
-use lab_20260924_0::{Op, Stratum};
+use ivm_dd::Dd;
+use ivm_dd::{Op, Stratum};
 use random::{drive, meta, run};
 use drive::Case;
 
@@ -49,22 +49,4 @@ fn k5_dd() {
 #[test]
 fn k5_oracle_dd() {
     run("k5_oracle_dd", 100, Case::generate_k5, drive::oracle::<Dd>);
-}
-
-#[cfg(feature = "sqlite")]
-#[test]
-fn random_sql() {
-    run("random_sql", 200, Case::generate, drive::oracle::<lab_20260924_0::Sql>);
-}
-
-#[cfg(feature = "sqlite")]
-#[test]
-fn k5_sql() {
-    run("k5_sql", 100, Case::generate_k5, meta::values::<lab_20260924_0::Sql>);
-}
-
-#[cfg(feature = "sqlite")]
-#[test]
-fn k5_oracle_sql() {
-    run("k5_oracle_sql", 100, Case::generate_k5, drive::oracle::<lab_20260924_0::Sql>);
 }

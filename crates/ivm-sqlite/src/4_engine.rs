@@ -23,6 +23,13 @@ fn error(stage: Stage, e: impl std::fmt::Display) -> EngineError {
     EngineError::new(stage, None, ErrorKind::Worker(e.to_string()))
 }
 
+fn plan_error(e: crate::EngineError) -> EngineError {
+    match e.kind {
+        crate::ErrorKind::Unsupported(why) => EngineError::new(Stage::Install, None, ErrorKind::Unsupported(why)),
+        _ => error(Stage::Install, e),
+    }
+}
+
 fn conn(host: &mut impl Host, stage: Stage) -> Result<&Connection, EngineError> {
     host.conn()
         .and_then(|c| c.downcast_ref::<Connection>())
@@ -59,6 +66,12 @@ impl Engine for Sqlite {
                 catalog::quote(&source.name)
             ))
             .map_err(|e| error(Stage::Install, e))?;
+            let keys = (0..source.cols.len()).map(|i| format!("c{i}")).collect::<Vec<_>>().join(",");
+            db.execute_batch(&format!(
+                "CREATE UNIQUE INDEX IF NOT EXISTS {} ON {}({keys})",
+                catalog::quote(format!("ivm_host_{}_set", source.name)),
+                catalog::quote(&source.name),
+            )).map_err(|e| error(Stage::Install, e))?;
         }
         let mut programs = Vec::new();
         for &output in &ir.outputs {
@@ -71,7 +84,7 @@ impl Engine for Sqlite {
             let mut single = ir.clone();
             single.outputs = vec![output];
             let program = SqlProgram::install_ir_unwatched(db, &name, &single)
-                .map_err(|e| error(Stage::Install, e))?;
+                .map_err(plan_error)?;
             let threshold = matches!(ir.strata.as_slice(), [Stratum::Let { id, body }]
                 if *id == output && matches!(ir.nodes.get(*body as usize), Some(Op::Threshold(_))));
             programs.push(OutputProgram {

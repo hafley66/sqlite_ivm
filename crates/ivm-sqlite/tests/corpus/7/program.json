@@ -1,0 +1,81 @@
+{
+  "rels": [
+    {
+      "id": 0,
+      "name": "s0",
+      "cols": [
+        "Int"
+      ],
+      "kind": "Source"
+    },
+    {
+      "id": 1,
+      "name": "d0",
+      "cols": [
+        "Int"
+      ],
+      "kind": "Derived"
+    }
+  ],
+  "nodes": [
+    {
+      "Get": 0
+    },
+    {
+      "Get": 0
+    },
+    {
+      "Antijoin": {
+        "l": 0,
+        "r": 1,
+        "lk": [
+          0
+        ],
+        "rk": [
+          0
+        ]
+      }
+    },
+    {
+      "Mfp": {
+        "input": 2,
+        "filter": [
+          {
+            "Col": 0
+          },
+          {
+            "Call": [
+              "Add",
+              [
+                {
+                  "Col": 0
+                },
+                {
+                  "Lit": 3
+                }
+              ]
+            ]
+          }
+        ],
+        "map": [],
+        "project": [
+          0
+        ]
+      }
+    },
+    {
+      "Threshold": 3
+    }
+  ],
+  "strata": [
+    {
+      "Let": {
+        "id": 1,
+        "body": 4
+      }
+    }
+  ],
+  "outputs": [
+    1
+  ]
+}

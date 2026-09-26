@@ -2,7 +2,7 @@
 //! Negate is never generated: SQLite has no EXCEPT ALL to mirror a negative weight.
 
 use super::rng::Rng;
-use lab_20260924_0::*;
+use ivm_dd::*;
 use std::collections::BTreeSet;
 
 pub const DOMAIN: usize = 3;

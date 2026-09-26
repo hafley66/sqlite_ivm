@@ -2,7 +2,8 @@
 
 use super::drive::{raw, snapshot, Case};
 use super::{gen, rng::Rng};
-use lab_20260924_0::*;
+use ivm_dd::*;
+use rusqlite::Connection;
 use std::collections::BTreeMap;
 
 /// Fresh sparse RelIds, shuffled NodeIds, renamed relations; strata keep their dependency order.
@@ -48,8 +49,8 @@ fn permuted(p: &Program, rng: &mut Rng) -> (Program, BTreeMap<RelId, RelId>) {
     (Program { rels, nodes, strata, outputs }, rel)
 }
 
-fn settle<E: Engine>(e: &mut E, f: &Frontier, at: usize) -> Result<Vec<(RelId, Row, W)>, String> {
-    let d = e.settle(f.clone(), &mut lab_20260924_0::rel::Raw::default()).map_err(|e| format!("frontier {at}: settle: {e}"))?;
+fn settle<E: Engine>(e: &mut E, f: &Frontier, at: usize, db: &Connection) -> Result<Vec<(RelId, Row, W)>, String> {
+    let d = e.settle(f.clone(), &mut Raw::with_connection(db)).map_err(|e| format!("frontier {at}: settle: {e}"))?;
     raw(&d).map_err(|e| format!("frontier {at}: {e}"))?;
     Ok(d.changes)
 }
@@ -59,19 +60,21 @@ pub fn permute<E: Engine>(case: &Case) -> Result<(), String> {
     let mut rng = Rng(case.seed ^ 0x9e4d_0001);
     let p = &case.program;
     let (q, map) = permuted(p, &mut rng);
-    let mut a = E::install(p, &mut lab_20260924_0::rel::Raw::default()).map_err(|e| format!("install: {e}"))?;
-    let mut b = E::install(&q, &mut lab_20260924_0::rel::Raw::default()).map_err(|e| format!("install permuted: {e}"))?;
+    let db_a = Connection::open_in_memory().map_err(|e| e.to_string())?;
+    let db_b = Connection::open_in_memory().map_err(|e| e.to_string())?;
+    let mut a = E::install(p, &mut Raw::with_connection(&db_a)).map_err(|e| format!("install: {e}"))?;
+    let mut b = E::install(&q, &mut Raw::with_connection(&db_b)).map_err(|e| format!("install permuted: {e}"))?;
     for (i, f) in case.frontiers.iter().enumerate() {
         let g = Frontier { changes: f.changes.iter().map(|c| SourceChange { rel: map[&c.rel], ..c.clone() }).collect() };
-        let da = settle(&mut a, f, i)?;
-        let db = settle(&mut b, &g, i)?;
+        let da = settle(&mut a, f, i, &db_a)?;
+        let db = settle(&mut b, &g, i, &db_b)?;
         let mut want: Vec<(RelId, Row, W)> = da.into_iter().map(|(r, row, w)| (map[&r], row, w)).collect();
         want.sort();
         if db != want {
             return Err(format!("frontier {i}: permuted delta\n  expected {want:?}\n  got      {db:?}"));
         }
         for out in &p.outputs {
-            let (sa, sb) = (snapshot(&a, *out)?, snapshot(&b, map[out])?);
+            let (sa, sb) = (snapshot(&a, *out, &db_a)?, snapshot(&b, map[out], &db_b)?);
             if sa != sb {
                 return Err(format!("frontier {i}: permuted snapshot of rel {out}\n  expected {sa:?}\n  got      {sb:?}"));
             }
@@ -97,24 +100,26 @@ fn k5_row(p: &Program, rel: RelId, row: &Row) -> Row {
 /// K5: transform every source frontier, then compare transformed deltas and snapshots.
 pub fn values<E: Engine>(case: &Case) -> Result<(), String> {
     let p = &case.program;
-    let mut a = E::install(p, &mut lab_20260924_0::rel::Raw::default()).map_err(|e| format!("install: {e}"))?;
-    let mut b = E::install(p, &mut lab_20260924_0::rel::Raw::default()).map_err(|e| format!("install transformed: {e}"))?;
+    let db_a = Connection::open_in_memory().map_err(|e| e.to_string())?;
+    let db_b = Connection::open_in_memory().map_err(|e| e.to_string())?;
+    let mut a = E::install(p, &mut Raw::with_connection(&db_a)).map_err(|e| format!("install: {e}"))?;
+    let mut b = E::install(p, &mut Raw::with_connection(&db_b)).map_err(|e| format!("install transformed: {e}"))?;
     for (i, f) in case.frontiers.iter().enumerate() {
         let transformed = Frontier { changes: f.changes.iter().map(|c| SourceChange {
             rel: c.rel, row: k5_row(p, c.rel, &c.row), w: c.w,
         }).collect() };
-        let da = settle(&mut a, f, i)?;
-        let db = settle(&mut b, &transformed, i)?;
+        let da = settle(&mut a, f, i, &db_a)?;
+        let db = settle(&mut b, &transformed, i, &db_b)?;
         let mut want: Vec<_> = da.into_iter().map(|(rel, row, w)| (rel, k5_row(p, rel, &row), w)).collect();
         want.sort();
         if db != want {
             return Err(format!("frontier {i}: K5 delta\n  expected {want:?}\n  got      {db:?}"));
         }
         for out in &p.outputs {
-            let mut want: Vec<_> = snapshot(&a, *out)?.into_iter()
+            let mut want: Vec<_> = snapshot(&a, *out, &db_a)?.into_iter()
                 .map(|(row, w)| (k5_row(p, *out, &row), w)).collect();
             want.sort();
-            let got = snapshot(&b, *out)?;
+            let got = snapshot(&b, *out, &db_b)?;
             if got != want {
                 return Err(format!("frontier {i}: K5 snapshot of rel {out}\n  expected {want:?}\n  got      {got:?}"));
             }
@@ -128,11 +133,13 @@ pub fn values<E: Engine>(case: &Case) -> Result<(), String> {
 pub fn split<E: Engine>(case: &Case) -> Result<(), String> {
     let mut rng = Rng(case.seed ^ 0x5b17_0002);
     let p = &case.program;
-    let mut a = E::install(p, &mut lab_20260924_0::rel::Raw::default()).map_err(|e| format!("install: {e}"))?;
-    let mut b = E::install(p, &mut lab_20260924_0::rel::Raw::default()).map_err(|e| format!("install split: {e}"))?;
+    let db_a = Connection::open_in_memory().map_err(|e| e.to_string())?;
+    let db_b = Connection::open_in_memory().map_err(|e| e.to_string())?;
+    let mut a = E::install(p, &mut Raw::with_connection(&db_a)).map_err(|e| format!("install: {e}"))?;
+    let mut b = E::install(p, &mut Raw::with_connection(&db_b)).map_err(|e| format!("install split: {e}"))?;
     let mut chunked = Vec::new();
     for (i, f) in case.frontiers.iter().enumerate() {
-        let whole = settle(&mut a, f, i)?;
+        let whole = settle(&mut a, f, i, &db_a)?;
         let n = f.changes.len();
         let mut cuts: Vec<usize> = (1..n).filter(|_| rng.chance(50)).collect();
         if cuts.is_empty() && n >= 2 {
@@ -143,7 +150,7 @@ pub fn split<E: Engine>(case: &Case) -> Result<(), String> {
         let mut sum: BTreeMap<(RelId, Row), W> = BTreeMap::new();
         for w in cuts.windows(2) {
             let chunk = Frontier { changes: f.changes[w[0]..w[1]].to_vec() };
-            for (rel, row, w) in settle(&mut b, &chunk, i)? {
+            for (rel, row, w) in settle(&mut b, &chunk, i, &db_b)? {
                 *sum.entry((rel, row)).or_default() += w;
             }
             chunked.push(chunk);
@@ -156,7 +163,7 @@ pub fn split<E: Engine>(case: &Case) -> Result<(), String> {
             return Err(format!("frontier {i}: split at {cuts:?}\n  whole  {whole:?}\n  chunks {parts:?}"));
         }
         for out in &p.outputs {
-            let (sa, sb) = (snapshot(&a, *out)?, snapshot(&b, *out)?);
+            let (sa, sb) = (snapshot(&a, *out, &db_a)?, snapshot(&b, *out, &db_b)?);
             if sa != sb {
                 return Err(format!("frontier {i}: split snapshot of rel {out}\n  whole  {sa:?}\n  chunks {sb:?}"));
             }

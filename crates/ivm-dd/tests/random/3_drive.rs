@@ -2,7 +2,7 @@
 //! A failing case is shrunk, written to tests/corpus/<seed>/, and replayed first on every later run.
 
 use super::{gen, rng::Rng, sql};
-use lab_20260924_0::*;
+use ivm_dd::*;
 use rusqlite::Connection;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -106,8 +106,8 @@ pub fn raw(d: &Delta) -> Result<(), String> {
     Ok(())
 }
 
-pub fn snapshot<E: Engine>(e: &E, rel: RelId) -> Result<Vec<(Row, W)>, String> {
-    let mut rows = e.snapshot(rel, &mut lab_20260924_0::rel::Raw::default()).map_err(|e| format!("snapshot: {e}"))?;
+pub fn snapshot<E: Engine>(e: &E, rel: RelId, db: &Connection) -> Result<Vec<(Row, W)>, String> {
+    let mut rows = e.snapshot(rel, &mut Raw::with_connection(db)).map_err(|e| format!("snapshot: {e}"))?;
     rows.sort();
     Ok(rows)
 }
@@ -116,12 +116,13 @@ pub fn snapshot<E: Engine>(e: &E, rel: RelId) -> Result<Vec<(Row, W)>, String> {
 pub fn oracle<E: Engine>(case: &Case) -> Result<(), String> {
     let p = &case.program;
     let oracle = Oracle::new(p)?;
-    let mut engine = E::install(p, &mut lab_20260924_0::rel::Raw::default()).map_err(|e| format!("install: {e}"))?;
+    let engine_db = Connection::open_in_memory().map_err(sql_err)?;
+    let mut engine = E::install(p, &mut Raw::with_connection(&engine_db)).map_err(|e| format!("install: {e}"))?;
     let mut before = oracle.bags()?;
     for (i, f) in case.frontiers.iter().enumerate() {
         oracle.apply(p, f)?;
         let after = oracle.bags()?;
-        let delta = engine.settle(f.clone(), &mut lab_20260924_0::rel::Raw::default()).map_err(|e| format!("frontier {i}: settle: {e}"))?;
+        let delta = engine.settle(f.clone(), &mut Raw::with_connection(&engine_db)).map_err(|e| format!("frontier {i}: settle: {e}"))?;
         raw(&delta).map_err(|e| format!("frontier {i}: {e}"))?;
         let mut expected = Vec::new();
         for (k, (rel, _)) in oracle.outputs.iter().enumerate() {
@@ -136,7 +137,7 @@ pub fn oracle<E: Engine>(case: &Case) -> Result<(), String> {
             return Err(format!("frontier {i}: delta\n  expected {expected:?}\n  got      {:?}", delta.changes));
         }
         for (k, (rel, _)) in oracle.outputs.iter().enumerate() {
-            let got = snapshot(&engine, *rel)?;
+            let got = snapshot(&engine, *rel, &engine_db)?;
             let want: Vec<(Row, W)> = after[k].clone().into_iter().collect();
             if got != want {
                 return Err(format!("frontier {i}: snapshot of rel {rel}\n  expected {want:?}\n  got      {got:?}"));
