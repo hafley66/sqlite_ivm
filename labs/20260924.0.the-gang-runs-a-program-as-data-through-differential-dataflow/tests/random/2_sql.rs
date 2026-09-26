@@ -19,6 +19,7 @@ pub fn arity(p: &Program, n: NodeId) -> usize {
         Op::Join { inputs, .. } => inputs.iter().map(|n| arity(p, *n)).sum(),
         Op::Antijoin { l, .. } => arity(p, *l),
         Op::Reduce { key, aggs, .. } => key.len() + aggs.len(),
+        Op::TopK { input, .. } => arity(p, *input),
         op => panic!("printer: unsupported {op:?}"),
     }
 }
@@ -37,12 +38,46 @@ pub fn ddl(p: &Program) -> String {
     }
     let mut printer = Printer { p, next: 0 };
     for stratum in &p.strata {
-        let Stratum::Let { id, body } = stratum else { panic!("printer: LetRec") };
-        let rel = p.rel(*id).unwrap();
-        let body = printer.node(*body);
-        writeln!(out, "CREATE VIEW \"{}\"({}) AS {body};", rel.name, names(rel.cols.len())).unwrap();
+        match stratum {
+            Stratum::Let { id, body } => {
+                let rel = p.rel(*id).unwrap();
+                let body = printer.node(*body);
+                writeln!(out, "CREATE VIEW \"{}\"({}) AS {body};", rel.name, names(rel.cols.len())).unwrap();
+            }
+            Stratum::LetRec(rec) => {
+                let cte = recursive_cte(p, rec);
+                for (tag, id) in rec.ids.iter().enumerate() {
+                    let rel = p.rel(*id).unwrap();
+                    writeln!(out, "CREATE VIEW \"{}\"(c0) AS {cte} SELECT c0 FROM r WHERE tag = {tag};", rel.name).unwrap();
+                }
+            }
+        }
     }
     out
+}
+
+/// The generator emits one seed and one linear edge step per recursive body. SQLite's
+/// recursive table occurs directly in each FROM clause, as its recursive CTE rule requires.
+fn recursive_cte(p: &Program, rec: &LetRec) -> String {
+    let mut anchors = Vec::new();
+    let mut steps = Vec::new();
+    for (tag, body) in rec.bodies.iter().enumerate() {
+        let Op::Union(parts) = &p.nodes[*body as usize] else { panic!("printer: recursive union") };
+        let Op::Get(seed) = &p.nodes[parts[0] as usize] else { panic!("printer: recursive seed") };
+        let Op::Mfp { input, filter, map, project } = &p.nodes[parts[1] as usize] else { panic!("printer: recursive step") };
+        assert!(filter.is_empty() && map.is_empty() && project == &[2]);
+        let Op::Join { inputs, equivalences } = &p.nodes[*input as usize] else { panic!("printer: recursive join") };
+        assert_eq!(equivalences, &vec![vec![(0, 0), (1, 0)]]);
+        let Op::Get(from) = &p.nodes[inputs[0] as usize] else { panic!("printer: recursive input") };
+        let Op::Get(edge) = &p.nodes[inputs[1] as usize] else { panic!("printer: recursive edge") };
+        let from_tag = rec.ids.iter().position(|id| id == from).unwrap();
+        anchors.push(format!("SELECT {tag}, c0 FROM \"{}\"", p.rel(*seed).unwrap().name));
+        steps.push(format!(
+            "SELECT {tag}, e.c1 FROM r JOIN \"{}\" AS e ON r.c0 = e.c0 WHERE r.tag = {from_tag}",
+            p.rel(*edge).unwrap().name
+        ));
+    }
+    format!("WITH RECURSIVE r(tag, c0) AS ({})", anchors.into_iter().chain(steps).collect::<Vec<_>>().join(" UNION "))
 }
 
 struct Printer<'p> {
@@ -124,6 +159,23 @@ impl Printer<'_> {
                 format!("SELECT {} FROM ({inner}) AS {t}{tail}", sel.join(", "))
             }
             Op::Threshold(n) => format!("SELECT DISTINCT * FROM ({})", self.node(*n)),
+            Op::TopK { input, key, order, limit } => {
+                let (t, inner) = (self.alias(), self.node(*input));
+                let width = arity(p, *input);
+                let partition = if key.is_empty() {
+                    String::new()
+                } else {
+                    format!("PARTITION BY {} ", key.iter().map(|c| format!("{t}.c{c}")).collect::<Vec<_>>().join(", "))
+                };
+                let by = order.iter()
+                    .map(|o| format!("{t}.c{} {}", o.col, if o.desc { "DESC" } else { "ASC" }))
+                    .chain((0..width).map(|c| format!("{t}.c{c} ASC")))
+                    .collect::<Vec<_>>().join(", ");
+                let cols = names(width);
+                format!(
+                    "SELECT {cols} FROM (SELECT {t}.*, ROW_NUMBER() OVER ({partition}ORDER BY {by}) AS rn FROM ({inner}) AS {t}) WHERE rn <= {limit}"
+                )
+            }
             op => panic!("printer: unsupported {op:?}"),
         }
     }

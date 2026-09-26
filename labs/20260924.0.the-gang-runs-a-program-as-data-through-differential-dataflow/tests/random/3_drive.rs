@@ -25,6 +25,13 @@ impl Case {
         let frontiers = gen::frontiers(&mut rng, &program);
         Case { seed, program, frontiers }
     }
+
+    pub fn generate_k5(seed: u64) -> Self {
+        let mut rng = Rng(seed);
+        let program = gen::k5_program();
+        let frontiers = gen::frontiers(&mut rng, &program);
+        Case { seed, program, frontiers }
+    }
 }
 
 /// A check returns its first disagreement as text.
@@ -252,18 +259,18 @@ fn env(name: &str) -> Option<u64> {
     std::env::var(name).ok().map(|v| v.parse().unwrap())
 }
 
-/// `RANDOM_SEED` runs one seed; otherwise `RANDOM_CASES` seeds (default `cases`) from `RANDOM_BASE` (default 0).
+/// `RANDOM_SEED` runs one seed; otherwise `SEEDS` (or `RANDOM_CASES`) seeds from `RANDOM_BASE`.
 pub fn seeds(cases: u64) -> Vec<u64> {
     if let Some(seed) = env("RANDOM_SEED") {
         return vec![seed];
     }
     let base = env("RANDOM_BASE").unwrap_or(0);
-    (base..base + env("RANDOM_CASES").unwrap_or(cases)).collect()
+    (base..base + env("SEEDS").or_else(|| env("RANDOM_CASES")).unwrap_or(cases)).collect()
 }
 
 /// Corpus first, then generated seeds; the first failure is shrunk, saved, and panics with a rerun command.
-pub fn run(test: &str, cases: u64, check: Check) {
-    let generated = seeds(cases).into_iter().map(Case::generate);
+pub fn run(test: &str, cases: u64, generate: fn(u64) -> Case, check: Check) {
+    let generated = seeds(cases).into_iter().map(generate);
     for case in corpus().into_iter().chain(generated) {
         let Err(msg) = guarded(check, &case) else { continue };
         let small = shrink(&case, check);

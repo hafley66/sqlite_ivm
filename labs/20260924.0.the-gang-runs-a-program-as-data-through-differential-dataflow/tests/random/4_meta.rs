@@ -1,4 +1,4 @@
-//! Metamorphic checks, engine against itself: K4 permuted ids and names, K7 one frontier split into k.
+//! Metamorphic checks, engine against itself: K4 ids, K5 values, K7 frontier split.
 
 use super::drive::{raw, snapshot, Case};
 use super::{gen, rng::Rng};
@@ -24,6 +24,7 @@ fn permuted(p: &Program, rng: &mut Rng) -> (Program, BTreeMap<RelId, RelId>) {
             Op::Antijoin { l, r, lk, rk } => Op::Antijoin { l: n(&l), r: n(&r), lk, rk },
             Op::Reduce { input, key, aggs } => Op::Reduce { input: n(&input), key, aggs },
             Op::Threshold(i) => Op::Threshold(n(&i)),
+            Op::TopK { input, key, order, limit } => Op::TopK { input: n(&input), key, order, limit },
             op => panic!("permute: unsupported {op:?}"),
         };
     }
@@ -35,7 +36,11 @@ fn permuted(p: &Program, rng: &mut Rng) -> (Program, BTreeMap<RelId, RelId>) {
         .iter()
         .map(|s| match s {
             Stratum::Let { id, body } => Stratum::Let { id: rel[id], body: n(body) },
-            Stratum::LetRec(_) => panic!("permute: LetRec"),
+            Stratum::LetRec(rec) => Stratum::LetRec(LetRec {
+                ids: rec.ids.iter().map(|id| rel[id]).collect(),
+                bodies: rec.bodies.iter().map(n).collect(),
+                limit: rec.limit,
+            }),
         })
         .collect();
     let mut outputs: Vec<RelId> = p.outputs.iter().map(|o| rel[o]).collect();
@@ -69,6 +74,49 @@ pub fn permute<E: Engine>(case: &Case) -> Result<(), String> {
             let (sa, sb) = (snapshot(&a, *out)?, snapshot(&b, map[out])?);
             if sa != sb {
                 return Err(format!("frontier {i}: permuted snapshot of rel {out}\n  expected {sa:?}\n  got      {sb:?}"));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// K5's fixed bijection on the generated key domain and positive cost scale.
+/// The final Count column stays unchanged; the Sum column scales with costs.
+fn k5_row(p: &Program, rel: RelId, row: &Row) -> Row {
+    const KEY: [Cell; gen::DOMAIN] = [2, 0, 1];
+    let name = p.rel(rel).unwrap().name.as_str();
+    row.iter().enumerate().map(|(i, value)| {
+        match (name, i) {
+            ("total", 2) => *value,
+            ("cost" | "best" | "total", 1) => value * 3,
+            _ => KEY[*value as usize],
+        }
+    }).collect()
+}
+
+/// K5: transform every source frontier, then compare transformed deltas and snapshots.
+pub fn values<E: Engine>(case: &Case) -> Result<(), String> {
+    let p = &case.program;
+    let mut a = E::install(p).map_err(|e| format!("install: {e}"))?;
+    let mut b = E::install(p).map_err(|e| format!("install transformed: {e}"))?;
+    for (i, f) in case.frontiers.iter().enumerate() {
+        let transformed = Frontier { changes: f.changes.iter().map(|c| SourceChange {
+            rel: c.rel, row: k5_row(p, c.rel, &c.row), w: c.w,
+        }).collect() };
+        let da = settle(&mut a, f, i)?;
+        let db = settle(&mut b, &transformed, i)?;
+        let mut want: Vec<_> = da.into_iter().map(|(rel, row, w)| (rel, k5_row(p, rel, &row), w)).collect();
+        want.sort();
+        if db != want {
+            return Err(format!("frontier {i}: K5 delta\n  expected {want:?}\n  got      {db:?}"));
+        }
+        for out in &p.outputs {
+            let mut want: Vec<_> = snapshot(&a, *out)?.into_iter()
+                .map(|(row, w)| (k5_row(p, *out, &row), w)).collect();
+            want.sort();
+            let got = snapshot(&b, *out)?;
+            if got != want {
+                return Err(format!("frontier {i}: K5 snapshot of rel {out}\n  expected {want:?}\n  got      {got:?}"));
             }
         }
     }

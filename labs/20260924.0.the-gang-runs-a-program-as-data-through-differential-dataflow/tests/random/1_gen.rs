@@ -1,4 +1,4 @@
-//! Random well-typed programs over the ops `Dd` supports, and set-respecting frontiers over values 0..3.
+//! Random well-typed programs and set-respecting frontiers over a finite key domain.
 //! Negate is never generated: SQLite has no EXCEPT ALL to mirror a negative weight.
 
 use super::rng::Rng;
@@ -38,12 +38,13 @@ impl Gen<'_> {
             return self.push(Op::Get(rel), arity, depth);
         }
         let b = budget - 1;
-        match self.rng.below(12) {
+        match self.rng.below(14) {
             0..=2 => self.mfp(b),
             3 | 4 => self.union(b),
             5 | 6 => self.join(b),
             7 | 8 => self.antijoin(b),
             9 | 10 => self.reduce(b),
+            11 | 12 => self.topk(b),
             _ => {
                 let input = self.node(b, false);
                 self.push(Op::Threshold(input), self.arity[input as usize], self.depth[input as usize] + 1)
@@ -163,10 +164,25 @@ impl Gen<'_> {
         let depth = self.depth[input as usize] + 1;
         self.push(Op::Reduce { input, key, aggs }, arity, depth)
     }
+
+    fn topk(&mut self, b: usize) -> NodeId {
+        let input = self.node(b, false);
+        let a = self.arity[input as usize];
+        let key_len = if self.rng.chance(25) { 0 } else { self.rng.range(1, a.min(2)) };
+        let key = self.cols(key_len, a);
+        let order = (0..self.rng.range(1, a.min(2)))
+            .map(|_| Order { col: self.rng.below(a) as ColId, desc: self.rng.chance(50) })
+            .collect();
+        let limit = self.rng.range(1, 3) as u32;
+        self.push(Op::TopK { input, key, order, limit }, a, self.depth[input as usize] + 1)
+    }
 }
 
 /// 1-3 sources of arity 1-3, 1-3 derived relations each with body depth budget 1-4, 1-2 outputs.
 pub fn program(rng: &mut Rng) -> Program {
+    if rng.chance(50) {
+        return recursive_program(rng);
+    }
     let mut rels = Vec::new();
     let mut gen = Gen { rng, nodes: vec![], arity: vec![], depth: vec![], rels: vec![] };
     let sources = gen.rng.range(1, 3);
@@ -194,12 +210,105 @@ pub fn program(rng: &mut Rng) -> Program {
     Program { rels, nodes: gen.nodes, strata, outputs }
 }
 
+/// Linear recursion over finite source keys. A tagged SQL CTE can print either one or two
+/// mutually recursive unary relations without nesting a recursive table in a subquery.
+fn recursive_program(rng: &mut Rng) -> Program {
+    let count = rng.range(1, 2);
+    let edge = count as RelId;
+    let mut rels: Vec<Relation> = (0..count)
+        .map(|i| Relation { id: i as RelId, name: format!("seed{i}"), cols: vec![Ty::Id], kind: RelKind::Source })
+        .collect();
+    rels.push(Relation { id: edge, name: "edge".into(), cols: vec![Ty::Id, Ty::Id], kind: RelKind::Source });
+    let ids: Vec<RelId> = (0..count).map(|i| edge + 1 + i as RelId).collect();
+    rels.extend(ids.iter().enumerate().map(|(i, id)| Relation {
+        id: *id, name: format!("reach{i}"), cols: vec![Ty::Id], kind: RelKind::Derived,
+    }));
+    let mut gen = Gen { rng, nodes: vec![], arity: vec![], depth: vec![], rels: vec![] };
+    for i in 0..count {
+        gen.rels.push((i as RelId, 1, 0));
+    }
+    gen.rels.push((edge, 2, 0));
+    let mut bodies = Vec::new();
+    for i in 0..count {
+        let seed = gen.push(Op::Get(i as RelId), 1, 0);
+        let from = gen.push(Op::Get(ids[(i + count - 1) % count]), 1, 0);
+        let edges = gen.push(Op::Get(edge), 2, 0);
+        let join = gen.push(Op::Join { inputs: vec![from, edges], equivalences: vec![vec![(0, 0), (1, 0)]] }, 3, 1);
+        let step = gen.push(Op::Mfp { input: join, filter: vec![], map: vec![], project: vec![2] }, 1, 2);
+        bodies.push(gen.push(Op::Union(vec![seed, step]), 1, 3));
+    }
+    let mut strata = vec![Stratum::LetRec(LetRec { ids: ids.clone(), bodies, limit: None })];
+    for id in &ids {
+        gen.rels.push((*id, 1, 4));
+    }
+    // A post-loop stratum exercises TopK over a recursive result or an outer source.
+    let input_rel = if gen.rng.chance(50) { ids[gen.rng.below(ids.len())] } else { edge };
+    let width = rels.iter().find(|r| r.id == input_rel).unwrap().cols.len();
+    let input = gen.push(Op::Get(input_rel), width, 4);
+    let key = if width == 2 && gen.rng.chance(50) { vec![0] } else { vec![] };
+    let desc = gen.rng.chance(50);
+    let limit = gen.rng.range(1, 2) as u32;
+    let top = gen.push(Op::TopK { input, key, order: vec![Order { col: (width - 1) as ColId, desc }], limit }, width, 5);
+    let top_id = edge + 1 + count as RelId;
+    rels.push(Relation { id: top_id, name: "top".into(), cols: vec![Ty::Id; width], kind: RelKind::Derived });
+    strata.push(Stratum::Let { id: top_id, body: top });
+    let mut outputs = ids;
+    outputs.push(top_id);
+    Program { rels, nodes: gen.nodes, strata, outputs }
+}
+
+/// K5 uses explicit key/cost columns, so the transformation commutes with every operator.
+pub fn k5_program() -> Program {
+    let rels = vec![
+        Relation { id: 0, name: "seed0".into(), cols: vec![Ty::Id], kind: RelKind::Source },
+        Relation { id: 1, name: "edge".into(), cols: vec![Ty::Id, Ty::Id], kind: RelKind::Source },
+        Relation { id: 2, name: "cost".into(), cols: vec![Ty::Id, Ty::Int], kind: RelKind::Source },
+        Relation { id: 3, name: "reach0".into(), cols: vec![Ty::Id], kind: RelKind::Derived },
+        Relation { id: 4, name: "best".into(), cols: vec![Ty::Id, Ty::Int], kind: RelKind::Derived },
+        Relation { id: 5, name: "total".into(), cols: vec![Ty::Id, Ty::Int, Ty::Int], kind: RelKind::Derived },
+    ];
+    let nodes = vec![
+        Op::Get(0),
+        Op::Get(3),
+        Op::Get(1),
+        Op::Join { inputs: vec![1, 2], equivalences: vec![vec![(0, 0), (1, 0)]] },
+        Op::Mfp { input: 3, filter: vec![], map: vec![], project: vec![2] },
+        Op::Union(vec![0, 4]),
+        Op::Get(3),
+        Op::Get(2),
+        Op::Join { inputs: vec![6, 7], equivalences: vec![vec![(0, 0), (1, 0)]] },
+        Op::Mfp { input: 8, filter: vec![], map: vec![], project: vec![0, 2] },
+        Op::TopK { input: 9, key: vec![0], order: vec![Order { col: 1, desc: true }], limit: 1 },
+        Op::Get(4),
+        Op::Reduce { input: 11, key: vec![0], aggs: vec![Agg::Sum(1), Agg::Count] },
+    ];
+    let strata = vec![
+        Stratum::LetRec(LetRec { ids: vec![3], bodies: vec![5], limit: None }),
+        Stratum::Let { id: 4, body: 10 },
+        Stratum::Let { id: 5, body: 12 },
+    ];
+    Program { rels, nodes, strata, outputs: vec![3, 4, 5] }
+}
+
 /// 20-50 frontiers of 0-4 changes; an insert only of an absent row, a delete only of a present one.
 pub fn frontiers(rng: &mut Rng, p: &Program) -> Vec<Frontier> {
     let sources: Vec<(RelId, usize)> =
         p.rels.iter().filter(|r| r.kind == RelKind::Source).map(|r| (r.id, r.cols.len())).collect();
     let mut state: BTreeSet<(RelId, Row)> = BTreeSet::new();
     let mut out = Vec::new();
+    if p.strata.iter().any(|s| matches!(s, Stratum::LetRec(_))) {
+        let edge = p.rels.iter().find(|r| r.name == "edge").unwrap().id;
+        let seed = p.rels.iter().find(|r| r.name == "seed0").unwrap().id;
+        let cycle = vec![
+            SourceChange { rel: seed, row: vec![0], w: 1 },
+            SourceChange { rel: edge, row: vec![0, 1], w: 1 },
+            SourceChange { rel: edge, row: vec![1, 0], w: 1 },
+        ];
+        for c in &cycle { state.insert((c.rel, c.row.clone())); }
+        out.push(Frontier { changes: cycle });
+        state.remove(&(edge, vec![0, 1]));
+        out.push(Frontier { changes: vec![SourceChange { rel: edge, row: vec![0, 1], w: -1 }] });
+    }
     for _ in 0..rng.range(20, 50) {
         let mut changes = Vec::new();
         let n = if rng.chance(10) { 0 } else { rng.range(1, 4) };

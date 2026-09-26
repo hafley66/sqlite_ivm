@@ -33,7 +33,7 @@ Which relational operators are expressed as DD operators vs SQL statements, behi
 | `oracle/*.sql` + `*.program.json` | one step file drives frontier and expected delta; SQL steps or raw `+/-` lines |
 | `tests/0_scripts.rs` | named scripts S-A … S-N5, S-T, S-I |
 | `tests/1_sqlite_scripts.rs` | the same scripts on SQLite, DRed cycle vs DD, K1 VM-step gates, EXPLAIN scan gate |
-| `tests/2_random.rs` | random programs and frontiers vs an independent IR→SQL printer; permute and split metamorphic checks |
+| `tests/2_random.rs` | random programs and frontiers vs an independent IR→SQL printer; K4 permute, K5 value transform, and K7 split checks |
 | `tests/3_gates.rs` | K1, K2, K6/K27, K9, K20 from timely/differential logs |
 
 ## Measurement
@@ -52,6 +52,20 @@ Recorded 2026-09-24, debug build, `--features sqlite`:
 | `2_random` | DD 200 + 3000 extra seeds, permute 100, split 100; SQLite 200 + 2×2000 extra seeds; no failures |
 | `3_gates` | 5 passed |
 | SQLite K1 (VM steps, one change after 1e3 vs 3e4 loaded) | access 824 → 824; team_cost 1421 → 1421 (before the scan fix: 7825 → 210825 and 65421 → 1863421, failing) |
+
+Random recursion/TopK extension, recorded 2026-09-26, debug build with `--features sqlite`:
+
+| run | result |
+|---|---|
+| seeds 0..999, `RANDOM_CASES=1000 cargo test --offline -j 4 --features sqlite --test 2_random` | DD and SQLite oracle, DD K4/K7, DD and SQLite K5: 6 passed; 175.59 s wall; maximum RSS 83,623,936 bytes |
+| seeds 0..999, `SEEDS=1000 cargo test --offline -j 4 --features sqlite --test 2_random k5_oracle` | DD and SQLite recompute oracle on the K5 program: 2 passed; 69.72 s wall; maximum RSS 42,090,496 bytes |
+| generator coverage, seeds 0..999 | 262 one-relation LetRec; 245 two-relation LetRec; 731 programs with TopK |
+| full lab gate, `cargo test --offline -j 4 --features sqlite` | all suites green |
+
+Each recursive case starts with a two-edge cycle and then deletes an edge. Recursive keys
+range over `0..3`, so each generated SCC has a finite fixpoint. The independent SQL printer
+uses a tagged `WITH RECURSIVE` CTE and `UNION` set semantics for either SCC size. K5 maps keys
+through `[2, 0, 1]`, scales costs and Sum by 3, and leaves Count unchanged.
 
 Paired release run, `cargo run --release --offline -j 2 --features sqlite --example 0_paired -- <engine> <workload> <n>`:
 
@@ -81,7 +95,7 @@ ignoring `desc` (S-N3 f0); LetRec without in-loop threshold (S-N2 diverges, 10s 
 | K11 allocation scaling | not measured |
 | DD Min/Max | general reduce re-reads the group (118 µs at groups of 1000); hierarchical reduce not built |
 | SQLite DRed | assumes the recursive body is monotone in outer inputs; a Negate of an outer relation into an SCC is not detected |
-| random harness | no Negate, LetRec, TopK in generated programs; no K5 value bijection |
+| random harness | no Negate in generated programs; recursive generation covers linear graph steps over finite keys |
 
 ## Invalidates
 
