@@ -43,6 +43,7 @@ pub(crate) enum Root {
         scan: usize,
         keys: Vec<KeysOf>,
         sums: Vec<SumOf>,
+        extremes: Vec<ExtremeOf>,
     },
 }
 
@@ -152,6 +153,12 @@ pub(crate) struct KeysOf {
 pub(crate) struct SumOf {
     pub take: usize,
     pub name: String,
+}
+
+pub(crate) struct ExtremeOf {
+    pub take: usize,
+    pub name: String,
+    pub max: bool,
 }
 
 pub(crate) struct ScanSpec {
@@ -315,7 +322,16 @@ fn compile_group(
             }
         }
     }
-    finish(c, Root::Group { scan, keys, sums }, output)
+    finish(
+        c,
+        Root::Group {
+            scan,
+            keys,
+            sums,
+            extremes: Vec::new(),
+        },
+        output,
+    )
 }
 fn finish(c: Compiler<'_>, root: Root, output: Vec<OutputColumn>) -> Result<Compiled, EngineError> {
     let mut c = c;
@@ -487,7 +503,19 @@ pub(crate) fn lower_ir(plan: &Compiled) -> Result<IrProgram, EngineError> {
             nodes.push(Op::Union(branch_nodes));
             root
         }
-        Root::Group { scan, keys, sums } => {
+        Root::Group {
+            scan,
+            keys,
+            sums,
+            extremes,
+        } => {
+            if !extremes.is_empty() {
+                return Err(EngineError::unsupported(
+                    Stage::Plan,
+                    "",
+                    "SQL lowering cannot reconstruct Min/Max",
+                ));
+            }
             let root = nodes.len() as NodeId;
             let mut aggs = vec![Agg::Count];
             aggs.extend(sums.iter().map(|sum| Agg::Sum(sum.take as ColId)));
@@ -837,24 +865,36 @@ pub(crate) fn compile_ir(
                     })
                 })
                 .collect::<Result<Vec<_>, EngineError>>()?;
-            let sums = aggs[1..]
-                .iter()
-                .enumerate()
-                .map(|(i, agg)| {
-                    let Agg::Sum(take) = agg else {
-                        return Err(unsupported());
-                    };
-                    Ok(SumOf {
+            let mut sums = Vec::new();
+            let mut extremes = Vec::new();
+            for (i, agg) in aggs[1..].iter().enumerate() {
+                let name = output
+                    .get(key.len() + i + 1)
+                    .ok_or_else(unsupported)?
+                    .name
+                    .clone();
+                match agg {
+                    Agg::Sum(take) if extremes.is_empty() => sums.push(SumOf {
                         take: *take as usize,
-                        name: output
-                            .get(key.len() + i + 1)
-                            .ok_or_else(unsupported)?
-                            .name
-                            .clone(),
-                    })
-                })
-                .collect::<Result<Vec<_>, EngineError>>()?;
-            Root::Group { scan, keys, sums }
+                        name,
+                    }),
+                    Agg::Min(take) | Agg::Max(take) => extremes.push(ExtremeOf {
+                        take: *take as usize,
+                        name,
+                        max: matches!(agg, Agg::Max(_)),
+                    }),
+                    _ => return Err(unsupported()),
+                }
+            }
+            if key.is_empty() || sums.is_empty() {
+                return Err(unsupported());
+            }
+            Root::Group {
+                scan,
+                keys,
+                sums,
+                extremes,
+            }
         }
         _ => return Err(unsupported()),
     };

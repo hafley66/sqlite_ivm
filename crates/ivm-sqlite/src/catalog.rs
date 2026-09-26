@@ -62,6 +62,7 @@ pub(crate) struct SettleSql {
     pub topk_fills: Vec<(String, String)>,
     pub root_touch: String,
     pub root_upsert: String,
+    pub root_extrema: Option<String>,
     pub root_delete: String,
     pub root_delta: String,
     pub bump: String,
@@ -496,8 +497,16 @@ fn bootstrap(conn: &Connection, inst: &Installed, meter: &mut Meter) -> Result<(
         let span = tracing::info_span!(target: observe::TARGET, observe::ROOT_SPAN, object = p);
         let _guard = span.enter();
         meter
+            .exec(conn, phase, p, &inst.sqls.root_touch, [])
+            .map_err(|e| EngineError::new(Stage::Install, p, ErrorKind::Sqlite(e.to_string())))?;
+        meter
             .exec(conn, phase, p, &inst.sqls.root_upsert, [])
             .map_err(|e| EngineError::new(Stage::Install, p, ErrorKind::Sqlite(e.to_string())))?;
+        if let Some(sql) = &inst.sqls.root_extrema {
+            meter.exec(conn, phase, p, sql, []).map_err(|e| {
+                EngineError::new(Stage::Install, p, ErrorKind::Sqlite(e.to_string()))
+            })?;
+        }
     }
 
     // Leave the transient tables exactly as a settled frontier does.
@@ -786,12 +795,20 @@ fn push_program_ddl(inst: &Installed, sql: &mut String) {
                 keys = key_cols.join(","),
             ));
         }
-        Root::Group { keys, sums, .. } => {
+        Root::Group {
+            keys,
+            sums,
+            extremes,
+            ..
+        } => {
             let key_names: Vec<String> = keys.iter().map(|k| quote(&k.name)).collect();
             let mut state_cols: Vec<String> = key_names.clone();
             state_cols.push("__n INTEGER NOT NULL".into());
             for i in 0..sums.len() {
                 state_cols.push(format!("__s{i} INTEGER NOT NULL"));
+            }
+            for i in 0..extremes.len() {
+                state_cols.push(format!("__e{i} INTEGER"));
             }
             sql.push_str(&format!(
                 "CREATE TABLE IF NOT EXISTS {r}({cols});\
@@ -805,6 +822,9 @@ fn push_program_ddl(inst: &Installed, sql: &mut String) {
             touch_cols.push("__bn INTEGER NOT NULL".into());
             for i in 0..sums.len() {
                 touch_cols.push(format!("__bs{i} INTEGER NOT NULL"));
+            }
+            for i in 0..extremes.len() {
+                touch_cols.push(format!("__be{i} INTEGER"));
             }
             sql.push_str(&format!(
                 "CREATE TABLE IF NOT EXISTS {t}({cols});",
@@ -828,11 +848,19 @@ fn push_program_ddl(inst: &Installed, sql: &mut String) {
                 r = quote(root(p)),
             ));
         }
-        Root::Group { keys, sums, .. } => {
+        Root::Group {
+            keys,
+            sums,
+            extremes,
+            ..
+        } => {
             let mut named: Vec<String> = keys.iter().map(|k| quote(&k.name)).collect();
             named.push(format!("__n AS {}", quote(&inst.count_name())));
             for (i, sum) in sums.iter().enumerate() {
                 named.push(format!("__s{i} AS {}", quote(&sum.name)));
+            }
+            for (i, extreme) in extremes.iter().enumerate() {
+                named.push(format!("__e{i} AS {}", quote(&extreme.name)));
             }
             sql.push_str(&format!(
                 "CREATE VIEW IF NOT EXISTS {v} AS SELECT {cols} FROM {r} WHERE __n > 0;",
@@ -883,6 +911,29 @@ fn push_program_ddl(inst: &Installed, sql: &mut String) {
             && !indexed.iter().any(|(t, c)| t == table && c == &topk.key)
         {
             indexed.push((table.clone(), topk.key.clone()));
+        }
+    }
+    if let Root::Group {
+        scan,
+        keys,
+        extremes,
+        ..
+    } = &plan.root
+    {
+        let source = &plan.scans[*scan];
+        for extreme in extremes {
+            let mut cols = keys
+                .iter()
+                .map(|k| source.needed[k.take].clone())
+                .collect::<Vec<_>>();
+            cols.push(source.needed[extreme.take].clone());
+            if !inst.derived.iter().any(|d| d == &source.table)
+                && !indexed
+                    .iter()
+                    .any(|(t, c)| t == &source.table && c == &cols)
+            {
+                indexed.push((source.table.clone(), cols));
+            }
         }
     }
     for (i, (table, cols)) in indexed.iter().enumerate() {
@@ -1380,7 +1431,12 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
             );
             (touch_sql, upsert_sql, delete_sql, delta_sql, snapshot_sql)
         }
-        Root::Group { scan, keys, sums } => {
+        Root::Group {
+            scan,
+            keys,
+            sums,
+            extremes,
+        } => {
             let group_scan = &plan.scans[*scan];
             let key_names: Vec<String> = keys.iter().map(|k| quote(&k.name)).collect();
             let key_takes: Vec<String> = keys
@@ -1398,10 +1454,12 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
                 .collect();
             let key_cond = key_cond.join(" AND ");
             let touch_sql = format!(
-                "INSERT INTO {t}({keys}, __bn, {bs}) SELECT {dc}, COALESCE(r.__n, 0), {bc} FROM (SELECT {kt}, SUM(__mult) AS __mn, {se} FROM {st} GROUP BY {g}) d LEFT JOIN {r} r ON {cond};",
+                "INSERT INTO {t}({keys}, __bn, {bs}{bec}) SELECT {dc}, COALESCE(r.__n, 0), {bc}{bev} FROM (SELECT {kt}, SUM(__mult) AS __mn, {se} FROM {st} GROUP BY {g}) d LEFT JOIN {r} r ON {cond};",
                 t = quote(touch(p)),
                 keys = key_names.join(","),
                 bs = (0..sums.len()).map(|i| format!("__bs{i}")).collect::<Vec<_>>().join(","),
+                bec = (0..extremes.len()).map(|i| format!(",__be{i}")).collect::<String>(),
+                bev = (0..extremes.len()).map(|i| format!(",r.__e{i}")).collect::<String>(),
                 dc = key_names
                     .iter()
                     .map(|c| format!("d.{c}"))
@@ -1424,10 +1482,12 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
                 g = g,
             );
             let upsert_sql = format!(
-                "INSERT INTO {r}({keys}, __n, {ss}) SELECT {kt}, SUM(__mult), {se} FROM {st} GROUP BY {g} ON CONFLICT({keys}) DO UPDATE SET __n = __n + excluded.__n{extra};",
+                "INSERT INTO {r}({keys}, __n, {ss}{ec}) SELECT {kt}, SUM(__mult), {se}{ev} FROM {st} GROUP BY {g} ON CONFLICT({keys}) DO UPDATE SET __n = __n + excluded.__n{extra};",
                 r = quote(root(p)),
                 keys = key_names.join(","),
                 ss = (0..sums.len()).map(|i| format!("__s{i}")).collect::<Vec<_>>().join(","),
+                ec = (0..extremes.len()).map(|i| format!(",__e{i}")).collect::<String>(),
+                ev = extremes.iter().map(|_| ",NULL").collect::<String>(),
                 kt = key_takes.join(","),
                 se = sum_exprs.join(","),
                 st = quote(&group_scan.stage),
@@ -1451,6 +1511,9 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
                 for i in 0..sums.len() {
                     terms.push(format!("r.__s{i} != t.__bs{i}"));
                 }
+                for i in 0..extremes.len() {
+                    terms.push(format!("r.__e{i} IS NOT t.__be{i}"));
+                }
                 terms.join(" OR ")
             };
             let delta_sql = format!(
@@ -1467,6 +1530,7 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
                     .join(","),
                 tbs = (0..sums.len())
                     .map(|i| format!("t.__bs{i}"))
+                    .chain((0..extremes.len()).map(|i| format!("t.__be{i}")))
                     .collect::<Vec<_>>()
                     .join(","),
                 t = quote(touch(p)),
@@ -1480,6 +1544,7 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
                     .join(","),
                 rbs = (0..sums.len())
                     .map(|i| format!("r.__s{i}"))
+                    .chain((0..extremes.len()).map(|i| format!("r.__e{i}")))
                     .collect::<Vec<_>>()
                     .join(","),
                 cond2 = key_cond.replace("d.", "t."),
@@ -1489,12 +1554,45 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
                 keys = key_names.join(","),
                 ss = (0..sums.len())
                     .map(|i| format!("__s{i}"))
+                    .chain((0..extremes.len()).map(|i| format!("__e{i}")))
                     .collect::<Vec<_>>()
                     .join(","),
                 r = quote(root(p)),
             );
             (touch_sql, upsert_sql, delete_sql, delta_sql, snapshot_sql)
         }
+    };
+
+    let root_extrema = if let Root::Group {
+        scan,
+        keys,
+        extremes,
+        ..
+    } = &plan.root
+    {
+        if extremes.is_empty() {
+            None
+        } else {
+            let source = &plan.scans[*scan];
+            let assignments = extremes.iter().enumerate().map(|(i, extreme)| {
+                let matches = keys.iter().map(|key| {
+                    format!("s.{}=r.{}", quote(&source.needed[key.take]), quote(&key.name))
+                }).collect::<Vec<_>>().join(" AND ");
+                let value = quote(&source.needed[extreme.take]);
+                let direction = if extreme.max { "DESC" } else { "ASC" };
+                format!("__e{i}=(SELECT s.{value} FROM {table} s WHERE {matches} ORDER BY s.{value} {direction} LIMIT 1)",
+                    table=quote(&source.table))
+            }).collect::<Vec<_>>().join(",");
+            let touched = keys
+                .iter()
+                .map(|key| format!("t.{}=r.{}", quote(&key.name), quote(&key.name)))
+                .collect::<Vec<_>>()
+                .join(" AND ");
+            Some(format!("UPDATE {root} AS r SET {assignments} WHERE EXISTS (SELECT 1 FROM {touch} t WHERE {touched});",
+                root=quote(root(p)), touch=quote(touch(p))))
+        }
+    } else {
+        None
     };
 
     SettleSql {
@@ -1506,6 +1604,7 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
         topk_fills,
         root_touch,
         root_upsert,
+        root_extrema,
         root_delete,
         root_delta,
         bump: format!(
@@ -1635,6 +1734,29 @@ pub(crate) fn teardown(conn: &Connection, inst: &Installed) -> Result<(), Engine
             && !indexed.iter().any(|(t, c)| t == table && c == &topk.key)
         {
             indexed.push((table.clone(), topk.key.clone()));
+        }
+    }
+    if let Root::Group {
+        scan,
+        keys,
+        extremes,
+        ..
+    } = &inst.plan.root
+    {
+        let source = &inst.plan.scans[*scan];
+        for extreme in extremes {
+            let mut cols = keys
+                .iter()
+                .map(|k| source.needed[k.take].clone())
+                .collect::<Vec<_>>();
+            cols.push(source.needed[extreme.take].clone());
+            if !inst.derived.iter().any(|d| d == &source.table)
+                && !indexed
+                    .iter()
+                    .any(|(t, c)| t == &source.table && c == &cols)
+            {
+                indexed.push((source.table.clone(), cols));
+            }
         }
     }
     for (i, _) in indexed.iter().enumerate() {

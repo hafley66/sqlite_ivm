@@ -351,6 +351,49 @@ fn typed_topk_reranks_touched_groups() {
         vec![row(3, 20, 50), row(6, 10, 100)]
     );
 }
+
+#[test]
+fn typed_reduce_min_max_retracts_extrema() {
+    let conn = conn();
+    conn.execute_batch("INSERT INTO job VALUES (1,10,5),(2,10,7),(3,20,3);")
+        .unwrap();
+    let mut ir: ivm_ir::Program =
+        serde_json::from_str(include_str!("../../ivm-dd/oracle/1_team_cost.program.json")).unwrap();
+    ir.strata.truncate(1);
+    ir.outputs.truncate(1);
+    let installed = Program::install_ir(&conn, "team_cost_ir", &ir).unwrap();
+    let tuple = |team, n, sum, min, max| {
+        ivm_sqlite::Tuple(vec![
+            Cell::Integer(team),
+            Cell::Integer(n),
+            Cell::Integer(sum),
+            Cell::Integer(min),
+            Cell::Integer(max),
+        ])
+    };
+    assert_eq!(
+        installed.snapshot(&conn).unwrap(),
+        vec![tuple(10, 2, 12, 5, 7), tuple(20, 1, 3, 3, 3)]
+    );
+    conn.execute_batch(
+        "BEGIN; DELETE FROM job WHERE id=1; INSERT INTO job VALUES (4,10,9); COMMIT;",
+    )
+    .unwrap();
+    assert_eq!(
+        installed.snapshot(&conn).unwrap(),
+        vec![tuple(10, 2, 16, 7, 9), tuple(20, 1, 3, 3, 3)]
+    );
+    conn.execute_batch("BEGIN; DELETE FROM job WHERE team=20; COMMIT;")
+        .unwrap();
+    let reopened = Program::open(&conn, "team_cost_ir").unwrap();
+    assert_eq!(
+        reopened.snapshot(&conn).unwrap(),
+        vec![tuple(10, 2, 16, 7, 9)]
+    );
+    conn.execute_batch("BEGIN; DELETE FROM job WHERE team=10; COMMIT;")
+        .unwrap();
+    assert!(reopened.snapshot(&conn).unwrap().is_empty());
+}
 fn visible_pairs(conn: &Connection) -> Vec<(i64, i64)> {
     let mut stmt = conn
         .prepare("SELECT person, resource FROM frontier_access ORDER BY person, resource")

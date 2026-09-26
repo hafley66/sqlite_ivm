@@ -207,6 +207,17 @@ fn settle_inner(
         for (what, sql) in [
             ("touch", &inst.sqls.root_touch),
             ("upsert", &inst.sqls.root_upsert),
+        ] {
+            meter
+                .exec(conn, phase, &inst.name, sql, [])
+                .map_err(|e| fail(what, &inst.name, e))?;
+        }
+        if let Some(sql) = &inst.sqls.root_extrema {
+            meter
+                .exec(conn, phase, &inst.name, sql, [])
+                .map_err(|e| fail("extrema", &inst.name, e))?;
+        }
+        for (what, sql) in [
             ("drop invisible", &inst.sqls.root_delete),
             ("delta", &inst.sqls.root_delta),
         ] {
