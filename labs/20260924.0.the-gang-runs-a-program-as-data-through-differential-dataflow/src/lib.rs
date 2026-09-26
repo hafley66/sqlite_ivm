@@ -1,5 +1,6 @@
-#[path = "0_ir.rs"]
-pub mod ir;
+pub mod ir {
+    pub use ivm_ir::*;
+}
 #[path = "1_rel.rs"]
 pub mod rel;
 #[path = "2_dd.rs"]

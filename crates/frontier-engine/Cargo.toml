@@ -7,8 +7,8 @@ description = "SQLite-backed incremental frontier engine: typed cells, indexed i
 
 [dependencies]
 # Correlated shared crates, never vendored. Revision recorded in HYPOTHESIS.md.
-sqlite-ext = { path = "/Users/chrishafley/projects/hafley-rs-wt/main-codex-attribution/crates/sqlite-ext" }
-hafley-observe = { path = "/Users/chrishafley/projects/hafley-rs-wt/main-codex-attribution/crates/hafley-observe" }
+sqlite-ext = { path = "../../hafley-rs/crates/sqlite-ext" }
+hafley-observe = { path = "../../hafley-rs/crates/hafley-observe" }
 tracing = "0.1"
 
 [dev-dependencies]

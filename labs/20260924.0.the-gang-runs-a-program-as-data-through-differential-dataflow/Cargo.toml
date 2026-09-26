@@ -12,6 +12,7 @@ path = "src/lib.rs"
 
 # Without features the crate links no SQLite; SQLite is then the test oracle only.
 [dependencies]
+ivm-ir = { path = "../../crates/ivm-ir" }
 differential-dataflow = "=0.25.1"
 timely = "=0.31.0"
 serde = { version = "1", features = ["derive"] }

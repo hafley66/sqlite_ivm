@@ -50,3 +50,6 @@ lab-20260924-dd-sqlite-pokemon-demo:
     done
     cd demo && pnpm install --frozen-lockfile && pnpm build
     echo "open $(pwd)/dist/index.html"
+# Link shared crates from the main hafley-rs checkout into this worktree.
+boop-start:
+    ln -sfn "${HOME}/projects/hafley-rs" hafley-rs
