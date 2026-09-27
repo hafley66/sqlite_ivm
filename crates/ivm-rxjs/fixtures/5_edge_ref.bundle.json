@@ -1,0 +1,3322 @@
+{
+  "program": {
+    "texts": [
+      "name"
+    ],
+    "rels": [
+      {
+        "id": 0,
+        "name": "__ir_unit",
+        "cols": [
+          "Id"
+        ],
+        "kind": "Source"
+      },
+      {
+        "id": 1,
+        "name": "__ir_term_map",
+        "cols": [
+          "Int",
+          "Id"
+        ],
+        "kind": "Source"
+      },
+      {
+        "id": 2,
+        "name": "__ir_plain_list_seeds",
+        "cols": [
+          "Id",
+          "Id"
+        ],
+        "kind": "Source"
+      },
+      {
+        "id": 3,
+        "name": "__ir_bad_lists",
+        "cols": [
+          "Id"
+        ],
+        "kind": "Source"
+      },
+      {
+        "id": 4,
+        "name": "__ir_plain_lists",
+        "cols": [
+          "Id",
+          "Id"
+        ],
+        "kind": "Derived"
+      },
+      {
+        "id": 5,
+        "name": "0:int",
+        "cols": [
+          "Id",
+          "Int"
+        ],
+        "kind": "Constructor"
+      },
+      {
+        "id": 6,
+        "name": "__ir_prewarm_5",
+        "cols": [
+          "Int",
+          "Int"
+        ],
+        "kind": "Source"
+      },
+      {
+        "id": 7,
+        "name": "__ir_prewarm_out_5",
+        "cols": [
+          "Int",
+          "Int",
+          "Id"
+        ],
+        "kind": "Derived"
+      },
+      {
+        "id": 8,
+        "name": "1:bool",
+        "cols": [
+          "Id",
+          "Int"
+        ],
+        "kind": "Constructor"
+      },
+      {
+        "id": 9,
+        "name": "__ir_prewarm_8",
+        "cols": [
+          "Int",
+          "Int"
+        ],
+        "kind": "Source"
+      },
+      {
+        "id": 10,
+        "name": "__ir_prewarm_out_8",
+        "cols": [
+          "Int",
+          "Int",
+          "Id"
+        ],
+        "kind": "Derived"
+      },
+      {
+        "id": 11,
+        "name": "3:atom",
+        "cols": [
+          "Id",
+          "Int"
+        ],
+        "kind": "Constructor"
+      },
+      {
+        "id": 12,
+        "name": "__ir_prewarm_11",
+        "cols": [
+          "Int",
+          "Int"
+        ],
+        "kind": "Source"
+      },
+      {
+        "id": 13,
+        "name": "__ir_prewarm_out_11",
+        "cols": [
+          "Int",
+          "Int",
+          "Id"
+        ],
+        "kind": "Derived"
+      },
+      {
+        "id": 14,
+        "name": "9:1:const",
+        "cols": [
+          "Id",
+          "Id"
+        ],
+        "kind": "Constructor"
+      },
+      {
+        "id": 15,
+        "name": "__ir_prewarm_14",
+        "cols": [
+          "Int",
+          "Id"
+        ],
+        "kind": "Source"
+      },
+      {
+        "id": 16,
+        "name": "__ir_prewarm_out_14",
+        "cols": [
+          "Int",
+          "Id",
+          "Id"
+        ],
+        "kind": "Derived"
+      },
+      {
+        "id": 17,
+        "name": "9:1:kernel",
+        "cols": [
+          "Id",
+          "Id"
+        ],
+        "kind": "Constructor"
+      },
+      {
+        "id": 18,
+        "name": "__ir_prewarm_17",
+        "cols": [
+          "Int",
+          "Id"
+        ],
+        "kind": "Source"
+      },
+      {
+        "id": 19,
+        "name": "__ir_prewarm_out_17",
+        "cols": [
+          "Int",
+          "Id",
+          "Id"
+        ],
+        "kind": "Derived"
+      },
+      {
+        "id": 20,
+        "name": "9:1:node",
+        "cols": [
+          "Id",
+          "Id"
+        ],
+        "kind": "Constructor"
+      },
+      {
+        "id": 21,
+        "name": "__ir_prewarm_20",
+        "cols": [
+          "Int",
+          "Id"
+        ],
+        "kind": "Source"
+      },
+      {
+        "id": 22,
+        "name": "__ir_prewarm_out_20",
+        "cols": [
+          "Int",
+          "Id",
+          "Id"
+        ],
+        "kind": "Derived"
+      },
+      {
+        "id": 23,
+        "name": "9:1:primitive",
+        "cols": [
+          "Id",
+          "Id"
+        ],
+        "kind": "Constructor"
+      },
+      {
+        "id": 24,
+        "name": "__ir_prewarm_23",
+        "cols": [
+          "Int",
+          "Id"
+        ],
+        "kind": "Source"
+      },
+      {
+        "id": 25,
+        "name": "__ir_prewarm_out_23",
+        "cols": [
+          "Int",
+          "Id",
+          "Id"
+        ],
+        "kind": "Derived"
+      },
+      {
+        "id": 26,
+        "name": "9:1:ref",
+        "cols": [
+          "Id",
+          "Id"
+        ],
+        "kind": "Constructor"
+      },
+      {
+        "id": 27,
+        "name": "__ir_prewarm_26",
+        "cols": [
+          "Int",
+          "Id"
+        ],
+        "kind": "Source"
+      },
+      {
+        "id": 28,
+        "name": "__ir_prewarm_out_26",
+        "cols": [
+          "Int",
+          "Id",
+          "Id"
+        ],
+        "kind": "Derived"
+      },
+      {
+        "id": 29,
+        "name": "9:1:var",
+        "cols": [
+          "Id",
+          "Id"
+        ],
+        "kind": "Constructor"
+      },
+      {
+        "id": 30,
+        "name": "__ir_prewarm_29",
+        "cols": [
+          "Int",
+          "Id"
+        ],
+        "kind": "Source"
+      },
+      {
+        "id": 31,
+        "name": "__ir_prewarm_out_29",
+        "cols": [
+          "Int",
+          "Id",
+          "Id"
+        ],
+        "kind": "Derived"
+      },
+      {
+        "id": 32,
+        "name": "9:2:[|]",
+        "cols": [
+          "Id",
+          "Id",
+          "Id"
+        ],
+        "kind": "Constructor"
+      },
+      {
+        "id": 33,
+        "name": "__ir_prewarm_32",
+        "cols": [
+          "Int",
+          "Id",
+          "Id"
+        ],
+        "kind": "Source"
+      },
+      {
+        "id": 34,
+        "name": "__ir_prewarm_out_32",
+        "cols": [
+          "Int",
+          "Id",
+          "Id",
+          "Id"
+        ],
+        "kind": "Derived"
+      },
+      {
+        "id": 35,
+        "name": "9:2:application",
+        "cols": [
+          "Id",
+          "Id",
+          "Id"
+        ],
+        "kind": "Constructor"
+      },
+      {
+        "id": 36,
+        "name": "__ir_prewarm_35",
+        "cols": [
+          "Int",
+          "Id",
+          "Id"
+        ],
+        "kind": "Source"
+      },
+      {
+        "id": 37,
+        "name": "__ir_prewarm_out_35",
+        "cols": [
+          "Int",
+          "Id",
+          "Id",
+          "Id"
+        ],
+        "kind": "Derived"
+      },
+      {
+        "id": 38,
+        "name": "9:2:edge",
+        "cols": [
+          "Id",
+          "Id",
+          "Id"
+        ],
+        "kind": "Constructor"
+      },
+      {
+        "id": 39,
+        "name": "__ir_prewarm_38",
+        "cols": [
+          "Int",
+          "Id",
+          "Id"
+        ],
+        "kind": "Source"
+      },
+      {
+        "id": 40,
+        "name": "__ir_prewarm_out_38",
+        "cols": [
+          "Int",
+          "Id",
+          "Id",
+          "Id"
+        ],
+        "kind": "Derived"
+      },
+      {
+        "id": 41,
+        "name": "__ir_semantic",
+        "cols": [
+          "Id",
+          "Id"
+        ],
+        "kind": "Derived"
+      },
+      {
+        "id": 42,
+        "name": "__ir_seed_n1_a3",
+        "cols": [
+          "Id",
+          "Id",
+          "Id"
+        ],
+        "kind": "Source"
+      },
+      {
+        "id": 43,
+        "name": "__ir_n1_a3",
+        "cols": [
+          "Id",
+          "Id",
+          "Id"
+        ],
+        "kind": "Derived"
+      },
+      {
+        "id": 44,
+        "name": "__ir_seed_n6_a2",
+        "cols": [
+          "Id",
+          "Id"
+        ],
+        "kind": "Source"
+      },
+      {
+        "id": 45,
+        "name": "__ir_n6_a2",
+        "cols": [
+          "Id",
+          "Id"
+        ],
+        "kind": "Derived"
+      },
+      {
+        "id": 46,
+        "name": "__ir_seed_n11_a1",
+        "cols": [
+          "Id"
+        ],
+        "kind": "Source"
+      },
+      {
+        "id": 47,
+        "name": "__ir_n11_a1",
+        "cols": [
+          "Id"
+        ],
+        "kind": "Derived"
+      },
+      {
+        "id": 48,
+        "name": "__ir_seed_n15_a1",
+        "cols": [
+          "Id"
+        ],
+        "kind": "Source"
+      },
+      {
+        "id": 49,
+        "name": "__ir_n15_a1",
+        "cols": [
+          "Id"
+        ],
+        "kind": "Derived"
+      },
+      {
+        "id": 50,
+        "name": "__ir_seed_n28_a1",
+        "cols": [
+          "Id"
+        ],
+        "kind": "Source"
+      },
+      {
+        "id": 51,
+        "name": "__ir_n28_a1",
+        "cols": [
+          "Id"
+        ],
+        "kind": "Derived"
+      },
+      {
+        "id": 52,
+        "name": "__ir_intern_requests_0",
+        "cols": [
+          "Id",
+          "Id",
+          "Id"
+        ],
+        "kind": "Derived"
+      },
+      {
+        "id": 53,
+        "name": "__ir_all_sources",
+        "cols": [
+          "Int"
+        ],
+        "kind": "Derived"
+      }
+    ],
+    "nodes": [
+      {
+        "Get": 6
+      },
+      {
+        "Mint": {
+          "input": 0,
+          "functor": 5,
+          "args": [
+            1
+          ]
+        }
+      },
+      {
+        "Get": 9
+      },
+      {
+        "Mint": {
+          "input": 2,
+          "functor": 8,
+          "args": [
+            1
+          ]
+        }
+      },
+      {
+        "Get": 12
+      },
+      {
+        "Mint": {
+          "input": 4,
+          "functor": 11,
+          "args": [
+            1
+          ]
+        }
+      },
+      {
+        "Get": 15
+      },
+      {
+        "Mint": {
+          "input": 6,
+          "functor": 14,
+          "args": [
+            1
+          ]
+        }
+      },
+      {
+        "Get": 18
+      },
+      {
+        "Mint": {
+          "input": 8,
+          "functor": 17,
+          "args": [
+            1
+          ]
+        }
+      },
+      {
+        "Get": 21
+      },
+      {
+        "Mint": {
+          "input": 10,
+          "functor": 20,
+          "args": [
+            1
+          ]
+        }
+      },
+      {
+        "Get": 24
+      },
+      {
+        "Mint": {
+          "input": 12,
+          "functor": 23,
+          "args": [
+            1
+          ]
+        }
+      },
+      {
+        "Get": 27
+      },
+      {
+        "Mint": {
+          "input": 14,
+          "functor": 26,
+          "args": [
+            1
+          ]
+        }
+      },
+      {
+        "Get": 30
+      },
+      {
+        "Mint": {
+          "input": 16,
+          "functor": 29,
+          "args": [
+            1
+          ]
+        }
+      },
+      {
+        "Get": 33
+      },
+      {
+        "Mint": {
+          "input": 18,
+          "functor": 32,
+          "args": [
+            1,
+            2
+          ]
+        }
+      },
+      {
+        "Get": 36
+      },
+      {
+        "Mint": {
+          "input": 20,
+          "functor": 35,
+          "args": [
+            1,
+            2
+          ]
+        }
+      },
+      {
+        "Get": 39
+      },
+      {
+        "Mint": {
+          "input": 22,
+          "functor": 38,
+          "args": [
+            1,
+            2
+          ]
+        }
+      },
+      {
+        "Get": 26
+      },
+      {
+        "Get": 14
+      },
+      {
+        "Union": [
+          24,
+          25
+        ]
+      },
+      {
+        "Get": 2
+      },
+      {
+        "Get": 4
+      },
+      {
+        "Join": {
+          "inputs": [
+            28,
+            25
+          ],
+          "equivalences": [
+            [
+              [
+                0,
+                0
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "Get": 32
+      },
+      {
+        "Join": {
+          "inputs": [
+            29,
+            30
+          ],
+          "equivalences": [
+            [
+              [
+                0,
+                3
+              ],
+              [
+                1,
+                2
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "Join": {
+          "inputs": [
+            31,
+            25
+          ],
+          "equivalences": [
+            [
+              [
+                0,
+                4
+              ],
+              [
+                1,
+                1
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "Get": 41
+      },
+      {
+        "Join": {
+          "inputs": [
+            32,
+            33
+          ],
+          "equivalences": [
+            [
+              [
+                0,
+                5
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "Mint": {
+          "input": 34,
+          "functor": 32,
+          "args": [
+            10,
+            1
+          ]
+        }
+      },
+      {
+        "Mfp": {
+          "input": 35,
+          "filter": [],
+          "map": [],
+          "project": [
+            7,
+            11
+          ]
+        }
+      },
+      {
+        "Union": [
+          27,
+          36
+        ]
+      },
+      {
+        "Get": 0
+      },
+      {
+        "Get": 45
+      },
+      {
+        "Join": {
+          "inputs": [
+            38,
+            39
+          ],
+          "equivalences": []
+        }
+      },
+      {
+        "Join": {
+          "inputs": [
+            40,
+            24
+          ],
+          "equivalences": [
+            [
+              [
+                0,
+                1
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "Join": {
+          "inputs": [
+            41,
+            33
+          ],
+          "equivalences": [
+            [
+              [
+                0,
+                2
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "Mint": {
+          "input": 42,
+          "functor": 38,
+          "args": [
+            4,
+            6
+          ]
+        }
+      },
+      {
+        "Mint": {
+          "input": 43,
+          "functor": 26,
+          "args": [
+            7
+          ]
+        }
+      },
+      {
+        "Mfp": {
+          "input": 44,
+          "filter": [],
+          "map": [],
+          "project": [
+            1,
+            2,
+            8
+          ]
+        }
+      },
+      {
+        "Get": 0
+      },
+      {
+        "Get": 45
+      },
+      {
+        "Join": {
+          "inputs": [
+            46,
+            47
+          ],
+          "equivalences": []
+        }
+      },
+      {
+        "Join": {
+          "inputs": [
+            48,
+            24
+          ],
+          "equivalences": [
+            [
+              [
+                0,
+                1
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "Join": {
+          "inputs": [
+            49,
+            33
+          ],
+          "equivalences": [
+            [
+              [
+                0,
+                2
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "Mint": {
+          "input": 50,
+          "functor": 38,
+          "args": [
+            4,
+            6
+          ]
+        }
+      },
+      {
+        "Mint": {
+          "input": 51,
+          "functor": 26,
+          "args": [
+            7
+          ]
+        }
+      },
+      {
+        "Get": 49
+      },
+      {
+        "Join": {
+          "inputs": [
+            52,
+            53
+          ],
+          "equivalences": []
+        }
+      },
+      {
+        "Get": 3
+      },
+      {
+        "Antijoin": {
+          "l": 54,
+          "r": 55,
+          "lk": [
+            9
+          ],
+          "rk": [
+            0
+          ]
+        }
+      },
+      {
+        "Join": {
+          "inputs": [
+            56,
+            25
+          ],
+          "equivalences": [
+            [
+              [
+                0,
+                9
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "Mint": {
+          "input": 57,
+          "functor": 32,
+          "args": [
+            8,
+            11
+          ]
+        }
+      },
+      {
+        "Mint": {
+          "input": 58,
+          "functor": 14,
+          "args": [
+            12
+          ]
+        }
+      },
+      {
+        "Get": 3
+      },
+      {
+        "Antijoin": {
+          "l": 59,
+          "r": 60,
+          "lk": [
+            13
+          ],
+          "rk": [
+            0
+          ]
+        }
+      },
+      {
+        "Join": {
+          "inputs": [
+            61,
+            25
+          ],
+          "equivalences": [
+            [
+              [
+                0,
+                13
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "Mint": {
+          "input": 62,
+          "functor": 32,
+          "args": [
+            1,
+            15
+          ]
+        }
+      },
+      {
+        "Mint": {
+          "input": 63,
+          "functor": 14,
+          "args": [
+            16
+          ]
+        }
+      },
+      {
+        "Get": 1
+      },
+      {
+        "Mfp": {
+          "input": 65,
+          "filter": [
+            {
+              "Call": [
+                "Eq",
+                [
+                  {
+                    "Col": 0
+                  },
+                  {
+                    "Lit": 26
+                  }
+                ]
+              ]
+            }
+          ],
+          "map": [],
+          "project": []
+        }
+      },
+      {
+        "Join": {
+          "inputs": [
+            64,
+            66
+          ],
+          "equivalences": []
+        }
+      },
+      {
+        "Join": {
+          "inputs": [
+            67,
+            24
+          ],
+          "equivalences": [
+            [
+              [
+                0,
+                19
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "Get": 4
+      },
+      {
+        "Join": {
+          "inputs": [
+            68,
+            69
+          ],
+          "equivalences": [
+            [
+              [
+                0,
+                17
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "Mint": {
+          "input": 70,
+          "functor": 35,
+          "args": [
+            21,
+            23
+          ]
+        }
+      },
+      {
+        "Mint": {
+          "input": 71,
+          "functor": 26,
+          "args": [
+            24
+          ]
+        }
+      },
+      {
+        "Mfp": {
+          "input": 72,
+          "filter": [],
+          "map": [],
+          "project": [
+            19,
+            17,
+            25
+          ]
+        }
+      },
+      {
+        "Mfp": {
+          "input": 72,
+          "filter": [],
+          "map": [],
+          "project": [
+            25
+          ]
+        }
+      },
+      {
+        "Get": 0
+      },
+      {
+        "Get": 1
+      },
+      {
+        "Mfp": {
+          "input": 76,
+          "filter": [
+            {
+              "Call": [
+                "Eq",
+                [
+                  {
+                    "Col": 0
+                  },
+                  {
+                    "Lit": 26
+                  }
+                ]
+              ]
+            }
+          ],
+          "map": [],
+          "project": []
+        }
+      },
+      {
+        "Join": {
+          "inputs": [
+            75,
+            77
+          ],
+          "equivalences": []
+        }
+      },
+      {
+        "Get": 1
+      },
+      {
+        "Mfp": {
+          "input": 79,
+          "filter": [
+            {
+              "Call": [
+                "Eq",
+                [
+                  {
+                    "Col": 0
+                  },
+                  {
+                    "Lit": 34
+                  }
+                ]
+              ]
+            }
+          ],
+          "map": [],
+          "project": []
+        }
+      },
+      {
+        "Join": {
+          "inputs": [
+            78,
+            80
+          ],
+          "equivalences": []
+        }
+      },
+      {
+        "Join": {
+          "inputs": [
+            81,
+            24
+          ],
+          "equivalences": [
+            [
+              [
+                0,
+                2
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "Join": {
+          "inputs": [
+            82,
+            69
+          ],
+          "equivalences": [
+            [
+              [
+                0,
+                4
+              ],
+              [
+                1,
+                0
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "Mint": {
+          "input": 83,
+          "functor": 35,
+          "args": [
+            6,
+            8
+          ]
+        }
+      },
+      {
+        "Mint": {
+          "input": 84,
+          "functor": 26,
+          "args": [
+            9
+          ]
+        }
+      },
+      {
+        "Mfp": {
+          "input": 85,
+          "filter": [],
+          "map": [],
+          "project": [
+            2,
+            4,
+            10
+          ]
+        }
+      },
+      {
+        "Mfp": {
+          "input": 85,
+          "filter": [],
+          "map": [],
+          "project": [
+            10
+          ]
+        }
+      },
+      {
+        "Get": 44
+      },
+      {
+        "Union": [
+          88
+        ]
+      },
+      {
+        "Threshold": 89
+      },
+      {
+        "Get": 48
+      },
+      {
+        "Union": [
+          91
+        ]
+      },
+      {
+        "Threshold": 92
+      },
+      {
+        "Get": 50
+      },
+      {
+        "Union": [
+          94,
+          87
+        ]
+      },
+      {
+        "Threshold": 95
+      },
+      {
+        "Get": 42
+      },
+      {
+        "Union": [
+          97,
+          45
+        ]
+      },
+      {
+        "Threshold": 98
+      },
+      {
+        "Get": 46
+      },
+      {
+        "Union": [
+          100,
+          74
+        ]
+      },
+      {
+        "Threshold": 101
+      },
+      {
+        "Union": [
+          73,
+          86
+        ]
+      },
+      {
+        "Threshold": 103
+      },
+      {
+        "Get": 0
+      },
+      {
+        "Mfp": {
+          "input": 105,
+          "filter": [],
+          "map": [
+            {
+              "Lit": 1
+            }
+          ],
+          "project": [
+            1
+          ]
+        }
+      },
+      {
+        "Get": 1
+      },
+      {
+        "Mfp": {
+          "input": 107,
+          "filter": [],
+          "map": [
+            {
+              "Lit": 1
+            }
+          ],
+          "project": [
+            2
+          ]
+        }
+      },
+      {
+        "Get": 2
+      },
+      {
+        "Mfp": {
+          "input": 109,
+          "filter": [],
+          "map": [
+            {
+              "Lit": 1
+            }
+          ],
+          "project": [
+            2
+          ]
+        }
+      },
+      {
+        "Get": 3
+      },
+      {
+        "Mfp": {
+          "input": 111,
+          "filter": [],
+          "map": [
+            {
+              "Lit": 1
+            }
+          ],
+          "project": [
+            1
+          ]
+        }
+      },
+      {
+        "Get": 6
+      },
+      {
+        "Mfp": {
+          "input": 113,
+          "filter": [],
+          "map": [
+            {
+              "Lit": 1
+            }
+          ],
+          "project": [
+            2
+          ]
+        }
+      },
+      {
+        "Get": 9
+      },
+      {
+        "Mfp": {
+          "input": 115,
+          "filter": [],
+          "map": [
+            {
+              "Lit": 1
+            }
+          ],
+          "project": [
+            2
+          ]
+        }
+      },
+      {
+        "Get": 12
+      },
+      {
+        "Mfp": {
+          "input": 117,
+          "filter": [],
+          "map": [
+            {
+              "Lit": 1
+            }
+          ],
+          "project": [
+            2
+          ]
+        }
+      },
+      {
+        "Get": 15
+      },
+      {
+        "Mfp": {
+          "input": 119,
+          "filter": [],
+          "map": [
+            {
+              "Lit": 1
+            }
+          ],
+          "project": [
+            2
+          ]
+        }
+      },
+      {
+        "Get": 18
+      },
+      {
+        "Mfp": {
+          "input": 121,
+          "filter": [],
+          "map": [
+            {
+              "Lit": 1
+            }
+          ],
+          "project": [
+            2
+          ]
+        }
+      },
+      {
+        "Get": 21
+      },
+      {
+        "Mfp": {
+          "input": 123,
+          "filter": [],
+          "map": [
+            {
+              "Lit": 1
+            }
+          ],
+          "project": [
+            2
+          ]
+        }
+      },
+      {
+        "Get": 24
+      },
+      {
+        "Mfp": {
+          "input": 125,
+          "filter": [],
+          "map": [
+            {
+              "Lit": 1
+            }
+          ],
+          "project": [
+            2
+          ]
+        }
+      },
+      {
+        "Get": 27
+      },
+      {
+        "Mfp": {
+          "input": 127,
+          "filter": [],
+          "map": [
+            {
+              "Lit": 1
+            }
+          ],
+          "project": [
+            2
+          ]
+        }
+      },
+      {
+        "Get": 30
+      },
+      {
+        "Mfp": {
+          "input": 129,
+          "filter": [],
+          "map": [
+            {
+              "Lit": 1
+            }
+          ],
+          "project": [
+            2
+          ]
+        }
+      },
+      {
+        "Get": 33
+      },
+      {
+        "Mfp": {
+          "input": 131,
+          "filter": [],
+          "map": [
+            {
+              "Lit": 1
+            }
+          ],
+          "project": [
+            3
+          ]
+        }
+      },
+      {
+        "Get": 36
+      },
+      {
+        "Mfp": {
+          "input": 133,
+          "filter": [],
+          "map": [
+            {
+              "Lit": 1
+            }
+          ],
+          "project": [
+            3
+          ]
+        }
+      },
+      {
+        "Get": 39
+      },
+      {
+        "Mfp": {
+          "input": 135,
+          "filter": [],
+          "map": [
+            {
+              "Lit": 1
+            }
+          ],
+          "project": [
+            3
+          ]
+        }
+      },
+      {
+        "Get": 42
+      },
+      {
+        "Mfp": {
+          "input": 137,
+          "filter": [],
+          "map": [
+            {
+              "Lit": 1
+            }
+          ],
+          "project": [
+            3
+          ]
+        }
+      },
+      {
+        "Get": 44
+      },
+      {
+        "Mfp": {
+          "input": 139,
+          "filter": [],
+          "map": [
+            {
+              "Lit": 1
+            }
+          ],
+          "project": [
+            2
+          ]
+        }
+      },
+      {
+        "Get": 46
+      },
+      {
+        "Mfp": {
+          "input": 141,
+          "filter": [],
+          "map": [
+            {
+              "Lit": 1
+            }
+          ],
+          "project": [
+            1
+          ]
+        }
+      },
+      {
+        "Get": 48
+      },
+      {
+        "Mfp": {
+          "input": 143,
+          "filter": [],
+          "map": [
+            {
+              "Lit": 1
+            }
+          ],
+          "project": [
+            1
+          ]
+        }
+      },
+      {
+        "Get": 50
+      },
+      {
+        "Mfp": {
+          "input": 145,
+          "filter": [],
+          "map": [
+            {
+              "Lit": 1
+            }
+          ],
+          "project": [
+            1
+          ]
+        }
+      },
+      {
+        "Union": [
+          106,
+          108,
+          110,
+          112,
+          114,
+          116,
+          118,
+          120,
+          122,
+          124,
+          126,
+          128,
+          130,
+          132,
+          134,
+          136,
+          138,
+          140,
+          142,
+          144,
+          146
+        ]
+      }
+    ],
+    "strata": [
+      {
+        "Let": {
+          "id": 7,
+          "body": 1
+        }
+      },
+      {
+        "Let": {
+          "id": 10,
+          "body": 3
+        }
+      },
+      {
+        "Let": {
+          "id": 13,
+          "body": 5
+        }
+      },
+      {
+        "Let": {
+          "id": 16,
+          "body": 7
+        }
+      },
+      {
+        "Let": {
+          "id": 19,
+          "body": 9
+        }
+      },
+      {
+        "Let": {
+          "id": 22,
+          "body": 11
+        }
+      },
+      {
+        "Let": {
+          "id": 25,
+          "body": 13
+        }
+      },
+      {
+        "Let": {
+          "id": 28,
+          "body": 15
+        }
+      },
+      {
+        "Let": {
+          "id": 31,
+          "body": 17
+        }
+      },
+      {
+        "Let": {
+          "id": 34,
+          "body": 19
+        }
+      },
+      {
+        "Let": {
+          "id": 37,
+          "body": 21
+        }
+      },
+      {
+        "Let": {
+          "id": 40,
+          "body": 23
+        }
+      },
+      {
+        "Let": {
+          "id": 41,
+          "body": 26
+        }
+      },
+      {
+        "LetRec": {
+          "ids": [
+            4
+          ],
+          "bodies": [
+            37
+          ],
+          "limit": null
+        }
+      },
+      {
+        "Let": {
+          "id": 45,
+          "body": 90
+        }
+      },
+      {
+        "Let": {
+          "id": 49,
+          "body": 93
+        }
+      },
+      {
+        "Let": {
+          "id": 51,
+          "body": 96
+        }
+      },
+      {
+        "Let": {
+          "id": 43,
+          "body": 99
+        }
+      },
+      {
+        "Let": {
+          "id": 47,
+          "body": 102
+        }
+      },
+      {
+        "Let": {
+          "id": 52,
+          "body": 104
+        }
+      },
+      {
+        "Let": {
+          "id": 53,
+          "body": 147
+        }
+      }
+    ],
+    "outputs": [
+      53,
+      7,
+      10,
+      13,
+      16,
+      19,
+      22,
+      25,
+      28,
+      31,
+      34,
+      37,
+      40,
+      43,
+      45,
+      47,
+      49,
+      51,
+      52
+    ]
+  },
+  "frontier0": {
+    "changes": [
+      {
+        "rel": 0,
+        "row": [
+          1
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          0,
+          10
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          1,
+          41
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          2,
+          11
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          4,
+          12
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          5,
+          13
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          6,
+          42
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          7,
+          14
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          8,
+          34
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          9,
+          43
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          10,
+          15
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          11,
+          44
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          13,
+          16
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          14,
+          35
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          15,
+          45
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          17,
+          17
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          18,
+          36
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          19,
+          46
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          22,
+          18
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          23,
+          37
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          24,
+          47
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          25,
+          19
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          26,
+          48
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          27,
+          20
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          28,
+          49
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          29,
+          54
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          30,
+          55
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          31,
+          21
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          32,
+          56
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          33,
+          57
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          34,
+          28
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          35,
+          9
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          36,
+          40
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          37,
+          50
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          38,
+          8
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          39,
+          29
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          40,
+          22
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          41,
+          51
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          42,
+          23
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          43,
+          30
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          44,
+          24
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          45,
+          31
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          46,
+          25
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          47,
+          38
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          48,
+          52
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          49,
+          26
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          50,
+          39
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          51,
+          53
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          52,
+          27
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          53,
+          32
+        ],
+        "w": 1
+      },
+      {
+        "rel": 1,
+        "row": [
+          54,
+          33
+        ],
+        "w": 1
+      },
+      {
+        "rel": 2,
+        "row": [
+          33,
+          21
+        ],
+        "w": 1
+      },
+      {
+        "rel": 3,
+        "row": [
+          29
+        ],
+        "w": 1
+      },
+      {
+        "rel": 3,
+        "row": [
+          30
+        ],
+        "w": 1
+      },
+      {
+        "rel": 3,
+        "row": [
+          31
+        ],
+        "w": 1
+      },
+      {
+        "rel": 3,
+        "row": [
+          32
+        ],
+        "w": 1
+      },
+      {
+        "rel": 6,
+        "row": [
+          35,
+          1
+        ],
+        "w": 1
+      },
+      {
+        "rel": 12,
+        "row": [
+          0,
+          1
+        ],
+        "w": 1
+      },
+      {
+        "rel": 12,
+        "row": [
+          2,
+          3
+        ],
+        "w": 1
+      },
+      {
+        "rel": 12,
+        "row": [
+          4,
+          5
+        ],
+        "w": 1
+      },
+      {
+        "rel": 12,
+        "row": [
+          5,
+          6
+        ],
+        "w": 1
+      },
+      {
+        "rel": 12,
+        "row": [
+          7,
+          8
+        ],
+        "w": 1
+      },
+      {
+        "rel": 12,
+        "row": [
+          10,
+          11
+        ],
+        "w": 1
+      },
+      {
+        "rel": 12,
+        "row": [
+          13,
+          14
+        ],
+        "w": 1
+      },
+      {
+        "rel": 12,
+        "row": [
+          17,
+          18
+        ],
+        "w": 1
+      },
+      {
+        "rel": 12,
+        "row": [
+          22,
+          23
+        ],
+        "w": 1
+      },
+      {
+        "rel": 12,
+        "row": [
+          25,
+          26
+        ],
+        "w": 1
+      },
+      {
+        "rel": 12,
+        "row": [
+          27,
+          28
+        ],
+        "w": 1
+      },
+      {
+        "rel": 12,
+        "row": [
+          31,
+          0
+        ],
+        "w": 1
+      },
+      {
+        "rel": 12,
+        "row": [
+          40,
+          41
+        ],
+        "w": 1
+      },
+      {
+        "rel": 12,
+        "row": [
+          42,
+          43
+        ],
+        "w": 1
+      },
+      {
+        "rel": 12,
+        "row": [
+          44,
+          45
+        ],
+        "w": 1
+      },
+      {
+        "rel": 12,
+        "row": [
+          46,
+          47
+        ],
+        "w": 1
+      },
+      {
+        "rel": 12,
+        "row": [
+          49,
+          50
+        ],
+        "w": 1
+      },
+      {
+        "rel": 12,
+        "row": [
+          52,
+          53
+        ],
+        "w": 1
+      },
+      {
+        "rel": 15,
+        "row": [
+          34,
+          57
+        ],
+        "w": 1
+      },
+      {
+        "rel": 15,
+        "row": [
+          39,
+          8
+        ],
+        "w": 1
+      },
+      {
+        "rel": 15,
+        "row": [
+          43,
+          23
+        ],
+        "w": 1
+      },
+      {
+        "rel": 15,
+        "row": [
+          45,
+          24
+        ],
+        "w": 1
+      },
+      {
+        "rel": 15,
+        "row": [
+          53,
+          27
+        ],
+        "w": 1
+      },
+      {
+        "rel": 15,
+        "row": [
+          54,
+          21
+        ],
+        "w": 1
+      },
+      {
+        "rel": 18,
+        "row": [
+          8,
+          14
+        ],
+        "w": 1
+      },
+      {
+        "rel": 18,
+        "row": [
+          14,
+          16
+        ],
+        "w": 1
+      },
+      {
+        "rel": 18,
+        "row": [
+          18,
+          17
+        ],
+        "w": 1
+      },
+      {
+        "rel": 18,
+        "row": [
+          23,
+          18
+        ],
+        "w": 1
+      },
+      {
+        "rel": 18,
+        "row": [
+          47,
+          25
+        ],
+        "w": 1
+      },
+      {
+        "rel": 18,
+        "row": [
+          50,
+          26
+        ],
+        "w": 1
+      },
+      {
+        "rel": 21,
+        "row": [
+          36,
+          9
+        ],
+        "w": 1
+      },
+      {
+        "rel": 27,
+        "row": [
+          1,
+          10
+        ],
+        "w": 1
+      },
+      {
+        "rel": 27,
+        "row": [
+          6,
+          13
+        ],
+        "w": 1
+      },
+      {
+        "rel": 27,
+        "row": [
+          9,
+          34
+        ],
+        "w": 1
+      },
+      {
+        "rel": 27,
+        "row": [
+          11,
+          15
+        ],
+        "w": 1
+      },
+      {
+        "rel": 27,
+        "row": [
+          15,
+          35
+        ],
+        "w": 1
+      },
+      {
+        "rel": 27,
+        "row": [
+          19,
+          36
+        ],
+        "w": 1
+      },
+      {
+        "rel": 27,
+        "row": [
+          24,
+          37
+        ],
+        "w": 1
+      },
+      {
+        "rel": 27,
+        "row": [
+          26,
+          19
+        ],
+        "w": 1
+      },
+      {
+        "rel": 27,
+        "row": [
+          28,
+          20
+        ],
+        "w": 1
+      },
+      {
+        "rel": 27,
+        "row": [
+          37,
+          40
+        ],
+        "w": 1
+      },
+      {
+        "rel": 27,
+        "row": [
+          41,
+          22
+        ],
+        "w": 1
+      },
+      {
+        "rel": 27,
+        "row": [
+          48,
+          38
+        ],
+        "w": 1
+      },
+      {
+        "rel": 27,
+        "row": [
+          51,
+          39
+        ],
+        "w": 1
+      },
+      {
+        "rel": 30,
+        "row": [
+          29,
+          11
+        ],
+        "w": 1
+      },
+      {
+        "rel": 30,
+        "row": [
+          30,
+          12
+        ],
+        "w": 1
+      },
+      {
+        "rel": 33,
+        "row": [
+          32,
+          55,
+          21
+        ],
+        "w": 1
+      },
+      {
+        "rel": 33,
+        "row": [
+          33,
+          54,
+          56
+        ],
+        "w": 1
+      },
+      {
+        "rel": 44,
+        "row": [
+          30,
+          31
+        ],
+        "w": 1
+      },
+      {
+        "rel": 44,
+        "row": [
+          50,
+          29
+        ],
+        "w": 1
+      },
+      {
+        "rel": 44,
+        "row": [
+          50,
+          51
+        ],
+        "w": 1
+      },
+      {
+        "rel": 48,
+        "row": [
+          33
+        ],
+        "w": 1
+      }
+    ]
+  },
+  "atoms": {
+    "8": {
+      "original": 38,
+      "printed": {
+        "s": "name"
+      }
+    },
+    "9": {
+      "original": 35,
+      "printed": 1
+    },
+    "10": {
+      "original": 0,
+      "printed": {
+        "a": "edge_of"
+      }
+    },
+    "11": {
+      "original": 2,
+      "printed": {
+        "a": "owner"
+      }
+    },
+    "12": {
+      "original": 4,
+      "printed": {
+        "a": "edge"
+      }
+    },
+    "13": {
+      "original": 5,
+      "printed": {
+        "a": "field"
+      }
+    },
+    "14": {
+      "original": 7,
+      "printed": {
+        "a": "edge_ref"
+      }
+    },
+    "15": {
+      "original": 10,
+      "printed": {
+        "a": "tagged"
+      }
+    },
+    "16": {
+      "original": 13,
+      "printed": {
+        "a": "nil"
+      }
+    },
+    "17": {
+      "original": 17,
+      "printed": {
+        "a": "cons"
+      }
+    },
+    "18": {
+      "original": 22,
+      "printed": {
+        "a": "intern"
+      }
+    },
+    "19": {
+      "original": 25,
+      "printed": {
+        "a": "pair"
+      }
+    },
+    "20": {
+      "original": 27,
+      "printed": {
+        "a": "literal_vars"
+      }
+    },
+    "21": {
+      "original": 31,
+      "printed": []
+    },
+    "22": {
+      "original": 40,
+      "printed": {
+        "a": "type"
+      }
+    },
+    "23": {
+      "original": 42,
+      "printed": {
+        "a": "not_a_ref"
+      }
+    },
+    "24": {
+      "original": 44,
+      "printed": {
+        "a": "x"
+      }
+    },
+    "25": {
+      "original": 46,
+      "printed": {
+        "a": "effect"
+      }
+    },
+    "26": {
+      "original": 49,
+      "printed": {
+        "a": "intern_snapshot"
+      }
+    },
+    "27": {
+      "original": 52,
+      "printed": {
+        "a": "none"
+      }
+    },
+    "28": {
+      "original": 34,
+      "printed": {
+        "args": [
+          [
+            {
+              "args": [
+                {
+                  "a": "owner"
+                }
+              ],
+              "f": "var"
+            },
+            {
+              "args": [
+                {
+                  "a": "edge"
+                }
+              ],
+              "f": "var"
+            }
+          ]
+        ],
+        "f": "const"
+      }
+    },
+    "29": {
+      "original": 39,
+      "printed": {
+        "args": [
+          {
+            "s": "name"
+          }
+        ],
+        "f": "const"
+      }
+    },
+    "30": {
+      "original": 43,
+      "printed": {
+        "args": [
+          {
+            "a": "not_a_ref"
+          }
+        ],
+        "f": "const"
+      }
+    },
+    "31": {
+      "original": 45,
+      "printed": {
+        "args": [
+          {
+            "a": "x"
+          }
+        ],
+        "f": "const"
+      }
+    },
+    "32": {
+      "original": 53,
+      "printed": {
+        "args": [
+          {
+            "a": "none"
+          }
+        ],
+        "f": "const"
+      }
+    },
+    "33": {
+      "original": 54,
+      "printed": {
+        "args": [
+          []
+        ],
+        "f": "const"
+      }
+    },
+    "34": {
+      "original": 8,
+      "printed": {
+        "args": [
+          {
+            "a": "edge_ref"
+          }
+        ],
+        "f": "kernel"
+      }
+    },
+    "35": {
+      "original": 14,
+      "printed": {
+        "args": [
+          {
+            "a": "nil"
+          }
+        ],
+        "f": "kernel"
+      }
+    },
+    "36": {
+      "original": 18,
+      "printed": {
+        "args": [
+          {
+            "a": "cons"
+          }
+        ],
+        "f": "kernel"
+      }
+    },
+    "37": {
+      "original": 23,
+      "printed": {
+        "args": [
+          {
+            "a": "intern"
+          }
+        ],
+        "f": "kernel"
+      }
+    },
+    "38": {
+      "original": 47,
+      "printed": {
+        "args": [
+          {
+            "a": "effect"
+          }
+        ],
+        "f": "kernel"
+      }
+    },
+    "39": {
+      "original": 50,
+      "printed": {
+        "args": [
+          {
+            "a": "intern_snapshot"
+          }
+        ],
+        "f": "kernel"
+      }
+    },
+    "40": {
+      "original": 36,
+      "printed": {
+        "args": [
+          1
+        ],
+        "f": "node"
+      }
+    },
+    "41": {
+      "original": 1,
+      "printed": {
+        "args": [
+          {
+            "a": "edge_of"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    "42": {
+      "original": 6,
+      "printed": {
+        "args": [
+          {
+            "a": "field"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    "43": {
+      "original": 9,
+      "printed": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "edge_ref"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    "44": {
+      "original": 11,
+      "printed": {
+        "args": [
+          {
+            "a": "tagged"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    "45": {
+      "original": 15,
+      "printed": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "nil"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    "46": {
+      "original": 19,
+      "printed": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "cons"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    "47": {
+      "original": 24,
+      "printed": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "intern"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    "48": {
+      "original": 26,
+      "printed": {
+        "args": [
+          {
+            "a": "pair"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    "49": {
+      "original": 28,
+      "printed": {
+        "args": [
+          {
+            "a": "literal_vars"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    "50": {
+      "original": 37,
+      "printed": {
+        "args": [
+          {
+            "args": [
+              1
+            ],
+            "f": "node"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    "51": {
+      "original": 41,
+      "printed": {
+        "args": [
+          {
+            "a": "type"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    "52": {
+      "original": 48,
+      "printed": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "effect"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    "53": {
+      "original": 51,
+      "printed": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "intern_snapshot"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    "54": {
+      "original": 29,
+      "printed": {
+        "args": [
+          {
+            "a": "owner"
+          }
+        ],
+        "f": "var"
+      }
+    },
+    "55": {
+      "original": 30,
+      "printed": {
+        "args": [
+          {
+            "a": "edge"
+          }
+        ],
+        "f": "var"
+      }
+    },
+    "56": {
+      "original": 32,
+      "printed": [
+        {
+          "args": [
+            {
+              "a": "edge"
+            }
+          ],
+          "f": "var"
+        }
+      ]
+    },
+    "57": {
+      "original": 33,
+      "printed": [
+        {
+          "args": [
+            {
+              "a": "owner"
+            }
+          ],
+          "f": "var"
+        },
+        {
+          "args": [
+            {
+              "a": "edge"
+            }
+          ],
+          "f": "var"
+        }
+      ]
+    }
+  },
+  "texts": [
+    "name"
+  ]
+}

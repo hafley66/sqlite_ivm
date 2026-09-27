@@ -31,6 +31,15 @@ function diff(before: Bag, after: Bag): Bag {
   for (const { row, w } of before.values()) put(out, row, -w);
   return out;
 }
+function sameRels(before: Map<number, Bag>, after: Map<number, Bag>): boolean {
+  if (before.size !== after.size) return false;
+  for (const [id, bag] of before) {
+    const next = after.get(id);
+    if (!next || bag.size !== next.size) return false;
+    for (const [key, value] of bag) if (next.get(key)?.w !== value.w) return false;
+  }
+  return true;
+}
 function select(row: Row, cols: number[]): Row { return cols.map(col => row[col]); }
 function keyOf(row: Row, cols: number[]): string { return JSON.stringify(select(row, cols)); }
 function groups(bag: Bag, cols: number[]): Map<string, Bag> {

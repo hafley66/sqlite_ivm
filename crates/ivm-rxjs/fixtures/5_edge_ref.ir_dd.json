@@ -1,0 +1,520 @@
+{
+  "closure": [
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                1
+              ],
+              "f": "node"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            {
+              "s": "name"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    1
+                  ],
+                  "f": "node"
+                },
+                {
+                  "s": "name"
+                }
+              ],
+              "f": "edge"
+            }
+          ],
+          "f": "ref"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "a": "edge_of"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                1
+              ],
+              "f": "node"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            {
+              "a": "type"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "args": [
+                    1
+                  ],
+                  "f": "node"
+                },
+                {
+                  "a": "type"
+                }
+              ],
+              "f": "edge"
+            }
+          ],
+          "f": "ref"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "a": "edge_of"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "a": "not_a_ref"
+            }
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "a": "x"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "a": "field"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                1
+              ],
+              "f": "node"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            {
+              "s": "name"
+            }
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "a": "field"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                1
+              ],
+              "f": "node"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            {
+              "a": "type"
+            }
+          ],
+          "f": "ref"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "a": "field"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "a": "pair"
+                },
+                [
+                  {
+                    "args": [
+                      1
+                    ],
+                    "f": "node"
+                  },
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          1
+                        ],
+                        "f": "node"
+                      },
+                      {
+                        "s": "name"
+                      }
+                    ],
+                    "f": "edge"
+                  }
+                ]
+              ],
+              "f": "application"
+            }
+          ],
+          "f": "ref"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "a": "tagged"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "a": "pair"
+                },
+                [
+                  {
+                    "args": [
+                      1
+                    ],
+                    "f": "node"
+                  },
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          1
+                        ],
+                        "f": "node"
+                      },
+                      {
+                        "a": "type"
+                      }
+                    ],
+                    "f": "edge"
+                  }
+                ]
+              ],
+              "f": "application"
+            }
+          ],
+          "f": "ref"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "a": "tagged"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "a": "pair"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            [
+              {
+                "args": [
+                  {
+                    "args": [
+                      1
+                    ],
+                    "f": "node"
+                  }
+                ],
+                "f": "ref"
+              },
+              {
+                "args": [
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          1
+                        ],
+                        "f": "node"
+                      },
+                      {
+                        "s": "name"
+                      }
+                    ],
+                    "f": "edge"
+                  }
+                ],
+                "f": "ref"
+              }
+            ]
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "a": "pair"
+                },
+                [
+                  {
+                    "args": [
+                      1
+                    ],
+                    "f": "node"
+                  },
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          1
+                        ],
+                        "f": "node"
+                      },
+                      {
+                        "s": "name"
+                      }
+                    ],
+                    "f": "edge"
+                  }
+                ]
+              ],
+              "f": "application"
+            }
+          ],
+          "f": "ref"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "intern"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            {
+              "a": "pair"
+            }
+          ],
+          "f": "ref"
+        },
+        {
+          "args": [
+            [
+              {
+                "args": [
+                  {
+                    "args": [
+                      1
+                    ],
+                    "f": "node"
+                  }
+                ],
+                "f": "ref"
+              },
+              {
+                "args": [
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          1
+                        ],
+                        "f": "node"
+                      },
+                      {
+                        "a": "type"
+                      }
+                    ],
+                    "f": "edge"
+                  }
+                ],
+                "f": "ref"
+              }
+            ]
+          ],
+          "f": "const"
+        },
+        {
+          "args": [
+            {
+              "args": [
+                {
+                  "a": "pair"
+                },
+                [
+                  {
+                    "args": [
+                      1
+                    ],
+                    "f": "node"
+                  },
+                  {
+                    "args": [
+                      {
+                        "args": [
+                          1
+                        ],
+                        "f": "node"
+                      },
+                      {
+                        "a": "type"
+                      }
+                    ],
+                    "f": "edge"
+                  }
+                ]
+              ],
+              "f": "application"
+            }
+          ],
+          "f": "ref"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "intern"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    },
+    {
+      "args": [
+        {
+          "args": [
+            []
+          ],
+          "f": "const"
+        }
+      ],
+      "rel": {
+        "args": [
+          {
+            "args": [
+              {
+                "a": "nil"
+              }
+            ],
+            "f": "kernel"
+          }
+        ],
+        "f": "ref"
+      }
+    }
+  ],
+  "counters": {
+    "delta_rows": {
+      "antijoin": 4,
+      "filter": 19,
+      "join": 49,
+      "mint": 24,
+      "reduce": 0,
+      "topk": 0,
+      "window": 0
+    },
+    "interned": 20,
+    "rounds": 3,
+    "rows_written": 11
+  },
+  "diagnostics": []
+}

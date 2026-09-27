@@ -11,6 +11,29 @@ fn numbered(id: usize, body: String) -> String {
 }
 fn cached() -> &'static str { "shareReplay({ bufferSize: 1, refCount: false })" }
 
+fn inputs(op: &Op) -> Vec<NodeId> {
+    match op {
+        Op::Get(_) => vec![],
+        Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Mfp { input, .. }
+        | Op::Reduce { input, .. } | Op::TopK { input, .. } | Op::Window { input, .. } => vec![*input],
+        Op::Union(inputs) | Op::Join { inputs, .. } => inputs.clone(),
+        Op::Negate(input) | Op::Threshold(input) | Op::Delay(input) => vec![*input],
+        Op::Antijoin { l, r, .. } => vec![*l, *r],
+    }
+}
+
+fn reachable(program: &Program, roots: &[NodeId]) -> Vec<usize> {
+    let mut seen = vec![false; program.nodes.len()];
+    let mut pending = roots.to_vec();
+    while let Some(id) = pending.pop() {
+        let index = id as usize;
+        if seen[index] { continue; }
+        seen[index] = true;
+        pending.extend(inputs(&program.nodes[index]));
+    }
+    seen.iter().enumerate().filter_map(|(id, used)| used.then_some(id)).collect()
+}
+
 fn expression(expr: &Expr, row: &str) -> String {
     match expr {
         Expr::Col(col) => format!("{row}[{col}]"),
@@ -157,10 +180,12 @@ fn window_source(program: &Program, id: usize, input: NodeId, partition: &[ColId
         &[("INPUT", input.to_string()), ("PARTITION", json(&partition)), ("ORDER", json(&order)), ("TYPES", json(&program.node_types(input).unwrap())), ("TOTAL", total_sum), ("VALUE", value), ("ID", id.to_string()), ("OLD", format!("oldNode(oldNodes, {id})")), ("CACHE", cached().into())])
 }
 
-fn stratum_source(stratum: &Stratum) -> Result<String, String> {
+fn stratum_source(stratum: &Stratum, index: usize) -> Result<String, String> {
     match stratum {
-        Stratum::Let { id, body } => Ok(render("    concatMap(frame => { const nodes = compute(frame.rels, previous.nodes, frame.terms); return nodes.n@BODY@.pipe(map(batch => { const rels = new Map(frame.rels); rels.set(@REL@, node(batch).now); const nextNodes = new Map(frame.nodes); for (const [id, bag] of node(batch).nodes) nextNodes.set(id, bag); return { rels, nodes: nextNodes, terms: frame.terms }; })); }),\n",
-            &[("BODY", body.to_string()), ("REL", id.to_string())])),
+        // A node can be read before and after a mint in different strata. Rebuild
+        // from the current relations so a later read cannot hide its next delta.
+        Stratum::Let { id, body } => Ok(render("    concatMap(frame => { const nodes = compute@INDEX@(frame.rels, new Map(), frame.terms); return nodes.n@BODY@.pipe(map(batch => { const rels = new Map(frame.rels); rels.set(@REL@, node(batch).now); const nextNodes = new Map(frame.nodes); for (const [id, bag] of node(batch).nodes) nextNodes.set(id, bag); return { rels, nodes: nextNodes, terms: frame.terms }; })); }),\n",
+            &[("BODY", body.to_string()), ("REL", id.to_string()), ("INDEX", index.to_string())])),
         Stratum::LetRec(rec) => {
             if rec.limit.is_some() { return Err("LetRec limit unsupported".into()); }
             if rec.ids.len() != rec.bodies.len() || rec.ids.is_empty() { return Err("LetRec ids and bodies mismatch".into()); }
@@ -177,7 +202,7 @@ fn stratum_source(stratum: &Stratum) -> Result<String, String> {
       const initial: Round = { rels: first, delta: firstDelta, changed: true, n: 0 };
       const next = (round: Round): Observable<Round> => {
         if (round.n > 1000) throw new Error('LetRec did not converge');
-        const nodes = compute(round.rels, new Map(), frame.terms);
+        const nodes = compute@INDEX@(round.rels, new Map(), frame.terms);
         return forkJoin([@BODIES@]).pipe(map(batches => {
           const rels = new Map(round.rels);
 @NEXT@          const delta = new Map<number, Bag>();
@@ -200,7 +225,7 @@ fn stratum_source(stratum: &Stratum) -> Result<String, String> {
       );
     })),
 "#,
-                &[("IDS", json(&rec.ids)), ("BODIES", bodies), ("NEXT", next)]))
+                &[("IDS", json(&rec.ids)), ("BODIES", bodies), ("NEXT", next), ("INDEX", index.to_string())]))
         }
     }
 }
@@ -216,16 +241,26 @@ pub fn emit(program: &Program) -> Result<String, String> {
     writeln!(out, "\nconst sourceIds = {};", json(&source_ids)).unwrap();
     writeln!(out, "const texts: string[] = {};", json(&program.texts)).unwrap();
     writeln!(out, "const usesStrings = {};", program.uses_strings()).unwrap();
-    out.push_str("\nfunction compute(rels: Map<number, Bag>, oldNodes: Map<number, Bag>, terms: Terms) {\n");
-    for (id, op) in program.nodes.iter().enumerate() {
-        out.push_str(&node_source(program, id, op)?);
+    for (index, stratum) in program.strata.iter().enumerate() {
+        let roots = match stratum {
+            Stratum::Let { body, .. } => vec![*body],
+            Stratum::LetRec(rec) => rec.bodies.clone(),
+        };
+        let used = reachable(program, &roots);
+        writeln!(out, "\nfunction compute{index}(rels: Map<number, Bag>, oldNodes: Map<number, Bag>, terms: Terms) {{").unwrap();
+        for id in used {
+            out.push_str(&node_source(program, id, &program.nodes[id])?);
+        }
+        writeln!(out, "  return {{ {} }};\n}}", roots.iter().map(|id| format!("n{id}")).collect::<Vec<_>>().join(", ")).unwrap();
     }
-    writeln!(out, "  return {{ {} }};\n}}", (0..program.nodes.len()).map(|id| format!("n{id}")).collect::<Vec<_>>().join(", ")).unwrap();
-    out.push_str("\nfunction strata$(frame: Frame, previous: State): Observable<Frame> {\n  return of(frame).pipe(\n");
-    for stratum in &program.strata { out.push_str(&stratum_source(stratum)?); }
-    out.push_str("  );\n}\n");
+    out.push_str("\nfunction strata$(frame: Frame, previous: State): Observable<Frame> {\n  let frames$: Observable<Frame> = of(frame);\n");
+    for (index, stratum) in program.strata.iter().enumerate() {
+        let operator = stratum_source(stratum, index)?;
+        writeln!(out, "  frames$ = frames$.pipe({});", operator.trim().trim_end_matches(',')).unwrap();
+    }
+    out.push_str("  return frames$;\n}\n");
     out.push_str("\nfunction initialState(): State {\n  const rels = new Map<number, Bag>();\n  for (const id of sourceIds) rels.set(id, empty());\n  return { rels, nodes: new Map(), terms: initialTerms(texts, usesStrings), outputs: new Map(), changes: [] };\n}\n");
-    out.push_str("\nexport function run(frontiers$: Observable<Frontier>): Observable<Batch> {\n  return defer(() => frontiers$.pipe(\n    mergeScan((state: State, frontier) => {\n      const rels = sourceFrontier(state.rels, frontier, sourceIds);\n      const terms = structuredClone(state.terms);\n      return strata$({ rels, nodes: new Map(), terms }, state).pipe(map(frame => {\n        const outputs = new Map<number, Bag>();\n        const changes: Change[] = [];\n");
+    out.push_str("\nexport function run(frontiers$: Observable<Frontier>): Observable<Batch> {\n  return defer(() => frontiers$.pipe(\n    mergeScan((state: State, frontier) => {\n      if (frontier.changes.length === 0) return of({ ...state, changes: [] });\n      const rels = sourceFrontier(state.rels, frontier, sourceIds);\n      const terms = structuredClone(state.terms);\n      const first = { frame: { rels, nodes: new Map<number, Bag>(), terms }, old: state, before: terms.next, pass: 0 };\n      return of(first).pipe(\n        expand(round => {\n          if (round.pass && round.frame.terms.next === round.before && (round.pass === 1 || sameRels(round.old.rels, round.frame.rels))) return EMPTY;\n          if (round.pass >= 8192) throw new Error('constructor closure budget');\n          const before = round.frame.terms.next;\n          return strata$(round.frame, round.old).pipe(map(frame => ({\n            frame, old: { ...round.old, rels: frame.rels, nodes: frame.nodes }, before, pass: round.pass + 1,\n          })));\n        }),\n        last(),\n        map(({ frame }) => {\n        const outputs = new Map<number, Bag>();\n        const changes: Change[] = [];\n");
     for rel in &program.outputs {
         writeln!(out, "        {{ const now = frame.rels.get({rel}) ?? empty(); outputs.set({rel}, now); for (const {{ row, w }} of diff(state.outputs.get({rel}) ?? empty(), now).values()) changes.push({{ rel: {rel}, row, w }}); }}").unwrap();
     }
