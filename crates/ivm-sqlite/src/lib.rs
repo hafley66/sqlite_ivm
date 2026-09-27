@@ -36,6 +36,8 @@
 use sqlite_ext::rusqlite;
 
 mod catalog;
+#[path = "2_terms.rs"]
+mod terms;
 mod composition;
 mod engine;
 mod error;

@@ -72,6 +72,7 @@ pub struct SqlRel {
     tags: Vec<(NodeId, bool, Vec<usize>)>,
     /// Join SQL node -> its three delta terms, each consolidated: Δa⋈Δb, I⁻a⋈Δb, Δa⋈I⁻b.
     terms: Vec<(usize, Vec<String>)>,
+    constructors: std::collections::BTreeMap<RelId, (String, Vec<Ty>)>,
 }
 
 fn list(alias: &str, cols: impl IntoIterator<Item = usize>) -> String {
@@ -146,6 +147,7 @@ fn render(e: &Expr, arity: usize, maps: &[String]) -> Result<String, EngineError
                 Func::And => format!("((({}) <> 0) AND (({}) <> 0))", a(0)?, a(1)?),
                 Func::Or => format!("((({}) <> 0) OR (({}) <> 0))", a(0)?, a(1)?),
                 Func::Not => format!("(({}) = 0)", a(0)?),
+                Func::TermLt => format!("ivm_term_lt({}, {})", a(0)?, a(1)?),
             }
         }
     })
@@ -201,6 +203,8 @@ impl SqlRel {
             mark: 0,
             tags: Vec::new(),
             terms: Vec::new(),
+            constructors: p.rels.iter().filter(|r| r.kind == RelKind::Constructor)
+                .map(|r| (r.id, (r.name.clone(), r.cols.iter().skip(1).copied().collect()))).collect(),
         };
         for r in p.rels.iter().filter(|r| r.kind == RelKind::Source) {
             let c = rel.push(r.cols.len(), false, |_| None);
@@ -305,11 +309,53 @@ impl Rel for SqlRel {
     type C = SqlC;
 
     fn get(&mut self, rel: RelId) -> Result<Self::C, EngineError> {
+        if let Some((name, types)) = self.constructors.get(&rel).cloned() {
+            let table = crate::terms::ctor_table(&name);
+            let width = types.len() + 1;
+            let c = self.push(width, false, |new| Some(format!(
+                "SELECT {}, 1 AS w FROM {} t WHERE NOT EXISTS (SELECT 1 FROM {} x_i WHERE x_i.c0=t.c0)",
+                (0..width).map(|i| format!("t.c{i} AS c{i}")).collect::<Vec<_>>().join(", "),
+                crate::catalog::quote(&table), new.i,
+            )));
+            self.integrate(&c, vec![0]);
+            return Ok(c);
+        }
         self.sources
             .iter()
             .find(|(id, _)| *id == rel)
             .map(|(_, c)| c.clone())
             .ok_or_else(|| EngineError::new(Stage::Install, Some(rel), ErrorKind::UnknownRel(rel)))
+    }
+
+    fn mint(&mut self, c: Self::C, functor: RelId, args: &[ColId]) -> Result<Self::C, EngineError> {
+        let (name, types) = self.constructors.get(&functor)
+            .ok_or_else(|| EngineError::new(Stage::Install, Some(functor), ErrorKind::UnknownRel(functor)))?.clone();
+        if args.len() != types.len() {
+            return Err(EngineError::new(Stage::Install, Some(functor), ErrorKind::Arity { expected: types.len(), actual: args.len() }));
+        }
+        if args.iter().any(|x| *x as usize >= c.arity) {
+            return Err(unsupported("Mint column out of range"));
+        }
+        self.flat(&c, "Mint over a LetRec variable");
+        let functor = name.replace('\'', "''");
+        let types_json = serde_json::to_string(&types).expect("Ty serialization").replace('\'', "''");
+        let arg_expr = format!("json_array({})", args.iter().map(|x| format!("d.c{x}")).collect::<Vec<_>>().join(","));
+        let arg_cols = args.iter().enumerate().map(|(i, x)| format!("d.c{x} AS c{}", i + 1)).collect::<Vec<_>>().join(",");
+        let ctor = crate::catalog::quote(crate::terms::ctor_table(&name));
+        let old = c.arity;
+        let next = self.push(old + 1, false, |_| Some(format!(
+            "SELECT {}, dict.id AS c{old}, d.w FROM {} d JOIN ivm_term_dict dict ON dict.functor='{functor}' AND dict.args={arg_expr}",
+            (0..old).map(|i| format!("d.c{i} AS c{i}")).collect::<Vec<_>>().join(","), c.d,
+        )));
+        let insert_dict = format!(
+            "INSERT INTO ivm_term_dict(functor,args,types) SELECT '{functor}', {arg_expr}, '{types_json}' FROM {} d WHERE d.w>0 AND NOT EXISTS (SELECT 1 FROM ivm_term_dict x WHERE x.functor='{functor}' AND x.args={arg_expr}) GROUP BY {arg_expr} ORDER BY {arg_expr} ON CONFLICT(functor,args) DO NOTHING", c.d,
+        );
+        let insert_ctor = format!(
+            "INSERT INTO {ctor} SELECT dict.id AS c0{} FROM {} d JOIN ivm_term_dict dict ON dict.functor='{functor}' AND dict.args={arg_expr} WHERE d.w>0 GROUP BY {arg_expr} ORDER BY {arg_expr} ON CONFLICT(c0) DO NOTHING",
+            if arg_cols.is_empty() { String::new() } else { format!(",{arg_cols}") }, c.d,
+        );
+        self.nodes[next.node].fill.splice(0..0, [insert_dict, insert_ctor]);
+        Ok(next)
     }
 
     fn mfp(&mut self, c: Self::C, filter: &[Expr], map: &[Expr], project: &[ColId]) -> Self::C {
@@ -477,7 +523,7 @@ impl Rel for SqlRel {
 
     /// Per-group accumulators (count, sums) take Δinput by upsert; Min/Max read a private arrangement of
     /// the input by index. Touched groups emit their new row minus their stored row.
-    fn reduce(&mut self, c: Self::C, key: &[ColId], aggs: &[Agg]) -> Self::C {
+    fn reduce(&mut self, c: Self::C, key: &[ColId], aggs: &[Agg], input_types: &[Ty]) -> Self::C {
         self.flat(&c, "Reduce over a LetRec variable");
         let key: Vec<usize> = key.iter().map(|k| *k as usize).collect();
         let arity = key.len() + aggs.len();
@@ -577,8 +623,10 @@ impl Rel for SqlRel {
         let values = aggs.iter().enumerate().map(|(j, agg)| match agg {
             Agg::Count => "g_i.cnt".to_string(),
             Agg::Sum(_) => format!("g_i.a{j}"),
-            Agg::Min(x) => format!("(SELECT n_i.c{x} FROM {arr} n_i WHERE {} AND n_i.w > 0 ORDER BY n_i.c{x} LIMIT 1)", g_on("g_i")),
-            Agg::Max(x) => format!("(SELECT n_i.c{x} FROM {arr} n_i WHERE {} AND n_i.w > 0 ORDER BY n_i.c{x} DESC LIMIT 1)", g_on("g_i")),
+            Agg::Min(x) => format!("(SELECT n_i.c{x} FROM {arr} n_i WHERE {} AND n_i.w > 0 ORDER BY {} LIMIT 1)", g_on("g_i"),
+                if input_types[*x as usize] == Ty::Id { format!("ivm_term_key(n_i.c{x})") } else { format!("n_i.c{x}") }),
+            Agg::Max(x) => format!("(SELECT n_i.c{x} FROM {arr} n_i WHERE {} AND n_i.w > 0 ORDER BY {} DESC LIMIT 1)", g_on("g_i"),
+                if input_types[*x as usize] == Ty::Id { format!("ivm_term_key(n_i.c{x})") } else { format!("n_i.c{x}") }),
         });
         let select = gk
             .iter()
@@ -639,6 +687,7 @@ impl Rel for SqlRel {
         key: &[ColId],
         order: &[Order],
         limit: u32,
+        input_types: &[Ty],
     ) -> Result<Self::C, EngineError> {
         if c.rec {
             return Err(unsupported("TopK over a LetRec variable"));
@@ -650,8 +699,12 @@ impl Rel for SqlRel {
             let part = if key.is_empty() { String::new() } else { format!("PARTITION BY {}", list("", key.iter().copied())) };
             let by = order
                 .iter()
-                .map(|o| format!("c{}{}", o.col, if o.desc { " DESC" } else { "" }))
-                .chain((0..c.arity).map(|x| format!("c{x}")))
+                .map(|o| {
+                    let x = o.col as usize;
+                    let value = if input_types[x] == Ty::Id { format!("ivm_term_key(c{x})") } else { format!("c{x}") };
+                    format!("{value}{}", if o.desc { " DESC" } else { "" })
+                })
+                .chain((0..c.arity).map(|x| if input_types[x] == Ty::Id { format!("ivm_term_key(c{x})") } else { format!("c{x}") }))
                 .collect::<Vec<_>>()
                 .join(", ");
             Some(format!(

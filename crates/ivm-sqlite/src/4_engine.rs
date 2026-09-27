@@ -80,6 +80,7 @@ impl Engine for Sqlite {
                 ErrorKind::Unsupported("output relation required"),
             ));
         }
+        crate::terms::install(db, ir).map_err(|e| error(Stage::Install, e))?;
         for source in ir.rels.iter().filter(|r| r.kind == RelKind::Source) {
             let columns = (0..source.cols.len())
                 .map(|i| format!("c{i} INTEGER NOT NULL"))
@@ -126,6 +127,7 @@ impl Engine for Sqlite {
 
     fn settle(&mut self, frontier: Frontier, host: &mut impl Host) -> Result<Delta, EngineError> {
         let db = conn(host, Stage::Settle)?;
+        crate::terms::register(db).map_err(|e| error(Stage::Settle, e))?;
         db.execute_batch("SAVEPOINT ivm_engine_frontier;")
             .map_err(|e| error(Stage::Settle, e))?;
         let run = || -> Result<Vec<(RelId, Row, W)>, EngineError> {
@@ -310,5 +312,10 @@ impl Engine for Sqlite {
             .map(|r| r.map_err(|e| error(Stage::Snapshot, e)))
             .collect();
         result
+    }
+
+    fn intern_snapshot(&self, functor: RelId, host: &mut impl Host) -> Result<Vec<(Row, W)>, EngineError> {
+        let db = conn(host, Stage::Snapshot)?;
+        crate::terms::snapshot(db, &self.ir, functor).map_err(|e| error(Stage::Snapshot, e))
     }
 }

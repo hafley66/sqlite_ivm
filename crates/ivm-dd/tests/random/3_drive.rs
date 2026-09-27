@@ -32,6 +32,83 @@ impl Case {
         let frontiers = gen::frontiers(&mut rng, &program);
         Case { seed, program, frontiers }
     }
+
+    pub fn generate_mint(seed: u64) -> Self {
+        let mut rng = Rng(seed);
+        let args = if rng.chance(50) { vec![0, 1] } else { vec![1, 0] };
+        let program = Program {
+            rels: vec![
+                Relation { id: 0, name: "mint_source".into(), cols: vec![Ty::Int, Ty::Int], kind: RelKind::Source },
+                Relation { id: 1, name: "mint_pair".into(), cols: vec![Ty::Id, Ty::Int, Ty::Int], kind: RelKind::Constructor },
+                Relation { id: 2, name: "mint_wrap".into(), cols: vec![Ty::Id, Ty::Id], kind: RelKind::Constructor },
+                Relation { id: 3, name: "mint_pairs".into(), cols: vec![Ty::Int, Ty::Int, Ty::Id], kind: RelKind::Derived },
+                Relation { id: 4, name: "mint_wrapped".into(), cols: vec![Ty::Int, Ty::Int, Ty::Id, Ty::Id], kind: RelKind::Derived },
+                Relation { id: 5, name: "mint_pairs_by_id".into(), cols: vec![Ty::Id, Ty::Int, Ty::Int], kind: RelKind::Derived },
+                Relation { id: 6, name: "mint_round_trip".into(), cols: vec![Ty::Int, Ty::Int, Ty::Id, Ty::Id, Ty::Int, Ty::Int], kind: RelKind::Derived },
+                Relation { id: 7, name: "mint_ordered_pairs".into(), cols: vec![Ty::Id, Ty::Id], kind: RelKind::Derived },
+                Relation { id: 8, name: "mint_extrema".into(), cols: vec![Ty::Id, Ty::Id], kind: RelKind::Derived },
+                Relation { id: 9, name: "mint_top".into(), cols: vec![Ty::Int, Ty::Int, Ty::Id], kind: RelKind::Derived },
+            ],
+            nodes: vec![
+                Op::Get(0),
+                Op::Mint { input: 0, functor: 1, args },
+                Op::Mint { input: 1, functor: 2, args: vec![2] },
+                Op::Get(1),
+                Op::Join { inputs: vec![1, 3], equivalences: vec![vec![(0, 2), (1, 0)]] },
+                Op::Join { inputs: vec![1, 1], equivalences: vec![] },
+                Op::Mfp { input: 5, filter: vec![Expr::Call(Func::TermLt, vec![Expr::Col(2), Expr::Col(5)])], map: vec![], project: vec![2, 5] },
+                Op::Reduce { input: 1, key: vec![], aggs: vec![Agg::Min(2), Agg::Max(2)] },
+                Op::TopK { input: 1, key: vec![], order: vec![Order { col: 2, desc: false }], limit: 2 },
+            ],
+            strata: vec![Stratum::Let { id: 3, body: 1 }, Stratum::Let { id: 4, body: 2 }, Stratum::Let { id: 5, body: 3 }, Stratum::Let { id: 6, body: 4 }, Stratum::Let { id: 7, body: 6 }, Stratum::Let { id: 8, body: 7 }, Stratum::Let { id: 9, body: 8 }],
+            outputs: vec![3, 4, 5, 6, 7, 8, 9],
+        };
+        let mut live = std::collections::BTreeSet::new();
+        let mut frontiers = Vec::new();
+        for _ in 0..16 {
+            let row = vec![rng.range(0, 3) as i64, rng.range(0, 3) as i64];
+            let w = if live.remove(&row) { -1 } else { live.insert(row.clone()); 1 };
+            frontiers.push(Frontier { changes: vec![SourceChange { rel: 0, row, w }] });
+        }
+        Case { seed, program, frontiers }
+    }
+}
+
+pub fn agreement<A: Engine, B: Engine>(case: &Case) -> Result<(), String> {
+    let left_db = Connection::open_in_memory().map_err(sql_err)?;
+    let right_db = Connection::open_in_memory().map_err(sql_err)?;
+    let mut left = A::install(&case.program, &mut Raw::with_connection(&left_db)).map_err(|e| format!("left install: {e}"))?;
+    let mut right = B::install(&case.program, &mut Raw::with_connection(&right_db)).map_err(|e| format!("right install: {e}"))?;
+    for (at, frontier) in case.frontiers.iter().enumerate() {
+        let a = left.settle(frontier.clone(), &mut Raw::with_connection(&left_db)).map_err(|e| format!("left frontier {at}: {e}"))?;
+        let b = right.settle(frontier.clone(), &mut Raw::with_connection(&right_db)).map_err(|e| format!("right frontier {at}: {e}"))?;
+        if a.changes != b.changes { return Err(format!("frontier {at}: delta {:?} != {:?}", a.changes, b.changes)); }
+        for rel in &case.program.outputs {
+            let a = snapshot(&left, *rel, &left_db)?;
+            let b = snapshot(&right, *rel, &right_db)?;
+            if a != b { return Err(format!("frontier {at}: relation {rel} {a:?} != {b:?}")); }
+        }
+        for rel in case.program.rels.iter().filter(|r| r.kind == RelKind::Constructor) {
+            let a = left.intern_snapshot(rel.id, &mut Raw::with_connection(&left_db)).map_err(|e| e.to_string())?;
+            let b = right.intern_snapshot(rel.id, &mut Raw::with_connection(&right_db)).map_err(|e| e.to_string())?;
+            if a != b { return Err(format!("frontier {at}: constructor {} {a:?} != {b:?}", rel.name)); }
+        }
+        let terms = snapshot(&left, 3, &left_db)?;
+        let ordered = snapshot(&left, 7, &left_db)?;
+        let mut expected = Vec::new();
+        for (a, _) in &terms {
+            for (b, _) in &terms {
+                let left_args = if let Op::Mint { args, .. } = &case.program.nodes[1] { args.iter().map(|i| a[*i as usize]).collect::<Vec<_>>() } else { unreachable!() };
+                let right_args = if let Op::Mint { args, .. } = &case.program.nodes[1] { args.iter().map(|i| b[*i as usize]).collect::<Vec<_>>() } else { unreachable!() };
+                if left_args < right_args {
+                    expected.push((vec![a[2], b[2]], 1));
+                }
+            }
+        }
+        expected.sort();
+        if ordered != expected { return Err(format!("frontier {at}: TermLt {ordered:?} != structural {expected:?}")); }
+    }
+    Ok(())
 }
 
 /// A check returns its first disagreement as text.

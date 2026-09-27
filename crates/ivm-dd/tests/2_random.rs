@@ -13,6 +13,7 @@ fn generator_coverage() {
     let mut one_rec = 0;
     let mut two_rec = 0;
     let mut topk = 0;
+    let mut mint = 0;
     for seed in 0..1000 {
         let case = drive::Case::generate(seed);
         for stratum in &case.program.strata {
@@ -21,9 +22,10 @@ fn generator_coverage() {
             }
         }
         if case.program.nodes.iter().any(|op| matches!(op, Op::TopK { .. })) { topk += 1; }
+        if drive::Case::generate_mint(seed).program.nodes.iter().any(|op| matches!(op, Op::Mint { .. })) { mint += 1; }
     }
-    println!("seeds=1000 one_rec={one_rec} two_rec={two_rec} topk={topk}");
-    assert!(one_rec > 0 && two_rec > 0 && topk > 0);
+    println!("seeds=1000 one_rec={one_rec} two_rec={two_rec} topk={topk} mint={mint}");
+    assert!(one_rec > 0 && two_rec > 0 && topk > 0 && mint > 0);
 }
 
 #[test]

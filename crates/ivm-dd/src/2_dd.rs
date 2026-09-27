@@ -16,6 +16,7 @@ use timely::order::Product;
 use timely::progress::Timestamp;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::cmp::Ordering;
 use std::rc::Rc;
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
@@ -67,6 +68,8 @@ impl Nest for Time {
                 outputs: Vec::new(),
                 taps: rel.taps.clone(),
                 reduce_reads: rel.reduce_reads.clone(),
+                constructors: rel.constructors.clone(),
+                interner: rel.interner.clone(),
             };
             let mut scope_defined: Vec<(RelId, Coll<'_, Inner>)> =
                 defined.iter().map(|(id, c)| (*id, c.clone().enter(sub))).collect();
@@ -99,6 +102,8 @@ pub struct DdRel<'s, T: Nest = Time> {
     /// Traced mode only: every observed node's records land here.
     taps: Option<Rc<RefCell<Vec<DdTap>>>>,
     reduce_reads: Option<ReduceReadLogger>,
+    constructors: BTreeMap<RelId, (String, Vec<Ty>)>,
+    interner: Rc<RefCell<Interner>>,
 }
 
 /// One record seen on an IR node's output collection in traced mode.
@@ -126,14 +131,32 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
             .ok_or_else(|| EngineError::new(Stage::Install, Some(rel), ErrorKind::UnknownRel(rel)))
     }
 
+    fn mint(&mut self, c: Self::C, functor: RelId, args: &[ColId]) -> Result<Self::C, EngineError> {
+        let (name, types) = self.constructors.get(&functor)
+            .ok_or_else(|| EngineError::new(Stage::Install, Some(functor), ErrorKind::UnknownRel(functor)))?.clone();
+        if args.len() != types.len() {
+            return Err(EngineError::new(Stage::Install, Some(functor), ErrorKind::Arity { expected: types.len(), actual: args.len() }));
+        }
+        let columns = args.to_vec();
+        let interner = self.interner.clone();
+        Ok(c.map(move |mut row| {
+            let values = cols(&row, &columns);
+            let id = interner.borrow_mut().mint(&name, &values, &types);
+            row.push(id);
+            row
+        }))
+    }
+
     fn mfp(&mut self, c: Self::C, filter: &[Expr], map: &[Expr], project: &[ColId]) -> Self::C {
         let (filter, map, project) = (filter.to_vec(), map.to_vec(), project.to_vec());
+        let interner = self.interner.clone();
         c.flat_map(move |mut row: Row| {
-            if !filter.iter().all(|e| eval(e, &row) != 0) {
+            let lt = |a, b| interner.borrow().compare(a, b) == Ordering::Less;
+            if !filter.iter().all(|e| eval_with(e, &row, &lt) != 0) {
                 return None;
             }
             for e in &map {
-                let v = eval(e, &row);
+                let v = eval_with(e, &row, &lt);
                 row.push(v);
             }
             Some(if project.is_empty() { row } else { cols(&row, &project) })
@@ -178,17 +201,18 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
         l.map(move |row| (cols(&row, &lk), row)).antijoin(keys).map(|(_, row)| row)
     }
 
-    fn reduce(&mut self, c: Self::C, key: &[ColId], aggs: &[Agg]) -> Self::C {
+    fn reduce(&mut self, c: Self::C, key: &[ColId], aggs: &[Agg], input_types: &[Ty]) -> Self::C {
         let (key, aggs) = (key.to_vec(), aggs.to_vec());
         let linear: Vec<Agg> = aggs.iter().filter(|a| matches!(a, Agg::Count | Agg::Sum(_))).cloned().collect();
         let extrema: Vec<Agg> = aggs.iter().filter(|a| matches!(a, Agg::Min(_) | Agg::Max(_))).cloned().collect();
+        let extrema_types: Vec<Ty> = extrema.iter().map(|a| match a { Agg::Min(c) | Agg::Max(c) => input_types[*c as usize], _ => unreachable!() }).collect();
         let values = match (linear.is_empty(), extrema.is_empty()) {
             (false, true) => accumulable_values(c, key, linear),
             (true, false) => accumulable_values(c.clone(), key.clone(), vec![Agg::Count])
-                .join(hierarchical_extrema(c, key, extrema, self.reduce_reads.clone()))
+                .join(hierarchical_extrema(c, key, extrema, extrema_types, self.interner.clone(), self.reduce_reads.clone()))
                 .map(|(group, (_, values))| (group, values)),
             (false, false) => accumulable_values(c.clone(), key.clone(), linear)
-                .join(hierarchical_extrema(c, key, extrema, self.reduce_reads.clone()))
+                .join(hierarchical_extrema(c, key, extrema, extrema_types, self.interner.clone(), self.reduce_reads.clone()))
                 .map(move |(group, (linear, extrema))| {
                     let (mut li, mut ei) = (linear.into_iter(), extrema.into_iter());
                     let values = aggs.iter().map(|a| match a {
@@ -209,12 +233,14 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
         c.threshold(|_, w: &W| if *w > 0 { 1 as W } else { 0 })
     }
 
-    fn topk(&mut self, c: Self::C, key: &[ColId], order: &[Order], limit: u32) -> Result<Self::C, EngineError> {
+    fn topk(&mut self, c: Self::C, key: &[ColId], order: &[Order], limit: u32, input_types: &[Ty]) -> Result<Self::C, EngineError> {
         let (key, order) = (key.to_vec(), order.to_vec());
+        let types = input_types.to_vec();
+        let interner = self.interner.clone();
         Ok(c.map(move |row| (cols(&row, &key), row))
             .reduce(move |_k, input: &[(&Row, W)], output: &mut Vec<(Row, W)>| {
                 let mut live: Vec<(&Row, W)> = input.iter().filter(|(_, w)| *w > 0).map(|(r, w)| (*r, *w)).collect();
-                live.sort_by(|(a, _), (b, _)| rank(&order, a, b));
+                live.sort_by(|(a, _), (b, _)| rank(&order, &types, &interner.borrow(), a, b));
                 let mut left = limit as W;
                 for (row, w) in live {
                     if left == 0 {
@@ -277,7 +303,7 @@ fn accumulable_values<'s, T: Nest>(c: Coll<'s, T>, key: Vec<ColId>, aggs: Vec<Ag
 /// Each level replaces up to 16 child buckets with their extrema. The final group reduce
 /// sees only the 16 possible high hash nibbles, regardless of the group's row count.
 fn hierarchical_extrema<'s, T: Nest>(
-    c: Coll<'s, T>, key: Vec<ColId>, aggs: Vec<Agg>, reduce_reads: Option<ReduceReadLogger>,
+    c: Coll<'s, T>, key: Vec<ColId>, aggs: Vec<Agg>, types: Vec<Ty>, interner: Rc<RefCell<Interner>>, reduce_reads: Option<ReduceReadLogger>,
 ) -> VecCollection<'s, T, (Row, Row), W> {
     let columns: Vec<ColId> = aggs.iter().map(|a| match a { Agg::Min(c) | Agg::Max(c) => *c, _ => unreachable!() }).collect();
     // Test row liveness before collapsing rows with equal aggregate values.
@@ -291,54 +317,64 @@ fn hierarchical_extrema<'s, T: Nest>(
         });
     for _ in 0..15 {
         let level_aggs = aggs.clone();
+        let level_types = types.clone();
+        let level_interner = interner.clone();
         let level_reads = reduce_reads.clone();
         buckets = buckets
             .reduce(move |_, input: &[(&Row, W)], output: &mut Vec<(Row, W)>| {
                 if let Some(logger) = &level_reads { logger.log(input.len()); }
-                extrema(input, &level_aggs, output)
+                extrema(input, &level_aggs, &level_types, &level_interner.borrow(), output)
             })
             .map(|((group, bucket), values)| ((group, bucket >> 4), values));
     }
     let level_aggs = aggs.clone();
+    let level_types = types.clone();
+    let level_interner = interner.clone();
     let level_reads = reduce_reads.clone();
     buckets
         .reduce(move |_, input: &[(&Row, W)], output: &mut Vec<(Row, W)>| {
             if let Some(logger) = &level_reads { logger.log(input.len()); }
-            extrema(input, &level_aggs, output)
+            extrema(input, &level_aggs, &level_types, &level_interner.borrow(), output)
         })
         .map(|((group, _), values)| (group, values))
         .reduce(move |_, input: &[(&Row, W)], output: &mut Vec<(Row, W)>| {
             if let Some(logger) = &reduce_reads { logger.log(input.len()); }
-            extrema(input, &aggs, output)
+            extrema(input, &aggs, &types, &interner.borrow(), output)
         })
 }
 
-fn extrema(input: &[(&Row, W)], aggs: &[Agg], output: &mut Vec<(Row, W)>) {
+fn extrema(input: &[(&Row, W)], aggs: &[Agg], types: &[Ty], interner: &Interner, output: &mut Vec<(Row, W)>) {
     let mut live = input.iter().filter(|(_, w)| *w > 0).map(|(row, _)| *row).peekable();
     if live.peek().is_none() { return; }
     let values = aggs.iter().enumerate().map(|(i, agg)| match agg {
-        Agg::Min(_) => live.clone().map(|row| row[i]).min().unwrap(),
-        Agg::Max(_) => live.clone().map(|row| row[i]).max().unwrap(),
+        Agg::Min(_) => live.clone().map(|row| row[i]).min_by(|a, b| cmp_cell(types[i], *a, *b, interner)).unwrap(),
+        Agg::Max(_) => live.clone().map(|row| row[i]).max_by(|a, b| cmp_cell(types[i], *a, *b, interner)).unwrap(),
         _ => unreachable!(),
     }).collect();
     output.push((values, 1));
 }
 
 /// `order` first, then the whole row ascending, so ties resolve the same way in every engine.
-fn rank(order: &[Order], a: &Row, b: &Row) -> std::cmp::Ordering {
+fn cmp_cell(ty: Ty, a: Cell, b: Cell, interner: &Interner) -> Ordering {
+    if ty == Ty::Id { interner.compare(a, b) } else { a.cmp(&b) }
+}
+
+fn rank(order: &[Order], types: &[Ty], interner: &Interner, a: &Row, b: &Row) -> Ordering {
     order
         .iter()
         .map(|o| {
-            let ord = a[o.col as usize].cmp(&b[o.col as usize]);
+            let i = o.col as usize;
+            let ord = cmp_cell(types[i], a[i], b[i], interner);
             if o.desc { ord.reverse() } else { ord }
         })
         .find(|ord| ord.is_ne())
-        .unwrap_or_else(|| a.cmp(b))
+        .unwrap_or_else(|| a.iter().zip(b).enumerate().map(|(i, (x, y))| cmp_cell(types[i], *x, *y, interner)).find(|o| o.is_ne()).unwrap_or(Ordering::Equal))
 }
 
 enum Command {
     Settle(Frontier, mpsc::Sender<Result<(Delta, Vec<DdTap>), EngineError>>),
     Snapshot(RelId, mpsc::Sender<Result<Vec<(Row, W)>, EngineError>>),
+    InternSnapshot(RelId, mpsc::Sender<Result<Vec<(Row, W)>, EngineError>>),
     Stop,
 }
 
@@ -397,6 +433,12 @@ impl Engine for Dd {
         self.tx.send(Command::Snapshot(rel, reply)).map_err(|e| worker_error(Stage::Snapshot, e))?;
         answer.recv().map_err(|e| worker_error(Stage::Snapshot, e))?
     }
+
+    fn intern_snapshot(&self, functor: RelId, _host: &mut impl Host) -> Result<Vec<(Row, W)>, EngineError> {
+        let (reply, answer) = mpsc::channel();
+        self.tx.send(Command::InternSnapshot(functor, reply)).map_err(|e| worker_error(Stage::Snapshot, e))?;
+        answer.recv().map_err(|e| worker_error(Stage::Snapshot, e))?
+    }
 }
 
 fn worker_error(stage: Stage, e: impl std::fmt::Display) -> EngineError {
@@ -414,6 +456,7 @@ impl Drop for Dd {
 
 struct Built {
     inputs: BTreeMap<RelId, InputSession<Time, Row, W>>,
+    constructor_inputs: BTreeMap<RelId, InputSession<Time, Row, W>>,
     guards: BTreeMap<RelId, Trace>,
     outputs: BTreeMap<RelId, Trace>,
 }
@@ -429,8 +472,14 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
         let mut probe = ProbeHandle::new();
         let captured: Rc<RefCell<Vec<(RelId, Row, Time, W)>>> = Rc::default();
         let taps: Option<Rc<RefCell<Vec<DdTap>>>> = traced.then(Rc::default);
+        let interner = Rc::new(RefCell::new(Interner::default()));
+        let constructors: BTreeMap<RelId, (String, Vec<Ty>)> = program.rels.iter()
+            .filter(|r| r.kind == RelKind::Constructor)
+            .map(|r| (r.id, (r.name.clone(), r.cols.iter().skip(1).copied().collect())))
+            .collect();
         let built = worker.dataflow::<Time, _, _>(|scope| -> Result<Built, EngineError> {
             let mut inputs = BTreeMap::new();
+            let mut constructor_inputs = BTreeMap::new();
             let mut guards = BTreeMap::new();
             let mut sources = BTreeMap::new();
             for rel in program.rels.iter().filter(|r| r.kind == RelKind::Source) {
@@ -441,7 +490,13 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                 guards.insert(rel.id, guard.trace);
                 sources.insert(rel.id, c);
             }
-            let mut rel = DdRel { scope, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone() };
+            for rel in program.rels.iter().filter(|r| r.kind == RelKind::Constructor) {
+                let (input, c) = scope.new_collection::<Row, W>();
+                c.clone().probe_with(&mut probe);
+                constructor_inputs.insert(rel.id, input);
+                sources.insert(rel.id, c);
+            }
+            let mut rel = DdRel { scope, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone(), constructors: constructors.clone(), interner: interner.clone() };
             lower(&program, &mut rel)?;
             let mut outputs = BTreeMap::new();
             for (id, c) in rel.outputs {
@@ -454,7 +509,7 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                     .probe_with(&mut probe);
                 outputs.insert(id, arranged.trace);
             }
-            Ok(Built { inputs, guards, outputs })
+            Ok(Built { inputs, constructor_inputs, guards, outputs })
         });
         let mut built = match built {
             Ok(built) => {
@@ -467,6 +522,7 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
             }
         };
         let mut epoch: Time = 0;
+        let mut frontier_tick = 0;
         loop {
             let Ok(command) = rx.lock().unwrap().recv() else { break };
             match command {
@@ -486,7 +542,31 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                         input.advance_to(epoch);
                         input.flush();
                     }
+                    for input in built.constructor_inputs.values_mut() {
+                        input.advance_to(epoch);
+                        input.flush();
+                    }
                     worker.step_while(|| probe.less_than(&epoch));
+                    loop {
+                        let pending = interner.borrow_mut().drain_pending();
+                        if pending.is_empty() { break; }
+                        for (name, row) in pending {
+                            let id = constructors.iter().find(|(_, (functor, _))| functor == &name).map(|(id, _)| id).copied();
+                            if let Some(id) = id {
+                                built.constructor_inputs.get_mut(&id).unwrap().update(row, 1);
+                            }
+                        }
+                        epoch += 1;
+                        for input in built.inputs.values_mut() {
+                            input.advance_to(epoch);
+                            input.flush();
+                        }
+                        for input in built.constructor_inputs.values_mut() {
+                            input.advance_to(epoch);
+                            input.flush();
+                        }
+                        worker.step_while(|| probe.less_than(&epoch));
+                    }
                     if let Some(logger) = &reduce_reads { logger.flush(); }
                     for trace in built.guards.values_mut().chain(built.outputs.values_mut()) {
                         trace.set_logical_compaction(AntichainRef::new(&[epoch]));
@@ -496,7 +576,7 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                         .borrow_mut()
                         .drain(..)
                         .map(|(rel, row, t, w)| {
-                            debug_assert_eq!(t, epoch - 1);
+                            let _ = t;
                             (rel, row, w)
                         })
                         .collect();
@@ -510,13 +590,20 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                         .filter(|(_, w)| *w != 0)
                         .map(|((node, tick, round, row), w)| DdTap { node, tick, round, row, w })
                         .collect();
-                    let _ = reply.send(Ok((Delta { tick: epoch - 1, changes }, seen)));
+                    let _ = reply.send(Ok((Delta { tick: frontier_tick, changes }, seen)));
+                    frontier_tick += 1;
                 }
                 Command::Snapshot(rel, reply) => {
                     let answer = built
                         .outputs
                         .get_mut(&rel)
                         .map(read_trace)
+                        .ok_or_else(|| EngineError::new(Stage::Snapshot, Some(rel), ErrorKind::UnknownRel(rel)));
+                    let _ = reply.send(answer);
+                }
+                Command::InternSnapshot(rel, reply) => {
+                    let answer = constructors.get(&rel)
+                        .map(|(name, _)| interner.borrow().snapshot(name))
                         .ok_or_else(|| EngineError::new(Stage::Snapshot, Some(rel), ErrorKind::UnknownRel(rel)));
                     let _ = reply.send(answer);
                 }

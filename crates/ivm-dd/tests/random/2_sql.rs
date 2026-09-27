@@ -209,6 +209,7 @@ fn expr(t: &str, a: usize, map: &[Expr], e: &Expr) -> String {
                 Func::And => return format!("({} <> 0 AND {} <> 0)", x(0), x(1)),
                 Func::Or => return format!("({} <> 0 OR {} <> 0)", x(0), x(1)),
                 Func::Not => return format!("({} = 0)", x(0)),
+                Func::TermLt => return format!("ivm_term_lt({}, {})", x(0), x(1)),
             };
             format!("({} {op} {})", x(0), x(1))
         }

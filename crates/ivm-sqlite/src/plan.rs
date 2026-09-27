@@ -111,6 +111,7 @@ fn render_expr(expr: &Expr, columns: &[String], maps: &[String]) -> Option<Strin
                 Func::And => format!("((({}) <> 0) AND (({}) <> 0))", a(0)?, a(1)?),
                 Func::Or => format!("((({}) <> 0) OR (({}) <> 0))", a(0)?, a(1)?),
                 Func::Not => format!("(({}) = 0)", a(0)?),
+                Func::TermLt => format!("ivm_term_lt({}, {})", a(0)?, a(1)?),
             }
         }
     })
