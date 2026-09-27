@@ -23,6 +23,8 @@ pub enum Ty {
 pub enum RelKind {
     Source,
     Derived,
+    /// Persistent dictionary rows `(id, arg0, ...)` for this relation's name.
+    Constructor,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,6 +48,8 @@ pub enum Func {
     And,
     Or,
     Not,
+    /// Structural comparison of two dictionary term IDs.
+    TermLt,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,6 +87,12 @@ pub enum WinFn {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Op {
     Get(RelId),
+    /// Intern selected columns under the named constructor relation and append its ID.
+    Mint {
+        input: NodeId,
+        functor: RelId,
+        args: Vec<ColId>,
+    },
     /// Filter, then append `map` columns, then keep `project` (empty = keep all).
     Mfp {
         input: NodeId,
@@ -154,6 +164,53 @@ pub struct Program {
 impl Program {
     pub fn rel(&self, id: RelId) -> Option<&Relation> {
         self.rels.iter().find(|rel| rel.id == id)
+    }
+
+    pub fn node_types(&self, id: NodeId) -> Option<Vec<Ty>> {
+        let op = self.nodes.get(id as usize)?;
+        Some(match op {
+            Op::Get(rel) => self.rel(*rel)?.cols.clone(),
+            Op::Mint { input, .. } => {
+                let mut cols = self.node_types(*input)?;
+                cols.push(Ty::Id);
+                cols
+            }
+            Op::Mfp { input, map, project, .. } => {
+                let mut cols = self.node_types(*input)?;
+                for expr in map { cols.push(expr_type(expr, &cols)?); }
+                if project.is_empty() { cols } else { project.iter().map(|c| cols.get(*c as usize).copied()).collect::<Option<Vec<_>>>()? }
+            }
+            Op::Union(inputs) => self.node_types(*inputs.first()?)?,
+            Op::Negate(input) | Op::Threshold(input) | Op::Delay(input) => self.node_types(*input)?,
+            Op::Join { inputs, .. } => {
+                let mut cols = Vec::new();
+                for input in inputs { cols.extend(self.node_types(*input)?); }
+                cols
+            }
+            Op::Antijoin { l, .. } => self.node_types(*l)?,
+            Op::Reduce { input, key, aggs } => {
+                let cols = self.node_types(*input)?;
+                let mut out = key.iter().map(|c| cols.get(*c as usize).copied()).collect::<Option<Vec<_>>>()?;
+                out.extend(aggs.iter().map(|agg| match agg {
+                    Agg::Min(c) | Agg::Max(c) => cols.get(*c as usize).copied(),
+                    Agg::Count | Agg::Sum(_) => Some(Ty::Int),
+                }).collect::<Option<Vec<_>>>()?);
+                out
+            }
+            Op::TopK { input, .. } => self.node_types(*input)?,
+            Op::Window { input, .. } => {
+                let mut cols = self.node_types(*input)?;
+                cols.push(Ty::Int);
+                cols
+            }
+        })
+    }
+}
+
+fn expr_type(expr: &Expr, cols: &[Ty]) -> Option<Ty> {
+    match expr {
+        Expr::Col(c) => cols.get(*c as usize).copied(),
+        Expr::Lit(_) | Expr::Call(_, _) => Some(Ty::Int),
     }
 }
 

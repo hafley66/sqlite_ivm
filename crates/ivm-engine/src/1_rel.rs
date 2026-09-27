@@ -48,19 +48,23 @@ pub trait Engine: Sized {
     fn install(program: &Program, host: &mut impl Host) -> Result<Self, EngineError>;
     fn settle(&mut self, frontier: Frontier, host: &mut impl Host) -> Result<Delta, EngineError>;
     fn snapshot(&self, rel: RelId, host: &mut impl Host) -> Result<Vec<(Row, W)>, EngineError>;
+    fn intern_snapshot(&self, _functor: RelId, _host: &mut impl Host) -> Result<Vec<(Row, W)>, EngineError> {
+        Err(EngineError::new(Stage::Snapshot, None, ErrorKind::Unsupported("intern_snapshot")))
+    }
 }
 
 pub trait Rel {
     type C: Clone;
     fn get(&mut self, rel: RelId) -> Result<Self::C, EngineError>;
+    fn mint(&mut self, c: Self::C, functor: RelId, args: &[ColId]) -> Result<Self::C, EngineError>;
     fn mfp(&mut self, c: Self::C, filter: &[Expr], map: &[Expr], project: &[ColId]) -> Self::C;
     fn union(&mut self, cs: Vec<Self::C>) -> Self::C;
     fn negate(&mut self, c: Self::C) -> Self::C;
     fn join(&mut self, cs: Vec<Self::C>, eq: &[Vec<(u8, ColId)>]) -> Result<Self::C, EngineError>;
     fn antijoin(&mut self, l: Self::C, r: Self::C, lk: &[ColId], rk: &[ColId]) -> Self::C;
-    fn reduce(&mut self, c: Self::C, key: &[ColId], aggs: &[Agg]) -> Self::C;
+    fn reduce(&mut self, c: Self::C, key: &[ColId], aggs: &[Agg], input_types: &[Ty]) -> Self::C;
     fn threshold(&mut self, c: Self::C) -> Self::C;
-    fn topk(&mut self, _c: Self::C, _key: &[ColId], _order: &[Order], _limit: u32) -> Result<Self::C, EngineError> {
+    fn topk(&mut self, _c: Self::C, _key: &[ColId], _order: &[Order], _limit: u32, _input_types: &[Ty]) -> Result<Self::C, EngineError> {
         Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("TopK")))
     }
     /// Engine-owned fixpoint: returns one collection per `rec.ids`, built with `lower_node` on the engine's inner algebra.
@@ -76,11 +80,15 @@ pub trait Rel {
 
 /// Scalar semantics shared by every engine: comparisons and logic yield 0 or 1.
 pub fn eval(expr: &Expr, row: &[Cell]) -> Cell {
+    eval_with(expr, row, &|_, _| panic!("TermLt requires a dictionary comparator"))
+}
+
+pub fn eval_with(expr: &Expr, row: &[Cell], term_lt: &dyn Fn(Cell, Cell) -> bool) -> Cell {
     match expr {
         Expr::Col(c) => row[*c as usize],
         Expr::Lit(v) => *v,
         Expr::Call(func, args) => {
-            let a = |i: usize| eval(&args[i], row);
+            let a = |i: usize| eval_with(&args[i], row, term_lt);
             match func {
                 Func::Eq => (a(0) == a(1)) as Cell,
                 Func::Ne => (a(0) != a(1)) as Cell,
@@ -93,6 +101,7 @@ pub fn eval(expr: &Expr, row: &[Cell]) -> Cell {
                 Func::And => (a(0) != 0 && a(1) != 0) as Cell,
                 Func::Or => (a(0) != 0 || a(1) != 0) as Cell,
                 Func::Not => (a(0) == 0) as Cell,
+                Func::TermLt => term_lt(a(0), a(1)) as Cell,
             }
         }
     }
@@ -144,6 +153,10 @@ pub fn lower_node<A: Rel>(
             Some((_, c)) => c.clone(),
             None => a.get(*rel)?,
         },
+        Op::Mint { input, functor, args } => {
+            let c = sub(*input, a)?;
+            a.mint(c, *functor, args)?
+        }
         Op::Mfp { input, filter, map, project } => {
             let c = sub(*input, a)?;
             a.mfp(c, filter, map, project)
@@ -167,7 +180,8 @@ pub fn lower_node<A: Rel>(
         }
         Op::Reduce { input, key, aggs } => {
             let c = sub(*input, a)?;
-            a.reduce(c, key, aggs)
+            let types = p.node_types(*input).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Reduce input types")))?;
+            a.reduce(c, key, aggs, &types)
         }
         Op::Threshold(input) => {
             let c = sub(*input, a)?;
@@ -175,7 +189,8 @@ pub fn lower_node<A: Rel>(
         }
         Op::TopK { input, key, order, limit } => {
             let c = sub(*input, a)?;
-            a.topk(c, key, order, *limit)?
+            let types = p.node_types(*input).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("TopK input types")))?;
+            a.topk(c, key, order, *limit, &types)?
         }
         Op::Window { .. } => return Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Window"))),
         Op::Delay(_) => return Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Delay"))),
