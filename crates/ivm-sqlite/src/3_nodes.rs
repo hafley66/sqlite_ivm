@@ -721,6 +721,60 @@ impl Rel for SqlRel {
         Ok(out)
     }
 
+    /// Recompute only partitions named by this frontier's input delta.
+    fn window(
+        &mut self,
+        c: Self::C,
+        partition: &[ColId],
+        order: &[Order],
+        func: &WinFn,
+        input_types: &[Ty],
+    ) -> Result<Self::C, EngineError> {
+        if c.rec {
+            return Err(unsupported("Window over a LetRec variable"));
+        }
+        let key: Vec<usize> = partition.iter().map(|x| *x as usize).collect();
+        self.integrate(&c, key.clone());
+        let value_col = order.first().map_or(0, |o| o.col as usize);
+        let all = list("", 0..c.arity);
+        let part = if key.is_empty() { String::new() } else { format!("PARTITION BY {}", list("", key.iter().copied())) };
+        let order_cols = order.iter().map(|o| {
+            let x = o.col as usize;
+            let value = if input_types[x] == Ty::Id { format!("ivm_term_key(c{x})") } else { format!("c{x}") };
+            format!("{value}{}", if o.desc { " DESC" } else { " ASC" })
+        }).collect::<Vec<_>>();
+        let by = order_cols.iter().cloned()
+            .chain((0..c.arity).map(|x| if input_types[x] == Ty::Id { format!("ivm_term_key(c{x}) ASC") } else { format!("c{x} ASC") }))
+            .chain(["seq ASC".to_string()]).collect::<Vec<_>>().join(", ");
+        let order_clause = if order_cols.is_empty() { String::new() } else { format!("ORDER BY {}", order_cols.join(", ")) };
+        let full_clause = if part.is_empty() { format!("ORDER BY {by}") } else { format!("{part} ORDER BY {by}") };
+        let rank_clause = [part.as_str(), order_clause.as_str()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" ");
+        let aggregate_clause = if order_cols.is_empty() { part.clone() } else { format!("{full_clause} ROWS UNBOUNDED PRECEDING") };
+        let value = match func {
+            WinFn::RowNumber => format!("ROW_NUMBER() OVER ({full_clause})"),
+            WinFn::Rank => format!("RANK() OVER ({rank_clause})"),
+            WinFn::DenseRank => format!("DENSE_RANK() OVER ({rank_clause})"),
+            WinFn::Lag(offset) => format!("COALESCE(LAG(c{value_col}, {offset}, 0) OVER ({full_clause}), 0)"),
+            WinFn::Lead(offset) => format!("COALESCE(LEAD(c{value_col}, {offset}, 0) OVER ({full_clause}), 0)"),
+            WinFn::Sum(col) => format!("SUM(c{col}) OVER ({aggregate_clause})"),
+            WinFn::Count => format!("COUNT(*) OVER ({aggregate_clause})"),
+        };
+        let out = self.push(c.arity + 1, false, |out| {
+            let gone = of_touched(&c, &key, &out.i, &key, c.arity + 1, "-");
+            Some(format!(
+                "WITH RECURSIVE cur AS (SELECT {all}, SUM(w) AS w FROM ({old} UNION ALL SELECT {all}, w FROM {d}) GROUP BY {all} HAVING SUM(w) > 0), \
+                 expanded AS (SELECT {all}, w, 1 AS seq FROM cur UNION ALL SELECT {all}, w, seq + 1 FROM expanded WHERE seq < w), \
+                 ranked AS (SELECT {all}, {value} AS c{width} FROM expanded) \
+                 SELECT {all}, c{width}, 1 AS w FROM ranked UNION ALL {gone}",
+                old = of_touched(&c, &key, &c.i, &key, c.arity, ""),
+                d = c.d,
+                width = c.arity,
+            ))
+        });
+        self.integrate(&out, key);
+        Ok(out)
+    }
+
     /// Variables are SCC-owned tables maintained by a DRed round loop at settle; see `Sql::fixpoint`.
     fn letrec(
         &mut self,

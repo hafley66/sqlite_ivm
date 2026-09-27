@@ -69,6 +69,12 @@ script_case!(pokemon_rematch, "pokemon/3_rematch");
 script_case!(pokemon_two_roads, "pokemon/4_two_roads");
 script_case!(pokemon_leads, "pokemon/5_leads");
 script_case!(pokemon_rare_candy, "pokemon/7_rare_candy");
+script_case!(window_functions, "12_window");
+
+#[test]
+fn delay_requires_clock_checker() {
+    support::expect_install_error::<Sqlite>("13_delay");
+}
 
 #[test]
 fn recursive_antijoin_rejected_at_install() {

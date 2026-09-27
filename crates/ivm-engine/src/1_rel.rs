@@ -67,6 +67,9 @@ pub trait Rel {
     fn topk(&mut self, _c: Self::C, _key: &[ColId], _order: &[Order], _limit: u32, _input_types: &[Ty]) -> Result<Self::C, EngineError> {
         Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("TopK")))
     }
+    fn window(&mut self, _c: Self::C, _partition: &[ColId], _order: &[Order], _func: &WinFn, _input_types: &[Ty]) -> Result<Self::C, EngineError> {
+        Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Window")))
+    }
     /// Engine-owned fixpoint: returns one collection per `rec.ids`, built with `lower_node` on the engine's inner algebra.
     fn letrec(&mut self, _p: &Program, _rec: &LetRec, _defined: &[(RelId, Self::C)]) -> Result<Vec<Self::C>, EngineError> {
         Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("LetRec")))
@@ -192,7 +195,11 @@ pub fn lower_node<A: Rel>(
             let types = p.node_types(*input).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("TopK input types")))?;
             a.topk(c, key, order, *limit, &types)?
         }
-        Op::Window { .. } => return Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Window"))),
+        Op::Window { input, partition, order, func } => {
+            let c = sub(*input, a)?;
+            let types = p.node_types(*input).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Window input types")))?;
+            a.window(c, partition, order, func, &types)?
+        }
         Op::Delay(_) => return Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Delay"))),
     };
     let c = a.observe(id, c);

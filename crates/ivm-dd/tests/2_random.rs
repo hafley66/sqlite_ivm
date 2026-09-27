@@ -14,6 +14,9 @@ fn generator_coverage() {
     let mut two_rec = 0;
     let mut topk = 0;
     let mut mint = 0;
+    let mut window = 0;
+    let mut window_join = 0;
+    let mut window_reduce = 0;
     for seed in 0..1000 {
         let case = drive::Case::generate(seed);
         for stratum in &case.program.strata {
@@ -22,10 +25,16 @@ fn generator_coverage() {
             }
         }
         if case.program.nodes.iter().any(|op| matches!(op, Op::TopK { .. })) { topk += 1; }
+        if case.program.nodes.iter().any(|op| matches!(op, Op::Window { .. })) { window += 1; }
+        for op in &case.program.nodes {
+            let input = match op { Op::Window { input, .. } => *input as usize, _ => continue };
+            if matches!(case.program.nodes[input], Op::Join { .. }) { window_join += 1; }
+            if matches!(case.program.nodes[input], Op::Reduce { .. }) { window_reduce += 1; }
+        }
         if drive::Case::generate_mint(seed).program.nodes.iter().any(|op| matches!(op, Op::Mint { .. })) { mint += 1; }
     }
-    println!("seeds=1000 one_rec={one_rec} two_rec={two_rec} topk={topk} mint={mint}");
-    assert!(one_rec > 0 && two_rec > 0 && topk > 0 && mint > 0);
+    println!("seeds=1000 one_rec={one_rec} two_rec={two_rec} topk={topk} mint={mint} window={window} window_join={window_join} window_reduce={window_reduce}");
+    assert!(one_rec > 0 && two_rec > 0 && topk > 0 && mint > 0 && window > 0 && window_join > 0 && window_reduce > 0);
 }
 
 #[test]

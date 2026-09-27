@@ -15,11 +15,12 @@ pub fn arity(p: &Program, n: NodeId) -> usize {
             }
         }
         Op::Union(ns) => arity(p, ns[0]),
-        Op::Negate(n) | Op::Threshold(n) => arity(p, *n),
+        Op::Negate(n) | Op::Threshold(n) | Op::Delay(n) => arity(p, *n),
         Op::Join { inputs, .. } => inputs.iter().map(|n| arity(p, *n)).sum(),
         Op::Antijoin { l, .. } => arity(p, *l),
         Op::Reduce { key, aggs, .. } => key.len() + aggs.len(),
         Op::TopK { input, .. } => arity(p, *input),
+        Op::Window { input, .. } => arity(p, *input) + 1,
         op => panic!("printer: unsupported {op:?}"),
     }
 }
@@ -175,6 +176,33 @@ impl Printer<'_> {
                 format!(
                     "SELECT {cols} FROM (SELECT {t}.*, ROW_NUMBER() OVER ({partition}ORDER BY {by}) AS rn FROM ({inner}) AS {t}) WHERE rn <= {limit}"
                 )
+            }
+            Op::Window { input, partition, order, func } => {
+                let (t, inner) = (self.alias(), self.node(*input));
+                let width = arity(p, *input);
+                let cols = (0..width).map(|i| format!("{t}.c{i} AS c{i}")).collect::<Vec<_>>().join(", ");
+                let part = if partition.is_empty() { String::new() } else {
+                    format!("PARTITION BY {}", partition.iter().map(|c| format!("{t}.c{c}")).collect::<Vec<_>>().join(", "))
+                };
+                let explicit = order.iter().map(|o| format!("{t}.c{} {}", o.col, if o.desc { "DESC" } else { "ASC" })).collect::<Vec<_>>();
+                let by = explicit.iter().cloned()
+                    .chain((0..width).map(|i| format!("{t}.c{i} ASC")))
+                    .collect::<Vec<_>>().join(", ");
+                let full = if part.is_empty() { format!("ORDER BY {by}") } else { format!("{part} ORDER BY {by}") };
+                let rank = [part.as_str(), if explicit.is_empty() { "" } else { "ORDER BY" }, &explicit.join(", ")]
+                    .into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" ");
+                let aggregate = if explicit.is_empty() { part.clone() } else { format!("{full} ROWS UNBOUNDED PRECEDING") };
+                let value_col = order.first().map_or(0, |o| o.col);
+                let value = match func {
+                    WinFn::RowNumber => format!("ROW_NUMBER() OVER ({full})"),
+                    WinFn::Rank => format!("RANK() OVER ({rank})"),
+                    WinFn::DenseRank => format!("DENSE_RANK() OVER ({rank})"),
+                    WinFn::Lag(offset) => format!("COALESCE(LAG({t}.c{value_col}, {offset}, 0) OVER ({full}), 0)"),
+                    WinFn::Lead(offset) => format!("COALESCE(LEAD({t}.c{value_col}, {offset}, 0) OVER ({full}), 0)"),
+                    WinFn::Sum(col) => format!("SUM({t}.c{col}) OVER ({aggregate})"),
+                    WinFn::Count => format!("COUNT(*) OVER ({aggregate})"),
+                };
+                format!("SELECT {cols}, {value} AS c{width} FROM ({inner}) AS {t}")
             }
             op => panic!("printer: unsupported {op:?}"),
         }

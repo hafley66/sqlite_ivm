@@ -26,6 +26,8 @@ fn permuted(p: &Program, rng: &mut Rng) -> (Program, BTreeMap<RelId, RelId>) {
             Op::Reduce { input, key, aggs } => Op::Reduce { input: n(&input), key, aggs },
             Op::Threshold(i) => Op::Threshold(n(&i)),
             Op::TopK { input, key, order, limit } => Op::TopK { input: n(&input), key, order, limit },
+            Op::Window { input, partition, order, func } => Op::Window { input: n(&input), partition, order, func },
+            Op::Delay(input) => Op::Delay(n(&input)),
             op => panic!("permute: unsupported {op:?}"),
         };
     }

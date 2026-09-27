@@ -1,0 +1,32 @@
+{
+  "rels": [
+    {"id": 0, "name": "job", "cols": ["Int", "Int", "Int"], "kind": "Source"},
+    {"id": 1, "name": "numbered", "cols": ["Int", "Int", "Int", "Int"], "kind": "Derived"},
+    {"id": 2, "name": "ranked", "cols": ["Int", "Int", "Int", "Int"], "kind": "Derived"},
+    {"id": 3, "name": "dense", "cols": ["Int", "Int", "Int", "Int"], "kind": "Derived"},
+    {"id": 4, "name": "lagged", "cols": ["Int", "Int", "Int", "Int"], "kind": "Derived"},
+    {"id": 5, "name": "led", "cols": ["Int", "Int", "Int", "Int"], "kind": "Derived"},
+    {"id": 6, "name": "running_sum", "cols": ["Int", "Int", "Int", "Int"], "kind": "Derived"},
+    {"id": 7, "name": "running_count", "cols": ["Int", "Int", "Int", "Int"], "kind": "Derived"}
+  ],
+  "nodes": [
+    {"Get": 0},
+    {"Window": {"input": 0, "partition": [1], "order": [{"col": 2, "desc": true}], "func": "RowNumber"}},
+    {"Window": {"input": 0, "partition": [1], "order": [{"col": 2, "desc": true}], "func": "Rank"}},
+    {"Window": {"input": 0, "partition": [1], "order": [{"col": 2, "desc": true}], "func": "DenseRank"}},
+    {"Window": {"input": 0, "partition": [1], "order": [{"col": 2, "desc": true}], "func": {"Lag": 1}}},
+    {"Window": {"input": 0, "partition": [1], "order": [{"col": 2, "desc": true}], "func": {"Lead": 1}}},
+    {"Window": {"input": 0, "partition": [1], "order": [{"col": 2, "desc": true}], "func": {"Sum": 2}}},
+    {"Window": {"input": 0, "partition": [1], "order": [{"col": 2, "desc": true}], "func": "Count"}}
+  ],
+  "strata": [
+    {"Let": {"id": 1, "body": 1}},
+    {"Let": {"id": 2, "body": 2}},
+    {"Let": {"id": 3, "body": 3}},
+    {"Let": {"id": 4, "body": 4}},
+    {"Let": {"id": 5, "body": 5}},
+    {"Let": {"id": 6, "body": 6}},
+    {"Let": {"id": 7, "body": 7}}
+  ],
+  "outputs": [1, 2, 3, 4, 5, 6, 7]
+}

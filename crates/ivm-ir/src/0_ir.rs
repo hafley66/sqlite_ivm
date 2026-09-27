@@ -78,7 +78,9 @@ pub enum WinFn {
     RowNumber,
     Rank,
     DenseRank,
+    /// Offset rows back; read the first order column (column 0 if unordered), defaulting to 0.
     Lag(u32),
+    /// Offset rows forward; read the first order column (column 0 if unordered), defaulting to 0.
     Lead(u32),
     Sum(ColId),
     Count,
@@ -134,6 +136,7 @@ pub enum Op {
     Window {
         input: NodeId,
         partition: Vec<ColId>,
+        /// Explicit order defines Rank/DenseRank peers. Other functions break ties by the full row.
         order: Vec<Order>,
         func: WinFn,
     },

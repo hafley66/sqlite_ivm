@@ -1,0 +1,9 @@
+{
+  "rels": [
+    {"id": 0, "name": "source", "cols": ["Int"], "kind": "Source"},
+    {"id": 1, "name": "previous", "cols": ["Int"], "kind": "Derived"}
+  ],
+  "nodes": [{"Get": 0}, {"Delay": 0}],
+  "strata": [{"Let": {"id": 1, "body": 1}}],
+  "outputs": [1]
+}

@@ -38,13 +38,14 @@ impl Gen<'_> {
             return self.push(Op::Get(rel), arity, depth);
         }
         let b = budget - 1;
-        match self.rng.below(14) {
+        match self.rng.below(18) {
             0..=2 => self.mfp(b),
             3 | 4 => self.union(b),
             5 | 6 => self.join(b),
             7 | 8 => self.antijoin(b),
             9 | 10 => self.reduce(b),
             11 | 12 => self.topk(b),
+            13..=16 => self.window(b),
             _ => {
                 let input = self.node(b, false);
                 self.push(Op::Threshold(input), self.arity[input as usize], self.depth[input as usize] + 1)
@@ -175,6 +176,26 @@ impl Gen<'_> {
             .collect();
         let limit = self.rng.range(1, 3) as u32;
         self.push(Op::TopK { input, key, order, limit }, a, self.depth[input as usize] + 1)
+    }
+
+    fn window(&mut self, b: usize) -> NodeId {
+        let input = self.node(b, false);
+        let a = self.arity[input as usize];
+        let partition_len = if self.rng.chance(30) { 0 } else { self.rng.range(1, a.min(2)) };
+        let partition = self.cols(partition_len, a);
+        let order = (0..self.rng.range(1, a.min(2)))
+            .map(|_| Order { col: self.rng.below(a) as ColId, desc: self.rng.chance(50) })
+            .collect();
+        let func = match self.rng.below(7) {
+            0 => WinFn::RowNumber,
+            1 => WinFn::Rank,
+            2 => WinFn::DenseRank,
+            3 => WinFn::Lag(self.rng.range(0, 2) as u32),
+            4 => WinFn::Lead(self.rng.range(0, 2) as u32),
+            5 => WinFn::Sum(self.rng.below(a) as ColId),
+            _ => WinFn::Count,
+        };
+        self.push(Op::Window { input, partition, order, func }, a + 1, self.depth[input as usize] + 1)
     }
 }
 

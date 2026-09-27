@@ -254,6 +254,52 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
             .map(|(_, row)| row))
     }
 
+    fn window(&mut self, c: Self::C, partition: &[ColId], order: &[Order], func: &WinFn, input_types: &[Ty]) -> Result<Self::C, EngineError> {
+        let (partition, order, func, types) = (partition.to_vec(), order.to_vec(), func.clone(), input_types.to_vec());
+        let interner = self.interner.clone();
+        let value_col = order.first().map_or(0, |o| o.col as usize);
+        Ok(c.map(move |row| (cols(&row, &partition), row))
+            .reduce(move |_key, input: &[(&Row, W)], output: &mut Vec<(Row, W)>| {
+                let mut rows = Vec::new();
+                for (row, weight) in input {
+                    for _ in 0..(*weight).max(0) {
+                        rows.push((*row).clone());
+                    }
+                }
+                rows.sort_by(|a, b| rank(&order, &types, &interner.borrow(), a, b));
+                let total_sum = if let WinFn::Sum(col) = func {
+                    rows.iter().fold(0i64, |sum, row| sum.wrapping_add(row[col as usize]))
+                } else { 0 };
+                let mut values: BTreeMap<Row, W> = BTreeMap::new();
+                let mut dense = 0i64;
+                let mut rank_at = 0i64;
+                let mut prefix_sum = 0i64;
+                for (i, row) in rows.iter().enumerate() {
+                    if i == 0 || order.iter().any(|o| row[o.col as usize] != rows[i - 1][o.col as usize]) {
+                        dense += 1;
+                        rank_at = i as i64 + 1;
+                    }
+                    let value = match func {
+                        WinFn::RowNumber => i as i64 + 1,
+                        WinFn::Rank => rank_at,
+                        WinFn::DenseRank => dense,
+                        WinFn::Lag(offset) => i.checked_sub(offset as usize).map_or(0, |j| rows[j][value_col]),
+                        WinFn::Lead(offset) => rows.get(i + offset as usize).map_or(0, |r| r[value_col]),
+                        WinFn::Sum(col) => {
+                            prefix_sum = prefix_sum.wrapping_add(row[col as usize]);
+                            if order.is_empty() { total_sum } else { prefix_sum }
+                        }
+                        WinFn::Count => if order.is_empty() { rows.len() as i64 } else { i as i64 + 1 },
+                    };
+                    let mut result = row.clone();
+                    result.push(value);
+                    *values.entry(result).or_default() += 1;
+                }
+                output.extend(values);
+            })
+            .map(|(_, row)| row))
+    }
+
     fn letrec(&mut self, p: &Program, rec: &LetRec, defined: &[(RelId, Self::C)]) -> Result<Vec<Self::C>, EngineError> {
         T::letrec(self, p, rec, defined)
     }

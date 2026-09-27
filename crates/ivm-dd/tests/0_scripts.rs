@@ -65,6 +65,16 @@ fn s_g_accumulable_team_sum() {
 }
 
 #[test]
+fn window_functions() {
+    println!("{}", support::run::<Dd>("12_window"));
+}
+
+#[test]
+fn delay_requires_clock_checker() {
+    support::expect_install_error::<Dd>("13_delay");
+}
+
+#[test]
 fn pokemon_0_can_surf() {
     println!("{}", support::run::<Dd>("pokemon/0_can_surf"));
 }
