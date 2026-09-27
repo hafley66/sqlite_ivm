@@ -15,13 +15,12 @@ use timely::dataflow::Scope;
 use timely::order::Product;
 use timely::progress::Timestamp;
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::cmp::Ordering;
 use std::rc::Rc;
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use timely::dataflow::operators::probe::Handle as ProbeHandle;
-use timely::dataflow::operators::Probe;
 use timely::progress::frontier::AntichainRef;
 use std::time::Duration;
 
@@ -791,7 +790,6 @@ impl Drop for Dd {
 struct Built {
     inputs: BTreeMap<RelId, InputSession<Time, Row, W>>,
     constructor_inputs: BTreeMap<RelId, InputSession<Time, Row, W>>,
-    guards: BTreeMap<RelId, Trace>,
     outputs: BTreeMap<RelId, Trace>,
 }
 
@@ -820,14 +818,10 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
         let built = worker.dataflow::<Time, _, _>(|scope| -> Result<Built, EngineError> {
             let mut inputs = BTreeMap::new();
             let mut constructor_inputs = BTreeMap::new();
-            let mut guards = BTreeMap::new();
             let mut sources = BTreeMap::new();
             for rel in program.rels.iter().filter(|r| r.kind == RelKind::Source) {
                 let (input, c) = scope.new_collection::<Row, W>();
-                let guard = c.clone().arrange_by_self();
-                guard.stream.clone().probe_with(&mut probe);
                 inputs.insert(rel.id, input);
-                guards.insert(rel.id, guard.trace);
                 sources.insert(rel.id, c);
             }
             for rel in program.rels.iter().filter(|r| r.kind == RelKind::Constructor) {
@@ -849,7 +843,7 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                     .probe_with(&mut probe);
                 outputs.insert(id, arranged.trace);
             }
-            Ok(Built { inputs, constructor_inputs, guards, outputs })
+            Ok(Built { inputs, constructor_inputs, outputs })
         });
         let mut built = match built {
             Ok(built) => {
@@ -861,6 +855,9 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                 return;
             }
         };
+        let mut source_rows: BTreeMap<RelId, HashSet<Row>> = program.rels.iter()
+            .filter(|rel| rel.kind == RelKind::Source)
+            .map(|rel| (rel.id, HashSet::new())).collect();
         let mut epoch: Time = 0;
         let mut frontier_tick = 0;
         loop {
@@ -868,7 +865,7 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
             match command {
                 Command::Settle(frontier, reply) => {
                     let interned_before = interner.borrow().len();
-                    let accepted = match guard(&program, &mut built.guards, epoch, &frontier) {
+                    let accepted = match guard(&program, &mut source_rows, epoch, &frontier) {
                         Ok(accepted) => accepted,
                         Err(e) => {
                             let _ = reply.send(Err(e));
@@ -913,7 +910,7 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                         worker.step_while(|| probe.less_than(&epoch));
                     }
                     if let Some(logger) = &reduce_reads { logger.flush(); }
-                    for trace in built.guards.values_mut().chain(built.outputs.values_mut()) {
+                    for trace in built.outputs.values_mut() {
                         trace.set_logical_compaction(AntichainRef::new(&[epoch]));
                         trace.set_physical_compaction(AntichainRef::new(&[epoch]));
                     }
@@ -981,16 +978,6 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
     });
 }
 
-fn count(trace: &mut Trace, row: &Row) -> W {
-    let (mut cursor, storage) = trace.cursor();
-    cursor.seek_key(&storage, row);
-    let mut n: W = 0;
-    if cursor.get_key(&storage) == Some(row) {
-        cursor.map_times(&storage, |_, w| n += *w);
-    }
-    n
-}
-
 fn read_trace(trace: &mut Trace) -> Vec<(Row, W)> {
     let (mut cursor, storage) = trace.cursor();
     let mut rows = Vec::new();
@@ -1010,7 +997,7 @@ fn read_trace(trace: &mut Trace) -> Vec<(Row, W)> {
 /// absent row is a no-op, like SQL `DELETE` matching nothing, and logs a warning.
 fn guard(
     program: &Program,
-    guards: &mut BTreeMap<RelId, Trace>,
+    sources: &mut BTreeMap<RelId, HashSet<Row>>,
     tick: Time,
     frontier: &Frontier,
 ) -> Result<Vec<SourceChange>, EngineError> {
@@ -1029,7 +1016,8 @@ fn guard(
             return Err(EngineError::new(Stage::Settle, Some(rel.id), ErrorKind::Unsupported("weight other than +1/-1")));
         }
         let key = (rel.id, change.row.clone());
-        let before = *pending.get(&key).unwrap_or(&0) + count(guards.get_mut(&rel.id).unwrap(), &change.row);
+        let before = *pending.get(&key).unwrap_or(&0)
+            + W::from(sources.get(&rel.id).unwrap().contains(&change.row));
         if change.w > 0 && before > 0 {
             return Err(EngineError::new(Stage::Settle, Some(rel.id), ErrorKind::PresentInsert(change.row.clone())));
         }
@@ -1039,6 +1027,11 @@ fn guard(
         }
         *pending.entry(key).or_default() += change.w;
         accepted.push(change.clone());
+    }
+    for change in &accepted {
+        let rows = sources.get_mut(&change.rel).unwrap();
+        if change.w > 0 { rows.insert(change.row.clone()); }
+        else { rows.remove(&change.row); }
     }
     Ok(accepted)
 }
