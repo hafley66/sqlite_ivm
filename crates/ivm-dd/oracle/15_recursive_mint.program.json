@@ -1,0 +1,26 @@
+{
+  "rels": [
+    {"id": 0, "name": "seed", "cols": ["Int"], "kind": "Source"},
+    {"id": 1, "name": "edge", "cols": ["Int", "Int"], "kind": "Source"},
+    {"id": 2, "name": "token", "cols": ["Id", "Int"], "kind": "Constructor"},
+    {"id": 3, "name": "reach", "cols": ["Int", "Id"], "kind": "Derived"},
+    {"id": 4, "name": "reachable", "cols": ["Int"], "kind": "Derived"}
+  ],
+  "nodes": [
+    {"Get": 0},
+    {"Mint": {"input": 0, "functor": 2, "args": [0]}},
+    {"Get": 3},
+    {"Get": 1},
+    {"Join": {"inputs": [2, 3], "equivalences": [[[0, 0], [1, 0]]]}},
+    {"Mfp": {"input": 4, "project": [3]}},
+    {"Mint": {"input": 5, "functor": 2, "args": [0]}},
+    {"Union": [1, 6]},
+    {"Get": 3},
+    {"Mfp": {"input": 8, "project": [0]}}
+  ],
+  "strata": [
+    {"LetRec": {"ids": [3], "bodies": [7], "limit": null}},
+    {"Let": {"id": 4, "body": 9}}
+  ],
+  "outputs": [4]
+}

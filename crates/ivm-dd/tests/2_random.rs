@@ -17,6 +17,11 @@ fn generator_coverage() {
     let mut window = 0;
     let mut window_join = 0;
     let mut window_reduce = 0;
+    let mut recursive_mint = 0;
+    let mut recursive_antijoin = 0;
+    let mut mint_before_antijoin = 0;
+    let mut antijoin_before_mint = 0;
+    let mut empty_antijoin_key = 0;
     for seed in 0..1000 {
         let case = drive::Case::generate(seed);
         for stratum in &case.program.strata {
@@ -32,9 +37,18 @@ fn generator_coverage() {
             if matches!(case.program.nodes[input], Op::Reduce { .. }) { window_reduce += 1; }
         }
         if drive::Case::generate_mint(seed).program.nodes.iter().any(|op| matches!(op, Op::Mint { .. })) { mint += 1; }
+        let shapes = drive::Case::generate_recursive_shapes(seed);
+        let first = &shapes.program.nodes[7];
+        let second = &shapes.program.nodes[8];
+        if shapes.program.nodes.iter().any(|op| matches!(op, Op::Mint { .. })) { recursive_mint += 1; }
+        if shapes.program.nodes.iter().any(|op| matches!(op, Op::Antijoin { .. })) { recursive_antijoin += 1; }
+        if matches!(first, Op::Mint { .. }) { mint_before_antijoin += 1; }
+        if matches!(second, Op::Mint { .. }) { antijoin_before_mint += 1; }
+        if shapes.program.nodes.iter().any(|op| matches!(op, Op::Antijoin { lk, .. } if lk.is_empty())) { empty_antijoin_key += 1; }
     }
-    println!("seeds=1000 one_rec={one_rec} two_rec={two_rec} topk={topk} mint={mint} window={window} window_join={window_join} window_reduce={window_reduce}");
+    println!("seeds=1000 one_rec={one_rec} two_rec={two_rec} topk={topk} mint={mint} window={window} window_join={window_join} window_reduce={window_reduce} recursive_mint={recursive_mint} recursive_antijoin={recursive_antijoin} mint_before_antijoin={mint_before_antijoin} antijoin_before_mint={antijoin_before_mint} empty_antijoin_key={empty_antijoin_key}");
     assert!(one_rec > 0 && two_rec > 0 && topk > 0 && mint > 0 && window > 0 && window_join > 0 && window_reduce > 0);
+    assert!(recursive_mint > 0 && recursive_antijoin > 0 && mint_before_antijoin > 0 && antijoin_before_mint > 0 && empty_antijoin_key > 0);
 }
 
 #[test]

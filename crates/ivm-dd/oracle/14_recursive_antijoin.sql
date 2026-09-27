@@ -1,0 +1,22 @@
+CREATE TABLE seed(n INTEGER PRIMARY KEY);
+CREATE TABLE edge(x INTEGER NOT NULL, y INTEGER NOT NULL, PRIMARY KEY(x, y));
+CREATE TABLE blocked(n INTEGER PRIMARY KEY);
+CREATE VIEW reach AS WITH RECURSIVE r(n) AS (
+  SELECT n FROM seed
+  UNION
+  SELECT e.y FROM r JOIN edge AS e ON e.x = r.n
+  LEFT JOIN blocked AS b ON b.n = e.y WHERE b.n IS NULL
+) SELECT n FROM r;
+-- step: seed_chain
++ seed 0
++ edge 0 1
++ edge 1 2
++ edge 2 3
+-- step: insert_outer_blocker
++ blocked 2
+-- step: delete_outer_blocker
+- blocked 2
+-- step: block_first_hop
++ blocked 1
+-- step: unblock_first_hop
+- blocked 1

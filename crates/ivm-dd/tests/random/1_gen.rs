@@ -278,6 +278,49 @@ fn recursive_program(rng: &mut Rng) -> Program {
     Program { rels, nodes: gen.nodes, strata, outputs }
 }
 
+/// Recursive Mint and Antijoin against a lower-stratum blocker, in either order.
+pub fn recursive_shapes_program(rng: &mut Rng) -> Program {
+    let rels = vec![
+        Relation { id: 0, name: "seed0".into(), cols: vec![Ty::Int], kind: RelKind::Source },
+        Relation { id: 1, name: "edge".into(), cols: vec![Ty::Int, Ty::Int], kind: RelKind::Source },
+        Relation { id: 2, name: "blocked".into(), cols: vec![Ty::Int], kind: RelKind::Source },
+        Relation { id: 3, name: "token".into(), cols: vec![Ty::Id, Ty::Int], kind: RelKind::Constructor },
+        Relation { id: 4, name: "reach".into(), cols: vec![Ty::Int, Ty::Id], kind: RelKind::Derived },
+        Relation { id: 5, name: "reachable".into(), cols: vec![Ty::Int], kind: RelKind::Derived },
+    ];
+    let mut nodes = vec![
+        Op::Get(0),
+        Op::Mint { input: 0, functor: 3, args: vec![0] },
+        Op::Get(4),
+        Op::Get(1),
+        Op::Join { inputs: vec![2, 3], equivalences: vec![vec![(0, 0), (1, 0)]] },
+        Op::Mfp { input: 4, filter: vec![], map: vec![], project: vec![3] },
+        Op::Get(2),
+    ];
+    let keys = if rng.chance(20) { vec![] } else { vec![0] };
+    let step = if rng.chance(50) {
+        nodes.push(Op::Antijoin { l: 5, r: 6, lk: keys.clone(), rk: keys });
+        nodes.push(Op::Mint { input: 7, functor: 3, args: vec![0] });
+        8
+    } else {
+        nodes.push(Op::Mint { input: 5, functor: 3, args: vec![0] });
+        nodes.push(Op::Antijoin { l: 7, r: 6, lk: keys.clone(), rk: keys });
+        8
+    };
+    nodes.push(Op::Union(vec![1, step]));
+    nodes.push(Op::Get(4));
+    nodes.push(Op::Mfp { input: 10, filter: vec![], map: vec![], project: vec![0] });
+    Program {
+        rels,
+        nodes,
+        strata: vec![
+            Stratum::LetRec(LetRec { ids: vec![4], bodies: vec![9], limit: None }),
+            Stratum::Let { id: 5, body: 11 },
+        ],
+        outputs: vec![4, 5],
+    }
+}
+
 /// K5 uses explicit key/cost columns, so the transformation commutes with every operator.
 pub fn k5_program() -> Program {
     let rels = vec![

@@ -39,6 +39,22 @@ fn random_mint_dd_sql_worker() {
     for seed in drive::seeds(200) {
         let case = Case::generate_mint(seed);
         drive::agreement::<Dd, Sqlite>(&case).unwrap_or_else(|error| panic!("seed {seed}: {error}"));
+        drive::term_lt_structure::<Dd>(&case).unwrap_or_else(|error| panic!("seed {seed}: {error}"));
+        drive::term_lt_structure::<Sqlite>(&case).unwrap_or_else(|error| panic!("seed {seed}: {error}"));
+    }
+}
+
+#[test]
+fn random_recursive_shapes_dd_sql() {
+    isolated("random_recursive_shapes_dd_sql_worker");
+}
+
+#[test]
+#[ignore = "run by random_recursive_shapes_dd_sql in a separate process"]
+fn random_recursive_shapes_dd_sql_worker() {
+    for seed in drive::seeds(200) {
+        let case = Case::generate_recursive_shapes(seed);
+        drive::agreement::<Dd, Sqlite>(&case).unwrap_or_else(|error| panic!("seed {seed}: {error}"));
     }
 }
 

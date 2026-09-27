@@ -76,10 +76,8 @@ fn delay_requires_clock_checker() {
     support::expect_install_error::<Sqlite>("13_delay");
 }
 
-#[test]
-fn recursive_antijoin_rejected_at_install() {
-    support::expect_install_error::<Sqlite>("11_recursive_antijoin");
-}
+script_case!(recursive_antijoin_left_input, "14_recursive_antijoin");
+script_case!(recursive_mint_input, "15_recursive_mint");
 
 #[test]
 fn dred_self_supporting_cycle_matches_dd() {

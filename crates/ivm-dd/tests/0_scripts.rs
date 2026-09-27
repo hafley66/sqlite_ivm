@@ -50,6 +50,16 @@ fn s5_recursive_antijoin_outer_input() {
 }
 
 #[test]
+fn recursive_antijoin_left_input() {
+    println!("{}", support::run::<Dd>("14_recursive_antijoin"));
+}
+
+#[test]
+fn recursive_mint_input() {
+    println!("{}", support::run::<Dd>("15_recursive_mint"));
+}
+
+#[test]
 fn s_t_s_i_timing_and_cells() {
     println!("{}", support::run::<Dd>("8_timing_and_cells"));
 }

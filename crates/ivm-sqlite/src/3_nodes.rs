@@ -40,6 +40,10 @@ enum Owner {
 struct Node {
     c: SqlC,
     fill: Vec<String>,
+    delete_fill: Vec<String>,
+    insert_fill: Vec<String>,
+    delete_seed: Vec<String>,
+    insert_seed: Vec<String>,
     /// Private state tables of the node (Reduce group accumulators, Min/Max arrangement).
     ddl: Vec<String>,
     integrated: bool,
@@ -252,6 +256,10 @@ impl SqlRel {
         self.nodes.push(Node {
             c: c.clone(),
             fill,
+            delete_fill: Vec::new(),
+            insert_fill: Vec::new(),
+            delete_seed: Vec::new(),
+            insert_seed: Vec::new(),
             ddl: Vec::new(),
             integrated: false,
             indexes: Vec::new(),
@@ -336,14 +344,13 @@ impl Rel for SqlRel {
         if args.iter().any(|x| *x as usize >= c.arity) {
             return Err(unsupported("Mint column out of range"));
         }
-        self.flat(&c, "Mint over a LetRec variable");
         let functor = name.replace('\'', "''");
         let types_json = serde_json::to_string(&types).expect("Ty serialization").replace('\'', "''");
         let arg_expr = format!("json_array({})", args.iter().map(|x| format!("d.c{x}")).collect::<Vec<_>>().join(","));
         let arg_cols = args.iter().enumerate().map(|(i, x)| format!("d.c{x} AS c{}", i + 1)).collect::<Vec<_>>().join(",");
         let ctor = crate::catalog::quote(crate::terms::ctor_table(&name));
         let old = c.arity;
-        let next = self.push(old + 1, false, |_| Some(format!(
+        let next = self.push(old + 1, c.rec, |_| Some(format!(
             "SELECT {}, dict.id AS c{old}, d.w FROM {} d JOIN ivm_term_dict dict ON dict.functor='{functor}' AND dict.args={arg_expr}",
             (0..old).map(|i| format!("d.c{i} AS c{i}")).collect::<Vec<_>>().join(","), c.d,
         )));
@@ -491,11 +498,57 @@ impl Rel for SqlRel {
         Ok(out)
     }
 
-    /// `l - l⋉threshold(π_rk r)`, built from this algebra's own join, threshold, negate and union.
+    /// Recursive left inputs read the right key's phase image and seed the SCC from key changes.
+    /// Other inputs use `l - l⋉threshold(π_rk r)`.
     fn antijoin(&mut self, l: Self::C, r: Self::C, lk: &[ColId], rk: &[ColId]) -> Self::C {
-        // With recursive `l`, an outer insertion into `r` removes derivations. The SCC loop
-        // stashes positive outer deltas until after over-delete, so its rounds cannot seed that loss.
-        self.flat(&l, "Antijoin over a LetRec variable");
+        if l.rec {
+            if r.rec {
+                self.fail(unsupported("Antijoin recursive right input"));
+                return l;
+            }
+            let unit = [r.arity as ColId];
+            let keys = if rk.is_empty() {
+                self.mfp(r, &[], &[Expr::Lit(0)], &unit)
+            } else {
+                self.mfp(r, &[], &[], rk)
+            };
+            let keys = self.threshold(keys);
+            self.integrate(&keys, (0..keys.arity).collect());
+            self.integrate(&l, lk.iter().map(|x| *x as usize).collect());
+            let out = self.push(l.arity, true, |_| None);
+            let all = list("l_d", 0..l.arity);
+            let key_cols: Vec<usize> = (0..keys.arity).collect();
+            let left_cols: Vec<usize> = lk.iter().map(|x| *x as usize).collect();
+            let left_match = |key: &str, left: &str| {
+                if lk.is_empty() { "1".into() } else { on(key, &key_cols, left, &left_cols) }
+            };
+            let match_old = on("k_i", &key_cols, "k", &key_cols);
+            let match_left = left_match("k", "l_i");
+            let absent = |deleting: bool| format!(
+                "COALESCE((SELECT k_i.w FROM {ki} k_i WHERE {old_match}), 0) + \
+                 COALESCE((SELECT SUM({delta}) FROM {kd} k WHERE {delta_match}), 0) <= 0",
+                ki = keys.i, kd = keys.d,
+                old_match = left_match("k_i", "l_d"),
+                delta_match = left_match("k", "l_d"),
+                delta = if deleting { "MAX(k.w, 0)" } else { "k.w" },
+            );
+            let node = &mut self.nodes[out.node];
+            for (target, deleting) in [(&mut node.delete_fill, true), (&mut node.insert_fill, false)] {
+                target.push(format!(
+                    "INSERT INTO {d} SELECT {all}, l_d.w FROM {ld} l_d WHERE {absent}",
+                    d = out.d, ld = l.d, absent = absent(deleting),
+                ));
+            }
+            node.delete_seed.push(format!(
+                "INSERT INTO {d} SELECT {cols}, -l_i.w FROM {kd} k CROSS JOIN {li} l_i WHERE k.w > 0 AND {match_left} AND NOT EXISTS (SELECT 1 FROM {ki} k_i WHERE {match_old} AND k_i.w > 0)",
+                d = out.d, cols = list("l_i", 0..l.arity), kd = keys.d, li = l.i, ki = keys.i,
+            ));
+            node.insert_seed.push(format!(
+                "INSERT INTO {d} SELECT {cols}, l_i.w FROM {kd} k CROSS JOIN {li} l_i WHERE k.w < 0 AND {match_left} AND NOT EXISTS (SELECT 1 FROM {ki} k_i WHERE {match_old} AND k_i.w + k.w > 0)",
+                d = out.d, cols = list("l_i", 0..l.arity), kd = keys.d, li = l.i, ki = keys.i,
+            ));
+            return out;
+        }
         let unit = [r.arity as ColId];
         let keys = if rk.is_empty() {
             self.mfp(r, &[], &[Expr::Lit(0)], &unit)
@@ -870,7 +923,10 @@ struct VarSql {
 
 #[derive(Default)]
 struct SccSql {
-    fills: Vec<String>,
+    delete_fills: Vec<String>,
+    insert_fills: Vec<String>,
+    delete_seeds: Vec<String>,
+    insert_seeds: Vec<String>,
     integrates: Vec<String>,
     clears: Vec<String>,
     vars: Vec<VarSql>,
@@ -901,7 +957,9 @@ impl NodesPlan {
             Step::Loop(_) => None,
         }));
         for scc in &self.sccs {
-            all.extend(scc.fills.iter().chain(&scc.integrates).chain(&scc.clears).chain(&scc.stash).chain(&scc.restore).map(String::as_str));
+            all.extend(scc.delete_fills.iter().chain(&scc.insert_fills)
+                .chain(&scc.delete_seeds).chain(&scc.insert_seeds)
+                .chain(&scc.integrates).chain(&scc.clears).chain(&scc.stash).chain(&scc.restore).map(String::as_str));
             for v in &scc.vars {
                 all.extend([
                     &v.over_delete, &v.rederive, &v.insert, &v.to_delta, &v.to_acc,
@@ -951,7 +1009,14 @@ impl NodesPlan {
                 }
             }
             match node.owner {
-                Owner::Loop(s) => sccs[s].fills.extend(node.fill.iter().cloned()),
+                Owner::Loop(s) => {
+                    sccs[s].delete_fills.extend(node.fill.iter().cloned());
+                    sccs[s].insert_fills.extend(node.fill.iter().cloned());
+                    sccs[s].delete_fills.extend(node.delete_fill.iter().cloned());
+                    sccs[s].insert_fills.extend(node.insert_fill.iter().cloned());
+                    sccs[s].delete_seeds.extend(node.delete_seed.iter().cloned());
+                    sccs[s].insert_seeds.extend(node.insert_seed.iter().cloned());
+                }
                 _ => steps.extend(node.fill.iter().cloned().map(Step::Fill)),
             }
             if let Owner::Copy(s) = node.owner {
@@ -1092,7 +1157,10 @@ impl NodesPlan {
             }
         }
         for scc in &mut self.sccs {
-            scc.fills.iter_mut().for_each(&fix);
+            scc.delete_fills.iter_mut().for_each(&fix);
+            scc.insert_fills.iter_mut().for_each(&fix);
+            scc.delete_seeds.iter_mut().for_each(&fix);
+            scc.insert_seeds.iter_mut().for_each(&fix);
             scc.integrates.iter_mut().for_each(&fix);
             scc.clears.iter_mut().for_each(&fix);
             scc.stash.iter_mut().for_each(&fix);
@@ -1136,7 +1204,8 @@ impl NodesPlan {
     }
 
     fn round(&self, db: &Connection, scc: &SccSql, deleting: bool) -> rusqlite::Result<bool> {
-        Self::exec_all(db, scc.fills.iter().chain(&scc.integrates))?;
+        let phase_fills = if deleting { &scc.delete_fills } else { &scc.insert_fills };
+        Self::exec_all(db, phase_fills.iter().chain(&scc.integrates))?;
         Self::exec_all(
             db,
             scc.vars
@@ -1160,6 +1229,7 @@ impl NodesPlan {
 
     fn fixpoint(&self, db: &Connection, scc: &SccSql) -> rusqlite::Result<()> {
         Self::exec_all(db, &scc.stash)?;
+        Self::exec_all(db, &scc.delete_seeds)?;
         while self.round(db, scc, true)? {}
         for v in &scc.vars {
             Self::exec_all(
@@ -1174,6 +1244,7 @@ impl NodesPlan {
             )?;
         }
         Self::exec_all(db, &scc.restore)?;
+        Self::exec_all(db, &scc.insert_seeds)?;
         while self.round(db, scc, false)? {}
         for v in &scc.vars {
             Self::exec_all(db, [&v.finish, &v.clear_acc])?;

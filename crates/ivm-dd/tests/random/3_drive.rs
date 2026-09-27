@@ -78,6 +78,81 @@ impl Case {
         }
         Case { seed, program, frontiers }
     }
+
+    pub fn generate_recursive_shapes(seed: u64) -> Self {
+        let mut rng = Rng(seed);
+        let program = gen::recursive_shapes_program(&mut rng);
+        let frontiers = gen::frontiers(&mut rng, &program);
+        Case { seed, program, frontiers }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Value {
+    Int(Cell),
+    Atom(Cell),
+    Term(String, Vec<Value>),
+}
+
+struct Terms {
+    by_id: BTreeMap<Cell, (String, Vec<Ty>, Row)>,
+}
+
+impl Terms {
+    fn read<E: Engine>(p: &Program, engine: &E, db: &Connection) -> Result<Self, String> {
+        let mut by_id = BTreeMap::new();
+        for rel in p.rels.iter().filter(|r| r.kind == RelKind::Constructor) {
+            let rows = engine.intern_snapshot(rel.id, &mut Raw::with_connection(db)).map_err(|e| e.to_string())?;
+            for (row, w) in rows {
+                if w != 1 { return Err(format!("constructor {} has weight {w}", rel.name)); }
+                by_id.insert(row[0], (rel.name.clone(), rel.cols[1..].to_vec(), row[1..].to_vec()));
+            }
+        }
+        Ok(Self { by_id })
+    }
+
+    fn value(&self, cell: Cell, ty: Ty, visiting: &mut Vec<Cell>) -> Result<Value, String> {
+        if ty == Ty::Int { return Ok(Value::Int(cell)); }
+        let Some((name, types, args)) = self.by_id.get(&cell) else { return Ok(Value::Atom(cell)); };
+        if visiting.contains(&cell) { return Err(format!("constructor cycle at id {cell}")); }
+        visiting.push(cell);
+        let values = args.iter().zip(types).map(|(arg, ty)| self.value(*arg, *ty, visiting)).collect::<Result<Vec<_>, _>>()?;
+        visiting.pop();
+        Ok(Value::Term(name.clone(), values))
+    }
+
+    fn row(&self, row: &Row, types: &[Ty]) -> Result<Vec<Value>, String> {
+        row.iter().zip(types).map(|(cell, ty)| self.value(*cell, *ty, &mut Vec::new())).collect()
+    }
+
+    fn delta(&self, p: &Program, delta: &Delta) -> Result<Vec<(RelId, Vec<Value>, W)>, String> {
+        let mut rows = delta.changes.iter().map(|(rel, row, w)| {
+            Ok((*rel, self.row(row, &p.rel(*rel).unwrap().cols)?, *w))
+        }).collect::<Result<Vec<_>, String>>()?;
+        rows.sort();
+        Ok(rows)
+    }
+
+    fn snapshot<E: Engine>(&self, p: &Program, engine: &E, rel: RelId, db: &Connection) -> Result<Vec<(Vec<Value>, W)>, String> {
+        let mut rows = snapshot(engine, rel, db)?.into_iter().map(|(row, w)| {
+            Ok((self.row(&row, &p.rel(rel).unwrap().cols)?, w))
+        }).collect::<Result<Vec<_>, String>>()?;
+        rows.sort();
+        Ok(rows)
+    }
+}
+
+fn agree_frontier<A: Engine, B: Engine>(p: &Program, at: usize, left: &A, left_db: &Connection, a: &Delta, right: &B, right_db: &Connection, b: &Delta) -> Result<(), String> {
+    let left_terms = Terms::read(p, left, left_db)?;
+    let right_terms = Terms::read(p, right, right_db)?;
+    let (a, b) = (left_terms.delta(p, a)?, right_terms.delta(p, b)?);
+    if a != b { return Err(format!("frontier {at}: delta {a:?} != {b:?}")); }
+    for rel in &p.outputs {
+        let a = left_terms.snapshot(p, left, *rel, left_db)?;
+        let b = right_terms.snapshot(p, right, *rel, right_db)?;
+        if a != b { return Err(format!("frontier {at}: relation {rel} {a:?} != {b:?}")); }
+    }
+    Ok(())
 }
 
 pub fn agreement<A: Engine, B: Engine>(case: &Case) -> Result<(), String> {
@@ -88,19 +163,18 @@ pub fn agreement<A: Engine, B: Engine>(case: &Case) -> Result<(), String> {
     for (at, frontier) in case.frontiers.iter().enumerate() {
         let a = left.settle(frontier.clone(), &mut Raw::with_connection(&left_db)).map_err(|e| format!("left frontier {at}: {e}"))?;
         let b = right.settle(frontier.clone(), &mut Raw::with_connection(&right_db)).map_err(|e| format!("right frontier {at}: {e}"))?;
-        if a.changes != b.changes { return Err(format!("frontier {at}: delta {:?} != {:?}", a.changes, b.changes)); }
-        for rel in &case.program.outputs {
-            let a = snapshot(&left, *rel, &left_db)?;
-            let b = snapshot(&right, *rel, &right_db)?;
-            if a != b { return Err(format!("frontier {at}: relation {rel} {a:?} != {b:?}")); }
-        }
-        for rel in case.program.rels.iter().filter(|r| r.kind == RelKind::Constructor) {
-            let a = left.intern_snapshot(rel.id, &mut Raw::with_connection(&left_db)).map_err(|e| e.to_string())?;
-            let b = right.intern_snapshot(rel.id, &mut Raw::with_connection(&right_db)).map_err(|e| e.to_string())?;
-            if a != b { return Err(format!("frontier {at}: constructor {} {a:?} != {b:?}", rel.name)); }
-        }
-        let terms = snapshot(&left, 3, &left_db)?;
-        let ordered = snapshot(&left, 7, &left_db)?;
+        agree_frontier(&case.program, at, &left, &left_db, &a, &right, &right_db, &b)?;
+    }
+    Ok(())
+}
+
+pub fn term_lt_structure<E: Engine>(case: &Case) -> Result<(), String> {
+    let db = memory_connection().map_err(sql_err)?;
+    let mut engine = E::install(&case.program, &mut Raw::with_connection(&db)).map_err(|e| format!("install: {e}"))?;
+    for (at, frontier) in case.frontiers.iter().enumerate() {
+        engine.settle(frontier.clone(), &mut Raw::with_connection(&db)).map_err(|e| format!("frontier {at}: {e}"))?;
+        let terms = snapshot(&engine, 3, &db)?;
+        let ordered = snapshot(&engine, 7, &db)?;
         let mut expected = Vec::new();
         for (a, _) in &terms {
             for (b, _) in &terms {
