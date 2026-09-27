@@ -31,3 +31,13 @@ impl Rng {
         }
     }
 }
+
+fn env(name: &str) -> Option<u64> {
+    std::env::var(name).ok().map(|v| v.parse().unwrap())
+}
+
+pub fn seeds(cases: u64) -> Vec<u64> {
+    if let Some(seed) = env("RANDOM_SEED") { return vec![seed]; }
+    let base = env("RANDOM_BASE").unwrap_or(0);
+    (base..base + env("SEEDS").or_else(|| env("RANDOM_CASES")).unwrap_or(cases)).collect()
+}

@@ -223,6 +223,7 @@ fn expr(t: &str, a: usize, map: &[Expr], e: &Expr) -> String {
     match e {
         Expr::Col(c) => col(t, a, map, *c as usize),
         Expr::Lit(v) => format!("({v})"),
+        Expr::Text(_) => panic!("string expressions use the text oracle"),
         Expr::Call(f, args) => {
             let x = |i: usize| expr(t, a, map, &args[i]);
             let op = match f {
@@ -238,6 +239,7 @@ fn expr(t: &str, a: usize, map: &[Expr], e: &Expr) -> String {
                 Func::Or => return format!("({} <> 0 OR {} <> 0)", x(0), x(1)),
                 Func::Not => return format!("({} = 0)", x(0)),
                 Func::TermLt => return format!("ivm_term_lt({}, {})", x(0), x(1)),
+                Func::StrNil => panic!("string expressions use the text oracle"),
             };
             format!("({} {op} {})", x(0), x(1))
         }

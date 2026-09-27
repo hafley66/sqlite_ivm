@@ -50,13 +50,21 @@ pub enum Func {
     Not,
     /// Structural comparison of two dictionary term IDs.
     TermLt,
+    StrNil,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Expr {
     Col(ColId),
     Lit(Cell),
+    Text(u32),
     Call(Func, Vec<Expr>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StrMode {
+    Construct { head: ColId, rest: ColId },
+    Decompose { whole: ColId },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,6 +103,7 @@ pub enum Op {
         functor: RelId,
         args: Vec<ColId>,
     },
+    StrCons { input: NodeId, mode: StrMode },
     /// Filter, then append `map` columns, then keep `project` (empty = keep all).
     Mfp {
         input: NodeId,
@@ -158,6 +167,8 @@ pub enum Stratum {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Program {
+    #[serde(default)]
+    pub texts: Vec<String>,
     pub rels: Vec<Relation>,
     pub nodes: Vec<Op>,
     pub strata: Vec<Stratum>,
@@ -165,6 +176,21 @@ pub struct Program {
 }
 
 impl Program {
+    pub fn uses_strings(&self) -> bool {
+        fn expr(e: &Expr) -> bool {
+            match e {
+                Expr::Text(_) | Expr::Call(Func::StrNil, _) => true,
+                Expr::Call(_, args) => args.iter().any(expr),
+                _ => false,
+            }
+        }
+        !self.texts.is_empty() || self.nodes.iter().any(|op| match op {
+            Op::StrCons { .. } => true,
+            Op::Mfp { filter, map, .. } => filter.iter().chain(map).any(expr),
+            _ => false,
+        })
+    }
+
     pub fn rel(&self, id: RelId) -> Option<&Relation> {
         self.rels.iter().find(|rel| rel.id == id)
     }
@@ -176,6 +202,11 @@ impl Program {
             Op::Mint { input, .. } => {
                 let mut cols = self.node_types(*input)?;
                 cols.push(Ty::Id);
+                cols
+            }
+            Op::StrCons { input, mode } => {
+                let mut cols = self.node_types(*input)?;
+                cols.extend(std::iter::repeat(Ty::Id).take(match mode { StrMode::Construct { .. } => 1, StrMode::Decompose { .. } => 2 }));
                 cols
             }
             Op::Mfp { input, map, project, .. } => {
@@ -213,6 +244,7 @@ impl Program {
 fn expr_type(expr: &Expr, cols: &[Ty]) -> Option<Ty> {
     match expr {
         Expr::Col(c) => cols.get(*c as usize).copied(),
+        Expr::Text(_) | Expr::Call(Func::StrNil, _) => Some(Ty::Id),
         Expr::Lit(_) | Expr::Call(_, _) => Some(Ty::Int),
     }
 }

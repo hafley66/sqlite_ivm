@@ -7,12 +7,15 @@ pub struct Term {
     pub functor: String,
     pub args: Row,
     pub types: Vec<Ty>,
+    pub text: Option<String>,
+    pub split: Option<(Cell, Cell)>,
 }
 
 #[derive(Default)]
 pub struct Interner {
     by_key: BTreeMap<(String, Row), Cell>,
     by_id: BTreeMap<Cell, Term>,
+    by_text: BTreeMap<String, Cell>,
     next: Cell,
     pending: Vec<(String, Row)>,
 }
@@ -26,12 +29,35 @@ impl Interner {
         let id = self.next.checked_add(1).expect("term ID space exhausted");
         self.next = id;
         self.by_key.insert(key, id);
-        self.by_id.insert(id, Term { functor: functor.to_owned(), args: args.to_vec(), types: types.to_vec() });
+        self.by_id.insert(id, Term { functor: functor.to_owned(), args: args.to_vec(), types: types.to_vec(), text: None, split: None });
         let mut row = vec![id];
         row.extend_from_slice(args);
         self.pending.push((functor.to_owned(), row));
         id
     }
+
+    pub fn mint_text(&mut self, text: &str) -> Cell {
+        if let Some(id) = self.by_text.get(text) { return *id; }
+        let split = if let Some(first) = text.chars().next() {
+            let (_, rest) = text.split_at(first.len_utf8());
+            let rest_id = self.mint_text(rest);
+            if rest.is_empty() { Some((0, rest_id)) } else {
+                Some((self.mint_text(&text[..first.len_utf8()]), rest_id))
+            }
+        } else { None };
+        let id = self.next.checked_add(1).expect("term ID space exhausted");
+        self.next = id;
+        let split = split.map(|(head, rest)| (if head == 0 { id } else { head }, rest));
+        self.by_text.insert(text.to_owned(), id);
+        self.by_id.insert(id, Term { functor: String::new(), args: vec![], types: vec![], text: Some(text.to_owned()), split });
+        id
+    }
+
+    pub fn text(&self, id: Cell) -> Option<&str> { self.by_id.get(&id)?.text.as_deref() }
+
+    pub fn text_id(&self, text: &str) -> Option<Cell> { self.by_text.get(text).copied() }
+
+    pub fn split(&self, id: Cell) -> Option<(Cell, Cell)> { self.by_id.get(&id)?.split }
 
     pub fn drain_pending(&mut self) -> Vec<(String, Row)> {
         std::mem::take(&mut self.pending)
@@ -61,6 +87,12 @@ pub fn compare(a: Cell, b: Cell, resolve: &mut impl FnMut(Cell) -> Option<Term>)
         (None, None) => a.cmp(&b),
         (None, Some(_)) => Ordering::Less,
         (Some(_), None) => Ordering::Greater,
+        (Some(x), Some(y)) if x.text.is_some() || y.text.is_some() => match (x.text, y.text) {
+            (Some(a), Some(b)) => a.cmp(&b),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            _ => unreachable!(),
+        },
         (Some(x), Some(y)) => x.args.len().cmp(&y.args.len())
             .then_with(|| x.functor.cmp(&y.functor))
             .then_with(|| {
@@ -92,7 +124,13 @@ pub fn sort_key(id: Cell, resolve: &mut impl FnMut(Cell) -> Option<Term>) -> Vec
             number(out, id);
             return;
         };
-        out.push(1);
+        if let Some(text) = term.text {
+            out.push(1);
+            for b in text.bytes() { if b == 0 { out.extend_from_slice(&[0, 255]); } else { out.push(b); } }
+            out.extend_from_slice(&[0, 0]);
+            return;
+        }
+        out.push(2);
         out.extend_from_slice(&(term.args.len() as u32).to_be_bytes());
         for b in term.functor.bytes() {
             if b == 0 { out.extend_from_slice(&[0, 255]); } else { out.push(b); }
@@ -125,5 +163,21 @@ mod tests {
         assert_eq!(terms.compare(wrapped_smaller, wrapped_larger), Ordering::Less);
         assert!(sort_key(wrapped_smaller, &mut |id| terms.get(id).cloned())
             < sort_key(wrapped_larger, &mut |id| terms.get(id).cloned()));
+    }
+
+    #[test]
+    fn strings_share_ids_with_constructors_and_split_without_writes() {
+        let mut terms = Interner::default();
+        let compound = terms.mint("token", &[7], &[Ty::Int]);
+        let later = terms.mint_text("écho");
+        let earlier = terms.mint_text("ada");
+        assert_eq!(terms.mint_text("écho"), later);
+        assert_ne!(compound, later);
+        assert_eq!(terms.compare(earlier, later), Ordering::Less);
+        let count = terms.by_id.len();
+        let (head, rest) = terms.split(later).unwrap();
+        assert_eq!((terms.text(head), terms.text(rest)), (Some("é"), Some("cho")));
+        assert_eq!(terms.by_id.len(), count);
+        assert!(terms.split(terms.text_id("").unwrap()).is_none());
     }
 }

@@ -70,6 +70,7 @@ impl Nest for Time {
                 reduce_reads: rel.reduce_reads.clone(),
                 constructors: rel.constructors.clone(),
                 interner: rel.interner.clone(),
+                texts: rel.texts.clone(),
             };
             let mut scope_defined: Vec<(RelId, Coll<'_, Inner>)> =
                 defined.iter().map(|(id, c)| (*id, c.clone().enter(sub))).collect();
@@ -104,6 +105,7 @@ pub struct DdRel<'s, T: Nest = Time> {
     reduce_reads: Option<ReduceReadLogger>,
     constructors: BTreeMap<RelId, (String, Vec<Ty>)>,
     interner: Rc<RefCell<Interner>>,
+    texts: Vec<Cell>,
 }
 
 /// One record seen on an IR node's output collection in traced mode.
@@ -147,16 +149,40 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
         }))
     }
 
+    fn str_cons(&mut self, c: Self::C, mode: &StrMode) -> Result<Self::C, EngineError> {
+        let mode = mode.clone();
+        let interner = self.interner.clone();
+        Ok(c.flat_map(move |mut row| {
+            match mode {
+                StrMode::Construct { head, rest } => {
+                    let joined = {
+                        let dict = interner.borrow();
+                        format!("{}{}", dict.text(row[head as usize])?, dict.text(row[rest as usize])?)
+                    };
+                    row.push(interner.borrow_mut().mint_text(&joined));
+                }
+                StrMode::Decompose { whole } => {
+                    let (head, rest) = interner.borrow().split(row[whole as usize])?;
+                    row.extend([head, rest]);
+                }
+            }
+            Some(row)
+        }))
+    }
+
     fn mfp(&mut self, c: Self::C, filter: &[Expr], map: &[Expr], project: &[ColId]) -> Self::C {
         let (filter, map, project) = (filter.to_vec(), map.to_vec(), project.to_vec());
         let interner = self.interner.clone();
+        let texts = self.texts.clone();
         c.flat_map(move |mut row: Row| {
             let lt = |a, b| interner.borrow().compare(a, b) == Ordering::Less;
-            if !filter.iter().all(|e| eval_with(e, &row, &lt) != 0) {
+            let literal = |index: u32| texts[index as usize];
+            let nil = || interner.borrow().text_id("").expect("empty string");
+            if !filter.iter().all(|e| eval_with_text(e, &row, &lt, &literal, &nil) != 0) {
                 return None;
             }
             for e in &map {
-                let v = eval_with(e, &row, &lt);
+                let v = eval_with_text(e, &row, &lt, &literal, &nil);
                 row.push(v);
             }
             Some(if project.is_empty() { row } else { cols(&row, &project) })
@@ -421,6 +447,8 @@ enum Command {
     Settle(Frontier, mpsc::Sender<Result<(Delta, Vec<DdTap>), EngineError>>),
     Snapshot(RelId, mpsc::Sender<Result<Vec<(Row, W)>, EngineError>>),
     InternSnapshot(RelId, mpsc::Sender<Result<Vec<(Row, W)>, EngineError>>),
+    InternText(String, mpsc::Sender<Cell>),
+    Text(Cell, mpsc::Sender<Option<String>>),
     Stop,
 }
 
@@ -485,6 +513,16 @@ impl Engine for Dd {
         self.tx.send(Command::InternSnapshot(functor, reply)).map_err(|e| worker_error(Stage::Snapshot, e))?;
         answer.recv().map_err(|e| worker_error(Stage::Snapshot, e))?
     }
+    fn intern_text(&mut self, value: &str, _host: &mut impl Host) -> Result<Cell, EngineError> {
+        let (reply, answer) = mpsc::channel();
+        self.tx.send(Command::InternText(value.to_owned(), reply)).map_err(|e| worker_error(Stage::Settle, e))?;
+        answer.recv().map_err(|e| worker_error(Stage::Settle, e))
+    }
+    fn text(&self, id: Cell, _host: &mut impl Host) -> Result<Option<String>, EngineError> {
+        let (reply, answer) = mpsc::channel();
+        self.tx.send(Command::Text(id, reply)).map_err(|e| worker_error(Stage::Snapshot, e))?;
+        answer.recv().map_err(|e| worker_error(Stage::Snapshot, e))
+    }
 }
 
 fn worker_error(stage: Stage, e: impl std::fmt::Display) -> EngineError {
@@ -519,6 +557,11 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
         let captured: Rc<RefCell<Vec<(RelId, Row, Time, W)>>> = Rc::default();
         let taps: Option<Rc<RefCell<Vec<DdTap>>>> = traced.then(Rc::default);
         let interner = Rc::new(RefCell::new(Interner::default()));
+        let texts = {
+            let mut dict = interner.borrow_mut();
+            if program.uses_strings() { dict.mint_text(""); }
+            program.texts.iter().map(|text| dict.mint_text(text)).collect::<Vec<_>>()
+        };
         let constructors: BTreeMap<RelId, (String, Vec<Ty>)> = program.rels.iter()
             .filter(|r| r.kind == RelKind::Constructor)
             .map(|r| (r.id, (r.name.clone(), r.cols.iter().skip(1).copied().collect())))
@@ -542,7 +585,7 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                 constructor_inputs.insert(rel.id, input);
                 sources.insert(rel.id, c);
             }
-            let mut rel = DdRel { scope, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone(), constructors: constructors.clone(), interner: interner.clone() };
+            let mut rel = DdRel { scope, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone(), constructors: constructors.clone(), interner: interner.clone(), texts: texts.clone() };
             lower(&program, &mut rel)?;
             let mut outputs = BTreeMap::new();
             for (id, c) in rel.outputs {
@@ -652,6 +695,8 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                         .ok_or_else(|| EngineError::new(Stage::Snapshot, Some(rel), ErrorKind::UnknownRel(rel)));
                     let _ = reply.send(answer);
                 }
+                Command::InternText(value, reply) => { let _ = reply.send(interner.borrow_mut().mint_text(&value)); }
+                Command::Text(id, reply) => { let _ = reply.send(interner.borrow().text(id).map(str::to_owned)); }
                 Command::Stop => break,
             }
         }

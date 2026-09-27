@@ -51,12 +51,19 @@ pub trait Engine: Sized {
     fn intern_snapshot(&self, _functor: RelId, _host: &mut impl Host) -> Result<Vec<(Row, W)>, EngineError> {
         Err(EngineError::new(Stage::Snapshot, None, ErrorKind::Unsupported("intern_snapshot")))
     }
+    fn intern_text(&mut self, _text: &str, _host: &mut impl Host) -> Result<Cell, EngineError> {
+        Err(EngineError::new(Stage::Settle, None, ErrorKind::Unsupported("intern_text")))
+    }
+    fn text(&self, _id: Cell, _host: &mut impl Host) -> Result<Option<String>, EngineError> {
+        Err(EngineError::new(Stage::Snapshot, None, ErrorKind::Unsupported("text")))
+    }
 }
 
 pub trait Rel {
     type C: Clone;
     fn get(&mut self, rel: RelId) -> Result<Self::C, EngineError>;
     fn mint(&mut self, c: Self::C, functor: RelId, args: &[ColId]) -> Result<Self::C, EngineError>;
+    fn str_cons(&mut self, c: Self::C, mode: &StrMode) -> Result<Self::C, EngineError>;
     fn mfp(&mut self, c: Self::C, filter: &[Expr], map: &[Expr], project: &[ColId]) -> Self::C;
     fn union(&mut self, cs: Vec<Self::C>) -> Self::C;
     fn negate(&mut self, c: Self::C) -> Self::C;
@@ -87,11 +94,16 @@ pub fn eval(expr: &Expr, row: &[Cell]) -> Cell {
 }
 
 pub fn eval_with(expr: &Expr, row: &[Cell], term_lt: &dyn Fn(Cell, Cell) -> bool) -> Cell {
+    eval_with_text(expr, row, term_lt, &|_| panic!("Text requires a dictionary"), &|| panic!("StrNil requires a dictionary"))
+}
+
+pub fn eval_with_text(expr: &Expr, row: &[Cell], term_lt: &dyn Fn(Cell, Cell) -> bool, text: &dyn Fn(u32) -> Cell, nil: &dyn Fn() -> Cell) -> Cell {
     match expr {
         Expr::Col(c) => row[*c as usize],
         Expr::Lit(v) => *v,
+        Expr::Text(index) => text(*index),
         Expr::Call(func, args) => {
-            let a = |i: usize| eval_with(&args[i], row, term_lt);
+            let a = |i: usize| eval_with_text(&args[i], row, term_lt, text, nil);
             match func {
                 Func::Eq => (a(0) == a(1)) as Cell,
                 Func::Ne => (a(0) != a(1)) as Cell,
@@ -105,6 +117,7 @@ pub fn eval_with(expr: &Expr, row: &[Cell], term_lt: &dyn Fn(Cell, Cell) -> bool
                 Func::Or => (a(0) != 0 || a(1) != 0) as Cell,
                 Func::Not => (a(0) == 0) as Cell,
                 Func::TermLt => term_lt(a(0), a(1)) as Cell,
+                Func::StrNil => nil(),
             }
         }
     }
@@ -159,6 +172,10 @@ pub fn lower_node<A: Rel>(
         Op::Mint { input, functor, args } => {
             let c = sub(*input, a)?;
             a.mint(c, *functor, args)?
+        }
+        Op::StrCons { input, mode } => {
+            let c = sub(*input, a)?;
+            a.str_cons(c, mode)?
         }
         Op::Mfp { input, filter, map, project } => {
             let c = sub(*input, a)?;

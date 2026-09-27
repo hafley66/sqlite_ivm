@@ -48,7 +48,7 @@ fn permuted(p: &Program, rng: &mut Rng) -> (Program, BTreeMap<RelId, RelId>) {
         .collect();
     let mut outputs: Vec<RelId> = p.outputs.iter().map(|o| rel[o]).collect();
     rng.shuffle(&mut outputs);
-    (Program { rels, nodes, strata, outputs }, rel)
+    (Program { texts: p.texts.clone(), rels, nodes, strata, outputs }, rel)
 }
 
 fn settle<E: Engine>(e: &mut E, f: &Frontier, at: usize, db: &Connection) -> Result<Vec<(RelId, Row, W)>, String> {

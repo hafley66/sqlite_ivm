@@ -1,0 +1,34 @@
+{
+  "texts": ["hi "],
+  "rels": [
+    {"id":0,"name":"name","cols":["Id"],"kind":"Source"},
+    {"id":1,"name":"word","cols":["Id"],"kind":"Source"},
+    {"id":2,"name":"greeting","cols":["Id"],"kind":"Derived"},
+    {"id":3,"name":"split","cols":["Id","Id"],"kind":"Derived"},
+    {"id":4,"name":"empty","cols":["Id"],"kind":"Derived"},
+    {"id":5,"name":"ordering","cols":["Id","Id"],"kind":"Derived"},
+    {"id":6,"name":"roundtrip","cols":["Id"],"kind":"Derived"}
+  ],
+  "nodes": [
+    {"Get":0},
+    {"Mfp":{"input":0,"filter":[],"map":[{"Text":0}],"project":[]}},
+    {"StrCons":{"input":1,"mode":{"Construct":{"head":1,"rest":0}}}},
+    {"Mfp":{"input":2,"filter":[],"map":[],"project":[2]}},
+    {"Get":1},
+    {"StrCons":{"input":4,"mode":{"Decompose":{"whole":0}}}},
+    {"Mfp":{"input":5,"filter":[],"map":[],"project":[1,2]}},
+    {"Mfp":{"input":4,"filter":[],"map":[{"Call":["StrNil",[]]}],"project":[1]}},
+    {"Join":{"inputs":[0,4],"equivalences":[]}},
+    {"Mfp":{"input":8,"filter":[{"Call":["TermLt",[{"Col":0},{"Col":1}]]}],"map":[],"project":[]}},
+    {"StrCons":{"input":5,"mode":{"Construct":{"head":1,"rest":2}}}},
+    {"Mfp":{"input":10,"filter":[],"map":[],"project":[3]}}
+  ],
+  "strata": [
+    {"Let":{"id":2,"body":3}},
+    {"Let":{"id":3,"body":6}},
+    {"Let":{"id":4,"body":7}},
+    {"Let":{"id":5,"body":9}},
+    {"Let":{"id":6,"body":11}}
+  ],
+  "outputs": [2,3,4,5,6]
+}

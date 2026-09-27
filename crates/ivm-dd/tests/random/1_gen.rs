@@ -228,7 +228,7 @@ pub fn program(rng: &mut Rng) -> Program {
     if derived > 1 && gen.rng.chance(50) {
         outputs.push((sources + gen.rng.below(derived - 1)) as RelId);
     }
-    Program { rels, nodes: gen.nodes, strata, outputs }
+    Program { texts: vec![], rels, nodes: gen.nodes, strata, outputs }
 }
 
 /// Linear recursion over finite source keys. A tagged SQL CTE can print either one or two
@@ -275,7 +275,7 @@ fn recursive_program(rng: &mut Rng) -> Program {
     strata.push(Stratum::Let { id: top_id, body: top });
     let mut outputs = ids;
     outputs.push(top_id);
-    Program { rels, nodes: gen.nodes, strata, outputs }
+    Program { texts: vec![], rels, nodes: gen.nodes, strata, outputs }
 }
 
 /// Recursive Mint and Antijoin against a lower-stratum blocker, in either order.
@@ -311,6 +311,7 @@ pub fn recursive_shapes_program(rng: &mut Rng) -> Program {
     nodes.push(Op::Get(4));
     nodes.push(Op::Mfp { input: 10, filter: vec![], map: vec![], project: vec![0] });
     Program {
+        texts: vec![],
         rels,
         nodes,
         strata: vec![
@@ -351,7 +352,7 @@ pub fn k5_program() -> Program {
         Stratum::Let { id: 4, body: 10 },
         Stratum::Let { id: 5, body: 12 },
     ];
-    Program { rels, nodes, strata, outputs: vec![3, 4, 5] }
+    Program { texts: vec![], rels, nodes, strata, outputs: vec![3, 4, 5] }
 }
 
 /// 20-50 frontiers of 0-4 changes; an insert only of an absent row, a delete only of a present one.

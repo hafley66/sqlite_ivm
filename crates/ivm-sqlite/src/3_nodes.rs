@@ -77,6 +77,7 @@ pub struct SqlRel {
     /// Join SQL node -> its three delta terms, each consolidated: Δa⋈Δb, I⁻a⋈Δb, Δa⋈I⁻b.
     terms: Vec<(usize, Vec<String>)>,
     constructors: std::collections::BTreeMap<RelId, (String, Vec<Ty>)>,
+    texts: Vec<String>,
 }
 
 fn list(alias: &str, cols: impl IntoIterator<Item = usize>) -> String {
@@ -108,7 +109,7 @@ fn unsupported(what: &'static str) -> EngineError {
 }
 
 /// Expr as SQL text; comparisons and logic yield 0/1, Add/Sub wrap like `eval`.
-fn render(e: &Expr, arity: usize, maps: &[String]) -> Result<String, EngineError> {
+fn render(e: &Expr, arity: usize, maps: &[String], texts: &[String]) -> Result<String, EngineError> {
     Ok(match e {
         Expr::Col(c) if (*c as usize) < arity => format!("c{c}"),
         Expr::Col(c) => maps
@@ -117,10 +118,14 @@ fn render(e: &Expr, arity: usize, maps: &[String]) -> Result<String, EngineError
             .ok_or_else(|| unsupported("Mfp column out of range"))?,
         Expr::Lit(v) if *v == i64::MIN => I64_MIN.into(),
         Expr::Lit(v) => format!("({v})"),
+        Expr::Text(index) => {
+            let value = texts.get(*index as usize).ok_or_else(|| unsupported("Text index out of range"))?;
+            format!("ivm_text_id('{}')", value.replace('\'', "''"))
+        }
         Expr::Call(func, args) => {
             let a = |i: usize| -> Result<String, EngineError> {
                 let arg = args.get(i).ok_or_else(|| unsupported("Func arity"))?;
-                render(arg, arity, maps)
+                render(arg, arity, maps, texts)
             };
             let bin = |op: &str| -> Result<String, EngineError> {
                 Ok(format!("(({}) {op} ({}))", a(0)?, a(1)?))
@@ -152,6 +157,7 @@ fn render(e: &Expr, arity: usize, maps: &[String]) -> Result<String, EngineError
                 Func::Or => format!("((({}) <> 0) OR (({}) <> 0))", a(0)?, a(1)?),
                 Func::Not => format!("(({}) = 0)", a(0)?),
                 Func::TermLt => format!("ivm_term_lt({}, {})", a(0)?, a(1)?),
+                Func::StrNil => "ivm_text_id('')".into(),
             }
         }
     })
@@ -209,6 +215,7 @@ impl SqlRel {
             terms: Vec::new(),
             constructors: p.rels.iter().filter(|r| r.kind == RelKind::Constructor)
                 .map(|r| (r.id, (r.name.clone(), r.cols.iter().skip(1).copied().collect()))).collect(),
+            texts: p.texts.clone(),
         };
         for r in p.rels.iter().filter(|r| r.kind == RelKind::Source) {
             let c = rel.push(r.cols.len(), false, |_| None);
@@ -365,16 +372,43 @@ impl Rel for SqlRel {
         Ok(next)
     }
 
+    fn str_cons(&mut self, c: Self::C, mode: &StrMode) -> Result<Self::C, EngineError> {
+        let old = c.arity;
+        let next = match mode {
+            StrMode::Construct { head, rest } => {
+                if *head as usize >= old || *rest as usize >= old { return Err(unsupported("StrCons column out of range")); }
+                let source = format!("SELECT h.text || r.text AS text FROM {} d JOIN ivm_term_dict h ON h.id=d.c{head} AND h.text IS NOT NULL JOIN ivm_term_dict r ON r.id=d.c{rest} AND r.text IS NOT NULL WHERE d.w>0", c.d);
+                let next = self.push(old + 1, c.rec, |_| Some(format!(
+                    "SELECT {}, dict.id AS c{old}, d.w FROM {} d JOIN ivm_term_dict h ON h.id=d.c{head} JOIN ivm_term_dict r ON r.id=d.c{rest} JOIN ivm_term_dict dict ON dict.text=h.text||r.text",
+                    (0..old).map(|i| format!("d.c{i} AS c{i}")).collect::<Vec<_>>().join(","), c.d,
+                )));
+                self.nodes[next.node].fill.splice(0..0, [
+                    format!("WITH RECURSIVE parts(text) AS ({source} UNION SELECT ivm_str_rest_text(text) FROM parts WHERE text<>''), all_texts(text) AS (SELECT text FROM parts UNION SELECT ivm_str_head_text(text) FROM parts WHERE text<>'') INSERT INTO ivm_term_dict(functor,args,types,text) SELECT '@str',json_array(text),'[]',text FROM all_texts WHERE true ON CONFLICT DO NOTHING"),
+                    "UPDATE ivm_term_dict AS d SET head_id=(SELECT id FROM ivm_term_dict h WHERE h.text=ivm_str_head_text(d.text)), rest_id=(SELECT id FROM ivm_term_dict r WHERE r.text=ivm_str_rest_text(d.text)) WHERE d.text IS NOT NULL AND d.text<>'' AND d.head_id IS NULL".into(),
+                ]);
+                next
+            }
+            StrMode::Decompose { whole } => {
+                if *whole as usize >= old { return Err(unsupported("StrCons column out of range")); }
+                self.push(old + 2, c.rec, |_| Some(format!(
+                    "SELECT {}, ivm_str_head(d.c{whole}) AS c{old}, ivm_str_rest(d.c{whole}) AS c{}, d.w FROM {} d WHERE ivm_str_head(d.c{whole}) IS NOT NULL",
+                    (0..old).map(|i| format!("d.c{i} AS c{i}")).collect::<Vec<_>>().join(","), old + 1, c.d,
+                )))
+            }
+        };
+        Ok(next)
+    }
+
     fn mfp(&mut self, c: Self::C, filter: &[Expr], map: &[Expr], project: &[ColId]) -> Self::C {
         let rendered = (|| -> Result<(Vec<String>, Vec<String>), EngineError> {
             let mut maps = Vec::new();
             for e in map {
-                let m = render(e, c.arity, &maps)?;
+                let m = render(e, c.arity, &maps, &self.texts)?;
                 maps.push(m);
             }
             let wheres = filter
                 .iter()
-                .map(|e| Ok(format!("({}) <> 0", render(e, c.arity, &[])?)))
+                .map(|e| Ok(format!("({}) <> 0", render(e, c.arity, &[], &self.texts)?)))
                 .collect::<Result<_, _>>()?;
             let all: Vec<ColId> = (0..(c.arity + maps.len()) as ColId).collect();
             let proj = if project.is_empty() {
@@ -384,7 +418,7 @@ impl Rel for SqlRel {
             };
             let cols = proj
                 .iter()
-                .map(|p| render(&Expr::Col(*p), c.arity, &maps))
+                .map(|p| render(&Expr::Col(*p), c.arity, &maps, &self.texts))
                 .collect::<Result<_, _>>()?;
             Ok((wheres, cols))
         })();

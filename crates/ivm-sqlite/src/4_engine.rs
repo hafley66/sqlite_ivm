@@ -322,4 +322,12 @@ impl Engine for Sqlite {
         let db = conn(host, Stage::Snapshot)?;
         crate::terms::snapshot(db, &self.ir, functor).map_err(|e| error(Stage::Snapshot, e))
     }
+    fn intern_text(&mut self, value: &str, host: &mut impl Host) -> Result<i64, EngineError> {
+        let db = conn(host, Stage::Settle)?;
+        crate::terms::intern_text(db, value).map_err(|e| error(Stage::Settle, e))
+    }
+    fn text(&self, id: i64, host: &mut impl Host) -> Result<Option<String>, EngineError> {
+        let db = conn(host, Stage::Snapshot)?;
+        crate::terms::text(db, id).map_err(|e| error(Stage::Snapshot, e))
+    }
 }

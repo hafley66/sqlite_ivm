@@ -43,6 +43,7 @@ impl Case {
         let mut rng = Rng(seed);
         let args = if rng.chance(50) { vec![0, 1] } else { vec![1, 0] };
         let program = Program {
+            texts: vec![],
             rels: vec![
                 Relation { id: 0, name: "mint_source".into(), cols: vec![Ty::Int, Ty::Int], kind: RelKind::Source },
                 Relation { id: 1, name: "mint_pair".into(), cols: vec![Ty::Id, Ty::Int, Ty::Int], kind: RelKind::Constructor },
@@ -413,17 +414,9 @@ fn corpus() -> Vec<Case> {
     cases
 }
 
-fn env(name: &str) -> Option<u64> {
-    std::env::var(name).ok().map(|v| v.parse().unwrap())
-}
-
 /// `RANDOM_SEED` runs one seed; otherwise `SEEDS` (or `RANDOM_CASES`) seeds from `RANDOM_BASE`.
 pub fn seeds(cases: u64) -> Vec<u64> {
-    if let Some(seed) = env("RANDOM_SEED") {
-        return vec![seed];
-    }
-    let base = env("RANDOM_BASE").unwrap_or(0);
-    (base..base + env("SEEDS").or_else(|| env("RANDOM_CASES")).unwrap_or(cases)).collect()
+    super::rng::seeds(cases)
 }
 
 /// Corpus first, then generated seeds; the first failure is shrunk, saved, and panics with a rerun command.

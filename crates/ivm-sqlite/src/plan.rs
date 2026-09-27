@@ -80,6 +80,7 @@ fn render_expr(expr: &Expr, columns: &[String], maps: &[String]) -> Option<Strin
         Expr::Col(col) => maps.get(*col as usize - columns.len())?.clone(),
         Expr::Lit(v) if *v == i64::MIN => "(-9223372036854775807 - 1)".into(),
         Expr::Lit(v) => format!("({v})"),
+        Expr::Text(_) => return None,
         Expr::Call(func, args) => {
             let a = |i: usize| render_expr(args.get(i)?, columns, maps);
             let bin = |op: &str| Some(format!("(({}) {op} ({}))", a(0)?, a(1)?));
@@ -112,6 +113,7 @@ fn render_expr(expr: &Expr, columns: &[String], maps: &[String]) -> Option<Strin
                 Func::Or => format!("((({}) <> 0) OR (({}) <> 0))", a(0)?, a(1)?),
                 Func::Not => format!("(({}) = 0)", a(0)?),
                 Func::TermLt => format!("ivm_term_lt({}, {})", a(0)?, a(1)?),
+                Func::StrNil => return None,
             }
         }
     })
@@ -540,6 +542,7 @@ pub(crate) fn lower_ir(plan: &Compiled) -> Result<IrProgram, EngineError> {
         }
     };
     Ok(IrProgram {
+        texts: vec![],
         rels,
         nodes,
         strata: vec![Stratum::Let {

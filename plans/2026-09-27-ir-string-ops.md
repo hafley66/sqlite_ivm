@@ -4,6 +4,10 @@
 
 ```rust
 // Cell remains i64; Ty::Id denotes dictionary identities, including strings.
+Program.texts: Vec<String>
+Expr::Text(u32) -> Ty::Id
+Engine::intern_text(&mut self, text: &str, host: &mut impl Host) -> Result<Cell, EngineError>
+Engine::text(&self, id: Cell, host: &mut impl Host) -> Result<Option<String>, EngineError>
 Op::StrCons { input: NodeId, mode: StrMode }       // append Id (construct), or Id, Id (decompose)
 StrMode::Construct { head: ColId, rest: ColId }
 StrMode::Decompose { whole: ColId }
@@ -24,6 +28,6 @@ SQLite extends `ivm_term_dict` with a nullable `text` column, `head_id` and `res
 
 At install, register the SQLite empty-ID scalar function and ensure the empty string dictionary row exists. DD interns empty text before dataflow starts. At each frontier, input literal IDs must resolve to text; construction reads head and rest, concatenates, inserts or gets the string ID and its split closure, then emits the weighted row. Decomposition reads `head_id` and `rest_id` and emits a row only for nonempty text. SQLite writes occur inside `ivm_engine_frontier`, so a failed frontier rolls back new strings. DD retains new entries across retractions, as it does for Mint. Results and test agreement compare decoded terms.
 
-## Representation boundary requiring a decision
+## Text ingress
 
-The current `Program`, `Frontier`, and `Host` APIs carry only `i64` cells. They have no text-bearing string literal or source-change representation. The fixture needs literal `"hi "` and source texts `"ada"` and `"hello"`; an engine cannot recover those bytes from an arbitrary `i64`. Before implementation, choose how text enters both engines, such as a program literal pool plus encoded references or a shared host interning API that supplies IDs for source changes. This also determines how generated oracle cases name strings without assuming equal numeric IDs across engines.
+`Program.texts: Vec<String>` is an install-time literal pool; `Expr::Text(u32)` names an entry. Each engine interns the pool at install. `Engine::intern_text(&mut self, text: &str, host) -> Result<Cell>` supplies IDs for source changes, and `Engine::text(&self, id: Cell, host) -> Result<Option<String>>` decodes results. The engine-owned dictionary is the only string authority. Tests call `intern_text` on each engine before building its frontier and compare decoded terms, never numeric IDs across engines.

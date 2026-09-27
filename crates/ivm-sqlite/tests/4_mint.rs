@@ -6,6 +6,7 @@ use rusqlite::{Connection, OpenFlags};
 
 fn mint_program(source: &str, output: &str) -> Program {
     Program {
+        texts: vec![],
         rels: vec![
             Relation { id: 0, name: source.into(), cols: vec![Ty::Int, Ty::Int], kind: RelKind::Source },
             Relation { id: 1, name: "shared_pair".into(), cols: vec![Ty::Id, Ty::Int, Ty::Int], kind: RelKind::Constructor },
@@ -80,6 +81,7 @@ fn failed_constructor_write_rolls_back_source_and_dictionary() {
 #[test]
 fn constructor_and_mint_paths_consolidate_one_delta() {
     let program = Program {
+        texts: vec![],
         rels: vec![
             Relation { id: 0, name: "twice_source".into(), cols: vec![Ty::Int], kind: RelKind::Source },
             Relation { id: 1, name: "twice_ctor".into(), cols: vec![Ty::Id, Ty::Int], kind: RelKind::Constructor },
@@ -114,6 +116,7 @@ fn topk_over_ids_uses_dictionary_order_across_programs() {
     minted.settle(change([1, 3], 1), &mut Raw::with_connection(&db)).unwrap();
     minted.settle(change([1, 2], 1), &mut Raw::with_connection(&db)).unwrap();
     let program = Program {
+        texts: vec![],
         rels: vec![
             Relation { id: 0, name: "order_ids".into(), cols: vec![Ty::Id], kind: RelKind::Source },
             Relation { id: 1, name: "order_min".into(), cols: vec![Ty::Id], kind: RelKind::Derived },
