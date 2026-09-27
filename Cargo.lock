@@ -661,6 +661,7 @@ dependencies = [
  "ivm-dd",
  "ivm-ir",
  "rusqlite",
+ "serde",
  "serde_json",
 ]
 

@@ -18,6 +18,20 @@ const generatedDir = resolve(import.meta.dirname, '.generated');
 mkdirSync(generatedDir, { recursive: true });
 const cases = JSON.parse(readFileSync(resolve(dir, 'cases.json'), 'utf8')) as Case[];
 
+test('three op module declarations', () => {
+  const source = readFileSync(resolve(dir, 'shape_3.ts'), 'utf8');
+  const declarations = source.split('\n')
+    .filter(line => /^  const n\d+: Observable<Batch> =/.test(line))
+    .map(line => line.match(/const n\d+: Observable<Batch> = (?:defer\(\(\) => of\(0\)|n\d+|merge\(n\d+, n\d+\))/)![0]);
+  expect(declarations).toMatchInlineSnapshot(`
+    [
+      "const n0: Observable<Batch> = defer(() => of(0)",
+      "const n1: Observable<Batch> = n0",
+      "const n2: Observable<Batch> = merge(n0, n1)",
+    ]
+  `);
+});
+
 function decode(cell: number, ty: 'Int' | 'Id', constructors: Record<string, Term>, texts: Record<string, string>): unknown {
   if (ty === 'Int') return cell;
   const term = constructors[cell];

@@ -104,6 +104,21 @@ fn main() {
         Frontier { changes: vec![SourceChange { rel: 0, row: vec![4], w: -1 }] },
     ];
     all.push(dump(&dir, "negate", negate, frontiers));
+    let shape = Program {
+        texts: vec![],
+        rels: vec![
+            Relation { id: 0, name: "source".into(), cols: vec![Ty::Int], kind: RelKind::Source },
+            Relation { id: 1, name: "output".into(), cols: vec![Ty::Int], kind: RelKind::Derived },
+        ],
+        nodes: vec![
+            Op::Get(0),
+            Op::Mfp { input: 0, filter: vec![ivm_dd::Expr::Call(ivm_dd::Func::Gt, vec![ivm_dd::Expr::Col(0), ivm_dd::Expr::Lit(2)])], map: vec![], project: vec![] },
+            Op::Union(vec![0, 1]),
+        ],
+        strata: vec![Stratum::Let { id: 1, body: 2 }],
+        outputs: vec![1],
+    };
+    fs::write(dir.join("shape_3.ts"), ivm_rxjs::emit(&shape).unwrap()).unwrap();
     let mut counts = BTreeMap::<String, usize>::new();
     for case in &all {
         for op in case["program"]["nodes"].as_array().unwrap() {

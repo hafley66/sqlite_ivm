@@ -1,39 +1,43 @@
-use ivm_ir::{Op, Program, Stratum};
+#[path = "2_emit.rs"]
+mod emitter;
 
-/// Emit one self-contained, strict TypeScript module for a checked IR program.
-pub fn emit(program: &Program) -> Result<String, String> {
-    for op in &program.nodes {
-        if matches!(op, Op::Delay(_)) {
-            return Err("Delay requires a clock checker".into());
-        }
-        if let Op::Join { inputs, .. } = op {
-            if inputs.len() != 2 { return Err("Join arity != 2".into()); }
-        }
-    }
-    for stratum in &program.strata {
-        if let Stratum::LetRec(rec) = stratum {
-            if rec.limit.is_some() { return Err("LetRec limit unsupported".into()); }
-        }
-    }
-    let json = serde_json::to_string(program).map_err(|e| e.to_string())?;
-    Ok(format!("import {{ EMPTY, Subject, defer, expand, forkJoin, from, last, map, merge, mergeMap, mergeScan, of, reduce, scan, shareReplay }} from 'rxjs';\nconst program: Program = {json};\n{}", include_str!("1_runtime.ts")))
-}
+pub use emitter::emit;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ivm_ir::*;
 
     #[test]
-    fn emits_module_without_subscription() {
-        let p = Program { texts: vec![], rels: vec![], nodes: vec![], strata: vec![], outputs: vec![] };
-        let ts = emit(&p).unwrap();
-        assert!(ts.contains("mergeScan"));
+    fn emits_per_node_observables() {
+        let program = Program {
+            texts: vec![],
+            rels: vec![
+                Relation { id: 0, name: "source".into(), cols: vec![Ty::Int], kind: RelKind::Source },
+                Relation { id: 1, name: "output".into(), cols: vec![Ty::Int], kind: RelKind::Derived },
+            ],
+            nodes: vec![
+                Op::Get(0),
+                Op::Mfp { input: 0, filter: vec![Expr::Call(Func::Gt, vec![Expr::Col(0), Expr::Lit(2)])], map: vec![], project: vec![] },
+                Op::Union(vec![0, 1]),
+            ],
+            strata: vec![Stratum::Let { id: 1, body: 2 }],
+            outputs: vec![1],
+        };
+        let ts = emit(&program).unwrap();
+        let declarations = ts.lines().filter(|line| line.starts_with("  const n") && line.contains(": Observable<Batch> = "))
+            .map(|line| line.split(": Observable<Batch> = ").next().unwrap())
+            .collect::<Vec<_>>().join("\n");
+        assert_eq!(declarations, "  const n0\n  const n1\n  const n2");
+        assert!(ts.contains("const n1: Observable<Batch> = n0.pipe(map("));
+        assert!(ts.contains("const n2: Observable<Batch> = merge(n0, n1).pipe(scan("));
         assert!(!ts.contains(".subscribe("));
+        assert!(!ts.contains("const program:"));
     }
 
     #[test]
     fn delay_is_unsupported() {
-        let p = Program { texts: vec![], rels: vec![], nodes: vec![Op::Delay(0)], strata: vec![], outputs: vec![] };
-        assert!(emit(&p).is_err());
+        let program = Program { texts: vec![], rels: vec![], nodes: vec![Op::Delay(0)], strata: vec![], outputs: vec![] };
+        assert!(emit(&program).is_err());
     }
 }
