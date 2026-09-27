@@ -34,7 +34,12 @@ pub fn ddl(p: &Program) -> String {
     let mut out = String::new();
     for rel in p.rels.iter().filter(|r| r.kind == RelKind::Source) {
         let n = rel.cols.len();
-        let defs: Vec<String> = (0..n).map(|i| format!("c{i} INTEGER NOT NULL")).collect();
+        let defs: Vec<String> = rel.cols.iter().enumerate().map(|(i, ty)| match ty {
+            Ty::Any => format!("c{i} BLOB"),
+            Ty::Text => format!("c{i} TEXT NOT NULL"),
+            Ty::Real => format!("c{i} REAL NOT NULL"),
+            _ => format!("c{i} INTEGER NOT NULL"),
+        }).collect();
         writeln!(out, "CREATE TABLE \"{}\"({}, PRIMARY KEY({}));", rel.name, defs.join(", "), names(n)).unwrap();
     }
     let mut printer = Printer { p, next: 0 };
@@ -55,6 +60,16 @@ pub fn ddl(p: &Program) -> String {
         }
     }
     out
+}
+
+pub fn any_literal(value: &AnyValue) -> String {
+    match value {
+        AnyValue::Null => "NULL".into(),
+        AnyValue::Integer(v) => v.to_string(),
+        AnyValue::Real(bits) => format!("{:.1}", f64::from_bits(*bits)),
+        AnyValue::Text(v) => format!("'{}'", v.replace('\'', "''")),
+        AnyValue::Blob(v) => format!("x'{}'", v.iter().map(|b| format!("{b:02x}")).collect::<String>()),
+    }
 }
 
 /// The generator emits one seed and one linear edge step per recursive body. SQLite's

@@ -6,6 +6,42 @@ use ivm_dd::*;
 use std::collections::BTreeSet;
 
 pub const DOMAIN: usize = 3;
+
+/// A no-affinity source exercises every SQLite storage class in one IR program.
+pub fn any_program() -> Program {
+    Program {
+        texts: vec![],
+        rels: vec![
+            Relation { id: 0, name: "mixed_source".into(), cols: vec![Ty::Any, Ty::Int], kind: RelKind::Source },
+            Relation { id: 1, name: "mixed_groups".into(), cols: vec![Ty::Any, Ty::Int], kind: RelKind::Derived },
+            Relation { id: 2, name: "mixed_top".into(), cols: vec![Ty::Any, Ty::Int], kind: RelKind::Derived },
+            Relation { id: 3, name: "mixed_join".into(), cols: vec![Ty::Any, Ty::Int, Ty::Any, Ty::Int], kind: RelKind::Derived },
+            Relation { id: 4, name: "mixed_sum".into(), cols: vec![Ty::Any], kind: RelKind::Derived },
+        ],
+        nodes: vec![
+            Op::Get(0),
+            Op::Reduce { input: 0, key: vec![0], aggs: vec![Agg::Count] },
+            Op::TopK { input: 0, key: vec![], order: vec![Order { col: 0, desc: false }], limit: 4 },
+            Op::Join { inputs: vec![0, 0], equivalences: vec![vec![(0, 0), (1, 0)]] },
+            Op::Reduce { input: 0, key: vec![], aggs: vec![Agg::Sum(0)] },
+        ],
+        strata: vec![Stratum::Let { id: 1, body: 1 }, Stratum::Let { id: 2, body: 2 }, Stratum::Let { id: 3, body: 3 }, Stratum::Let { id: 4, body: 4 }],
+        outputs: vec![1, 2, 3, 4],
+    }
+}
+
+pub fn any_values(rng: &mut Rng) -> Vec<AnyValue> {
+    let n = rng.below(8) as i64 - 3;
+    vec![
+        AnyValue::Integer(n),
+        AnyValue::Real((n as f64).to_bits()),
+        AnyValue::Null,
+        AnyValue::Null,
+        AnyValue::Text(format!("t{}", rng.below(5))),
+        AnyValue::Blob(vec![rng.below(256) as u8, 0, rng.below(256) as u8]),
+        AnyValue::Blob(vec![rng.below(256) as u8]),
+    ]
+}
 /// Widest relation a node may produce.
 const WIDE: usize = 4;
 

@@ -9,6 +9,64 @@ use random::{drive, meta, run};
 use drive::Case;
 use std::process::Command;
 
+fn any_oracle<E: ivm_dd::Engine>(seed: u64) {
+    use ivm_dd::{AnyValue, Frontier, Raw, RelKind, SourceChange, Ty};
+    use rusqlite::{types::Value, Connection};
+
+    let mut rng = random::rng::Rng(seed);
+    let program = random::gen::any_program();
+    let values = random::gen::any_values(&mut rng);
+    let oracle = Connection::open_in_memory().unwrap();
+    oracle.execute_batch(&random::sql::ddl(&program)).unwrap();
+    let db = Connection::open_in_memory().unwrap();
+    let mut host = Raw::with_connection(&db);
+    let mut engine = E::install(&program, &mut host).unwrap();
+    let mut changes = Vec::new();
+    for (i, value) in values.iter().enumerate() {
+        oracle.execute_batch(&format!("INSERT INTO mixed_source VALUES ({}, {})", random::sql::any_literal(value), i + 1)).unwrap();
+        changes.push(SourceChange { rel: 0, row: vec![engine.intern_any(value, &mut host).unwrap(), i as i64 + 1], w: 1 });
+    }
+    engine.settle(Frontier { changes }, &mut host).unwrap();
+    for rel in program.rels.iter().filter(|rel| rel.kind == RelKind::Derived) {
+        let mut stmt = oracle.prepare(&format!("SELECT * FROM {}", rel.name)).unwrap();
+        let width = stmt.column_count();
+        let mut want = stmt.query_map([], |row| (0..width).map(|i| row.get::<_, Value>(i)).collect::<rusqlite::Result<Vec<_>>>())
+            .unwrap().map(Result::unwrap).collect::<Vec<_>>();
+        let mut got = engine.snapshot(rel.id, &mut host).unwrap().into_iter().flat_map(|(row, weight)| {
+            let row = row.iter().zip(&rel.cols).map(|(cell, ty)| match ty {
+                Ty::Any => match engine.any_value(*cell, &mut host).unwrap() {
+                    AnyValue::Null => Value::Null,
+                    AnyValue::Integer(v) => Value::Integer(v),
+                    AnyValue::Real(bits) => Value::Real(f64::from_bits(bits)),
+                    AnyValue::Text(v) => Value::Text(v),
+                    AnyValue::Blob(v) => Value::Blob(v),
+                },
+                Ty::Int => Value::Integer(*cell),
+                _ => panic!("unexpected random output type"),
+            }).collect::<Vec<_>>();
+            std::iter::repeat_n(row, weight as usize)
+        }).collect::<Vec<_>>();
+        let sort = |rows: &mut Vec<Vec<Value>>| rows.sort_by(|a, b| format!("{a:?}").cmp(&format!("{b:?}")));
+        sort(&mut want);
+        sort(&mut got);
+        assert_eq!(got, want, "seed {seed} relation {}", rel.name);
+    }
+}
+
+#[test]
+fn random_any_sqlite_oracle() {
+    isolated("random_any_sqlite_oracle_worker");
+}
+
+#[test]
+#[ignore = "run by random_any_sqlite_oracle in a separate process"]
+fn random_any_sqlite_oracle_worker() {
+    for seed in random::drive::seeds(1000) {
+        any_oracle::<Dd>(seed);
+        any_oracle::<Sqlite>(seed);
+    }
+}
+
 #[test]
 fn captured_oracle_ir_agrees_with_dd() {
     // Lowered from sprefa oracle/eval on 2026-09-27. Each engine's bootstrap
