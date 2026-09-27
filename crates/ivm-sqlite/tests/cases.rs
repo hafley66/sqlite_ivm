@@ -744,7 +744,7 @@ fn direct_settle_batch_contracts() {
         }
     ));
 
-    // NULL cells are an explicit unsupported, not a silent rewrite.
+    // The source schema declares this column NOT NULL, so SQLite rejects it.
     let err = program
         .settle(
             &conn,
@@ -755,7 +755,7 @@ fn direct_settle_batch_contracts() {
             }],
         )
         .unwrap_err();
-    assert!(err.is_unsupported());
+    assert!(matches!(err.kind, ivm_sqlite::ErrorKind::Sqlite(_)));
 }
 
 #[test]

@@ -431,6 +431,7 @@ fn bootstrap(conn: &Connection, inst: &Installed, meter: &mut Meter) -> Result<(
         Root::Union { .. } => Vec::new(),
     };
     for table in &inst.plan.sources {
+        if inst.sql_text { continue; }
         let scan = source_scan(inst, table);
         let nulls = (0..scan.columns.len())
             .map(|i| format!("v{i} IS NULL"))
@@ -553,10 +554,11 @@ fn source_types(conn: &Connection, table: &str) -> Option<Vec<Ty>> {
         }
     }
     let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", quote(table))).ok()?;
-    let declared = stmt.query_map([], |row| row.get::<_, String>(2)).ok()?
+    let declared = stmt.query_map([], |row| Ok((row.get::<_, String>(2)?, row.get::<_, i64>(3)?, row.get::<_, i64>(5)?))).ok()?
         .collect::<Result<Vec<_>, _>>().ok()?;
     if declared.is_empty() { return None; }
-    Some(declared.into_iter().map(|name| {
+    Some(declared.into_iter().map(|(name, not_null, primary_key)| {
+        if not_null == 0 && primary_key == 0 { return Ty::Any; }
         let name = name.to_ascii_uppercase();
         if name.contains("INT") { Ty::Int }
         else if name.contains("CHAR") || name.contains("CLOB") || name.contains("TEXT") { Ty::Text }

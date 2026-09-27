@@ -506,24 +506,19 @@ fn prepopulated_producer_then_consumer_composition() {
     composition.teardown(&conn).unwrap();
 }
 
-/// A failed bootstrap is atomic: no catalog row, no collector, no shadow
-/// objects, and the source tables keep every pre-existing row — including
-/// the cell that caused the rejection.
+/// NULL and numeric text bootstrap through Any; a failed integer overflow
+/// still rolls the install savepoint back without disturbing source rows.
 #[test]
 fn failed_bootstrap_leaves_no_objects_and_sources_untouched() {
-    // NULL in a staged row: explicit Unsupported, matching the settle-time
-    // contract for watched sources.
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
         "CREATE TABLE nullable_src(a INTEGER NOT NULL, b INTEGER);
          INSERT INTO nullable_src VALUES (1, 7), (2, NULL);",
     )
     .unwrap();
-    assert_install_rejected(
-        Program::install(&conn, "nullp", "SELECT a FROM nullable_src"),
-        true,
-        "NULL",
-    );
+    let nullable = Program::install(&conn, "nullp", "SELECT a FROM nullable_src").unwrap();
+    assert_snapshot(&conn, &nullable, "SELECT a FROM nullable_src ORDER BY a");
+    nullable.teardown(&conn).unwrap();
     assert_no_program_objects(&conn);
     assert_eq!(catalog_rows(&conn, "nullp"), 0);
     let (rows, nulls): (i64, i64) = {
@@ -536,23 +531,16 @@ fn failed_bootstrap_leaves_no_objects_and_sources_untouched() {
     assert_eq!((rows, nulls), (2, 1), "source rows were disturbed");
     conn.close().unwrap();
 
-    // TEXT storage in a group-sum column would settle by coercion, not by
-    // value: rejected instead of silently counted.
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(
         "CREATE TABLE sum_src(id INTEGER PRIMARY KEY, team INTEGER NOT NULL, cost);
          INSERT INTO sum_src VALUES (1, 10, 5), (2, 10, '7');",
     )
     .unwrap();
-    assert_install_rejected(
-        Program::install(
-            &conn,
-            "textsum",
-            "SELECT team, count(*) AS jobs, sum(cost) AS total FROM sum_src GROUP BY team",
-        ),
-        true,
-        "TEXT/BLOB",
-    );
+    let query = "SELECT team, count(*) AS jobs, sum(cost) AS total FROM sum_src GROUP BY team";
+    let textsum = Program::install(&conn, "textsum", query).unwrap();
+    assert_snapshot(&conn, &textsum, query);
+    textsum.teardown(&conn).unwrap();
     assert_no_program_objects(&conn);
     assert_eq!(catalog_rows(&conn, "textsum"), 0);
     let rows: i64 = conn

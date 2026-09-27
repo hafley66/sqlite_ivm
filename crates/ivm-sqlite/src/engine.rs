@@ -258,13 +258,6 @@ fn validate_batch(inst: &Installed, batch: &[SourceChange]) -> Result<(), Engine
                 },
             ));
         }
-        if change.row.iter().any(|cell| matches!(cell, Cell::Null)) {
-            return Err(EngineError::unsupported(
-                Stage::Collect,
-                &change.relation,
-                "NULL cells: keys and sums over NULL are not a supported shape",
-            ));
-        }
     }
     Ok(())
 }
