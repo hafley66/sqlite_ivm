@@ -11,6 +11,12 @@ use std::path::PathBuf;
 
 type Bag = BTreeMap<Row, W>;
 
+pub fn memory_connection() -> rusqlite::Result<Connection> {
+    let db = Connection::open_in_memory()?;
+    db.execute_batch("PRAGMA temp_store = MEMORY;")?;
+    Ok(db)
+}
+
 #[derive(Clone, Debug)]
 pub struct Case {
     pub seed: u64,
@@ -75,8 +81,8 @@ impl Case {
 }
 
 pub fn agreement<A: Engine, B: Engine>(case: &Case) -> Result<(), String> {
-    let left_db = Connection::open_in_memory().map_err(sql_err)?;
-    let right_db = Connection::open_in_memory().map_err(sql_err)?;
+    let left_db = memory_connection().map_err(sql_err)?;
+    let right_db = memory_connection().map_err(sql_err)?;
     let mut left = A::install(&case.program, &mut Raw::with_connection(&left_db)).map_err(|e| format!("left install: {e}"))?;
     let mut right = B::install(&case.program, &mut Raw::with_connection(&right_db)).map_err(|e| format!("right install: {e}"))?;
     for (at, frontier) in case.frontiers.iter().enumerate() {
@@ -125,7 +131,7 @@ fn sql_err(e: rusqlite::Error) -> String {
 
 impl Oracle {
     fn new(p: &Program) -> Result<Self, String> {
-        let conn = Connection::open_in_memory().map_err(sql_err)?;
+        let conn = memory_connection().map_err(sql_err)?;
         conn.execute_batch(&sql::ddl(p)).map_err(sql_err)?;
         let outputs = p.outputs.iter().map(|id| (*id, p.rel(*id).unwrap().name.clone())).collect();
         Ok(Oracle { conn, outputs })
@@ -193,7 +199,7 @@ pub fn snapshot<E: Engine>(e: &E, rel: RelId, db: &Connection) -> Result<Vec<(Ro
 pub fn oracle<E: Engine>(case: &Case) -> Result<(), String> {
     let p = &case.program;
     let oracle = Oracle::new(p)?;
-    let engine_db = Connection::open_in_memory().map_err(sql_err)?;
+    let engine_db = memory_connection().map_err(sql_err)?;
     let mut engine = E::install(p, &mut Raw::with_connection(&engine_db)).map_err(|e| format!("install: {e}"))?;
     let mut before = oracle.bags()?;
     for (i, f) in case.frontiers.iter().enumerate() {

@@ -69,7 +69,7 @@ fn lookup(db: &Connection, id: i64) -> rusqlite::Result<Option<Term>> {
 pub(crate) fn snapshot(db: &Connection, ir: &Program, functor: RelId) -> rusqlite::Result<Vec<(Row, W)>> {
     let rel = ir.rel(functor).filter(|r| r.kind == RelKind::Constructor).ok_or(rusqlite::Error::InvalidQuery)?;
     let table = crate::catalog::quote(ctor_table(&rel.name));
-    let mut stmt = db.prepare(&format!("SELECT * FROM {table} ORDER BY c0"))?;
+    let mut stmt = db.prepare_cached(&format!("SELECT * FROM {table} ORDER BY c0"))?;
     let rows = stmt.query_map([], |r| Ok(((0..rel.cols.len()).map(|i| r.get(i)).collect::<rusqlite::Result<Row>>()?, 1)))?
         .collect();
     rows

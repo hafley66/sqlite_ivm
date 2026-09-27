@@ -6,6 +6,7 @@ use crate::{
 use ivm_engine::{Engine, EngineError, ErrorKind, Host, Stage};
 use ivm_ir::{Delta, Frontier, Op, Program, RelId, RelKind, Row, Stratum, W};
 use sqlite_ext::rusqlite::{self, Connection};
+use std::borrow::Cow;
 
 pub struct Sqlite {
     programs: Vec<OutputProgram>,
@@ -118,16 +119,20 @@ impl Engine for Sqlite {
                 threshold,
             });
         }
-        Ok(Self {
+        let engine = Self {
             programs,
             ir: ir.clone(),
             tick: 0,
-        })
+        };
+        // A frontier visits every installed output. Rusqlite's default cache of 16
+        // statements evicts each output's SQL before the next frontier reaches it.
+        let capacity = engine.statements().len() + ir.outputs.len() * 2 + ir.rels.len() * 3 + 16;
+        db.set_prepared_statement_cache_capacity(capacity);
+        Ok(engine)
     }
 
     fn settle(&mut self, frontier: Frontier, host: &mut impl Host) -> Result<Delta, EngineError> {
         let db = conn(host, Stage::Settle)?;
-        crate::terms::register(db).map_err(|e| error(Stage::Settle, e))?;
         db.execute_batch("SAVEPOINT ivm_engine_frontier;")
             .map_err(|e| error(Stage::Settle, e))?;
         let run = || -> Result<Vec<(RelId, Row, W)>, EngineError> {
@@ -176,12 +181,10 @@ impl Engine for Sqlite {
                     .collect::<Vec<_>>()
                     .join(" AND ");
                 let table = catalog::quote(&source.name);
+                let count_sql = format!("SELECT count(*) FROM {table} WHERE {match_row}");
                 let count: i64 = db
-                    .query_row(
-                        &format!("SELECT count(*) FROM {table} WHERE {match_row}"),
-                        rusqlite::params_from_iter(&change.row),
-                        |r| r.get(0),
-                    )
+                    .prepare_cached(&count_sql)
+                    .and_then(|mut stmt| stmt.query_row(rusqlite::params_from_iter(&change.row), |r| r.get(0)))
                     .map_err(|e| error(Stage::Settle, e))?;
                 if change.w > 0 && count > 0 {
                     return Err(EngineError::new(
@@ -201,7 +204,8 @@ impl Engine for Sqlite {
                 } else {
                     format!("DELETE FROM {table} WHERE {match_row}")
                 };
-                db.execute(&sql, rusqlite::params_from_iter(&change.row))
+                db.prepare_cached(&sql)
+                    .and_then(|mut stmt| stmt.execute(rusqlite::params_from_iter(&change.row)))
                     .map_err(|e| error(Stage::Settle, e))?;
                 batch.push(SqlChange {
                     relation: source.name.clone(),
@@ -234,7 +238,7 @@ impl Engine for Sqlite {
                 } else {
                     let width = output.program.inner.output.len();
                     let mut stmt = db
-                        .prepare(output.program.inner.sqls.weight_delta.as_deref().unwrap())
+                        .prepare_cached(output.program.inner.sqls.weight_delta.as_deref().unwrap())
                         .map_err(|e| error(Stage::Settle, e))?;
                     let rows = stmt
                         .query_map([], |r| Ok((row_of(r, width)?, r.get::<_, W>(width)?)))
@@ -275,8 +279,8 @@ impl Engine for Sqlite {
         let db = conn(host, Stage::Snapshot)?;
         let plan = &output.program.inner.plan;
         let width = plan.output.len();
-        let sql = match &plan.root {
-            crate::plan::Root::Nodes(nodes) => nodes.output_snapshot.clone(),
+        let sql: Cow<'_, str> = match &plan.root {
+            crate::plan::Root::Nodes(nodes) => Cow::Borrowed(&nodes.output_snapshot),
             crate::plan::Root::Union { .. } => {
                 let cols = plan
                     .output
@@ -284,17 +288,17 @@ impl Engine for Sqlite {
                     .map(|c| catalog::quote(&c.name))
                     .collect::<Vec<_>>()
                     .join(",");
-                format!(
+                Cow::Owned(format!(
                     "SELECT {cols},__weight FROM {} WHERE __weight>0 ORDER BY {cols}",
                     catalog::quote(catalog::root(&output.program.inner.name))
-                )
+                ))
             }
             crate::plan::Root::Group { .. } => {
                 let snapshot = output.program.inner.sqls.snapshot.trim_end_matches(';');
-                format!("SELECT *,1 FROM ({snapshot})")
+                Cow::Owned(format!("SELECT *,1 FROM ({snapshot})"))
             }
         };
-        let mut stmt = db.prepare(&sql).map_err(|e| error(Stage::Snapshot, e))?;
+        let mut stmt = db.prepare_cached(&sql).map_err(|e| error(Stage::Snapshot, e))?;
         let result = stmt
             .query_map([], |r| {
                 let row = row_of(r, width)?;

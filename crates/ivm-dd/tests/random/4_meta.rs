@@ -1,6 +1,6 @@
 //! Metamorphic checks, engine against itself: K4 ids, K5 values, K7 frontier split.
 
-use super::drive::{raw, snapshot, Case};
+use super::drive::{memory_connection, raw, snapshot, Case};
 use super::{gen, rng::Rng};
 use ivm_dd::*;
 use rusqlite::Connection;
@@ -60,8 +60,8 @@ pub fn permute<E: Engine>(case: &Case) -> Result<(), String> {
     let mut rng = Rng(case.seed ^ 0x9e4d_0001);
     let p = &case.program;
     let (q, map) = permuted(p, &mut rng);
-    let db_a = Connection::open_in_memory().map_err(|e| e.to_string())?;
-    let db_b = Connection::open_in_memory().map_err(|e| e.to_string())?;
+    let db_a = memory_connection().map_err(|e| e.to_string())?;
+    let db_b = memory_connection().map_err(|e| e.to_string())?;
     let mut a = E::install(p, &mut Raw::with_connection(&db_a)).map_err(|e| format!("install: {e}"))?;
     let mut b = E::install(&q, &mut Raw::with_connection(&db_b)).map_err(|e| format!("install permuted: {e}"))?;
     for (i, f) in case.frontiers.iter().enumerate() {
@@ -100,8 +100,8 @@ fn k5_row(p: &Program, rel: RelId, row: &Row) -> Row {
 /// K5: transform every source frontier, then compare transformed deltas and snapshots.
 pub fn values<E: Engine>(case: &Case) -> Result<(), String> {
     let p = &case.program;
-    let db_a = Connection::open_in_memory().map_err(|e| e.to_string())?;
-    let db_b = Connection::open_in_memory().map_err(|e| e.to_string())?;
+    let db_a = memory_connection().map_err(|e| e.to_string())?;
+    let db_b = memory_connection().map_err(|e| e.to_string())?;
     let mut a = E::install(p, &mut Raw::with_connection(&db_a)).map_err(|e| format!("install: {e}"))?;
     let mut b = E::install(p, &mut Raw::with_connection(&db_b)).map_err(|e| format!("install transformed: {e}"))?;
     for (i, f) in case.frontiers.iter().enumerate() {
@@ -133,8 +133,8 @@ pub fn values<E: Engine>(case: &Case) -> Result<(), String> {
 pub fn split<E: Engine>(case: &Case) -> Result<(), String> {
     let mut rng = Rng(case.seed ^ 0x5b17_0002);
     let p = &case.program;
-    let db_a = Connection::open_in_memory().map_err(|e| e.to_string())?;
-    let db_b = Connection::open_in_memory().map_err(|e| e.to_string())?;
+    let db_a = memory_connection().map_err(|e| e.to_string())?;
+    let db_b = memory_connection().map_err(|e| e.to_string())?;
     let mut a = E::install(p, &mut Raw::with_connection(&db_a)).map_err(|e| format!("install: {e}"))?;
     let mut b = E::install(p, &mut Raw::with_connection(&db_b)).map_err(|e| format!("install split: {e}"))?;
     let mut chunked = Vec::new();
