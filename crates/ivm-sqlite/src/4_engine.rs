@@ -406,7 +406,11 @@ impl Engine for Sqlite {
                         (&mut counters.delta_rows.window, work.delta_rows.window),
                         (&mut counters.delta_rows.mint, work.delta_rows.mint),
                     ] {
-                        if let (Some(target), Some(source)) = (target.as_mut(), source) { *target += source; }
+                        match (target.as_mut(), source) {
+                            (Some(target), Some(source)) => *target += source,
+                            (_, None) => *target = None,
+                            _ => {}
+                        }
                     }
                     *counters.rounds.as_mut().unwrap() += work.rounds.unwrap_or(0);
                     *counters.statements.as_mut().unwrap() += work.statements.unwrap_or(0);

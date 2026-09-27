@@ -93,3 +93,32 @@ The retained SQLite changes are in the SQL node lowerer and bootstrap. An `Mfp` 
 With the final source, a later three-run set measured rust 0.165/0.130/0.129 s (median 0.130), ir:dd 2.521/2.586/2.604 s (median 2.586), and ir:sqlite 12.525/12.752/12.030 s (median 12.525). Another lane had CPU-heavy `dl8` and Rust compilation processes active during this set. The paired SQLite A/B results above isolate the effect of the retained changes more closely. Neither engine reached the issue's fixed release target.
 
 `SEEDS=1000 cargo test -j 4 -p ivm-ir -p ivm-engine -p ivm-dd -p ivm-sqlite -p ivm-rxjs` passed on the final SQLite code. The nested frontier extension test first failed due a stale `libsqlite3-sys` build output in its fixed temporary target; cleaning only that package and rebuilding made it pass. `bash scripts/0_build.sh release` produced the extension loaded by sprefa. With an explicit `LC_ALL=en_US.UTF-8`, sprefa `cargo test -j 4 --test it` reached 140/141: the only failure compares a pinned book excerpt for `dl8 run --help` that omits `fs.watch` against current CLI output. All engine oracle and ladder tests passed. On the final batched-bootstrap source, the targeted `ir_engines_match_v7_oracles` test passed. No sprefa source or oracle expected output was edited.
+
+## SQLite materialization boundaries: design
+
+The SQL node lowerer currently gives every node a `d` table for the current frontier and gives a node an `i` table when a consumer needs its pre-frontier image. Keep the `i` table and its indexes wherever `integrate` requests them. Store a pure node's `d` query as a statement-local CTE instead of creating and filling a `d` table. Each CTE consolidates `c0..cN,w` with the same `GROUP BY` and nonzero-weight test as the old fill statement. Build the CTE dependency closure for each statement in node order, so a chain of pure nodes reads its input delta CTE or physical delta table without a persistent intermediate. The CTE is evaluated at the consumer statement's existing point in the fill sequence.
+
+| IR operation / SQL object | Persistent across frontiers | Current-frontier delta |
+| --- | --- | --- |
+| Source and derived relation (`Get`, `Let`, output) | Source host table; `i` for any requested pre-image and every visible output | Physical `d` when it is written by source staging, LetRec, or another stateful producer |
+| `Join`, `Antijoin` | Input `i` arrangements and indexes used by pre-image/absence reads | Physical producer `d`; internal pure key/projection/negation nodes may be CTEs |
+| `Reduce`, `TopK`, `Window` | Group accumulator, input arrangement, or ranked/window output `i` as requested | Physical producer `d`; pure inputs may be CTEs |
+| `Mint`, constructing `StrCons`, constructor `Get` | Constructor dictionary/table and any requested `i` | Physical `d`, because dictionary writes or constructor scans are ordered fill effects |
+| `LetRec` variable, body, result, outer-input copy | Variable `i`, body `i`, result `i` when requested; SCC `nx`, `del`, `acc`, and copy `hold` staging | Physical `d` at round and DRed phase boundaries |
+| `Mfp`, `Union`, `Negate`, `Threshold`, decomposing `StrCons` | `i` only if a later consumer requests its pre-image | CTE over input `d` and, for `Threshold`, input `i`; no `d` table |
+
+Within a LetRec round, each inlined query reads the current round's physical variable and copy deltas. DRed over-delete, rederive, and insert statements read the body boundary's physical `d` and its integrated pre-image; pure nodes inside the body are evaluated by the fill statement that writes that boundary. Recursive antijoin's delete/insert seeds read the key delta through a CTE and the physical left-input boundary. SCC `stash`/`restore` and round order remain unchanged. Integration runs in reverse node order, keeping each input's `i` pre-image intact while a downstream inlined `Threshold` delta is evaluated. Each node's upsert and zero-row cleanup remain paired.
+
+Count every prepared `CREATE` in an install, including `IF NOT EXISTS` and index statements, at the statement batch boundary. The expected decrease is one `CREATE TABLE` per eligible pure delta, with existing `i` and private state DDL retained. The test uses SQLite statement tracing on the connection around `Engine::install`; this also sees the source and catalog DDL issued outside the batch. The c15 fixture's expected count was 7,544 before and is 5,825 after, a reduction of 1,719 tables. A pure chain with three inlined nodes creates 20 objects; adding 20 more MFP nodes keeps the count at 20. The recursive growth test records 131 CREATEs for eight LetRec strata (24 stateful IR/SCC/output nodes) and 467 for 32 strata (96 stateful nodes), with `assert_growth_sized(..., Growth::Linear)` sized by those stateful counts. Work-row counters for inlined MFP and decomposing `StrCons` report `None` because their frontier deltas are no longer stored for a separate count query.
+
+## SQLite materialization boundaries: measurements and validation
+
+Release `cargo test -p ivm-sqlite --test 6_install_growth -- --ignored bench_ --nocapture`, with `CARGO_BUILD_JOBS=4`, `CARGO_INCREMENTAL=0`, and `RUST_TEST_THREADS=4`, measured one install and all captured frontiers per program. c15 has no captured source frontier, so its settle timing uses one empty frontier. The two smaller captured programs use their `sqlite_frontiers` from the 0_fs_json oracle captures. Times are one run each, in milliseconds, on the same host; the before run compiled the checked-in lowerer, then restored the edited source for the after run.
+
+| Program | Before install | Before settle | Before total | After install | After settle | After total |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| c15 (4,011 IR nodes, 93 outputs) | 1,612.151 | 195.993 | 1,808.144 | 921.915 | 361.394 | 1,283.309 |
+| 3_count | 4.170 | 8.007 | 12.177 | 3.365 | 10.747 | 14.112 |
+| 16_intern_row_reuse | 6.144 | 14.835 | 20.980 | 4.731 | 20.354 | 25.086 |
+
+`bash scripts/0_build.sh release` passed. `SEEDS=1000 cargo test -j 4 -p ivm-ir -p ivm-engine -p ivm-dd -p ivm-sqlite -p ivm-rxjs` passed, including the captured 3_count and 16_intern_row_reuse DD comparisons. A separate c15 test compares the empty-frontier delta and all 93 output snapshots with DD. `just rxjs-test` passed: 226 Vitest cases and TypeScript checking. The sprefa end-to-end `dl8` timing remains for the herder after merge.

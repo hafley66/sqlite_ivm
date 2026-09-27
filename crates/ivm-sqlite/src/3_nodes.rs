@@ -1,4 +1,4 @@
-//! SQLite engine: `lower` emits one delta table and one INSERT..SELECT per node; all state lives in tables.
+//! SQLite engine: `lower` keeps persistent images in tables and folds pure deltas into CTEs.
 //! Join uses the pre-image rule: every node integrates only after every fill of the settle has run.
 //! Every read of integrated state is driven from a delta (CROSS JOIN fixes the loop order); aliases of
 //! integrated tables end in `_i` so query plans name them.
@@ -47,7 +47,7 @@ enum Owner {
     Copy(usize),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum WorkKind { Filter, Join, Antijoin, Reduce, Topk, Window, Mint }
 
 impl WorkKind {
@@ -80,6 +80,8 @@ impl WorkKind {
 
 struct Node {
     c: SqlC,
+    body: Option<String>,
+    inline: bool,
     fill: Vec<String>,
     delete_fill: Vec<String>,
     insert_fill: Vec<String>,
@@ -302,7 +304,8 @@ impl SqlRel {
             (Some(a), true) => Owner::Loop(a.scc),
             _ => Owner::Settle,
         };
-        let fill = body(&c).into_iter().map(|body| {
+        let body = body(&c);
+        let fill = body.iter().map(|body| {
             let cols = list("", 0..arity);
             format!(
                 "INSERT INTO {d} ({cols}, w) SELECT {cols}, SUM(w) FROM ({body}) WHERE true GROUP BY {cols} HAVING SUM(w) <> 0",
@@ -312,6 +315,8 @@ impl SqlRel {
         let fill = fill.collect();
         self.nodes.push(Node {
             c: c.clone(),
+            body,
+            inline: false,
             fill,
             delete_fill: Vec::new(),
             insert_fill: Vec::new(),
@@ -446,6 +451,9 @@ impl Rel for SqlRel {
                 )))
             }
         };
+        if matches!(mode, StrMode::Decompose { .. }) {
+            self.nodes[next.node].inline = true;
+        }
         Ok(next)
     }
 
@@ -483,7 +491,7 @@ impl Rel for SqlRel {
             self.fail(e);
             (Vec::new(), vec!["0".into()])
         });
-        self.push(cols.len(), c.rec, |_| {
+        let out = self.push(cols.len(), c.rec, |_| {
             let select = cols
                 .iter()
                 .enumerate()
@@ -496,7 +504,9 @@ impl Rel for SqlRel {
                 wheres.join(" AND ")
             };
             Some(format!("SELECT {select}, w FROM {} WHERE {wheres}", c.d))
-        })
+        });
+        self.nodes[out.node].inline = true;
+        out
     }
 
     fn union(&mut self, cs: Vec<Self::C>) -> Self::C {
@@ -508,25 +518,29 @@ impl Rel for SqlRel {
         }
         let cols = list("", 0..arity);
         let rec = cs.iter().any(|c| c.rec);
-        self.push(arity, rec, |_| {
+        let out = self.push(arity, rec, |_| {
             Some(
                 cs.iter()
                     .map(|c| format!("SELECT {cols}, w FROM {}", c.d))
                     .collect::<Vec<_>>()
                     .join(" UNION ALL "),
             )
-        })
+        });
+        self.nodes[out.node].inline = true;
+        out
     }
 
     fn negate(&mut self, c: Self::C) -> Self::C {
         self.flat(&c, "Negate over a LetRec variable");
-        self.push(c.arity, false, |_| {
+        let out = self.push(c.arity, false, |_| {
             Some(format!(
                 "SELECT {}, -w AS w FROM {}",
                 list("", 0..c.arity),
                 c.d
             ))
-        })
+        });
+        self.nodes[out.node].inline = true;
+        out
     }
 
     /// Δ(a⋈b) = Δa⋈Δb + I⁻(a)⋈Δb + Δa⋈I⁻(b), with I⁻ the integrated tables not yet updated this settle.
@@ -831,7 +845,7 @@ impl Rel for SqlRel {
         self.flat(&c, "Threshold over a LetRec variable");
         self.integrate(&c, Vec::new());
         let n: Vec<usize> = (0..c.arity).collect();
-        self.push(c.arity, false, |_| {
+        let out = self.push(c.arity, false, |_| {
             Some(format!(
                 "SELECT {dc}, CASE WHEN COALESCE(i_i.w, 0) + d.w > 0 THEN 1 ELSE -1 END AS w \
                  FROM (SELECT {all}, SUM(w) AS w FROM {d} GROUP BY {all}) d LEFT JOIN {i} i_i ON {cond} \
@@ -842,7 +856,9 @@ impl Rel for SqlRel {
                 i = c.i,
                 cond = on("i_i", &n, "d", &n),
             ))
-        })
+        });
+        self.nodes[out.node].inline = true;
+        out
     }
 
     /// Touched groups re-ranked by `order` then the whole row ascending (DD `rank`); weight = rows taken.
@@ -975,6 +991,8 @@ impl Rel for SqlRel {
         for body in &rec.bodies {
             let c = lower_node(p, self, &mut nodes, &scope, *body)?;
             let b = if c.rec { c } else { self.copy(c) };
+            // DRed reads and clears the body delta after each round.
+            self.nodes[b.node].inline = false;
             self.integrate(&b, Vec::new());
             bs.push(b);
         }
@@ -1060,6 +1078,43 @@ pub(crate) struct NodesPlan {
     pub output_snapshot: String,
     pub output_arity: usize,
     work: Vec<(Owner, String, WorkKind, usize)>,
+    filter_measured: bool,
+    mint_measured: bool,
+}
+
+fn delta_refs(sql: &str, by_name: &std::collections::HashMap<&str, usize>) -> Vec<usize> {
+    let bytes = sql.as_bytes();
+    sql.match_indices("ivm_n").filter_map(|(at, _)| {
+        if at > 0 && (bytes[at - 1].is_ascii_alphanumeric() || bytes[at - 1] == b'_') {
+            return None;
+        }
+        let end = bytes[at..].iter().position(|byte| !byte.is_ascii_alphanumeric() && *byte != b'_')
+            .map(|len| at + len).unwrap_or(bytes.len());
+        by_name.get(&sql[at..end]).copied()
+    }).collect()
+}
+
+fn with_inline_deltas(sql: &str, definitions: &[(String, String)],
+    by_name: &std::collections::HashMap<&str, usize>, deps: &[Vec<usize>]) -> String {
+    let mut needed = vec![false; definitions.len()];
+    let mut pending = delta_refs(sql, by_name);
+    while let Some(i) = pending.pop() {
+        if !needed[i] {
+            needed[i] = true;
+            pending.extend(deps[i].iter().copied());
+        }
+    }
+    let ctes = definitions.iter().zip(needed).filter_map(|((name, body), needed)| {
+        needed.then(|| format!("{name} AS MATERIALIZED ({body})"))
+    }).collect::<Vec<_>>().join(", ");
+    if ctes.is_empty() { return sql.to_owned(); }
+    if let Some(rest) = sql.strip_prefix("WITH RECURSIVE ") {
+        format!("WITH RECURSIVE {ctes}, {rest}")
+    } else if let Some(rest) = sql.strip_prefix("WITH ") {
+        format!("WITH {ctes}, {rest}")
+    } else {
+        format!("WITH {ctes} {sql}")
+    }
 }
 
 impl NodesPlan {
@@ -1092,11 +1147,28 @@ impl NodesPlan {
         if let Some(error) = rel.err {
             return Err(error);
         }
+        let filter_measured = !rel.work_nodes.iter().any(|(id, node)| {
+            matches!(program.nodes.get(*id as usize), Some(Op::Mfp { .. }))
+                && rel.nodes.get(*node).is_some_and(|built| built.inline)
+        });
+        let mint_measured = !rel.work_nodes.iter().any(|(id, node)| {
+            matches!(program.nodes.get(*id as usize), Some(Op::Mint { .. } | Op::StrCons { .. }))
+                && rel.nodes.get(*node).is_some_and(|built| built.inline)
+        });
         let work = rel.work_nodes.iter().filter_map(|(id, node)| {
             let kind = WorkKind::of(program.nodes.get(*id as usize)?)?;
             let built = rel.nodes.get(*node)?;
+            if built.inline || (kind == WorkKind::Filter && !filter_measured)
+                || (kind == WorkKind::Mint && !mint_measured) { return None; }
             Some((built.owner, built.c.d.clone(), kind, built.c.arity))
         }).collect();
+        let inline_deltas = rel.nodes.iter().filter(|node| node.inline).map(|node| {
+            let cols = list("", 0..node.c.arity);
+            let body = node.body.as_ref().expect("inline node has a body");
+            (node.c.d.clone(), format!(
+                "SELECT {cols}, SUM(w) AS w FROM ({body}) WHERE true GROUP BY {cols} HAVING SUM(w) <> 0"
+            ))
+        }).collect::<Vec<_>>();
         let mut ddl = Vec::new();
         let mut objects = Vec::new();
         let mut source_fills = Vec::new();
@@ -1111,11 +1183,10 @@ impl NodesPlan {
                 ..
             } = &node.c;
             let cols = list("", 0..*arity);
-            ddl.push(format!(
-                "CREATE TABLE {d} ({}, w INTEGER NOT NULL)",
-                decl(*arity)
-            ));
-            objects.push(("TABLE".into(), d.clone()));
+            if !node.inline {
+                ddl.push(format!("CREATE TABLE {d} ({}, w INTEGER NOT NULL)", decl(*arity)));
+                objects.push(("TABLE".into(), d.clone()));
+            }
             ddl.extend(node.ddl.iter().cloned());
             for extra in &node.ddl {
                 if let Some((kind, name)) = ddl_object(extra) {
@@ -1129,14 +1200,17 @@ impl NodesPlan {
             }
             match node.owner {
                 Owner::Loop(s) => {
-                    sccs[s].delete_fills.extend(node.fill.iter().cloned());
-                    sccs[s].insert_fills.extend(node.fill.iter().cloned());
+                    if !node.inline {
+                        sccs[s].delete_fills.extend(node.fill.iter().cloned());
+                        sccs[s].insert_fills.extend(node.fill.iter().cloned());
+                    }
                     sccs[s].delete_fills.extend(node.delete_fill.iter().cloned());
                     sccs[s].insert_fills.extend(node.insert_fill.iter().cloned());
                     sccs[s].delete_seeds.extend(node.delete_seed.iter().cloned());
                     sccs[s].insert_seeds.extend(node.insert_seed.iter().cloned());
                 }
-                _ => steps.extend(node.fill.iter().cloned().map(Step::Fill)),
+                _ if !node.inline => steps.extend(node.fill.iter().cloned().map(Step::Fill)),
+                _ => {}
             }
             if let Owner::Copy(s) = node.owner {
                 let hold = format!("ivm_n{k}_hold");
@@ -1161,7 +1235,7 @@ impl NodesPlan {
                     (&mut scc.integrates, &mut scc.clears)
                 }
             };
-            clrs.push(format!("DELETE FROM {d}"));
+            if !node.inline { clrs.push(format!("DELETE FROM {d}")); }
             if node.integrated {
                 ddl.push(format!(
                     "CREATE TABLE {i} ({}, w INTEGER NOT NULL, PRIMARY KEY ({cols})) WITHOUT ROWID",
@@ -1232,6 +1306,12 @@ impl NodesPlan {
             source_fills.push(format!("INSERT INTO {} ({cols},w) SELECT {vals},SUM(__sign) FROM {} WHERE __table='{}' GROUP BY {vals} HAVING SUM(__sign)<>0",
                 c.d, crate::catalog::quote(crate::catalog::stage(name)), source.name.replace('\'', "''")));
         }
+        // A pure delta can read an input's pre-frontier image. Integrate consumers
+        // before inputs so those images remain the pre-frontier values throughout.
+        integrates = integrates.chunks_exact(2).rev().flatten().cloned().collect();
+        for scc in &mut sccs {
+            scc.integrates = scc.integrates.chunks_exact(2).rev().flatten().cloned().collect();
+        }
         let (_, output) = rel
             .outputs
             .first()
@@ -1267,9 +1347,38 @@ impl NodesPlan {
             ),
             output_arity: output.arity,
             work,
+            filter_measured,
+            mint_measured,
         };
+        plan.inline_statements(&inline_deltas);
         plan.prefix(name);
         Ok(plan)
+    }
+
+    fn inline_statements(&mut self, inline_deltas: &[(String, String)]) {
+        let by_name = inline_deltas.iter().enumerate().map(|(i, (name, _))| (name.as_str(), i))
+            .collect::<std::collections::HashMap<_, _>>();
+        let deps = inline_deltas.iter().map(|(_, body)| delta_refs(body, &by_name)).collect::<Vec<_>>();
+        let expand = |sql: &mut String| *sql = with_inline_deltas(sql, inline_deltas, &by_name, &deps);
+        self.source_fills.iter_mut().for_each(&expand);
+        for step in &mut self.steps {
+            if let Step::Fill(sql) = step { expand(sql); }
+        }
+        for scc in &mut self.sccs {
+            scc.delete_fills.iter_mut().chain(&mut scc.insert_fills)
+                .chain(&mut scc.delete_seeds).chain(&mut scc.insert_seeds)
+                .chain(&mut scc.integrates).chain(&mut scc.clears)
+                .chain(&mut scc.stash).chain(&mut scc.restore).for_each(&expand);
+            for var in &mut scc.vars {
+                for sql in [&mut var.over_delete, &mut var.rederive, &mut var.insert,
+                    &mut var.to_delta, &mut var.to_acc, &mut var.to_del, &mut var.clear_nx,
+                    &mut var.clear_del, &mut var.any, &mut var.finish, &mut var.clear_acc] {
+                    expand(sql);
+                }
+            }
+        }
+        self.integrates.iter_mut().chain(&mut self.clears).for_each(&expand);
+        expand(&mut self.output_delta);
     }
 
     fn prefix(&mut self, program: &str) {
@@ -1411,6 +1520,8 @@ impl NodesPlan {
     }
 
     pub fn run(&self, db: &Connection, counters: &mut Counters) -> rusqlite::Result<Vec<(Row, W)>> {
+        if !self.filter_measured { counters.delta_rows.filter = None; }
+        if !self.mint_measured { counters.delta_rows.mint = None; }
         Self::exec_all(db, &self.source_fills, counters)?;
         for step in &self.steps {
             match step {
