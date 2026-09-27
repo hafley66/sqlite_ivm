@@ -450,6 +450,11 @@ impl Rel for SqlRel {
     }
 
     fn mfp(&mut self, c: Self::C, filter: &[Expr], map: &[Expr], project: &[ColId], input_types: &[Ty]) -> Self::C {
+        if filter.is_empty() && map.is_empty()
+            && (project.is_empty() || (project.len() == c.arity
+                && project.iter().enumerate().all(|(i, col)| *col as usize == i))) {
+            return c;
+        }
         let rendered = (|| -> Result<(Vec<String>, Vec<String>), EngineError> {
             let mut maps = Vec::new();
             let mut types = input_types.to_vec();
@@ -496,6 +501,7 @@ impl Rel for SqlRel {
 
     fn union(&mut self, cs: Vec<Self::C>) -> Self::C {
         let cs = self.feed(cs);
+        if cs.len() == 1 { return cs.into_iter().next().unwrap(); }
         let arity = cs.first().map_or(0, |c| c.arity);
         if cs.iter().any(|c| c.arity != arity) {
             self.fail(unsupported("Union arity mismatch"));

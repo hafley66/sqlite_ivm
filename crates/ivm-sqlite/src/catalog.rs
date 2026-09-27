@@ -379,6 +379,21 @@ fn bootstrap(conn: &Connection, inst: &Installed, meter: &mut Meter) -> Result<(
     let phase = "install";
     let p = &inst.name;
 
+    // Typed IR has no constant-producing node, so empty source tables leave
+    // every node empty. Check sources in batches before preparing fill SQL.
+    if !inst.sql_text && !inst.plan.sources.is_empty() {
+        let mut has_rows = false;
+        for tables in inst.plan.sources.chunks(128) {
+            let query = format!("SELECT {}", tables.iter().map(|table| {
+                format!("EXISTS(SELECT 1 FROM {} LIMIT 1)", quote(table))
+            }).collect::<Vec<_>>().join(" OR "));
+            has_rows = conn.query_row(&query, [], |row| row.get::<_, bool>(0))
+                .map_err(|e| EngineError::new(Stage::Install, p, ErrorKind::Sqlite(e.to_string())))?;
+            if has_rows { break; }
+        }
+        if !has_rows { return Ok(()); }
+    }
+
     // Stage every current source row with sign +1, in declared column
     // order. The staging columns carry no declared type, so cells keep
     // their storage classes end to end.
