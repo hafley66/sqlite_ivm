@@ -386,59 +386,90 @@ impl Engine for Sqlite {
             }
             let mut changes = Vec::new();
             for output in &self.programs {
-                let used = batch.iter().filter(|change| output.program.inner.plan.sources.contains(&change.relation)).cloned().collect::<Vec<_>>();
-                let (visible, work) = crate::engine::settle_counted(db, &output.program.inner, &used, false)
-                    .map_err(|e| error(Stage::Settle, e))?;
-                for (target, source) in [
-                    (&mut counters.delta_rows.filter, work.delta_rows.filter),
-                    (&mut counters.delta_rows.join, work.delta_rows.join),
-                    (&mut counters.delta_rows.antijoin, work.delta_rows.antijoin),
-                    (&mut counters.delta_rows.reduce, work.delta_rows.reduce),
-                    (&mut counters.delta_rows.topk, work.delta_rows.topk),
-                    (&mut counters.delta_rows.window, work.delta_rows.window),
-                    (&mut counters.delta_rows.mint, work.delta_rows.mint),
-                ] {
-                    if let (Some(target), Some(source)) = (target.as_mut(), source) { *target += source; }
-                }
-                *counters.rounds.as_mut().unwrap() += work.rounds.unwrap_or(0);
-                *counters.statements.as_mut().unwrap() += work.statements.unwrap_or(0);
-                if output.threshold || output.program.inner.sqls.weight_delta.is_none() {
-                    for change in visible {
-                        let row = change
-                            .row
-                            .into_iter()
-                            .map(|cell| match cell {
-                                Cell::Integer(v) => Ok(v),
-                                _ => Err(error(Stage::Settle, "non-integer output")),
-                            })
-                            .collect::<Result<Row, _>>()?;
-                        changes.push((output.rel, row, change.sign.as_integer()));
-                    }
-                } else {
-                    let width = output.program.inner.output.len();
-                    let mut stmt = db
-                        .prepare_cached(output.program.inner.sqls.weight_delta.as_deref().unwrap())
-                        .map_err(|e| error(Stage::Settle, e))?;
-                    let rows = stmt
-                        .query_map([], |r| Ok((row_of(r, width)?, r.get::<_, W>(width)?)))
-                        .map_err(|e| error(Stage::Settle, e))?;
+                let mut used = batch.iter().filter(|change| output.program.inner.plan.sources.contains(&change.relation)).cloned().collect::<Vec<_>>();
+                let mut terms = if output.members.is_empty() { 0 } else {
                     *counters.statements.as_mut().unwrap() += 1;
-                    for row in rows {
-                        let (row, weight) = row.map_err(|e| error(Stage::Settle, e))?;
-                        if output.members.is_empty() {
-                            changes.push((output.rel, row, weight));
-                        } else {
-                            let rel = row[0] as RelId;
-                            let width = output.members.iter().find(|(id, _)| *id == rel)
-                                .map(|(_, width)| *width)
-                                .ok_or_else(|| error(Stage::Settle, "unknown bundled output"))?;
-                            changes.push((rel, row[1..=width].to_vec(), weight));
+                    db.query_row("SELECT count(*) FROM ivm_term_dict", [], |r| r.get::<_, i64>(0))
+                        .map_err(|e| error(Stage::Settle, e))?
+                };
+                // Later strata and recursive rounds can mint rows after an earlier
+                // constructor scan. Empty-source passes carry those rows forward.
+                for pass in 0..=8192 {
+                    let (visible, work) = crate::engine::settle_counted(db, &output.program.inner, &used, false)
+                        .map_err(|e| error(Stage::Settle, e))?;
+                    for (target, source) in [
+                        (&mut counters.delta_rows.filter, work.delta_rows.filter),
+                        (&mut counters.delta_rows.join, work.delta_rows.join),
+                        (&mut counters.delta_rows.antijoin, work.delta_rows.antijoin),
+                        (&mut counters.delta_rows.reduce, work.delta_rows.reduce),
+                        (&mut counters.delta_rows.topk, work.delta_rows.topk),
+                        (&mut counters.delta_rows.window, work.delta_rows.window),
+                        (&mut counters.delta_rows.mint, work.delta_rows.mint),
+                    ] {
+                        if let (Some(target), Some(source)) = (target.as_mut(), source) { *target += source; }
+                    }
+                    *counters.rounds.as_mut().unwrap() += work.rounds.unwrap_or(0);
+                    *counters.statements.as_mut().unwrap() += work.statements.unwrap_or(0);
+                    if output.threshold || output.program.inner.sqls.weight_delta.is_none() {
+                        for change in visible {
+                            let row = change
+                                .row
+                                .into_iter()
+                                .map(|cell| match cell {
+                                    Cell::Integer(v) => Ok(v),
+                                    _ => Err(error(Stage::Settle, "non-integer output")),
+                                })
+                                .collect::<Result<Row, _>>()?;
+                            changes.push((output.rel, row, change.sign.as_integer()));
+                        }
+                    } else {
+                        let width = output.program.inner.output.len();
+                        let mut stmt = db
+                            .prepare_cached(output.program.inner.sqls.weight_delta.as_deref().unwrap())
+                            .map_err(|e| error(Stage::Settle, e))?;
+                        let rows = stmt
+                            .query_map([], |r| Ok((row_of(r, width)?, r.get::<_, W>(width)?)))
+                            .map_err(|e| error(Stage::Settle, e))?;
+                        *counters.statements.as_mut().unwrap() += 1;
+                        for row in rows {
+                            let (row, weight) = row.map_err(|e| error(Stage::Settle, e))?;
+                            if output.members.is_empty() {
+                                changes.push((output.rel, row, weight));
+                            } else {
+                                let rel = row[0] as RelId;
+                                let width = output.members.iter().find(|(id, _)| *id == rel)
+                                    .map(|(_, width)| *width)
+                                    .ok_or_else(|| error(Stage::Settle, "unknown bundled output"))?;
+                                changes.push((rel, row[1..=width].to_vec(), weight));
+                            }
                         }
                     }
+                    if output.members.is_empty() { break; }
+                    *counters.statements.as_mut().unwrap() += 1;
+                    let after: i64 = db.query_row("SELECT count(*) FROM ivm_term_dict", [], |r| r.get(0))
+                        .map_err(|e| error(Stage::Settle, e))?;
+                    if after == terms { break; }
+                    if pass == 8192 {
+                        return Err(EngineError::new(Stage::Settle, None, ErrorKind::Unsupported("constructor closure budget")));
+                    }
+                    terms = after;
+                    used.clear();
                 }
             }
             changes.sort();
-            Ok(changes)
+            let mut consolidated: Vec<(RelId, Row, W)> = Vec::new();
+            for (rel, row, weight) in changes {
+                if let Some((last_rel, last_row, last_weight)) = consolidated.last_mut() {
+                    if *last_rel == rel && *last_row == row {
+                        *last_weight = last_weight.checked_add(weight)
+                            .ok_or_else(|| error(Stage::Settle, "output weight overflow"))?;
+                        continue;
+                    }
+                }
+                consolidated.push((rel, row, weight));
+            }
+            consolidated.retain(|(_, _, weight)| *weight != 0);
+            Ok(consolidated)
         };
         match run() {
             Ok(changes) => {

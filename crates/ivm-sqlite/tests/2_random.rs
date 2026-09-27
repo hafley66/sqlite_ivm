@@ -9,6 +9,24 @@ use random::{drive, meta, run};
 use drive::Case;
 use std::process::Command;
 
+#[test]
+fn captured_oracle_ir_agrees_with_dd() {
+    // Lowered from sprefa oracle/eval on 2026-09-27. Each engine's bootstrap
+    // frontiers carry its own intern ids; agreement decodes terms before comparing.
+    for (name, source) in [
+        ("3_count", include_str!("corpus/9_3_count_case.json")),
+        ("16_intern_row_reuse", include_str!("corpus/10_16_intern_row_reuse_case.json")),
+    ] {
+        let fixture: serde_json::Value = serde_json::from_str(source).unwrap();
+        let program: ivm_ir::Program = serde_json::from_value(fixture["program"].clone()).unwrap();
+        let texts: Vec<String> = serde_json::from_value(fixture["texts"].clone()).unwrap();
+        let dd_frontiers: Vec<ivm_ir::Frontier> = serde_json::from_value(fixture["dd_frontiers"].clone()).unwrap();
+        let sqlite_frontiers: Vec<ivm_ir::Frontier> = serde_json::from_value(fixture["sqlite_frontiers"].clone()).unwrap();
+        drive::agreement_frontiers::<Dd, Sqlite>(&program, &texts, &dd_frontiers, &sqlite_frontiers)
+            .unwrap_or_else(|error| panic!("{name}: {error}"));
+    }
+}
+
 fn isolated(worker: &str) {
     let status = Command::new(std::env::current_exe().unwrap())
         .args(["--ignored", "--exact", worker, "--nocapture"])

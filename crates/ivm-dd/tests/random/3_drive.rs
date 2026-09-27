@@ -174,6 +174,27 @@ pub fn agreement<A: Engine, B: Engine>(case: &Case) -> Result<(), String> {
     Ok(())
 }
 
+/// Compare the same logical updates when each engine assigns its own intern ids.
+pub fn agreement_frontiers<A: Engine, B: Engine>(program: &Program, texts: &[String], left_frontiers: &[Frontier], right_frontiers: &[Frontier]) -> Result<(), String> {
+    if left_frontiers.len() != right_frontiers.len() {
+        return Err("frontier count differs".into());
+    }
+    let left_db = memory_connection().map_err(sql_err)?;
+    let right_db = memory_connection().map_err(sql_err)?;
+    let mut left = A::install(program, &mut Raw::with_connection(&left_db)).map_err(|e| format!("left install: {e}"))?;
+    let mut right = B::install(program, &mut Raw::with_connection(&right_db)).map_err(|e| format!("right install: {e}"))?;
+    for text in texts {
+        left.intern_text(text, &mut Raw::with_connection(&left_db)).map_err(|e| format!("left intern text: {e}"))?;
+        right.intern_text(text, &mut Raw::with_connection(&right_db)).map_err(|e| format!("right intern text: {e}"))?;
+    }
+    for (at, (left_frontier, right_frontier)) in left_frontiers.iter().zip(right_frontiers).enumerate() {
+        let a = left.settle(left_frontier.clone(), &mut Raw::with_connection(&left_db)).map_err(|e| format!("left frontier {at}: {e}"))?;
+        let b = right.settle(right_frontier.clone(), &mut Raw::with_connection(&right_db)).map_err(|e| format!("right frontier {at}: {e}"))?;
+        agree_frontier(program, at, &left, &left_db, &a, &right, &right_db, &b)?;
+    }
+    Ok(())
+}
+
 pub fn term_lt_structure<E: Engine>(case: &Case) -> Result<(), String> {
     let db = memory_connection().map_err(sql_err)?;
     let mut engine = E::install(&case.program, &mut Raw::with_connection(&db)).map_err(|e| format!("install: {e}"))?;
