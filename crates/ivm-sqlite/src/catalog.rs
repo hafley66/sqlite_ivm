@@ -253,7 +253,7 @@ pub(crate) fn install(
 ) -> Result<Arc<Installed>, EngineError> {
     let parsed = compile(conn, name, select_sql)?;
     let program = plan::lower_ir(&parsed, &|table| source_types(conn, table))?;
-    install_program(conn, name, &program, parsed.output, watch, false)
+    install_program(conn, name, &program, parsed.output, watch, false, false)
 }
 
 pub(crate) fn install_ir(
@@ -261,6 +261,7 @@ pub(crate) fn install_ir(
     name: &str,
     program: &IrProgram,
     watch: Watch,
+    terms_ready: bool,
 ) -> Result<Arc<Installed>, EngineError> {
     let output_id = *program.outputs.first().ok_or_else(|| {
         EngineError::unsupported(Stage::Plan, name, "a typed program needs one output")
@@ -275,7 +276,7 @@ pub(crate) fn install_ir(
             name: format!("c{i}"),
         })
         .collect();
-    install_program(conn, name, program, output, watch, true)
+    install_program(conn, name, program, output, watch, true, terms_ready)
 }
 
 fn install_program(
@@ -285,6 +286,7 @@ fn install_program(
     output: Vec<OutputColumn>,
     watch: Watch,
     typed_ir: bool,
+    terms_ready: bool,
 ) -> Result<Arc<Installed>, EngineError> {
     validate_program_name(name)?;
     let _guard =
@@ -340,9 +342,11 @@ fn install_program(
     meter
         .batch(conn, "install", name, &sql)
         .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
-    if let Err(e) = crate::terms::install(conn, program) {
-        rollback(conn, "frontier_sp_install");
-        return Err(EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())));
+    if !terms_ready {
+        if let Err(e) = crate::terms::install(conn, program) {
+            rollback(conn, "frontier_sp_install");
+            return Err(EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())));
+        }
     }
     if let Err(e) = bootstrap(conn, &installed, &mut meter) {
         rollback(conn, "frontier_sp_install");

@@ -190,17 +190,17 @@ impl Program {
         program: &ivm_ir::Program,
     ) -> Result<Self, EngineError> {
         Ok(Self {
-            inner: catalog::install_ir(conn, name, program, catalog::Watch::Sources)?,
+            inner: catalog::install_ir(conn, name, program, catalog::Watch::Sources, false)?,
         })
     }
 
-    pub(crate) fn install_ir_unwatched(
+    pub(crate) fn install_ir_unwatched_terms_ready(
         conn: &rusqlite::Connection,
         name: &str,
         program: &ivm_ir::Program,
     ) -> Result<Self, EngineError> {
         Ok(Self {
-            inner: catalog::install_ir(conn, name, program, catalog::Watch::None)?,
+            inner: catalog::install_ir(conn, name, program, catalog::Watch::None, true)?,
         })
     }
 

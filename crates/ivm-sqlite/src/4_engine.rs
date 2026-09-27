@@ -4,8 +4,9 @@ use crate::{
     catalog, Cell, Program as SqlProgram, Sign, SourceChange as SqlChange,
 };
 use ivm_engine::{Counters, Engine, EngineError, ErrorKind, Host, Stage};
-use ivm_ir::{Delta, Frontier, Op, Program, RelId, RelKind, Row, Stratum, W};
+use ivm_ir::{Delta, Expr, Frontier, NodeId, Op, Program, RelId, RelKind, Row, Stratum, W};
 use sqlite_ext::rusqlite::{self, Connection};
+use std::collections::{BTreeSet, HashSet};
 
 pub struct Sqlite {
     programs: Vec<OutputProgram>,
@@ -59,6 +60,139 @@ fn row_of(row: &rusqlite::Row<'_>, width: usize) -> rusqlite::Result<Row> {
     (0..width).map(|i| row.get(i)).collect()
 }
 
+/// Each catalog program owns one output. Retain the strata that define that
+/// output and the relations its bodies read, in their original order.
+fn output_program(ir: &Program, output: RelId) -> Program {
+    fn text_refs(expr: &Expr, used: &mut BTreeSet<u32>) {
+        match expr {
+            Expr::Text(id) => { used.insert(*id); }
+            Expr::Call(_, args) => args.iter().for_each(|arg| text_refs(arg, used)),
+            _ => {}
+        }
+    }
+    fn remap_text(expr: &mut Expr, ids: &[u32]) {
+        match expr {
+            Expr::Text(id) => {
+                if let Ok(mapped) = ids.binary_search(id) { *id = mapped as u32; }
+            }
+            Expr::Call(_, args) => args.iter_mut().for_each(|arg| remap_text(arg, ids)),
+            _ => {}
+        }
+    }
+    fn visit_node(ir: &Program, node: NodeId, seen: &mut [bool], relations: &mut Vec<RelId>) {
+        let Some(slot) = seen.get_mut(node as usize) else { return };
+        if *slot { return; }
+        *slot = true;
+        match &ir.nodes[node as usize] {
+            Op::Get(id) => relations.push(*id),
+            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Mfp { input, .. }
+            | Op::Negate(input) | Op::Reduce { input, .. } | Op::Threshold(input)
+            | Op::TopK { input, .. } | Op::Window { input, .. } | Op::Delay(input) => {
+                visit_node(ir, *input, seen, relations);
+            }
+            Op::Union(inputs) | Op::Join { inputs, .. } => {
+                for &input in inputs { visit_node(ir, input, seen, relations); }
+            }
+            Op::Antijoin { l, r, .. } => {
+                visit_node(ir, *l, seen, relations);
+                visit_node(ir, *r, seen, relations);
+            }
+        }
+    }
+
+    let mut needed = vec![false; ir.strata.len()];
+    let mut pending = vec![output];
+    while let Some(id) = pending.pop() {
+        let Some((index, stratum)) = ir.strata.iter().enumerate().find(|(_, stratum)| match stratum {
+            Stratum::Let { id: defined, .. } => *defined == id,
+            Stratum::LetRec(rec) => rec.ids.contains(&id),
+        }) else { continue };
+        if needed[index] { continue; }
+        needed[index] = true;
+        let mut seen = vec![false; ir.nodes.len()];
+        let mut relations = Vec::new();
+        match stratum {
+            Stratum::Let { body, .. } => visit_node(ir, *body, &mut seen, &mut relations),
+            Stratum::LetRec(rec) => {
+                for &body in &rec.bodies { visit_node(ir, body, &mut seen, &mut relations); }
+            }
+        }
+        pending.extend(relations);
+    }
+    let mut single = ir.clone();
+    single.outputs = vec![output];
+    single.strata = ir.strata.iter().zip(needed).filter_map(|(stratum, keep)| keep.then(|| stratum.clone())).collect();
+    let mut used = vec![false; ir.nodes.len()];
+    for stratum in &single.strata {
+        let mut relations = Vec::new();
+        match stratum {
+            Stratum::Let { body, .. } => visit_node(ir, *body, &mut used, &mut relations),
+            Stratum::LetRec(rec) => {
+                for &body in &rec.bodies { visit_node(ir, body, &mut used, &mut relations); }
+            }
+        }
+    }
+    let mut remap = vec![0; ir.nodes.len()];
+    let mut next = 0;
+    for (old, keep) in used.iter().enumerate() {
+        if *keep { remap[old] = next; next += 1; }
+    }
+    single.nodes = ir.nodes.iter().enumerate().filter_map(|(old, op)| used[old].then(|| {
+        let mut op = op.clone();
+        let mut rewrite = |id: &mut NodeId| {
+            if let Some(mapped) = remap.get(*id as usize) { *id = *mapped; }
+        };
+        match &mut op {
+            Op::Get(_) => {}
+            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Mfp { input, .. }
+            | Op::Negate(input) | Op::Reduce { input, .. } | Op::Threshold(input)
+            | Op::TopK { input, .. } | Op::Window { input, .. } | Op::Delay(input) => rewrite(input),
+            Op::Union(inputs) | Op::Join { inputs, .. } => inputs.iter_mut().for_each(&mut rewrite),
+            Op::Antijoin { l, r, .. } => { rewrite(l); rewrite(r); }
+        }
+        op
+    })).collect();
+    let mut relations = HashSet::from([output]);
+    for stratum in &single.strata {
+        match stratum {
+            Stratum::Let { id, .. } => { relations.insert(*id); }
+            Stratum::LetRec(rec) => relations.extend(rec.ids.iter().copied()),
+        }
+    }
+    for op in &single.nodes {
+        match op {
+            Op::Get(id) => { relations.insert(*id); }
+            Op::Mint { functor, .. } => { relations.insert(*functor); }
+            _ => {}
+        }
+    }
+    single.rels.retain(|relation| relations.contains(&relation.id));
+    let mut used_texts = BTreeSet::new();
+    for op in &single.nodes {
+        if let Op::Mfp { filter, map, .. } = op {
+            filter.iter().chain(map).for_each(|expr| text_refs(expr, &mut used_texts));
+        }
+    }
+    let text_ids = used_texts.into_iter().collect::<Vec<_>>();
+    single.texts = text_ids.iter().filter_map(|id| ir.texts.get(*id as usize).cloned()).collect();
+    for op in &mut single.nodes {
+        if let Op::Mfp { filter, map, .. } = op {
+            filter.iter_mut().chain(map).for_each(|expr| remap_text(expr, &text_ids));
+        }
+    }
+    for stratum in &mut single.strata {
+        match stratum {
+            Stratum::Let { body, .. } => {
+                if let Some(mapped) = remap.get(*body as usize) { *body = *mapped; }
+            }
+            Stratum::LetRec(rec) => rec.bodies.iter_mut().for_each(|body| {
+                if let Some(mapped) = remap.get(*body as usize) { *body = *mapped; }
+            }),
+        }
+    }
+    single
+}
+
 impl Engine for Sqlite {
     fn install(ir: &Program, host: &mut impl Host) -> Result<Self, EngineError> {
         let db = conn(host, Stage::Install)?;
@@ -95,9 +229,8 @@ impl Engine for Sqlite {
                 .filter(|name| !name.is_empty())
                 .map(str::to_owned)
                 .unwrap_or_else(|| format!("ivm_output_{output}"));
-            let mut single = ir.clone();
-            single.outputs = vec![output];
-            let program = SqlProgram::install_ir_unwatched(db, &name, &single)
+            let single = output_program(ir, output);
+            let program = SqlProgram::install_ir_unwatched_terms_ready(db, &name, &single)
                 .map_err(plan_error)?;
             let threshold = matches!(ir.strata.as_slice(), [Stratum::Let { id, body }]
                 if *id == output && matches!(ir.nodes.get(*body as usize), Some(Op::Threshold(_))));
@@ -160,15 +293,10 @@ impl Engine for Sqlite {
                         ErrorKind::Unsupported("weight other than +1/-1"),
                     ));
                 }
-                let names = self.programs[0]
-                    .program
-                    .inner
-                    .plan
-                    .scans
-                    .iter()
-                    .find(|s| s.table == source.name)
-                    .map(|s| s.columns.as_slice())
-                    .ok_or_else(|| error(Stage::Settle, "source scan missing"))?;
+                let names = self.programs.iter().find_map(|output| {
+                    output.program.inner.plan.scans.iter().find(|scan| scan.table == source.name)
+                        .map(|scan| scan.columns.clone())
+                }).unwrap_or_else(|| (0..source.cols.len()).map(|i| format!("c{i}")).collect());
                 let match_row = names
                     .iter()
                     .map(|c| format!("{}=?", catalog::quote(c)))
@@ -215,7 +343,8 @@ impl Engine for Sqlite {
             }
             let mut changes = Vec::new();
             for output in &self.programs {
-                let (visible, work) = crate::engine::settle_counted(db, &output.program.inner, &batch, false)
+                let used = batch.iter().filter(|change| output.program.inner.plan.sources.contains(&change.relation)).cloned().collect::<Vec<_>>();
+                let (visible, work) = crate::engine::settle_counted(db, &output.program.inner, &used, false)
                     .map_err(|e| error(Stage::Settle, e))?;
                 for (target, source) in [
                     (&mut counters.delta_rows.filter, work.delta_rows.filter),
