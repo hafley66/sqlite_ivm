@@ -1,11 +1,13 @@
-//! Paired timing and RSS: `cargo run --release --example 0_paired [--features sqlite] -- <engine> <workload> <n>`.
+//! Paired timing and RSS: `cargo run -p ivm-sqlite --release --example 0_paired -- <engine> <workload> <n>`.
 //! One engine and one workload per process so RSS is not shared; prints one TSV row.
 
-use lab_20260924_0::{Dd, Engine, Frontier, Program, SourceChange};
+use ivm_dd::{Dd, Engine, Frontier, Program, Raw, SourceChange};
+use ivm_sqlite::Sqlite;
+use rusqlite::Connection;
 use std::time::{Duration, Instant};
 
 fn program(name: &str) -> Program {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("oracle").join(format!("{name}.program.json"));
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../ivm-dd/oracle").join(format!("{name}.program.json"));
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
@@ -59,17 +61,19 @@ fn rss_kib() -> u64 {
 
 fn run<E: Engine>(engine: &str, name: &str, n: i64) {
     let (program, load, churn) = workload(name, n);
+    let db = Connection::open_in_memory().unwrap();
+    let mut host = Raw::with_connection(&db);
     let t0 = Instant::now();
-    let mut e = E::install(&program, &mut lab_20260924_0::rel::Raw::default()).unwrap();
+    let mut e = E::install(&program, &mut host).unwrap();
     let installed = t0.elapsed();
     let t1 = Instant::now();
-    let loaded_rows = e.settle(load, &mut lab_20260924_0::rel::Raw::default()).unwrap().changes.len();
+    let loaded_rows = e.settle(load, &mut host).unwrap().changes.len();
     let load_time = t1.elapsed();
     let mut times: Vec<Duration> = churn
         .into_iter()
         .map(|f| {
             let t = Instant::now();
-            e.settle(f, &mut lab_20260924_0::rel::Raw::default()).unwrap();
+            e.settle(f, &mut host).unwrap();
             t.elapsed()
         })
         .collect();
@@ -91,8 +95,7 @@ fn main() {
     let (engine, name, n) = (args[0].as_str(), args[1].as_str(), args[2].parse().unwrap());
     match engine {
         "dd" => run::<Dd>(engine, name, n),
-        #[cfg(feature = "sqlite")]
-        "sqlite" => run::<lab_20260924_0::Sql>(engine, name, n),
+        "sqlite" => run::<Sqlite>(engine, name, n),
         other => panic!("unknown engine {other}"),
     }
 }

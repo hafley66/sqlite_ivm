@@ -48,3 +48,24 @@ fn k1_sqlite_one_row_change_work_is_independent_of_loaded_size() {
     println!("team_cost: {small} VM steps at 1e3, {large} at 3e4");
     assert!(large <= small * 2, "team_cost: {small} VM steps at 1e3, {large} at 3e4");
 }
+
+#[test]
+fn k1_sqlite_no_scan_of_integrated_tables() {
+    let mut scans = Vec::new();
+    for name in ["0_access", "1_team_cost", "4_antijoin", "5_self_join", "6_topk", "7_reach"] {
+        let db = Connection::open_in_memory().unwrap();
+        let sql = Sqlite::install(&support::program(name), &mut Raw::with_connection(&db)).unwrap();
+        for stmt in sql.statements() {
+            let mut eqp = db.prepare(&format!("EXPLAIN QUERY PLAN {stmt}")).unwrap();
+            let zeros = vec![0i64; eqp.parameter_count()];
+            let details: Vec<String> = eqp.query_map(rusqlite::params_from_iter(zeros), |r| r.get(3)).unwrap().map(Result::unwrap).collect();
+            let one_row = stmt.contains("x_i ON 1)");
+            for detail in details.iter().filter(|detail| {
+                !one_row && detail.starts_with("SCAN") && detail.split_whitespace().nth(1).is_some_and(|table| table.ends_with("_i"))
+            }) {
+                scans.push(format!("{name}: {detail}\n    in {stmt}"));
+            }
+        }
+    }
+    assert!(scans.is_empty(), "{} scans:\n{}", scans.len(), scans.join("\n"));
+}

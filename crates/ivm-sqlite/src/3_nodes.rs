@@ -786,6 +786,27 @@ pub(crate) struct NodesPlan {
 }
 
 impl NodesPlan {
+    /// Statements issued during settle, excluding snapshot reads.
+    pub fn statements(&self) -> Vec<&str> {
+        let mut all: Vec<&str> = self.source_fills.iter().map(String::as_str).collect();
+        all.extend(self.steps.iter().filter_map(|step| match step {
+            Step::Fill(sql) => Some(sql.as_str()),
+            Step::Loop(_) => None,
+        }));
+        for scc in &self.sccs {
+            all.extend(scc.fills.iter().chain(&scc.integrates).chain(&scc.clears).chain(&scc.stash).chain(&scc.restore).map(String::as_str));
+            for v in &scc.vars {
+                all.extend([
+                    &v.over_delete, &v.rederive, &v.insert, &v.to_delta, &v.to_acc,
+                    &v.to_del, &v.clear_nx, &v.clear_del, &v.any, &v.finish, &v.clear_acc,
+                ].into_iter().map(String::as_str));
+            }
+        }
+        all.extend(self.integrates.iter().chain(&self.clears).map(String::as_str));
+        all.push(&self.output_delta);
+        all
+    }
+
     pub fn compile(name: &str, program: &Program) -> Result<Self, EngineError> {
         let mut rel = SqlRel::new(program, false);
         lower(program, &mut rel)?;

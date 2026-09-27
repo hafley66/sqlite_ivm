@@ -80,7 +80,7 @@ fn dred_self_supporting_cycle_matches_dd() {
     let program = support::program("7_reach");
     let dd_db = Connection::open_in_memory().unwrap();
     let sql_db = Connection::open_in_memory().unwrap();
-    let mut dd = Dd::install(&program, &mut Raw::with_connection(&dd_db)).unwrap();
+    let mut dd = <Dd as Engine>::install(&program, &mut Raw::with_connection(&dd_db)).unwrap();
     let mut sql = Sqlite::install(&program, &mut Raw::with_connection(&sql_db)).unwrap();
     let edge = |x, y, w| SourceChange { rel: 0, row: vec![x, y], w };
     let steps = [

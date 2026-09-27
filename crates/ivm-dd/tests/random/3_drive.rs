@@ -278,7 +278,7 @@ pub fn run(test: &str, cases: u64, generate: fn(u64) -> Case, check: Check) {
         let small_msg = guarded(check, &small).err().unwrap_or(msg);
         write_corpus(test, &small, &small_msg);
         panic!(
-            "{test} seed {seed}: {small_msg}\nprogram: {}\nfrontiers: {}\ncorpus: {}\nrerun: cd {} && RANDOM_SEED={seed} CARGO_TARGET_DIR=../20260923.3.dd-inside-sqlite/target cargo test --offline -j 2 --test 2_random {test} -- --nocapture",
+            "{test} seed {seed}: {small_msg}\nprogram: {}\nfrontiers: {}\ncorpus: {}\nrerun: cd {} && RANDOM_SEED={seed} cargo test -j 4 --test 2_random {test} -- --nocapture",
             serde_json::to_string(&small.program).unwrap(),
             serde_json::to_string(&small.frontiers).unwrap(),
             corpus_dir().join(small.seed.to_string()).display(),

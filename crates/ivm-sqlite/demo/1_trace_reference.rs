@@ -1,4 +1,5 @@
-//! `cargo run --example 1_trace --features sqlite -- <script under oracle/, e.g. pokemon/0_can_surf> <out.json>`.
+//! Historical trace producer from the retired lab, retained with the demo source.
+//! Its `SqlSeen` adapter refers to the retired engine and is not a Cargo example.
 //! Trace JSON of plans/2026-09-25-pokemon-trace-demo.md; any engine/oracle/non-loop node disagreement exits 1, writes nothing.
 
 #[cfg(feature = "sqlite")]

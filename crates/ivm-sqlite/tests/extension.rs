@@ -15,15 +15,11 @@ fn extension_path() -> PathBuf {
     let ext = Path::new(env!("CARGO_MANIFEST_DIR")).join(
         "../../labs/20260923.2.the-gang-builds-the-sqlite-frontier-engine/crates/frontier-ext",
     );
-    let target = std::env::var_os("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::temp_dir().join("ivm-sqlite-extension-target"))
-        .join("frontier-ext");
+    let target = std::env::temp_dir().join("ivm-sqlite-extension-target/frontier-ext");
     let built = Command::new("cargo")
         .args(["build", "--offline", "-j", "4", "--manifest-path"])
         .arg(ext.join("Cargo.toml"))
-        // A fixed target dir pins the artifact path even when the ambient
-        // CARGO_TARGET_DIR points elsewhere.
+        // A fixed target dir pins the artifact path.
         .arg("--target-dir")
         .arg(&target)
         .output()

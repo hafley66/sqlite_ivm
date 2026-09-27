@@ -37,19 +37,6 @@ package:
 benchmark-inventory *args:
     python3 scripts/13_benchmark_inventory.py {{args}}
 
-# Pokémon trace demo: trace every oracle/pokemon script through DD and SQLite, then build one self-contained HTML page.
-lab-20260924-dd-sqlite-pokemon-demo:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    cd labs/20260924.0.the-gang-runs-a-program-as-data-through-differential-dataflow
-    export CARGO_TARGET_DIR=../20260923.3.dd-inside-sqlite/target
-    mkdir -p demo/traces
-    for sql in oracle/pokemon/*.sql; do
-        name=$(basename "$sql" .sql)
-        cargo run --quiet --offline -j 2 --example 1_trace --features sqlite -- "pokemon/$name" "demo/traces/$name.json"
-    done
-    cd demo && pnpm install --frozen-lockfile && pnpm build
-    echo "open $(pwd)/dist/index.html"
 # Link shared crates from the main hafley-rs checkout into this worktree.
 boop-start:
     ln -sfn "${HOME}/projects/hafley-rs" hafley-rs

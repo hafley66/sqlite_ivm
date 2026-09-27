@@ -234,13 +234,14 @@ fn k6_dd_engine_source_gate() {
         ("0_ir.rs", "../ivm-ir/src/0_ir.rs"),
         ("1_rel.rs", "../ivm-engine/src/1_rel.rs"),
         ("2_dd.rs", "src/2_dd.rs"),
-        ("3_sqlite.rs", "../../labs/20260924.0.the-gang-runs-a-program-as-data-through-differential-dataflow/src/3_sqlite.rs"),
+        ("3_nodes.rs", "../ivm-sqlite/src/3_nodes.rs"),
+        ("4_engine.rs", "../ivm-sqlite/src/4_engine.rs"),
         ("lib.rs", "src/lib.rs"),
     ] {
         let text = std::fs::read_to_string(dir.join(path)).unwrap();
         let text: String = text.lines().filter(|l| !l.trim_start().starts_with("//") && !l.contains("cfg(feature")).map(str::trim_start).collect::<Vec<_>>().join("\n");
         for token in forbidden {
-            let links_sqlite = file == "lib.rs" || file == "3_sqlite.rs";
+            let links_sqlite = file == "lib.rs" || file == "3_nodes.rs" || file == "4_engine.rs";
             let allowed = links_sqlite && (token == "rusqlite" || token == "Connection");
             assert!(allowed || !text.contains(token), "{file} contains {token:?}");
         }

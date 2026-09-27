@@ -13,6 +13,30 @@ pub struct Sqlite {
     tick: u64,
 }
 
+impl Sqlite {
+    /// SQL statements the installed programs may issue while settling a frontier.
+    pub fn statements(&self) -> Vec<&str> {
+        let mut all = Vec::new();
+        for output in &self.programs {
+            if let crate::plan::Root::Nodes(nodes) = &output.program.inner.plan.root {
+                all.extend(nodes.statements());
+            } else {
+                let sqls = &output.program.inner.sqls;
+                all.extend(sqls.clears.iter().map(|(_, sql)| sql.as_str()));
+                all.push(&sqls.stage_insert);
+                all.extend(sqls.scan_fills.iter().chain(&sqls.join_fills).chain(&sqls.anti_fills).chain(&sqls.topk_fills).map(|(_, sql)| sql.as_str()));
+                all.extend([
+                    &sqls.root_touch, &sqls.root_upsert, &sqls.root_delete,
+                    &sqls.root_delta, &sqls.bump, &sqls.read_frontier, &sqls.read_delta,
+                ].into_iter().map(String::as_str));
+                all.extend(sqls.root_extrema.as_deref());
+                all.extend(sqls.weight_delta.as_deref());
+            }
+        }
+        all.into_iter().filter(|sql| !sql.is_empty()).collect()
+    }
+}
+
 struct OutputProgram {
     rel: RelId,
     program: SqlProgram,

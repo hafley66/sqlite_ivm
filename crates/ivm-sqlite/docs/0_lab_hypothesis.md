@@ -1,5 +1,7 @@
 # The gang runs a program as data through differential dataflow
 
+Historical lab receipt. The active engines, oracle, and tests now live in `crates/ivm-{dd,sqlite}`; commands and source paths below record the original lab run.
+
 ## Hypothesis
 
 One differential-dataflow 0.25.1 engine can install any `Program` of the IR in
