@@ -15,7 +15,7 @@ use timely::dataflow::Scope;
 use timely::order::Product;
 use timely::progress::Timestamp;
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::cmp::Ordering;
 use std::rc::Rc;
 use std::sync::mpsc;
@@ -32,6 +32,27 @@ type Inner = Product<Time, u64>;
 /// Rows supplied by an arrangement to a hierarchical reduce closure.
 pub type ReduceReadEventBuilder = timely::container::CapacityContainerBuilder<Vec<(Duration, usize)>>;
 type ReduceReadLogger = timely::logging_core::Logger<ReduceReadEventBuilder>;
+
+fn rec_inputs(p: &Program, rec: &LetRec) -> BTreeSet<RelId> {
+    let mut inputs = BTreeSet::new();
+    let mut visited = vec![false; p.nodes.len()];
+    let mut pending = rec.bodies.clone();
+    while let Some(id) = pending.pop() {
+        let index = id as usize;
+        let Some(seen) = visited.get_mut(index) else { continue; };
+        if *seen { continue; }
+        *seen = true;
+        match &p.nodes[index] {
+            Op::Get(rel) => { inputs.insert(*rel); }
+            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Mfp { input, .. }
+            | Op::Reduce { input, .. } | Op::TopK { input, .. } | Op::Window { input, .. } => pending.push(*input),
+            Op::Negate(input) | Op::Threshold(input) | Op::Delay(input) => pending.push(*input),
+            Op::Union(nodes) | Op::Join { inputs: nodes, .. } => pending.extend(nodes.iter().copied()),
+            Op::Antijoin { l, r, .. } => pending.extend([*l, *r]),
+        }
+    }
+    inputs
+}
 
 /// Timestamps the algebra runs at. Only the top level may open a LetRec scope; this bounds monomorphization.
 pub trait Nest: Timestamp + Lattice + Ord + Hash + Clone + std::fmt::Debug + 'static {
@@ -57,15 +78,23 @@ impl Nest for Time {
     }
     fn letrec<'s>(rel: &mut DdRel<'s, Self>, p: &Program, rec: &LetRec, defined: &[(RelId, Coll<'s>)])
         -> Result<Vec<Coll<'s>>, EngineError> {
+        let used = rec_inputs(p, rec);
         if rec.limit.is_some() {
             return Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("LetRec limit")));
+        }
+        if !rec.ids.iter().any(|id| used.contains(id)) {
+            let mut nodes = vec![None; p.nodes.len()];
+            return rec.bodies.iter().map(|body| {
+                let c = lower_node(p, rel, &mut nodes, defined, *body)?;
+                Ok(rel.threshold(c))
+            }).collect();
         }
         let outer = rel.scope;
         outer.scoped::<Inner, _, _>("LetRec", |sub| {
             let mut inner = DdRel {
                 scope: sub,
                 rec: rec.ids.first().copied(),
-                sources: rel.sources.iter().map(|(id, c)| (*id, c.clone().enter(sub))).collect(),
+                sources: rel.sources.iter().filter(|(id, _)| used.contains(id)).map(|(id, c)| (*id, c.clone().enter(sub))).collect(),
                 outputs: Vec::new(),
                 taps: rel.taps.clone(),
                 reduce_reads: rel.reduce_reads.clone(),
@@ -75,7 +104,7 @@ impl Nest for Time {
                 texts: rel.texts.clone(),
             };
             let mut scope_defined: Vec<(RelId, Coll<'_, Inner>)> =
-                defined.iter().map(|(id, c)| (*id, c.clone().enter(sub))).collect();
+                defined.iter().filter(|(id, _)| used.contains(id)).map(|(id, c)| (*id, c.clone().enter(sub))).collect();
             let mut variables = Vec::new();
             for id in &rec.ids {
                 let (variable, current) = Variable::new(sub, Product::new(Default::default(), 1));
