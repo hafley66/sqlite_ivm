@@ -31,6 +31,7 @@ struct OutputProgram {
     rel: RelId,
     program: SqlProgram,
     threshold: bool,
+    members: Vec<(RelId, usize)>,
 }
 
 fn error(stage: Stage, e: impl std::fmt::Display) -> EngineError {
@@ -193,6 +194,39 @@ fn output_program(ir: &Program, output: RelId) -> Program {
     single
 }
 
+/// One physical plan carries every typed output. The first column identifies
+/// the output relation; remaining columns hold its row, padded to a common width.
+fn bundled_program(ir: &Program) -> Result<(Program, Vec<(RelId, usize)>), EngineError> {
+    let mut bundle = ir.clone();
+    let members = ir.outputs.iter().map(|id| {
+        ir.rel(*id).map(|rel| (*id, rel.cols.len())).ok_or_else(||
+            EngineError::new(Stage::Install, Some(*id), ErrorKind::UnknownRel(*id)))
+    }).collect::<Result<Vec<_>, _>>()?;
+    let width = members.iter().map(|(_, width)| *width).max().unwrap_or(0);
+    let mut branches = Vec::with_capacity(members.len());
+    for &(rel, arity) in &members {
+        let get = bundle.nodes.len() as NodeId;
+        bundle.nodes.push(Op::Get(rel));
+        let branch = bundle.nodes.len() as NodeId;
+        let mut map = vec![Expr::Lit(rel as i64)];
+        map.extend((arity..width).map(|_| Expr::Lit(0)));
+        let mut project = vec![arity as u16];
+        project.extend((0..arity).map(|column| column as u16));
+        project.extend((arity + 1..=width).map(|column| column as u16));
+        bundle.nodes.push(Op::Mfp { input: get, filter: vec![], map, project });
+        branches.push(branch);
+    }
+    let body = bundle.nodes.len() as NodeId;
+    bundle.nodes.push(Op::Union(branches));
+    let id = bundle.rels.iter().map(|rel| rel.id).max().unwrap_or(0).checked_add(1)
+        .ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("relation id space exhausted")))?;
+    let name = format!("__ivm_bundle_{}", ir.rel(ir.outputs[0]).unwrap().name);
+    bundle.rels.push(ivm_ir::Relation { id, name, cols: vec![ivm_ir::Ty::Int; width + 1], kind: RelKind::Derived });
+    bundle.strata.push(Stratum::Let { id, body });
+    bundle.outputs = vec![id];
+    Ok((bundle, members))
+}
+
 impl Engine for Sqlite {
     fn install(ir: &Program, host: &mut impl Host) -> Result<Self, EngineError> {
         let db = conn(host, Stage::Install)?;
@@ -222,23 +256,32 @@ impl Engine for Sqlite {
             )).map_err(|e| error(Stage::Install, e))?;
         }
         let mut programs = Vec::new();
-        for &output in &ir.outputs {
-            let name = ir
-                .rel(output)
-                .map(|r| r.name.as_str())
-                .filter(|name| !name.is_empty())
-                .map(str::to_owned)
-                .unwrap_or_else(|| format!("ivm_output_{output}"));
-            let single = output_program(ir, output);
-            let program = SqlProgram::install_ir_unwatched_terms_ready(db, &name, &single)
+        if ir.outputs.len() > 1 {
+            let (bundle, members) = bundled_program(ir)?;
+            let relation = bundle.rel(bundle.outputs[0]).expect("bundle output");
+            let program = SqlProgram::install_ir_unwatched_terms_ready(db, &relation.name, &bundle)
                 .map_err(plan_error)?;
-            let threshold = matches!(ir.strata.as_slice(), [Stratum::Let { id, body }]
-                if *id == output && matches!(ir.nodes.get(*body as usize), Some(Op::Threshold(_))));
-            programs.push(OutputProgram {
-                rel: output,
-                program,
-                threshold,
-            });
+            programs.push(OutputProgram { rel: relation.id, program, threshold: false, members });
+        } else {
+            for &output in &ir.outputs {
+                let name = ir
+                    .rel(output)
+                    .map(|r| r.name.as_str())
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format!("ivm_output_{output}"));
+                let single = output_program(ir, output);
+                let program = SqlProgram::install_ir_unwatched_terms_ready(db, &name, &single)
+                    .map_err(plan_error)?;
+                let threshold = matches!(ir.strata.as_slice(), [Stratum::Let { id, body }]
+                    if *id == output && matches!(ir.nodes.get(*body as usize), Some(Op::Threshold(_))));
+                programs.push(OutputProgram {
+                    rel: output,
+                    program,
+                    threshold,
+                    members: Vec::new(),
+                });
+            }
         }
         let engine = Self {
             programs,
@@ -382,7 +425,15 @@ impl Engine for Sqlite {
                     *counters.statements.as_mut().unwrap() += 1;
                     for row in rows {
                         let (row, weight) = row.map_err(|e| error(Stage::Settle, e))?;
-                        changes.push((output.rel, row, weight));
+                        if output.members.is_empty() {
+                            changes.push((output.rel, row, weight));
+                        } else {
+                            let rel = row[0] as RelId;
+                            let width = output.members.iter().find(|(id, _)| *id == rel)
+                                .map(|(_, width)| *width)
+                                .ok_or_else(|| error(Stage::Settle, "unknown bundled output"))?;
+                            changes.push((rel, row[1..=width].to_vec(), weight));
+                        }
                     }
                 }
             }
@@ -423,7 +474,7 @@ impl Engine for Sqlite {
         let output = self
             .programs
             .iter()
-            .find(|output| output.rel == rel)
+            .find(|output| output.rel == rel || output.members.iter().any(|(id, _)| *id == rel))
             .ok_or_else(|| {
                 EngineError::new(Stage::Snapshot, Some(rel), ErrorKind::UnknownRel(rel))
             })?;
@@ -436,19 +487,18 @@ impl Engine for Sqlite {
             .query_map([], |r| {
                 let row = row_of(r, width)?;
                 let weight: W = r.get(width)?;
-                Ok((
-                    row,
-                    if output.threshold {
-                        weight.min(1)
-                    } else {
-                        weight
-                    },
-                ))
+                Ok((row, weight))
             })
             .map_err(|e| error(Stage::Snapshot, e))?
             .map(|r| r.map_err(|e| error(Stage::Snapshot, e)))
-            .collect();
-        result
+            .collect::<Result<Vec<_>, _>>()?;
+        if output.members.is_empty() {
+            Ok(result.into_iter().map(|(row, weight)| (row, if output.threshold { weight.min(1) } else { weight })).collect())
+        } else {
+            let arity = output.members.iter().find(|(id, _)| *id == rel).expect("selected member").1;
+            Ok(result.into_iter().filter(|(row, _)| row[0] == rel as i64)
+                .map(|(row, weight)| (row[1..=arity].to_vec(), weight)).collect())
+        }
     }
 
     fn intern_snapshot(&self, functor: RelId, host: &mut impl Host) -> Result<Vec<(Row, W)>, EngineError> {

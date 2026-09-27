@@ -246,3 +246,97 @@ fn output_install_remaps_text_literals() {
         );
     }
 }
+
+#[test]
+fn c15_shaped_ir_installs_one_shared_plan() {
+    // Captured from sprefa's c15_standard_plus_3 lowerer on 2026-09-27.
+    let program: Program = serde_json::from_str(include_str!("corpus/8_c15_program.json")).unwrap();
+    assert_eq!(
+        (
+            program.nodes.len(),
+            program.strata.len(),
+            program.outputs.len()
+        ),
+        (4011, 164, 93)
+    );
+    let db = Connection::open_in_memory().unwrap();
+    let start = Instant::now();
+    let engine = Sqlite::install(&program, &mut Raw::with_connection(&db)).unwrap();
+    let elapsed = start.elapsed();
+    let objects: i64 = db
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    eprintln!(
+        "c15 nodes={} strata={} outputs={} objects={objects} install={elapsed:?}",
+        program.nodes.len(),
+        program.strata.len(),
+        program.outputs.len()
+    );
+    assert!(
+        objects < 8_000,
+        "c15-shaped install created {objects} schema objects"
+    );
+    for &rel in [program.outputs[0], *program.outputs.last().unwrap()].iter() {
+        assert!(engine
+            .snapshot(rel, &mut Raw::with_connection(&db))
+            .unwrap()
+            .is_empty());
+    }
+}
+
+#[test]
+fn bundled_outputs_keep_set_and_bag_weights() {
+    let program = Program {
+        texts: vec![],
+        rels: vec![
+            Relation {
+                id: 0,
+                name: "weight_source".into(),
+                cols: vec![Ty::Int],
+                kind: RelKind::Source,
+            },
+            Relation {
+                id: 1,
+                name: "set_output".into(),
+                cols: vec![Ty::Int],
+                kind: RelKind::Derived,
+            },
+            Relation {
+                id: 2,
+                name: "bag_output".into(),
+                cols: vec![Ty::Int],
+                kind: RelKind::Derived,
+            },
+        ],
+        nodes: vec![Op::Get(0), Op::Threshold(0), Op::Union(vec![0, 0])],
+        strata: vec![
+            Stratum::Let { id: 1, body: 1 },
+            Stratum::Let { id: 2, body: 2 },
+        ],
+        outputs: vec![1, 2],
+    };
+    let db = Connection::open_in_memory().unwrap();
+    let mut host = Raw::with_connection(&db);
+    let mut engine = Sqlite::install(&program, &mut host).unwrap();
+    let change = |w| Frontier {
+        changes: vec![SourceChange {
+            rel: 0,
+            row: vec![7],
+            w,
+        }],
+    };
+    assert_eq!(
+        engine.settle(change(1), &mut host).unwrap().changes,
+        vec![(1, vec![7], 1), (2, vec![7], 2)]
+    );
+    assert_eq!(engine.snapshot(1, &mut host).unwrap(), vec![(vec![7], 1)]);
+    assert_eq!(engine.snapshot(2, &mut host).unwrap(), vec![(vec![7], 2)]);
+    assert_eq!(
+        engine.settle(change(-1), &mut host).unwrap().changes,
+        vec![(1, vec![7], -1), (2, vec![7], -2)]
+    );
+}
