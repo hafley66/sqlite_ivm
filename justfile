@@ -40,3 +40,11 @@ benchmark-inventory *args:
 # Link shared crates from the main hafley-rs checkout into this worktree.
 boop-start:
     ln -sfn "${HOME}/projects/hafley-rs" hafley-rs
+
+# Emit oracle fixtures and compare the generated Observable modules with DD.
+rxjs-test:
+    CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 RUST_TEST_THREADS=4 cargo test -j 4 -p ivm-rxjs
+    CARGO_BUILD_JOBS=4 CARGO_INCREMENTAL=0 cargo run -j 4 -p ivm-rxjs --features fixtures --bin dump-fixtures
+    cd crates/ivm-rxjs/ts && pnpm exec vitest run
+    cd crates/ivm-rxjs/ts && pnpm exec tsc --noEmit
+    ! rg -l -F '.subscribe(' target/ivm-rxjs-fixtures --glob '*.ts'

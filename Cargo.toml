@@ -7,7 +7,7 @@ description = "Transactional incremental SQL views for SQLite using persistent v
 readme = "README.md"
 
 [workspace]
-members = ["crates/ivm-ir", "crates/ivm-engine", "crates/ivm-dd", "crates/ivm-sqlite"]
+members = ["crates/ivm-ir", "crates/ivm-engine", "crates/ivm-dd", "crates/ivm-sqlite", "crates/ivm-rxjs"]
 exclude = ["hafley-rs/crates/hafley-observe", "hafley-rs/crates/sqlite-ext"]
 resolver = "2"
 

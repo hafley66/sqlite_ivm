@@ -655,6 +655,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ivm-rxjs"
+version = "0.1.0"
+dependencies = [
+ "ivm-dd",
+ "ivm-ir",
+ "rusqlite",
+ "serde_json",
+]
+
+[[package]]
 name = "ivm-sqlite"
 version = "0.1.0"
 dependencies = [
