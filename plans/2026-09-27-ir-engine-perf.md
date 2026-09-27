@@ -122,3 +122,24 @@ Release `cargo test -p ivm-sqlite --test 6_install_growth -- --ignored bench_ --
 | 16_intern_row_reuse | 6.144 | 14.835 | 20.980 | 4.731 | 20.354 | 25.086 |
 
 `bash scripts/0_build.sh release` passed. `SEEDS=1000 cargo test -j 4 -p ivm-ir -p ivm-engine -p ivm-dd -p ivm-sqlite -p ivm-rxjs` passed, including the captured 3_count and 16_intern_row_reuse DD comparisons. A separate c15 test compares the empty-frontier delta and all 93 output snapshots with DD. `just rxjs-test` passed: 226 Vitest cases and TypeScript checking. The sprefa end-to-end `dl8` timing remains for the herder after merge.
+
+## Settle-cost pass (ivm-settle lane)
+
+The ignored release test `bench_settle_frontiers` in `crates/ivm-sqlite/tests/6_install_growth.rs` installs the captured `8_c15_program.json` in each engine, then applies a deterministic 10-frontier sequence. The sizes `[483, 515, 134, 102, 3097, 5, 5, 3, 1, 3]` reproduce the comptime-round-1 size pattern above. Rows are distinct synthetic IDs distributed across the fixture's `__ir_seed_n*` source relations. The test compares every SQLite delta with DD. The program has 4,011 nodes, 164 strata, and 93 outputs; no captured 0_fs_json program is present in this repository, so these results do not claim its exact IR graph or row values. The first frontier includes statement-cache warmup. All values below are single release runs in milliseconds, with concurrent host activity affecting absolute times.
+
+| Frontier inputs | DD before | DD after source guard | SQLite before | SQLite after empty-delta skip | SQLite statements before → after |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 483 | 42.1 | 38.5 | 366.9 | 223.6 | 16,302 → 10,555 |
+| 515 | 33.2 | 29.2 | 72.9 | 49.2 | 16,398 → 10,651 |
+| 134 | 33.0 | 25.1 | 64.3 | 35.5 | 15,069 → 9,041 |
+| 102 | 32.2 | 23.5 | 64.8 | 34.5 | 14,836 → 7,697 |
+| 3097 | 42.7 | 34.6 | 118.9 | 97.1 | 24,144 → 18,397 |
+| 5 | 21.5 | 17.0 | 55.1 | 6.7 | 12,797 → 568 |
+| 5 | 17.8 | 16.2 | 54.1 | 7.8 | 12,797 → 568 |
+| 3 | 17.7 | 14.6 | 53.4 | 7.5 | 12,717 → 272 |
+| 1 | 17.9 | 15.6 | 56.6 | 6.4 | 12,711 → 250 |
+| 3 | 18.8 | 18.2 | 62.3 | 6.2 | 12,717 → 275 |
+
+The listed settles sum to 276.9 → 232.5 ms for DD and 969.3 → 474.6 ms for SQLite. DD install measured 166.8 ms before and 160.1 ms after in these runs. SQLite install measured 915.0 ms before and 907.2 ms after. The DD change replaces per-row arrangement cursor seeks in the source set guard with a worker-owned `HashSet` per source; accepted frontiers update the sets only after all validation succeeds. The SQLite plan indexes physical delta dependencies after SQL lowering. Its settle pass skips a fill when every referenced physical delta is empty, skips a recursive scope when its external deltas are empty, and marks the scope's result deltas from the actual `INSERT` row counts. It also skips integration, work counts, and cleanup for empty physical deltas. The relative statement-count reduction is independent of host scheduling.
+
+A `samply record --save-only` profile of the release bench was filtered to samples whose stack contained `Sqlite::settle` and to DD worker samples outside `dataflow_core`, excluding install stacks. Of 572 SQLite settle samples on the final code, sampled leaf frames included `sqlite3MemMalloc` (64), `sqlite3VdbeExec` (48), `sqlite3MemSize` (42), `sqlite3Malloc` (32), `selectExpander` (25), and `sqlite3RunParser` (15). Of 327 DD worker settle samples, leaves included Timely outer/product `propagate_pointstamps` (15/19), outer/product heap `pop` (17/11), Timely outer change-batch quicksort (20), and outer/product `MutableAntichain::rebuild` (8/7). These are CPU sample counts, not wall-time proportions. The remaining DD fixed cost is concentrated in Timely progress propagation and scheduling; SQLite still executes thousands of statements on the larger frontiers.

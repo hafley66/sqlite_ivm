@@ -1070,10 +1070,18 @@ pub(crate) struct NodesPlan {
     pub ddl: Vec<String>,
     pub objects: Vec<(String, String)>,
     source_fills: Vec<String>,
+    source_writes: Vec<Option<usize>>,
     steps: Vec<Step>,
+    step_reads: Vec<Vec<usize>>,
+    step_writes: Vec<Option<usize>>,
+    scc_reads: Vec<Vec<usize>>,
+    scc_results: Vec<Vec<usize>>,
     sccs: Vec<SccSql>,
     integrates: Vec<String>,
+    integrate_reads: Vec<Vec<usize>>,
     clears: Vec<String>,
+    clear_targets: Vec<Option<usize>>,
+    work_ids: Vec<Option<usize>>,
     pub output_delta: String,
     pub output_snapshot: String,
     pub output_arity: usize,
@@ -1324,10 +1332,18 @@ impl NodesPlan {
             ddl,
             objects,
             source_fills,
+            source_writes: Vec::new(),
             steps,
+            step_reads: Vec::new(),
+            step_writes: Vec::new(),
+            scc_reads: Vec::new(),
+            scc_results: Vec::new(),
             sccs,
             integrates,
+            integrate_reads: Vec::new(),
             clears,
+            clear_targets: Vec::new(),
+            work_ids: Vec::new(),
             output_delta: if set_output { format!(
                 "SELECT {out_cols}, CASE WHEN COALESCE(i_i.w,0)>0 THEN -1 ELSE 1 END \
                  FROM (SELECT {cols},SUM(w) AS dw FROM {delta} GROUP BY {cols} HAVING SUM(w)<>0) d \
@@ -1352,7 +1368,68 @@ impl NodesPlan {
         };
         plan.inline_statements(&inline_deltas);
         plan.prefix(name);
+        plan.index_delta_dependencies(&rel.nodes, name);
         Ok(plan)
+    }
+
+    fn index_delta_dependencies(&mut self, nodes: &[Node], program: &str) {
+        let names = nodes.iter().filter(|node| !node.inline)
+            .map(|node| node.c.d.replace("ivm_n", &format!("frontier_{program}_n")))
+            .collect::<Vec<_>>();
+        let by_name = names.iter().enumerate().map(|(i, name)| (name.as_str(), i))
+            .collect::<std::collections::HashMap<_, _>>();
+        let write = |sql: &str| sql.rsplit_once("INSERT INTO ")
+            .and_then(|(_, tail)| tail.split(|c: char| !c.is_ascii_alphanumeric() && c != '_').next())
+            .and_then(|name| by_name.get(name).copied());
+        let reads = |sql: &str| {
+            let prefix = format!("frontier_{program}_n");
+            let bytes = sql.as_bytes();
+            let mut found = sql.match_indices(&prefix).filter_map(|(at, _)| {
+                if at > 0 && (bytes[at - 1].is_ascii_alphanumeric() || bytes[at - 1] == b'_') {
+                    return None;
+                }
+                if sql[..at].ends_with("INSERT INTO ") { return None; }
+                let end = bytes[at..].iter().position(|byte| !byte.is_ascii_alphanumeric() && *byte != b'_')
+                    .map(|len| at + len).unwrap_or(bytes.len());
+                by_name.get(&sql[at..end]).copied()
+            }).collect::<Vec<_>>();
+            found.sort_unstable();
+            found.dedup();
+            found
+        };
+        self.source_writes = self.source_fills.iter().map(|sql| write(sql)).collect();
+        self.integrate_reads = self.integrates.iter().map(|sql| reads(sql)).collect();
+        self.clear_targets = self.clears.iter().map(|sql| sql.strip_prefix("DELETE FROM ")
+            .and_then(|tail| tail.split_whitespace().next())
+            .and_then(|name| by_name.get(name).copied())).collect();
+        self.work_ids = self.work.iter().map(|(_, table, _, _)| by_name.get(table.as_str()).copied()).collect();
+        for step in &self.steps {
+            match step {
+                Step::Fill(sql) => {
+                    self.step_reads.push(reads(sql));
+                    self.step_writes.push(write(sql));
+                }
+                Step::Loop(_) => {
+                    self.step_reads.push(Vec::new());
+                    self.step_writes.push(None);
+                }
+            }
+        }
+        for (scc_id, scc) in self.sccs.iter().enumerate() {
+            let internal = nodes.iter().filter(|node| node.owner == Owner::Loop(scc_id))
+                .filter_map(|node| by_name.get(node.c.d.replace("ivm_n", &format!("frontier_{program}_n")).as_str()).copied())
+                .collect::<Vec<_>>();
+            let sqls = scc.delete_fills.iter().chain(&scc.insert_fills)
+                .chain(&scc.delete_seeds).chain(&scc.insert_seeds)
+                .chain(&scc.integrates).chain(&scc.stash).chain(&scc.restore);
+            let mut external = sqls.flat_map(|sql| reads(sql)).collect::<Vec<_>>();
+            external.retain(|id| !internal.contains(id));
+            external.sort_unstable();
+            external.dedup();
+            self.scc_reads.push(external);
+            self.scc_results.push(scc.vars.iter().map(|v| write(&v.finish)
+                .expect("SCC finish writes a physical delta")).collect());
+        }
     }
 
     fn inline_statements(&mut self, inline_deltas: &[(String, String)]) {
@@ -1445,14 +1522,14 @@ impl NodesPlan {
         Ok(())
     }
 
-    fn count_work(&self, db: &Connection, owner: Owner, counters: &mut Counters) -> rusqlite::Result<()> {
-        for (at, table, kind, arity) in &self.work {
+    fn count_work(&self, db: &Connection, owner: Owner, active: Option<&[bool]>, counters: &mut Counters) -> rusqlite::Result<()> {
+        for (i, (at, table, kind, arity)) in self.work.iter().enumerate() {
             let matches = match (*at, owner) {
                 (Owner::Settle | Owner::Copy(_), Owner::Settle) => true,
                 (Owner::Loop(a), Owner::Loop(b)) => a == b,
                 _ => false,
             };
-            if matches {
+            if matches && active.is_none_or(|active| self.work_ids[i].is_none_or(|id| active.get(id) == Some(&true))) {
                 let cols = list("", 0..*arity);
                 let sql = format!("SELECT count(*) FROM (SELECT {cols} FROM {table} GROUP BY {cols} HAVING sum(w)<>0)");
                 let rows: i64 = db.query_row(&sql, [], |r| r.get(0))?;
@@ -1467,7 +1544,7 @@ impl NodesPlan {
         let scc = &self.sccs[scc_id];
         let phase_fills = if deleting { &scc.delete_fills } else { &scc.insert_fills };
         Self::exec_all(db, phase_fills.iter().chain(&scc.integrates), counters)?;
-        self.count_work(db, Owner::Loop(scc_id), counters)?;
+        self.count_work(db, Owner::Loop(scc_id), None, counters)?;
         Self::exec_all(
             db,
             scc.vars
@@ -1492,7 +1569,7 @@ impl NodesPlan {
         Ok(more)
     }
 
-    fn fixpoint(&self, db: &Connection, scc_id: usize, counters: &mut Counters) -> rusqlite::Result<()> {
+    fn fixpoint(&self, db: &Connection, scc_id: usize, counters: &mut Counters) -> rusqlite::Result<Vec<bool>> {
         let scc = &self.sccs[scc_id];
         Self::exec_all(db, &scc.stash, counters)?;
         Self::exec_all(db, &scc.delete_seeds, counters)?;
@@ -1513,25 +1590,46 @@ impl NodesPlan {
         Self::exec_all(db, &scc.restore, counters)?;
         Self::exec_all(db, &scc.insert_seeds, counters)?;
         while self.round(db, scc_id, false, counters)? {}
+        let mut results = Vec::with_capacity(scc.vars.len());
         for v in &scc.vars {
-            Self::exec_all(db, [&v.finish, &v.clear_acc], counters)?;
+            results.push(Self::exec(db, &v.finish, counters)? > 0);
+            Self::exec(db, &v.clear_acc, counters)?;
         }
-        Ok(())
+        Ok(results)
     }
 
     pub fn run(&self, db: &Connection, counters: &mut Counters) -> rusqlite::Result<Vec<(Row, W)>> {
         if !self.filter_measured { counters.delta_rows.filter = None; }
         if !self.mint_measured { counters.delta_rows.mint = None; }
-        Self::exec_all(db, &self.source_fills, counters)?;
-        for step in &self.steps {
+        let mut active = vec![false; self.scc_reads.iter().chain(&self.scc_results)
+            .flat_map(|ids| ids.iter().copied())
+            .chain(self.step_reads.iter().flat_map(|ids| ids.iter().copied()))
+            .chain(self.step_writes.iter().flatten().copied())
+            .chain(self.source_writes.iter().flatten().copied())
+            .max().map_or(0, |id| id + 1)];
+        for (sql, written) in self.source_fills.iter().zip(&self.source_writes) {
+            let rows = Self::exec(db, sql, counters)?;
+            if let Some(id) = written { active[*id] |= rows > 0; }
+        }
+        for (at, step) in self.steps.iter().enumerate() {
             match step {
                 Step::Fill(sql) => {
-                    Self::exec(db, sql, counters)?;
+                    let reads = &self.step_reads[at];
+                    if !reads.is_empty() && !reads.iter().any(|id| active.get(*id) == Some(&true)) { continue; }
+                    let rows = Self::exec(db, sql, counters)?;
+                    if let Some(id) = self.step_writes[at] { active[id] |= rows > 0; }
                 }
-                Step::Loop(s) => self.fixpoint(db, *s, counters)?,
+                Step::Loop(s) => {
+                    let reads = &self.scc_reads[*s];
+                    if !reads.is_empty() && !reads.iter().any(|id| active.get(*id) == Some(&true)) { continue; }
+                    let results = self.fixpoint(db, *s, counters)?;
+                    for (id, nonempty) in self.scc_results[*s].iter().zip(results) {
+                        active[*id] |= nonempty;
+                    }
+                }
             }
         }
-        self.count_work(db, Owner::Settle, counters)?;
+        self.count_work(db, Owner::Settle, Some(&active), counters)?;
         let mut stmt = db.prepare_cached(&self.output_delta)?;
         let changes = stmt
             .query_map([], |r| {
@@ -1544,7 +1642,16 @@ impl NodesPlan {
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         *counters.statements.as_mut().unwrap() += 1;
-        Self::exec_all(db, self.integrates.iter().chain(&self.clears), counters)?;
+        for (sql, reads) in self.integrates.iter().zip(&self.integrate_reads) {
+            if reads.is_empty() || reads.iter().any(|id| active.get(*id) == Some(&true)) {
+                Self::exec(db, sql, counters)?;
+            }
+        }
+        for (sql, target) in self.clears.iter().zip(&self.clear_targets) {
+            if target.is_none_or(|id| active.get(id) == Some(&true)) {
+                Self::exec(db, sql, counters)?;
+            }
+        }
         Ok(changes)
     }
 }

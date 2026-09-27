@@ -467,3 +467,36 @@ fn bench_materialization_boundaries() {
         eprintln!("bench_ {name} install_ms={install_ms:.3} settle_ms={settle_ms:.3} total_ms={:.3}", install_ms + settle_ms);
     }
 }
+
+#[test]
+#[ignore]
+fn bench_settle_frontiers() {
+    let program: Program = serde_json::from_str(include_str!("corpus/8_c15_program.json")).unwrap();
+    let sources = program.rels.iter().filter(|r| r.kind == RelKind::Source && r.name.starts_with("__ir_seed_n"))
+        .collect::<Vec<_>>();
+    let sizes = [483, 515, 134, 102, 3097, 5, 5, 3, 1, 3];
+    let mut ordinal = 0i64;
+    let frontiers = sizes.map(|size| Frontier { changes: (0..size).map(|_| {
+        let source = sources[ordinal as usize % sources.len()];
+        ordinal += 1;
+        SourceChange { rel: source.id, row: vec![ordinal; source.cols.len()], w: 1 }
+    }).collect() });
+    fn measure<E: Engine>(name: &str, program: &Program, frontiers: &[Frontier]) -> Vec<Vec<(u32, Vec<i64>, i64)>> {
+        let db = Connection::open_in_memory().unwrap();
+        let mut host = Raw::with_connection(&db);
+        let start = Instant::now();
+        let mut engine = E::install(program, &mut host).unwrap();
+        eprintln!("settle_bench engine={name} install_ms={:.3}", start.elapsed().as_secs_f64() * 1000.0);
+        frontiers.iter().enumerate().map(|(at, frontier)| {
+            let start = Instant::now();
+            let delta = engine.settle(frontier.clone(), &mut host).unwrap();
+            eprintln!("settle_bench engine={name} frontier={at} inputs={} outputs={} statements={:?} settle_ms={:.3}",
+                frontier.changes.len(), delta.changes.len(), engine.counters().statements,
+                start.elapsed().as_secs_f64() * 1000.0);
+            delta.changes
+        }).collect()
+    }
+    let dd = measure::<Dd>("dd", &program, &frontiers);
+    let sqlite = measure::<Sqlite>("sqlite", &program, &frontiers);
+    assert_eq!(sqlite, dd);
+}
