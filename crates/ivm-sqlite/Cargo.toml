@@ -1,0 +1,30 @@
+[package]
+name = "ivm-sqlite"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "SQLite-backed incremental frontier engine: typed cells, indexed integer joins, one settled frontier per transaction."
+
+[dependencies]
+# Correlated shared crates, never vendored. Revision recorded in HYPOTHESIS.md.
+sqlite-ext = { path = "../../hafley-rs/crates/sqlite-ext" }
+hafley-observe = { path = "../../hafley-rs/crates/hafley-observe" }
+tracing = "0.1"
+ivm-ir = { path = "../ivm-ir" }
+ivm-engine = { path = "../ivm-engine" }
+serde_json = "1"
+
+[dev-dependencies]
+ivm-dd = { path = "../ivm-dd" }
+tracing-subscriber = "0.3"
+# Tests are the SQLite host: they link a bundled copy and load extensions.
+rusqlite = { version = "=0.40.2", features = ["bundled", "load_extension"] }
+
+[[example]]
+name = "cases"
+
+[[example]]
+name = "bootstrap"
+
+[[example]]
+name = "measure"

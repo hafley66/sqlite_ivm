@@ -1,0 +1,2 @@
+random_sql
+panic: every plan source has a scan

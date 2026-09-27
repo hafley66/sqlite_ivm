@@ -1,0 +1,2 @@
+random_sql
+install: Install rel None: Worker("[plan/d0] unsupported: IR operator outside the SQL frontier subset")

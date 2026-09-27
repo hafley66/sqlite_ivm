@@ -1,0 +1,66 @@
+{
+  "rels": [
+    {
+      "id": 0,
+      "name": "s0",
+      "cols": [
+        "Int",
+        "Int"
+      ],
+      "kind": "Source"
+    },
+    {
+      "id": 1,
+      "name": "s1",
+      "cols": [
+        "Int",
+        "Int"
+      ],
+      "kind": "Source"
+    },
+    {
+      "id": 2,
+      "name": "s2",
+      "cols": [
+        "Int",
+        "Int",
+        "Int"
+      ],
+      "kind": "Source"
+    },
+    {
+      "id": 3,
+      "name": "d0",
+      "cols": [
+        "Int",
+        "Int"
+      ],
+      "kind": "Derived"
+    }
+  ],
+  "nodes": [
+    {
+      "Get": 1
+    },
+    {
+      "Get": 0
+    },
+    {
+      "Union": [
+        0,
+        1
+      ]
+    }
+  ],
+  "strata": [
+    {
+      "Let": {
+        "id": 3,
+        "body": 2
+      }
+    }
+  ],
+  "outputs": [
+    3
+  ]
+}

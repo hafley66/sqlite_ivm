@@ -9,9 +9,20 @@ publish = false
 # build graph with the test-side rusqlite/bundled.
 [workspace]
 
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/hafley66/hafley-rs"
+homepage = "https://github.com/hafley66/hafley-rs"
+
+[workspace.dependencies]
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
+
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-frontier-engine = { path = "../../../../crates/frontier-engine" }
-sqlite-ext = { path = "/Users/chrishafley/projects/hafley-rs-wt/main-codex-attribution/crates/sqlite-ext", features = ["loadable"] }
+ivm-sqlite = { path = "../../../../crates/ivm-sqlite" }
+sqlite-ext = { path = "../../../../hafley-rs/crates/sqlite-ext", features = ["loadable"] }

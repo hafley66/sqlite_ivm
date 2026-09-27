@@ -1,4 +1,5 @@
 target/
+/hafley-rs
 bench/target/
 bench/shared/node_modules/
 bench/results/
