@@ -411,32 +411,61 @@ fn numeric_prefix(bytes: &[u8]) -> f64 {
 }
 
 fn sqlite_sum_any(values: &[(AnyValue, W)]) -> Result<AnyValue, &'static str> {
-    let (mut integer, mut real, mut approximate, mut seen) = (0i64, 0.0f64, false, false);
+    fn add(sum: &mut f64, error: &mut f64, value: f64) {
+        let old = *sum;
+        let next = old + value;
+        if old.abs() > value.abs() { *error += (old - next) + value; }
+        else { *error += (value - next) + old; }
+        *sum = next;
+    }
+    fn add_integer(sum: &mut f64, error: &mut f64, value: i64) {
+        if !(-4503599627370495..=4503599627370495).contains(&value) {
+            let small = value % 16384;
+            add(sum, error, (value - small) as f64);
+            add(sum, error, small as f64);
+        } else { add(sum, error, value as f64); }
+    }
+    fn init(integer: i64) -> (f64, f64) {
+        if !(-4503599627370495..=4503599627370495).contains(&integer) {
+            let small = integer % 16384;
+            ((integer - small) as f64, small as f64)
+        } else { (integer as f64, 0.0) }
+    }
+    let (mut integer, mut real, mut error, mut approximate, mut overflow, mut seen) = (0i64, 0.0f64, 0.0f64, false, false, false);
     for (value, weight) in values {
         for _ in 0..(*weight).max(0) {
-            match value {
+            let numeric = match value {
                 AnyValue::Null => continue,
-                AnyValue::Integer(value) if !approximate => {
-                    integer = integer.checked_add(*value).ok_or("integer overflow")?;
+                AnyValue::Integer(value) => Ok(*value),
+                AnyValue::Text(value) => value.trim().parse::<i64>().map_err(|_| numeric_prefix(value.as_bytes())),
+                AnyValue::Real(bits) => Err(f64::from_bits(*bits)),
+                AnyValue::Blob(value) => Err(numeric_prefix(value)),
+            };
+            match numeric {
+                Ok(value) if !approximate => {
+                    if let Some(next) = integer.checked_add(value) { integer = next; }
+                    else {
+                        overflow = true;
+                        (real, error) = init(integer);
+                        approximate = true;
+                        add_integer(&mut real, &mut error, value);
+                    }
                 }
-                AnyValue::Integer(value) => real += *value as f64,
-                AnyValue::Real(bits) => {
-                    if !approximate { real = integer as f64; approximate = true; }
-                    real += f64::from_bits(*bits);
-                }
-                AnyValue::Text(value) => {
-                    if !approximate { real = integer as f64; approximate = true; }
-                    real += numeric_prefix(value.as_bytes());
-                }
-                AnyValue::Blob(value) => {
-                    if !approximate { real = integer as f64; approximate = true; }
-                    real += numeric_prefix(value);
+                Ok(value) => add_integer(&mut real, &mut error, value),
+                Err(value) => {
+                    if !approximate { (real, error) = init(integer); approximate = true; }
+                    overflow = false;
+                    add(&mut real, &mut error, value);
                 }
             }
             seen = true;
         }
     }
-    Ok(if !seen { AnyValue::Null } else if approximate { AnyValue::Real(real.to_bits()) } else { AnyValue::Integer(integer) })
+    if overflow { return Err("integer overflow"); }
+    let total = if error.is_infinite() { real } else { real + error };
+    Ok(if !seen || approximate && total.is_nan() { AnyValue::Null }
+        else if approximate { AnyValue::Real(total.to_bits()) }
+        else { AnyValue::Integer(integer) })
 }
 
 fn accumulable_values<'s, T: Nest>(c: Coll<'s, T>, key: Vec<ColId>, aggs: Vec<Agg>, types: Vec<Ty>, interner: Rc<RefCell<Interner>>, sum_error: Rc<RefCell<Option<String>>>) -> VecCollection<'s, T, (Row, Row), W> {
