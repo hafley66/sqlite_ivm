@@ -255,7 +255,7 @@ pub(crate) fn install(
 ) -> Result<Arc<Installed>, EngineError> {
     let parsed = compile(conn, name, select_sql)?;
     let program = plan::lower_ir(&parsed)?;
-    install_program(conn, name, &program, parsed.output, watch)
+    install_program(conn, name, &program, parsed.output, watch, false)
 }
 
 pub(crate) fn install_ir(
@@ -277,7 +277,7 @@ pub(crate) fn install_ir(
             name: format!("c{i}"),
         })
         .collect();
-    install_program(conn, name, program, output, watch)
+    install_program(conn, name, program, output, watch, true)
 }
 
 fn install_program(
@@ -286,12 +286,13 @@ fn install_program(
     program: &IrProgram,
     output: Vec<OutputColumn>,
     watch: Watch,
+    typed_ir: bool,
 ) -> Result<Arc<Installed>, EngineError> {
     validate_program_name(name)?;
     let _guard =
         tracing::info_span!(target: observe::TARGET, observe::INSTALL_SPAN, program = name)
             .entered();
-    let compiled = compile_ir(conn, name, program, output)?;
+    let compiled = compile_ir(conn, name, program, output, typed_ir)?;
     let mut meter = Meter::default();
 
     if catalog_row(conn, name, &mut meter)?.is_some() {
@@ -323,7 +324,8 @@ fn install_program(
     let program_json = serde_json::to_string(&program)
         .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::State(e.to_string())))?;
     sql.push_str(&format!(
-        "INSERT INTO {c}(name, program, frontier, install) VALUES ('{n}', '{s}', 0, {i});",
+        "INSERT INTO {c}(name, program, frontier, install, typed_ir) VALUES ('{n}', '{s}', 0, {i}, {});",
+        typed_ir as u8,
         c = quote(catalog()),
         n = name.replace('\'', "''"),
         s = program_json.replace('\'', "''"),
@@ -551,6 +553,7 @@ fn compile_ir(
     name: &str,
     program: &IrProgram,
     output: Vec<OutputColumn>,
+    typed_ir: bool,
 ) -> Result<Compiled, EngineError> {
     let columns = |table: &str| -> Option<Vec<String>> {
         let mut fresh = Meter::default();
@@ -558,31 +561,37 @@ fn compile_ir(
             .ok()
             .filter(|cols| !cols.is_empty())
     };
-    plan::compile_ir(name, program, output, &columns)
+    plan::compile_ir(name, program, output, &columns, typed_ir)
 }
 
 fn catalog_row(
     conn: &Connection,
     name: &str,
     meter: &mut Meter,
-) -> Result<Option<(String, u64)>, EngineError> {
+) -> Result<Option<(String, u64, bool)>, EngineError> {
     let sql = format!(
-        "SELECT program, install FROM {} WHERE name = ?1",
+        "SELECT program, install, typed_ir FROM {} WHERE name = ?1",
         quote(catalog())
     );
     // First install on a database has no catalog yet; create it before reads.
     meter
         .batch(conn, "install", name, &format!(
-            "CREATE TABLE IF NOT EXISTS {}(name TEXT PRIMARY KEY, program TEXT NOT NULL, frontier INTEGER NOT NULL DEFAULT 0, install INTEGER NOT NULL);\
+            "CREATE TABLE IF NOT EXISTS {}(name TEXT PRIMARY KEY, program TEXT NOT NULL, frontier INTEGER NOT NULL DEFAULT 0, install INTEGER NOT NULL, typed_ir INTEGER NOT NULL DEFAULT 0);\
              CREATE TABLE IF NOT EXISTS {}(name TEXT NOT NULL, pos INTEGER NOT NULL, col TEXT NOT NULL, PRIMARY KEY(name, pos))",
             quote(catalog()),
             quote(catalog_column()),
         ))
         .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
     migrate_legacy_catalog(conn, meter)?;
+    let columns: Vec<String> = meter.rows(conn, "install", name, "PRAGMA table_info(frontier_catalog)", [], |row| row.get(1))
+        .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
+    if !columns.iter().any(|column| column == "typed_ir") {
+        meter.batch(conn, "install", name, "ALTER TABLE frontier_catalog ADD COLUMN typed_ir INTEGER NOT NULL DEFAULT 0")
+            .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
+    }
     let row = meter
         .one(conn, "install", name, &sql, [name], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64, row.get::<_, i64>(2)? != 0))
         })
         .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
     Ok(row)
@@ -1732,7 +1741,7 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
 pub(crate) fn open(conn: &Connection, name: &str) -> Result<Arc<Installed>, EngineError> {
     validate_program_name(name)?;
     let mut meter = Meter::default();
-    let Some((json, install)) = catalog_row(conn, name, &mut meter)? else {
+    let Some((json, install, typed_ir)) = catalog_row(conn, name, &mut meter)? else {
         return Err(EngineError::new(
             Stage::Install,
             name,
@@ -1756,7 +1765,7 @@ pub(crate) fn open(conn: &Connection, name: &str) -> Result<Arc<Installed>, Engi
             |row| row.get::<_, String>(0).map(|name| OutputColumn { name }),
         )
         .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
-    let compiled = compile_ir(conn, name, &program, output)?;
+    let compiled = compile_ir(conn, name, &program, output, typed_ir)?;
     let mut installed = build_installed(name, install, compiled);
     installed.derived = scan_derived_sources(conn, &installed)?;
     Ok(Arc::new(installed))

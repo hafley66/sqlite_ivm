@@ -560,6 +560,7 @@ pub(crate) fn compile_ir(
     ir: &IrProgram,
     output: Vec<OutputColumn>,
     schema: &Schema<'_>,
+    typed_ir: bool,
 ) -> Result<Compiled, EngineError> {
     let dictionary_order = ir.nodes.iter().any(|op| match op {
         Op::TopK { input, .. } => ir.node_types(*input)
@@ -569,7 +570,7 @@ pub(crate) fn compile_ir(
         })),
         _ => false,
     });
-    if !dictionary_order && ir.strata.len() == 1
+    if !typed_ir && !dictionary_order && ir.strata.len() == 1
         && !ir.strata.iter().any(|stratum| matches!(stratum, Stratum::LetRec { .. }))
     {
         if let Ok(compiled) = compile_ir_legacy(name, ir, output.clone(), schema) {
