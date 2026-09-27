@@ -2,6 +2,7 @@
 //! Op names follow Materialize MIR (plans/2026-09-24-ivm-cousins/4_design.md §2.1).
 
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 
 pub type RelId = u32;
 pub type NodeId = u32;
@@ -12,6 +13,49 @@ pub type Cell = i64;
 pub type Row = Vec<Cell>;
 /// Z-set weight.
 pub type W = i64;
+
+/// A native SQLite storage class before or after its engine-specific dictionary encoding.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum AnyValue {
+    Null,
+    Integer(i64),
+    Real(u64),
+    Text(String),
+    Blob(Vec<u8>),
+}
+
+impl AnyValue {
+    pub fn sqlite_cmp(&self, other: &Self) -> Ordering {
+        fn class(value: &AnyValue) -> u8 {
+            match value {
+                AnyValue::Null => 0,
+                AnyValue::Integer(_) | AnyValue::Real(_) => 1,
+                AnyValue::Text(_) => 2,
+                AnyValue::Blob(_) => 3,
+            }
+        }
+        fn int_real(integer: i64, real: f64) -> Ordering {
+            if real.is_nan() { return Ordering::Greater; }
+            if real >= 9223372036854775808.0 { return Ordering::Less; }
+            if real < i64::MIN as f64 { return Ordering::Greater; }
+            integer.cmp(&(real.trunc() as i64)).then_with(|| {
+                if real.fract() > 0.0 { Ordering::Less }
+                else if real.fract() < 0.0 { Ordering::Greater }
+                else { Ordering::Equal }
+            })
+        }
+        class(self).cmp(&class(other)).then_with(|| match (self, other) {
+            (AnyValue::Null, AnyValue::Null) => Ordering::Equal,
+            (AnyValue::Integer(a), AnyValue::Integer(b)) => a.cmp(b),
+            (AnyValue::Real(a), AnyValue::Real(b)) => f64::from_bits(*a).partial_cmp(&f64::from_bits(*b)).unwrap_or(Ordering::Equal),
+            (AnyValue::Integer(a), AnyValue::Real(b)) => int_real(*a, f64::from_bits(*b)),
+            (AnyValue::Real(a), AnyValue::Integer(b)) => int_real(*b, f64::from_bits(*a)).reverse(),
+            (AnyValue::Text(a), AnyValue::Text(b)) => a.cmp(b),
+            (AnyValue::Blob(a), AnyValue::Blob(b)) => a.cmp(b),
+            _ => Ordering::Equal,
+        })
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Ty {

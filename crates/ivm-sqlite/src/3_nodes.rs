@@ -524,7 +524,7 @@ impl Rel for SqlRel {
     }
 
     /// Δ(a⋈b) = Δa⋈Δb + I⁻(a)⋈Δb + Δa⋈I⁻(b), with I⁻ the integrated tables not yet updated this settle.
-    fn join(&mut self, cs: Vec<Self::C>, eq: &[Vec<(u8, ColId)>]) -> Result<Self::C, EngineError> {
+    fn join(&mut self, cs: Vec<Self::C>, eq: &[Vec<(u8, ColId)>], types: &[Vec<Ty>]) -> Result<Self::C, EngineError> {
         let [a, b]: [SqlC; 2] = self
             .feed(cs)
             .try_into()
@@ -541,6 +541,11 @@ impl Rel for SqlRel {
                 .ok_or_else(|| unsupported("Join class missing a side"))
         };
         let (lk, rk) = (side(0)?, side(1)?);
+        let predicates = lk.iter().zip(&rk).map(|(l, r)| {
+            let left = ordered(types[0][*l], format!("{{la}}.c{l}"));
+            let right = ordered(types[1][*r], format!("{{ra}}.c{r}"));
+            format!("{left} = {right}")
+        }).collect::<Vec<_>>();
         self.integrate(&a, lk.clone());
         self.integrate(&b, rk.clone());
         let term = |l: &str, r: &str, l_first: bool| {
@@ -563,7 +568,7 @@ impl Rel for SqlRel {
                     .map(|i| format!("{ra}.c{i} AS c{}", a.arity + i))
                     .collect::<Vec<_>>()
                     .join(", "),
-                on(la, &lk, ra, &rk)
+                if predicates.is_empty() { "1".to_string() } else { predicates.join(" AND ").replace("{la}", la).replace("{ra}", ra) }
             )
         };
         let terms = [
@@ -647,7 +652,7 @@ impl Rel for SqlRel {
             .enumerate()
             .map(|(i, c)| vec![(0, *c), (1, i as ColId)])
             .collect();
-        let joined = match self.join(vec![l.clone(), keys], &eq) {
+        let joined = match self.join(vec![l.clone(), keys], &eq, &[vec![Ty::Int; l.arity], vec![Ty::Int; rk.len()]]) {
             Ok(j) => j,
             Err(e) => {
                 self.fail(e);
@@ -665,6 +670,9 @@ impl Rel for SqlRel {
     fn reduce(&mut self, c: Self::C, key: &[ColId], aggs: &[Agg], input_types: &[Ty]) -> Self::C {
         self.flat(&c, "Reduce over a LetRec variable");
         let key: Vec<usize> = key.iter().map(|k| *k as usize).collect();
+        if key.iter().any(|x| input_types[*x] == Ty::Any) {
+            self.integrate(&c, key.clone());
+        }
         let arity = key.len() + aggs.len();
         let out = self.push(arity, false, |_| None);
         let k = out.node;
@@ -678,7 +686,7 @@ impl Rel for SqlRel {
         let kx = if key.is_empty() {
             vec!["0".to_string()]
         } else {
-            key.iter().map(|x| format!("c{x}")).collect()
+            key.iter().map(|x| if input_types[*x] == Ty::Any { format!("ivm_any_key(c{x})") } else { format!("c{x}") }).collect()
         };
         let group = if key.is_empty() {
             "HAVING COUNT(*) > 0".to_string()
@@ -689,13 +697,13 @@ impl Rel for SqlRel {
             .iter()
             .enumerate()
             .filter_map(|(j, a)| {
-                if let Agg::Sum(x) = a {
-                    Some((j, *x))
-                } else {
-                    None
+                match a {
+                    Agg::Sum(x) if input_types[*x as usize] != Ty::Any => Some((j, *x)),
+                    _ => None,
                 }
             })
             .collect();
+        let any_sums = aggs.iter().any(|agg| matches!(agg, Agg::Sum(x) if input_types[*x as usize] == Ty::Any));
         let extremes: Vec<ColId> = aggs
             .iter()
             .filter_map(|a| {
@@ -722,7 +730,7 @@ impl Rel for SqlRel {
             d = c.d
         )];
         let all = list("", 0..c.arity);
-        if !extremes.is_empty() {
+        if !extremes.is_empty() || any_sums {
             ddl.push(format!(
                 "CREATE TABLE {arr} ({}, w INTEGER NOT NULL, PRIMARY KEY ({all})) WITHOUT ROWID",
                 decl(c.arity)
@@ -751,7 +759,7 @@ impl Rel for SqlRel {
             let pairs: Vec<String> = key
                 .iter()
                 .zip(&gk)
-                .map(|(x, t)| format!("n_i.c{x} = {alias}.g{t}"))
+                .map(|(x, t)| if input_types[*x] == Ty::Any { format!("ivm_any_key(n_i.c{x}) = {alias}.g{t}") } else { format!("n_i.c{x} = {alias}.g{t}") })
                 .collect();
             if pairs.is_empty() {
                 "1".to_string()
@@ -761,16 +769,28 @@ impl Rel for SqlRel {
         };
         let values = aggs.iter().enumerate().map(|(j, agg)| match agg {
             Agg::Count => "g_i.cnt".to_string(),
+            Agg::Sum(x) if input_types[*x as usize] == Ty::Any => format!("(SELECT ivm_any_id(SUM(v)) FROM (WITH RECURSIVE expanded(v,n) AS (SELECT ivm_any_value(n_i.c{x}), n_i.w FROM {arr} n_i WHERE {} AND n_i.w>0 UNION ALL SELECT v,n-1 FROM expanded WHERE n>1) SELECT v FROM expanded))", g_on("g_i")),
             Agg::Sum(x) => if input_types[*x as usize] == Ty::Real { format!("ivm_real_bits(g_i.a{j})") } else { format!("g_i.a{j}") },
-            Agg::Min(x) => format!("(SELECT n_i.c{x} FROM {arr} n_i WHERE {} AND n_i.w > 0 ORDER BY {} LIMIT 1)", g_on("g_i"),
-                ordered(input_types[*x as usize], format!("n_i.c{x}"))),
-            Agg::Max(x) => format!("(SELECT n_i.c{x} FROM {arr} n_i WHERE {} AND n_i.w > 0 ORDER BY {} DESC LIMIT 1)", g_on("g_i"),
-                ordered(input_types[*x as usize], format!("n_i.c{x}"))),
+            Agg::Min(x) | Agg::Max(x) => {
+                let is_any = input_types[*x as usize] == Ty::Any;
+                let filter = if is_any { format!(" AND ivm_any_value(n_i.c{x}) IS NOT NULL") } else { String::new() };
+                let direction = if matches!(agg, Agg::Max(_)) { " DESC" } else { "" };
+                let query = format!("(SELECT n_i.c{x} FROM {arr} n_i WHERE {} AND n_i.w > 0{filter} ORDER BY {}{direction} LIMIT 1)",
+                    g_on("g_i"), ordered(input_types[*x as usize], format!("n_i.c{x}")));
+                if is_any { format!("COALESCE({query},ivm_any_id(NULL))") } else { query }
+            }
         });
-        let select = gk
+        let select = key
             .iter()
-            .take(key.len())
-            .map(|x| format!("g_i.g{x}"))
+            .zip(&gk)
+            .map(|(col, group)| if input_types[*col] == Ty::Any {
+                let candidate = list("", 0..c.arity);
+                let cond = key.iter().zip(&gk).map(|(x, gcol)| {
+                    if input_types[*x] == Ty::Any { format!("ivm_any_key(v.c{x}) = g_i.g{gcol}") }
+                    else { format!("v.c{x} = g_i.g{gcol}") }
+                }).collect::<Vec<_>>().join(" AND ");
+                format!("(SELECT v.c{col} FROM (SELECT {candidate}, SUM(w) AS w FROM (SELECT {candidate}, w FROM {} UNION ALL SELECT {candidate}, w FROM {}) GROUP BY {candidate}) v WHERE v.w>0 AND {cond} ORDER BY {} LIMIT 1)", c.i, c.d, key.iter().map(|x| format!("v.c{x}")).collect::<Vec<_>>().join(", "))
+            } else { format!("g_i.g{group}") })
             .chain(values)
             .enumerate()
             .map(|(i, s)| format!("{s} AS c{i}"))

@@ -1,4 +1,4 @@
-use crate::{Cell, Row, Ty};
+use crate::{AnyValue, Cell, Row, Ty};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
@@ -16,12 +16,14 @@ pub struct Interner {
     by_key: BTreeMap<(String, Row), Cell>,
     by_id: BTreeMap<Cell, Term>,
     by_text: BTreeMap<String, Cell>,
+    by_any: BTreeMap<AnyValue, Cell>,
+    any_by_id: BTreeMap<Cell, AnyValue>,
     next: Cell,
     pending: Vec<(String, Row)>,
 }
 
 impl Interner {
-    pub fn len(&self) -> usize { self.by_id.len() }
+    pub fn len(&self) -> usize { self.by_id.len() + self.any_by_id.len() }
 
     pub fn mint(&mut self, functor: &str, args: &[Cell], types: &[Ty]) -> Cell {
         let key = (functor.to_owned(), args.to_vec());
@@ -58,6 +60,34 @@ impl Interner {
     pub fn text(&self, id: Cell) -> Option<&str> { self.by_id.get(&id)?.text.as_deref() }
 
     pub fn text_id(&self, text: &str) -> Option<Cell> { self.by_text.get(text).copied() }
+
+    pub fn mint_any(&mut self, value: &AnyValue) -> Cell {
+        if let AnyValue::Real(bits) = value {
+            if f64::from_bits(*bits).is_nan() { return self.mint_any(&AnyValue::Null); }
+        }
+        if let Some(id) = self.by_any.get(value) { return *id; }
+        if let AnyValue::Real(bits) = value {
+            let n = f64::from_bits(*bits);
+            if n.is_finite() && n >= i64::MIN as f64 && n < 9223372036854775808.0 && (n as i64) as f64 == n {
+                self.mint_any(&AnyValue::Integer(n as i64));
+            }
+        }
+        let id = self.next.checked_add(1).expect("cell ID space exhausted");
+        self.next = id;
+        self.by_any.insert(value.clone(), id);
+        self.any_by_id.insert(id, value.clone());
+        id
+    }
+
+    pub fn any_value(&self, id: Cell) -> Option<&AnyValue> { self.any_by_id.get(&id) }
+
+    pub fn any_key(&self, id: Cell) -> Option<Cell> {
+        let AnyValue::Real(bits) = self.any_value(id)? else { return Some(id); };
+        let n = f64::from_bits(*bits);
+        if n.is_finite() && n >= i64::MIN as f64 && n < 9223372036854775808.0 && (n as i64) as f64 == n {
+            self.by_any.get(&AnyValue::Integer(n as i64)).copied()
+        } else { Some(id) }
+    }
 
     pub fn split(&self, id: Cell) -> Option<(Cell, Cell)> { self.by_id.get(&id)?.split }
 

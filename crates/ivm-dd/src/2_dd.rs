@@ -71,6 +71,7 @@ impl Nest for Time {
                 reduce_reads: rel.reduce_reads.clone(),
                 constructors: rel.constructors.clone(),
                 interner: rel.interner.clone(),
+                sum_error: rel.sum_error.clone(),
                 texts: rel.texts.clone(),
             };
             let mut scope_defined: Vec<(RelId, Coll<'_, Inner>)> =
@@ -107,6 +108,7 @@ pub struct DdRel<'s, T: Nest = Time> {
     reduce_reads: Option<ReduceReadLogger>,
     constructors: BTreeMap<RelId, (String, Vec<Ty>)>,
     interner: Rc<RefCell<Interner>>,
+    sum_error: Rc<RefCell<Option<String>>>,
     texts: Vec<Cell>,
 }
 
@@ -217,7 +219,7 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
         c.negate()
     }
 
-    fn join(&mut self, cs: Vec<Self::C>, eq: &[Vec<(u8, ColId)>]) -> Result<Self::C, EngineError> {
+    fn join(&mut self, cs: Vec<Self::C>, eq: &[Vec<(u8, ColId)>], types: &[Vec<Ty>]) -> Result<Self::C, EngineError> {
         if cs.len() != 2 {
             return Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Join arity != 2")));
         }
@@ -227,10 +229,32 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
                 .collect()
         };
         let (lk, rk) = (side(0), side(1));
+        let l_any = lk.iter().map(|c| types[0][*c as usize] == Ty::Any).collect::<Vec<_>>();
+        let r_any = rk.iter().map(|c| types[1][*c as usize] == Ty::Any).collect::<Vec<_>>();
+        let li = self.interner.clone();
+        let ri = self.interner.clone();
         let mut cs = cs.into_iter();
         let (l, r) = (cs.next().unwrap(), cs.next().unwrap());
-        let l = l.map(move |row| (cols(&row, &lk), row));
-        let r = r.map(move |row| (cols(&row, &rk), row));
+        let l = l.flat_map(move |row| {
+            let mut key = cols(&row, &lk);
+            for (cell, any) in key.iter_mut().zip(&l_any) {
+                if *any {
+                    if matches!(li.borrow().any_value(*cell), Some(AnyValue::Null)) { return None; }
+                    *cell = li.borrow().any_key(*cell)?;
+                }
+            }
+            Some((key, row))
+        });
+        let r = r.flat_map(move |row| {
+            let mut key = cols(&row, &rk);
+            for (cell, any) in key.iter_mut().zip(&r_any) {
+                if *any {
+                    if matches!(ri.borrow().any_value(*cell), Some(AnyValue::Null)) { return None; }
+                    *cell = ri.borrow().any_key(*cell)?;
+                }
+            }
+            Some((key, row))
+        });
         Ok(l.join(r).map(|(_, (mut a, b))| {
             a.extend(b);
             a
@@ -251,11 +275,11 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
         let extrema: Vec<Agg> = aggs.iter().filter(|a| matches!(a, Agg::Min(_) | Agg::Max(_))).cloned().collect();
         let extrema_types: Vec<Ty> = extrema.iter().map(|a| match a { Agg::Min(c) | Agg::Max(c) => input_types[*c as usize], _ => unreachable!() }).collect();
         let values = match (linear.is_empty(), extrema.is_empty()) {
-            (false, true) => accumulable_values(c, key, linear, input_types.to_vec()),
-            (true, false) => accumulable_values(c.clone(), key.clone(), vec![Agg::Count], input_types.to_vec())
+            (false, true) => accumulable_values(c, key, linear, input_types.to_vec(), self.interner.clone(), self.sum_error.clone()),
+            (true, false) => accumulable_values(c.clone(), key.clone(), vec![Agg::Count], input_types.to_vec(), self.interner.clone(), self.sum_error.clone())
                 .join(hierarchical_extrema(c, key, extrema, extrema_types, self.interner.clone(), self.reduce_reads.clone()))
                 .map(|(group, (_, values))| (group, values)),
-            (false, false) => accumulable_values(c.clone(), key.clone(), linear, input_types.to_vec())
+            (false, false) => accumulable_values(c.clone(), key.clone(), linear, input_types.to_vec(), self.interner.clone(), self.sum_error.clone())
                 .join(hierarchical_extrema(c, key, extrema, extrema_types, self.interner.clone(), self.reduce_reads.clone()))
                 .map(move |(group, (linear, extrema))| {
                     let (mut li, mut ei) = (linear.into_iter(), extrema.into_iter());
@@ -265,7 +289,7 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
                     }).collect();
                     (group, values)
                 }),
-            (true, true) => accumulable_values(c, key, linear, input_types.to_vec()),
+            (true, true) => accumulable_values(c, key, linear, input_types.to_vec(), self.interner.clone(), self.sum_error.clone()),
         };
         values.map(|(mut group, values)| {
             group.extend(values);
@@ -364,9 +388,111 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
 }
 
 /// Count and Sum ride in the diff (`[count, sums..]`), so a group is one record and a change costs O(1) in group size.
-fn accumulable_values<'s, T: Nest>(c: Coll<'s, T>, key: Vec<ColId>, aggs: Vec<Agg>, types: Vec<Ty>) -> VecCollection<'s, T, (Row, Row), W> {
-    if aggs.iter().any(|agg| matches!(agg, Agg::Sum(col) if types[*col as usize] == Ty::Real)) {
-        return c.map(move |row| (cols(&row, &key), row))
+fn numeric_prefix(bytes: &[u8]) -> f64 {
+    let mut end = 0;
+    while end < bytes.len() && matches!(bytes[end], b' ' | b'\t' | b'\n' | b'\r' | 0x0b | 0x0c) { end += 1; }
+    if end < bytes.len() && matches!(bytes[end], b'+' | b'-') { end += 1; }
+    let mut digits = 0;
+    while end < bytes.len() && bytes[end].is_ascii_digit() { end += 1; digits += 1; }
+    if end < bytes.len() && bytes[end] == b'.' {
+        end += 1;
+        while end < bytes.len() && bytes[end].is_ascii_digit() { end += 1; digits += 1; }
+    }
+    if digits == 0 { return 0.0; }
+    let exponent = end;
+    if end < bytes.len() && matches!(bytes[end], b'e' | b'E') {
+        end += 1;
+        if end < bytes.len() && matches!(bytes[end], b'+' | b'-') { end += 1; }
+        let before = end;
+        while end < bytes.len() && bytes[end].is_ascii_digit() { end += 1; }
+        if end == before { end = exponent; }
+    }
+    std::str::from_utf8(&bytes[..end]).ok().and_then(|text| text.trim().parse::<f64>().ok()).unwrap_or(0.0)
+}
+
+fn sqlite_sum_any(values: &[(AnyValue, W)]) -> Result<AnyValue, &'static str> {
+    let (mut integer, mut real, mut approximate, mut seen) = (0i64, 0.0f64, false, false);
+    for (value, weight) in values {
+        for _ in 0..(*weight).max(0) {
+            match value {
+                AnyValue::Null => continue,
+                AnyValue::Integer(value) if !approximate => {
+                    integer = integer.checked_add(*value).ok_or("integer overflow")?;
+                }
+                AnyValue::Integer(value) => real += *value as f64,
+                AnyValue::Real(bits) => {
+                    if !approximate { real = integer as f64; approximate = true; }
+                    real += f64::from_bits(*bits);
+                }
+                AnyValue::Text(value) => {
+                    if !approximate { real = integer as f64; approximate = true; }
+                    real += numeric_prefix(value.as_bytes());
+                }
+                AnyValue::Blob(value) => {
+                    if !approximate { real = integer as f64; approximate = true; }
+                    real += numeric_prefix(value);
+                }
+            }
+            seen = true;
+        }
+    }
+    Ok(if !seen { AnyValue::Null } else if approximate { AnyValue::Real(real.to_bits()) } else { AnyValue::Integer(integer) })
+}
+
+fn accumulable_values<'s, T: Nest>(c: Coll<'s, T>, key: Vec<ColId>, aggs: Vec<Agg>, types: Vec<Ty>, interner: Rc<RefCell<Interner>>, sum_error: Rc<RefCell<Option<String>>>) -> VecCollection<'s, T, (Row, Row), W> {
+    let key_cols = key.clone();
+    let key_types = types.clone();
+    let sum_interner = interner.clone();
+    let key_of = move |row: &Row| {
+        let mut group = cols(row, &key_cols);
+        for (cell, col) in group.iter_mut().zip(&key_cols) {
+            if key_types[*col as usize] == Ty::Any {
+                *cell = interner.borrow().any_key(*cell).expect("Any cell");
+            }
+        }
+        group
+    };
+    let real_sum = aggs.iter().any(|agg| matches!(agg, Agg::Sum(col) if types[*col as usize] == Ty::Real));
+    if key.iter().any(|col| types[*col as usize] == Ty::Any)
+        || aggs.iter().any(|agg| matches!(agg, Agg::Sum(col) if types[*col as usize] == Ty::Any)) {
+        let key_len = key.len();
+        return c.map(move |row| (key_of(&row), row))
+            .reduce(move |_group, input: &[(&Row, W)], output: &mut Vec<(Row, W)>| {
+                let count: W = input.iter().map(|(_, w)| *w).sum();
+                if count <= 0 { return; }
+                let representative = input.iter().filter(|(_, w)| *w > 0)
+                    .min_by_key(|(row, _)| cols(row, &key))
+                    .expect("live group").0;
+                let mut values = cols(representative, &key);
+                for agg in &aggs {
+                    values.push(match agg {
+                        Agg::Count => count,
+                        Agg::Sum(col) if types[*col as usize] == Ty::Real => input.iter()
+                            .map(|(row, w)| f64::from_bits(row[*col as usize] as u64) * *w as f64)
+                            .sum::<f64>().to_bits() as i64,
+                        Agg::Sum(col) if types[*col as usize] == Ty::Any => {
+                            let values = input.iter().map(|(row, w)| {
+                                (sum_interner.borrow().any_value(row[*col as usize]).expect("Any cell").clone(), *w)
+                            }).collect::<Vec<_>>();
+                            let sum = match sqlite_sum_any(&values) {
+                                Ok(sum) => sum,
+                                Err(error) => {
+                                    *sum_error.borrow_mut() = Some(error.to_string());
+                                    AnyValue::Null
+                                }
+                            };
+                            sum_interner.borrow_mut().mint_any(&sum)
+                        }
+                        Agg::Sum(col) => input.iter().fold(0i64, |sum, (row, w)| sum.wrapping_add(row[*col as usize].wrapping_mul(*w))),
+                        _ => unreachable!(),
+                    });
+                }
+                output.push((values, 1));
+            })
+            .map(move |(_, row)| (row[..key_len].to_vec(), row[key_len..].to_vec()));
+    }
+    if real_sum {
+        return c.map(move |row| (key_of(&row), row))
             .reduce(move |_key, input: &[(&Row, W)], output: &mut Vec<(Row, W)>| {
                 let count: W = input.iter().map(|(_, w)| *w).sum();
                 if count <= 0 { return; }
@@ -386,7 +512,7 @@ fn accumulable_values<'s, T: Nest>(c: Coll<'s, T>, key: Vec<ColId>, aggs: Vec<Ag
     c.explode(move |row: Row| {
         let mut acc = vec![1 as W];
         acc.extend(sums.iter().map(|c| row[*c as usize]));
-        Some(((cols(&row, &key), ()), acc))
+        Some(((key_of(&row), ()), acc))
     })
     .reduce(move |_k, input: &[(&(), Vec<W>)], output: &mut Vec<(Row, W)>| {
         let acc = &input[0].1;
@@ -455,8 +581,14 @@ fn extrema(input: &[(&Row, W)], aggs: &[Agg], types: &[Ty], interner: &Interner,
     let mut live = input.iter().filter(|(_, w)| *w > 0).map(|(row, _)| *row).peekable();
     if live.peek().is_none() { return; }
     let values = aggs.iter().enumerate().map(|(i, agg)| match agg {
-        Agg::Min(_) => live.clone().map(|row| row[i]).min_by(|a, b| cmp_cell(types[i], *a, *b, interner)).unwrap(),
-        Agg::Max(_) => live.clone().map(|row| row[i]).max_by(|a, b| cmp_cell(types[i], *a, *b, interner)).unwrap(),
+        Agg::Min(_) => live.clone().map(|row| row[i])
+            .filter(|cell| types[i] != Ty::Any || !matches!(interner.any_value(*cell), Some(AnyValue::Null)))
+            .min_by(|a, b| cmp_cell(types[i], *a, *b, interner))
+            .unwrap_or_else(|| live.clone().next().unwrap()[i]),
+        Agg::Max(_) => live.clone().map(|row| row[i])
+            .filter(|cell| types[i] != Ty::Any || !matches!(interner.any_value(*cell), Some(AnyValue::Null)))
+            .max_by(|a, b| cmp_cell(types[i], *a, *b, interner))
+            .unwrap_or_else(|| live.clone().next().unwrap()[i]),
         _ => unreachable!(),
     }).collect();
     output.push((values, 1));
@@ -468,7 +600,8 @@ fn cmp_cell(ty: Ty, a: Cell, b: Cell, interner: &Interner) -> Ordering {
         Ty::Id => interner.compare(a, b),
         Ty::Text => interner.text(a).cmp(&interner.text(b)),
         Ty::Real => f64::from_bits(a as u64).partial_cmp(&f64::from_bits(b as u64)).unwrap_or_else(|| a.cmp(&b)),
-        Ty::Int | Ty::Any => a.cmp(&b),
+        Ty::Any => interner.any_value(a).expect("Any cell").sqlite_cmp(interner.any_value(b).expect("Any cell")),
+        Ty::Int => a.cmp(&b),
     }
 }
 
@@ -490,6 +623,8 @@ enum Command {
     InternSnapshot(RelId, mpsc::Sender<Result<Vec<(Row, W)>, EngineError>>),
     InternText(String, mpsc::Sender<Cell>),
     Text(Cell, mpsc::Sender<Option<String>>),
+    InternAny(AnyValue, mpsc::Sender<Cell>),
+    AnyValue(Cell, mpsc::Sender<Option<AnyValue>>),
     Stop,
 }
 
@@ -569,6 +704,17 @@ impl Engine for Dd {
         self.tx.send(Command::Text(id, reply)).map_err(|e| worker_error(Stage::Snapshot, e))?;
         answer.recv().map_err(|e| worker_error(Stage::Snapshot, e))
     }
+    fn intern_any(&mut self, value: &AnyValue, _host: &mut impl Host) -> Result<Cell, EngineError> {
+        let (reply, answer) = mpsc::channel();
+        self.tx.send(Command::InternAny(value.clone(), reply)).map_err(|e| worker_error(Stage::Settle, e))?;
+        answer.recv().map_err(|e| worker_error(Stage::Settle, e))
+    }
+    fn any_value(&self, id: Cell, _host: &mut impl Host) -> Result<AnyValue, EngineError> {
+        let (reply, answer) = mpsc::channel();
+        self.tx.send(Command::AnyValue(id, reply)).map_err(|e| worker_error(Stage::Snapshot, e))?;
+        answer.recv().map_err(|e| worker_error(Stage::Snapshot, e))?
+            .ok_or_else(|| EngineError::new(Stage::Snapshot, None, ErrorKind::Worker(format!("unknown Any cell {id}"))))
+    }
 }
 
 fn worker_error(stage: Stage, e: impl std::fmt::Display) -> EngineError {
@@ -603,6 +749,7 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
         let captured: Rc<RefCell<Vec<(RelId, Row, Time, W)>>> = Rc::default();
         let taps: Option<Rc<RefCell<Vec<DdTap>>>> = Some(Rc::default());
         let interner = Rc::new(RefCell::new(Interner::default()));
+        let sum_error = Rc::new(RefCell::new(None));
         let texts = {
             let mut dict = interner.borrow_mut();
             if program.uses_strings() { dict.mint_text(""); }
@@ -631,7 +778,7 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                 constructor_inputs.insert(rel.id, input);
                 sources.insert(rel.id, c);
             }
-            let mut rel = DdRel { scope, rec: None, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone(), constructors: constructors.clone(), interner: interner.clone(), texts: texts.clone() };
+            let mut rel = DdRel { scope, rec: None, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone(), constructors: constructors.clone(), interner: interner.clone(), sum_error: sum_error.clone(), texts: texts.clone() };
             lower(&program, &mut rel)?;
             let mut outputs = BTreeMap::new();
             for (id, c) in rel.outputs {
@@ -683,6 +830,10 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                         input.flush();
                     }
                     worker.step_while(|| probe.less_than(&epoch));
+                    if let Some(message) = sum_error.borrow_mut().take() {
+                        let _ = reply.send(Err(EngineError::new(Stage::Settle, None, ErrorKind::Worker(message))));
+                        break;
+                    }
                     loop {
                         let pending = interner.borrow_mut().drain_pending();
                         if pending.is_empty() { break; }
@@ -764,6 +915,8 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                 }
                 Command::InternText(value, reply) => { let _ = reply.send(interner.borrow_mut().mint_text(&value)); }
                 Command::Text(id, reply) => { let _ = reply.send(interner.borrow().text(id).map(str::to_owned)); }
+                Command::InternAny(value, reply) => { let _ = reply.send(interner.borrow_mut().mint_any(&value)); }
+                Command::AnyValue(id, reply) => { let _ = reply.send(interner.borrow().any_value(id).cloned()); }
                 Command::Stop => break,
             }
         }

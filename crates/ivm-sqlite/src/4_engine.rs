@@ -544,4 +544,12 @@ impl Engine for Sqlite {
         let db = conn(host, Stage::Snapshot)?;
         crate::terms::text(db, id).map_err(|e| error(Stage::Snapshot, e))
     }
+    fn intern_any(&mut self, value: &ivm_ir::AnyValue, host: &mut impl Host) -> Result<i64, EngineError> {
+        let db = conn(host, Stage::Settle)?;
+        crate::terms::intern_any_value(db, value).map_err(|e| error(Stage::Settle, e))
+    }
+    fn any_value(&self, id: i64, host: &mut impl Host) -> Result<ivm_ir::AnyValue, EngineError> {
+        let db = conn(host, Stage::Snapshot)?;
+        crate::terms::any_value(db, id).map_err(|e| error(Stage::Snapshot, e))
+    }
 }

@@ -1,4 +1,4 @@
-use ivm_ir::{self, RelKind, Program, RelId, Row, Term, Ty, W};
+use ivm_ir::{self, AnyValue, RelKind, Program, RelId, Row, Term, Ty, W};
 use sqlite_ext::rusqlite::{self, Connection, OptionalExtension, functions::FunctionFlags, types::Value};
 use std::cmp::Ordering;
 
@@ -22,6 +22,7 @@ pub(crate) fn install(db: &Connection, ir: &Program) -> rusqlite::Result<()> {
     }
     db.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS ivm_term_text_unique ON ivm_term_dict(text)")?;
     db.execute_batch("CREATE TABLE IF NOT EXISTS ivm_cell_dict(id INTEGER PRIMARY KEY, class INTEGER NOT NULL, payload INTEGER NOT NULL, UNIQUE(class,payload))")?;
+    db.execute_batch("CREATE TABLE IF NOT EXISTS ivm_blob_dict(id INTEGER PRIMARY KEY AUTOINCREMENT, bytes BLOB NOT NULL UNIQUE)")?;
     if ir.uses_strings() {
         intern_text(db, "")?;
         for text in &ir.texts { intern_text(db, text)?; }
@@ -57,6 +58,21 @@ pub(crate) fn register(db: &Connection) -> rusqlite::Result<()> {
     db.create_scalar_function("ivm_any_value", 1, FunctionFlags::SQLITE_UTF8, |ctx| {
         let db = unsafe { ctx.get_connection()? };
         decode_any(&db, ctx.get(0)?)
+    })?;
+    db.create_scalar_function("ivm_any_key", 1, FunctionFlags::SQLITE_UTF8, |ctx| {
+        let db = unsafe { ctx.get_connection()? };
+        any_key(&db, ctx.get(0)?)
+    })?;
+    db.create_scalar_function("ivm_any_id", 1, FunctionFlags::SQLITE_UTF8, |ctx| {
+        let db = unsafe { ctx.get_connection()? };
+        let value = match ctx.get::<Value>(0)? {
+            Value::Null => AnyValue::Null,
+            Value::Integer(v) => AnyValue::Integer(v),
+            Value::Real(v) => AnyValue::Real(v.to_bits()),
+            Value::Text(v) => AnyValue::Text(v),
+            Value::Blob(v) => AnyValue::Blob(v),
+        };
+        intern_any_value(&db, &value)
     })?;
     db.create_scalar_function("ivm_text_key", 1, FunctionFlags::SQLITE_UTF8, |ctx| {
         let db = unsafe { ctx.get_connection()? };
@@ -115,8 +131,10 @@ pub(crate) fn encode_value(db: &Connection, ty: Ty, value: &Value) -> rusqlite::
         (Ty::Real, Value::Integer(v)) => Ok((*v as f64).to_bits() as i64),
         (Ty::Text, Value::Text(v)) => intern_text(db, v),
         (Ty::Any, Value::Integer(v)) => intern_any(db, 1, *v),
-        (Ty::Any, Value::Real(v)) => intern_any(db, 2, v.to_bits() as i64),
+        (Ty::Any, Value::Real(v)) => intern_any_value(db, &AnyValue::Real(v.to_bits())),
         (Ty::Any, Value::Text(v)) => intern_any(db, 3, intern_text(db, v)?),
+        (Ty::Any, Value::Null) => intern_any(db, 0, 0),
+        (Ty::Any, Value::Blob(v)) => intern_any(db, 4, intern_blob(db, v)?),
         _ => Err(rusqlite::Error::InvalidQuery),
     }
 }
@@ -126,12 +144,54 @@ fn intern_any(db: &Connection, class: i64, payload: i64) -> rusqlite::Result<i64
     db.query_row("SELECT id FROM ivm_cell_dict WHERE class=?1 AND payload=?2", (class, payload), |r| r.get(0))
 }
 
+fn intern_blob(db: &Connection, bytes: &[u8]) -> rusqlite::Result<i64> {
+    db.execute("INSERT INTO ivm_blob_dict(bytes) VALUES (?1) ON CONFLICT DO NOTHING", [bytes])?;
+    db.query_row("SELECT id FROM ivm_blob_dict WHERE bytes=?1", [bytes], |r| r.get(0))
+}
+
+pub(crate) fn intern_any_value(db: &Connection, value: &AnyValue) -> rusqlite::Result<i64> {
+    match value {
+        AnyValue::Null => intern_any(db, 0, 0),
+        AnyValue::Integer(v) => intern_any(db, 1, *v),
+        AnyValue::Real(bits) => {
+            let n = f64::from_bits(*bits);
+            if n.is_nan() { return intern_any(db, 0, 0); }
+            if n.is_finite() && n >= i64::MIN as f64 && n < 9223372036854775808.0 && (n as i64) as f64 == n {
+                intern_any(db, 1, n as i64)?;
+            }
+            intern_any(db, 2, *bits as i64)
+        }
+        AnyValue::Text(v) => intern_any(db, 3, intern_text(db, v)?),
+        AnyValue::Blob(v) => intern_any(db, 4, intern_blob(db, v)?),
+    }
+}
+
+fn any_key(db: &Connection, id: i64) -> rusqlite::Result<i64> {
+    let AnyValue::Real(bits) = any_value(db, id)? else { return Ok(id); };
+    let n = f64::from_bits(bits);
+    if n.is_finite() && n >= i64::MIN as f64 && n < 9223372036854775808.0 && (n as i64) as f64 == n {
+        db.query_row("SELECT id FROM ivm_cell_dict WHERE class=1 AND payload=?1", [n as i64], |r| r.get(0))
+    } else { Ok(id) }
+}
+
+pub(crate) fn any_value(db: &Connection, id: i64) -> rusqlite::Result<AnyValue> {
+    Ok(match decode_any(db, id)? {
+        Value::Null => AnyValue::Null,
+        Value::Integer(v) => AnyValue::Integer(v),
+        Value::Real(v) => AnyValue::Real(v.to_bits()),
+        Value::Text(v) => AnyValue::Text(v),
+        Value::Blob(v) => AnyValue::Blob(v),
+    })
+}
+
 fn decode_any(db: &Connection, id: i64) -> rusqlite::Result<Value> {
     let (class, payload): (i64, i64) = db.query_row("SELECT class,payload FROM ivm_cell_dict WHERE id=?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))?;
     match class {
+        0 => Ok(Value::Null),
         1 => Ok(Value::Integer(payload)),
         2 => Ok(Value::Real(f64::from_bits(payload as u64))),
         3 => Ok(Value::Text(text(db, payload)?.ok_or(rusqlite::Error::InvalidQuery)?)),
+        4 => db.query_row("SELECT bytes FROM ivm_blob_dict WHERE id=?1", [payload], |r| r.get::<_, Vec<u8>>(0)).map(Value::Blob),
         _ => Err(rusqlite::Error::InvalidQuery),
     }
 }

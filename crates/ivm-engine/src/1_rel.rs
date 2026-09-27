@@ -100,6 +100,12 @@ pub trait Engine: Sized {
     fn text(&self, _id: Cell, _host: &mut impl Host) -> Result<Option<String>, EngineError> {
         Err(EngineError::new(Stage::Snapshot, None, ErrorKind::Unsupported("text")))
     }
+    fn intern_any(&mut self, _value: &ivm_ir::AnyValue, _host: &mut impl Host) -> Result<Cell, EngineError> {
+        Err(EngineError::new(Stage::Settle, None, ErrorKind::Unsupported("intern_any")))
+    }
+    fn any_value(&self, _id: Cell, _host: &mut impl Host) -> Result<ivm_ir::AnyValue, EngineError> {
+        Err(EngineError::new(Stage::Snapshot, None, ErrorKind::Unsupported("any_value")))
+    }
 }
 
 pub trait Rel {
@@ -110,7 +116,7 @@ pub trait Rel {
     fn mfp(&mut self, c: Self::C, filter: &[Expr], map: &[Expr], project: &[ColId], input_types: &[Ty]) -> Self::C;
     fn union(&mut self, cs: Vec<Self::C>) -> Self::C;
     fn negate(&mut self, c: Self::C) -> Self::C;
-    fn join(&mut self, cs: Vec<Self::C>, eq: &[Vec<(u8, ColId)>]) -> Result<Self::C, EngineError>;
+    fn join(&mut self, cs: Vec<Self::C>, eq: &[Vec<(u8, ColId)>], types: &[Vec<Ty>]) -> Result<Self::C, EngineError>;
     fn antijoin(&mut self, l: Self::C, r: Self::C, lk: &[ColId], rk: &[ColId]) -> Self::C;
     fn reduce(&mut self, c: Self::C, key: &[ColId], aggs: &[Agg], input_types: &[Ty]) -> Self::C;
     fn threshold(&mut self, c: Self::C) -> Self::C;
@@ -275,7 +281,8 @@ pub fn lower_node<A: Rel>(
         }
         Op::Join { inputs, equivalences } => {
             let cs = inputs.iter().map(|n| sub(*n, a)).collect::<Result<Vec<_>, _>>()?;
-            a.join(cs, equivalences)?
+            let types = inputs.iter().map(|n| p.node_types(*n).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Join input types")))).collect::<Result<Vec<_>, _>>()?;
+            a.join(cs, equivalences, &types)?
         }
         Op::Antijoin { l, r, lk, rk } => {
             let l = sub(*l, a)?;
