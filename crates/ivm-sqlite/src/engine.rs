@@ -136,6 +136,7 @@ pub(crate) fn settle_counted(
     if in_commit {
         let mut meter = Meter::default();
         let changes = settle_inner(conn, inst, batch, &mut meter, &mut counters)?;
+        if inst.sql_text { counters.delta_rows.join = None; counters.rounds = None; }
         counters.rows_written = changes.len() as u64;
         *counters.statements.as_mut().unwrap() += meter.statements;
         return Ok((changes, counters));
@@ -146,6 +147,7 @@ pub(crate) fn settle_counted(
     *counters.statements.as_mut().unwrap() += 1;
     match settle_inner(conn, inst, batch, &mut meter, &mut counters) {
         Ok(changes) => {
+            if inst.sql_text { counters.delta_rows.join = None; counters.rounds = None; }
             conn.execute_batch("RELEASE frontier_sp_settle;")
                 .map_err(|e| fail("release", &inst.name, e))?;
             *counters.statements.as_mut().unwrap() += 1;
@@ -196,6 +198,7 @@ fn settle_inner(
             .map_err(|e| fail("stage", &change.relation, e))?;
     }
     if let crate::plan::Root::Nodes(nodes) = &inst.plan.root {
+        if inst.sql_text { catalog::encode_stage(conn, inst)?; }
         let changes = nodes
             .run(conn, counters)
             .map_err(|e| fail("node settle", &inst.name, e))?;
@@ -208,10 +211,10 @@ fn settle_inner(
         let sql = format!(
             "INSERT INTO {}(__sign,{cols}) VALUES ({})",
             catalog::quote(catalog::delta(&inst.name)),
-            (0..=inst.output.len())
-                .map(|_| "?")
-                .collect::<Vec<_>>()
-                .join(",")
+            std::iter::once("?1".to_owned()).chain(
+                inst.ir.rel(inst.ir.outputs[0]).expect("output relation").cols.iter().enumerate()
+                    .map(|(i, ty)| if inst.sql_text { catalog::decode_sql(*ty, &format!("?{}", i + 2)) } else { format!("?{}", i + 2) })
+            ).collect::<Vec<_>>().join(",")
         );
         for (row, weight) in changes {
             let params = std::iter::once(weight)
@@ -232,96 +235,7 @@ fn settle_inner(
         return read_delta(conn, inst, meter);
     }
 
-    for (object, sql) in &inst.sqls.scan_fills {
-        let span =
-            tracing::info_span!(target: observe::TARGET, observe::SCAN_SPAN, object = %object);
-        let _guard = span.enter();
-        meter
-            .exec(conn, phase, object, sql, [object])
-            .map_err(|e| fail("scan delta", object, e))?;
-    }
-
-    for (object, sql) in &inst.sqls.join_fills {
-        let span =
-            tracing::info_span!(target: observe::TARGET, observe::JOIN_SPAN, object = %object);
-        let _guard = span.enter();
-        meter
-            .exec(conn, phase, object, sql, [])
-            .map_err(|e| fail("join delta", object, e))?;
-    }
-    for (object, sql) in &inst.sqls.anti_fills {
-        meter
-            .exec(conn, phase, object, sql, [])
-            .map_err(|e| fail("antijoin delta", object, e))?;
-    }
-    for (object, sql) in &inst.sqls.topk_fills {
-        meter
-            .exec(conn, phase, object, sql, [])
-            .map_err(|e| fail("topk delta", object, e))?;
-    }
-
-    {
-        let span =
-            tracing::info_span!(target: observe::TARGET, observe::ROOT_SPAN, object = %inst.name);
-        let _guard = span.enter();
-        for (what, sql) in [
-            ("touch", &inst.sqls.root_touch),
-            ("upsert", &inst.sqls.root_upsert),
-        ] {
-            meter
-                .exec(conn, phase, &inst.name, sql, [])
-                .map_err(|e| fail(what, &inst.name, e))?;
-        }
-        if let Some(sql) = &inst.sqls.root_extrema {
-            meter
-                .exec(conn, phase, &inst.name, sql, [])
-                .map_err(|e| fail("extrema", &inst.name, e))?;
-        }
-        for (what, sql) in [
-            ("drop invisible", &inst.sqls.root_delete),
-            ("delta", &inst.sqls.root_delta),
-        ] {
-            meter
-                .exec(conn, phase, &inst.name, sql, [])
-                .map_err(|e| fail(what, &inst.name, e))?;
-        }
-    }
-
-    meter
-        .exec(
-            conn,
-            phase,
-            catalog::catalog(),
-            &inst.sqls.bump,
-            [inst.name.as_str()],
-        )
-        .map_err(|e| fail("frontier bump", catalog::catalog(), e))?;
-    let frontier: u64 = meter
-        .one(
-            conn,
-            "read",
-            catalog::catalog(),
-            &inst.sqls.read_frontier,
-            [inst.name.as_str()],
-            |row| row.get::<_, i64>(0).map(|v| v as u64),
-        )
-        .map_err(|e| fail("frontier read", catalog::catalog(), e))?
-        .unwrap_or(0);
-
-    let changes = read_delta(conn, inst, meter)?;
-
-    tracing::debug!(
-        target: observe::TARGET,
-        program = %inst.name,
-        frontier,
-        input_changes = batch.len(),
-        output_changes = changes.len(),
-        sql_statements = meter.statements,
-        sql_bytes = meter.sql_bytes,
-        "{}",
-        observe::SETTLED_EVENT,
-    );
-    Ok(changes)
+    unreachable!("runtime plans always use NodesPlan")
 }
 
 fn validate_batch(inst: &Installed, batch: &[SourceChange]) -> Result<(), EngineError> {

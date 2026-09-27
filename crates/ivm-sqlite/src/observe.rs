@@ -14,12 +14,3 @@ pub(crate) const INSTALL_SPAN: &str = "frontier_install";
 pub(crate) const SETTLE_SPAN: &str = "frontier_settle";
 /// Span opened while a program tears down.
 pub(crate) const TEARDOWN_SPAN: &str = "frontier_teardown";
-/// One scan's netted delta fill.
-pub(crate) const SCAN_SPAN: &str = "frontier_scan";
-/// One join's three-term derivation delta.
-pub(crate) const JOIN_SPAN: &str = "frontier_join";
-/// The root application (union or aggregate).
-pub(crate) const ROOT_SPAN: &str = "frontier_root";
-
-/// Emitted once per settled frontier.
-pub(crate) const SETTLED_EVENT: &str = "frontier_settled";

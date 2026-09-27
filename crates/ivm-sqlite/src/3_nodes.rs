@@ -17,6 +17,16 @@ fn decl(arity: usize) -> String {
 const I64_MIN: &str = "(-9223372036854775807 - 1)";
 const I64_MAX: &str = "9223372036854775807";
 
+fn ordered(ty: Ty, value: String) -> String {
+    match ty {
+        Ty::Id => format!("ivm_term_key({value})"),
+        Ty::Text => format!("ivm_text_value({value})"),
+        Ty::Real => format!("ivm_real_value({value})"),
+        Ty::Any => format!("ivm_any_value({value})"),
+        Ty::Int => value,
+    }
+}
+
 /// A node's SQL objects: `d` holds this settle's delta, `i` the integrated Z-set before this settle.
 /// `rec` marks nodes that read a variable of the LetRec being lowered.
 #[derive(Clone, Debug)]
@@ -141,7 +151,7 @@ fn unsupported(what: &'static str) -> EngineError {
 }
 
 /// Expr as SQL text; comparisons and logic yield 0/1, Add/Sub wrap like `eval`.
-fn render(e: &Expr, arity: usize, maps: &[String], texts: &[String]) -> Result<String, EngineError> {
+fn render(e: &Expr, arity: usize, maps: &[String], texts: &[String], types: &[Ty]) -> Result<String, EngineError> {
     Ok(match e {
         Expr::Col(c) if (*c as usize) < arity => format!("c{c}"),
         Expr::Col(c) => maps
@@ -157,10 +167,12 @@ fn render(e: &Expr, arity: usize, maps: &[String], texts: &[String]) -> Result<S
         Expr::Call(func, args) => {
             let a = |i: usize| -> Result<String, EngineError> {
                 let arg = args.get(i).ok_or_else(|| unsupported("Func arity"))?;
-                render(arg, arity, maps, texts)
+                render(arg, arity, maps, texts, types)
             };
             let bin = |op: &str| -> Result<String, EngineError> {
-                Ok(format!("(({}) {op} ({}))", a(0)?, a(1)?))
+                let left = ordered(expr_type(&args[0], types).ok_or_else(|| unsupported("expression type"))?, a(0)?);
+                let right = ordered(expr_type(&args[1], types).ok_or_else(|| unsupported("expression type"))?, a(1)?);
+                Ok(format!("({left} {op} {right})"))
             };
             match func {
                 Func::Eq => bin("=")?,
@@ -169,6 +181,11 @@ fn render(e: &Expr, arity: usize, maps: &[String], texts: &[String]) -> Result<S
                 Func::Le => bin("<=")?,
                 Func::Gt => bin(">")?,
                 Func::Ge => bin(">=")?,
+                Func::Add | Func::Sub if expr_type(e, types) == Some(Ty::Real) => {
+                    let left = if expr_type(&args[0], types) == Some(Ty::Real) { format!("ivm_real_value({})", a(0)?) } else { a(0)? };
+                    let right = if expr_type(&args[1], types) == Some(Ty::Real) { format!("ivm_real_value({})", a(1)?) } else { a(1)? };
+                    format!("ivm_real_bits({left} {} {right})", if *func == Func::Add { "+" } else { "-" })
+                }
                 Func::Add => {
                     let (x, y) = (a(0)?, a(1)?);
                     format!(
@@ -432,16 +449,18 @@ impl Rel for SqlRel {
         Ok(next)
     }
 
-    fn mfp(&mut self, c: Self::C, filter: &[Expr], map: &[Expr], project: &[ColId]) -> Self::C {
+    fn mfp(&mut self, c: Self::C, filter: &[Expr], map: &[Expr], project: &[ColId], input_types: &[Ty]) -> Self::C {
         let rendered = (|| -> Result<(Vec<String>, Vec<String>), EngineError> {
             let mut maps = Vec::new();
+            let mut types = input_types.to_vec();
             for e in map {
-                let m = render(e, c.arity, &maps, &self.texts)?;
+                let m = render(e, c.arity, &maps, &self.texts, &types)?;
                 maps.push(m);
+                types.push(expr_type(e, &types).ok_or_else(|| unsupported("Mfp expression type"))?);
             }
             let wheres = filter
                 .iter()
-                .map(|e| Ok(format!("({}) <> 0", render(e, c.arity, &[], &self.texts)?)))
+                .map(|e| Ok(format!("({}) <> 0", render(e, c.arity, &[], &self.texts, input_types)?)))
                 .collect::<Result<_, _>>()?;
             let all: Vec<ColId> = (0..(c.arity + maps.len()) as ColId).collect();
             let proj = if project.is_empty() {
@@ -451,7 +470,7 @@ impl Rel for SqlRel {
             };
             let cols = proj
                 .iter()
-                .map(|p| render(&Expr::Col(*p), c.arity, &maps, &self.texts))
+                .map(|p| render(&Expr::Col(*p), c.arity, &maps, &self.texts, &types))
                 .collect::<Result<_, _>>()?;
             Ok((wheres, cols))
         })();
@@ -575,9 +594,9 @@ impl Rel for SqlRel {
             }
             let unit = [r.arity as ColId];
             let keys = if rk.is_empty() {
-                self.mfp(r, &[], &[Expr::Lit(0)], &unit)
+                self.mfp(r, &[], &[Expr::Lit(0)], &unit, &[])
             } else {
-                self.mfp(r, &[], &[], rk)
+                self.mfp(r, &[], &[], rk, &[])
             };
             let keys = self.threshold(keys);
             self.integrate(&keys, (0..keys.arity).collect());
@@ -618,9 +637,9 @@ impl Rel for SqlRel {
         }
         let unit = [r.arity as ColId];
         let keys = if rk.is_empty() {
-            self.mfp(r, &[], &[Expr::Lit(0)], &unit)
+            self.mfp(r, &[], &[Expr::Lit(0)], &unit, &[])
         } else {
-            self.mfp(r, &[], &[], rk)
+            self.mfp(r, &[], &[], rk, &[])
         };
         let keys = self.threshold(keys);
         let eq: Vec<Vec<(u8, ColId)>> = lk
@@ -636,7 +655,7 @@ impl Rel for SqlRel {
             }
         };
         let left: Vec<ColId> = (0..l.arity as ColId).collect();
-        let semi = self.mfp(joined, &[], &[], &left);
+        let semi = self.mfp(joined, &[], &[], &left, &[]);
         let gone = self.negate(semi);
         self.union(vec![l, gone])
     }
@@ -692,13 +711,13 @@ impl Rel for SqlRel {
             vec![format!(
             "CREATE TABLE {g} ({}, cnt INTEGER NOT NULL{}, PRIMARY KEY ({gcols})) WITHOUT ROWID",
             gk.iter().map(|x| format!("g{x} INTEGER NOT NULL")).collect::<Vec<_>>().join(", "),
-            sums.iter().map(|(j, _)| format!(", a{j} INTEGER NOT NULL")).collect::<String>()
+            sums.iter().map(|(j, x)| format!(", a{j} {} NOT NULL", if input_types[*x as usize] == Ty::Real { "REAL" } else { "INTEGER" })).collect::<String>()
         )];
         let mut fill = vec![format!(
             "INSERT INTO {g} ({gcols}, cnt{s_cols}) SELECT {}, SUM(w){} FROM {d} WHERE true {group} \
              ON CONFLICT ({gcols}) DO UPDATE SET cnt = cnt + excluded.cnt{}",
             kx.join(", "),
-            sums.iter().map(|(_, x)| format!(", SUM(c{x} * w)")).collect::<String>(),
+            sums.iter().map(|(_, x)| format!(", SUM({} * w)", if input_types[*x as usize] == Ty::Real { format!("ivm_real_value(c{x})") } else { format!("c{x}") })).collect::<String>(),
             sums.iter().map(|(j, _)| format!(", a{j} = a{j} + excluded.a{j}")).collect::<String>(),
             d = c.d
         )];
@@ -742,11 +761,11 @@ impl Rel for SqlRel {
         };
         let values = aggs.iter().enumerate().map(|(j, agg)| match agg {
             Agg::Count => "g_i.cnt".to_string(),
-            Agg::Sum(_) => format!("g_i.a{j}"),
+            Agg::Sum(x) => if input_types[*x as usize] == Ty::Real { format!("ivm_real_bits(g_i.a{j})") } else { format!("g_i.a{j}") },
             Agg::Min(x) => format!("(SELECT n_i.c{x} FROM {arr} n_i WHERE {} AND n_i.w > 0 ORDER BY {} LIMIT 1)", g_on("g_i"),
-                if input_types[*x as usize] == Ty::Id { format!("ivm_term_key(n_i.c{x})") } else { format!("n_i.c{x}") }),
+                ordered(input_types[*x as usize], format!("n_i.c{x}"))),
             Agg::Max(x) => format!("(SELECT n_i.c{x} FROM {arr} n_i WHERE {} AND n_i.w > 0 ORDER BY {} DESC LIMIT 1)", g_on("g_i"),
-                if input_types[*x as usize] == Ty::Id { format!("ivm_term_key(n_i.c{x})") } else { format!("n_i.c{x}") }),
+                ordered(input_types[*x as usize], format!("n_i.c{x}"))),
         });
         let select = gk
             .iter()
@@ -821,10 +840,10 @@ impl Rel for SqlRel {
                 .iter()
                 .map(|o| {
                     let x = o.col as usize;
-                    let value = if input_types[x] == Ty::Id { format!("ivm_term_key(c{x})") } else { format!("c{x}") };
+                    let value = ordered(input_types[x], format!("c{x}"));
                     format!("{value}{}", if o.desc { " DESC" } else { "" })
                 })
-                .chain((0..c.arity).map(|x| if input_types[x] == Ty::Id { format!("ivm_term_key(c{x})") } else { format!("c{x}") }))
+                .chain((0..c.arity).map(|x| ordered(input_types[x], format!("c{x}"))))
                 .collect::<Vec<_>>()
                 .join(", ");
             Some(format!(
@@ -860,11 +879,11 @@ impl Rel for SqlRel {
         let part = if key.is_empty() { String::new() } else { format!("PARTITION BY {}", list("", key.iter().copied())) };
         let order_cols = order.iter().map(|o| {
             let x = o.col as usize;
-            let value = if input_types[x] == Ty::Id { format!("ivm_term_key(c{x})") } else { format!("c{x}") };
+            let value = ordered(input_types[x], format!("c{x}"));
             format!("{value}{}", if o.desc { " DESC" } else { " ASC" })
         }).collect::<Vec<_>>();
         let by = order_cols.iter().cloned()
-            .chain((0..c.arity).map(|x| if input_types[x] == Ty::Id { format!("ivm_term_key(c{x}) ASC") } else { format!("c{x} ASC") }))
+            .chain((0..c.arity).map(|x| format!("{} ASC", ordered(input_types[x], format!("c{x}")))))
             .chain(["seq ASC".to_string()]).collect::<Vec<_>>().join(", ");
         let order_clause = if order_cols.is_empty() { String::new() } else { format!("ORDER BY {}", order_cols.join(", ")) };
         let full_clause = if part.is_empty() { format!("ORDER BY {by}") } else { format!("{part} ORDER BY {by}") };
@@ -1041,7 +1060,7 @@ impl NodesPlan {
         all
     }
 
-    pub fn compile(name: &str, program: &Program) -> Result<Self, EngineError> {
+    pub fn compile(name: &str, program: &Program, set_output: bool) -> Result<Self, EngineError> {
         let mut rel = SqlRel::new(program, false);
         lower(program, &mut rel)?;
         if let Some(error) = rel.err {
@@ -1203,10 +1222,19 @@ impl NodesPlan {
             sccs,
             integrates,
             clears,
-            output_delta: format!(
+            output_delta: if set_output { format!(
+                "SELECT {out_cols}, CASE WHEN COALESCE(i_i.w,0)>0 THEN -1 ELSE 1 END \
+                 FROM (SELECT {cols},SUM(w) AS dw FROM {delta} GROUP BY {cols} HAVING SUM(w)<>0) d \
+                 LEFT JOIN {integrated} i_i ON {same} \
+                 WHERE (COALESCE(i_i.w,0)>0) <> (COALESCE(i_i.w,0)+d.dw>0) ORDER BY {out_cols}",
+                out_cols = list("d", 0..output.arity),
+                delta = output.d,
+                integrated = output.i,
+                same = on("d", &(0..output.arity).collect::<Vec<_>>(), "i_i", &(0..output.arity).collect::<Vec<_>>()),
+            ) } else { format!(
                 "SELECT {cols},SUM(w) FROM {} GROUP BY {cols} HAVING SUM(w)<>0 ORDER BY {cols}",
                 output.d
-            ),
+            ) },
             output_snapshot: format!(
                 "SELECT {cols},w FROM {} WHERE w>0 ORDER BY {cols}",
                 output.i

@@ -100,7 +100,8 @@ pub fn compare(a: Cell, b: Cell, resolve: &mut impl FnMut(Cell) -> Option<Term>)
             .then_with(|| {
                 for ((a, ta), (b, tb)) in x.args.iter().zip(&x.types).zip(y.args.iter().zip(&y.types)) {
                     let order = match (ta, tb) {
-                        (Ty::Id, Ty::Id) => compare(*a, *b, resolve),
+                        (Ty::Id | Ty::Text, Ty::Id | Ty::Text) => compare(*a, *b, resolve),
+                        (Ty::Real, Ty::Real) => f64::from_bits(*a as u64).partial_cmp(&f64::from_bits(*b as u64)).unwrap_or(Ordering::Equal),
                         _ => (*ta as u8).cmp(&(*tb as u8)).then_with(|| a.cmp(b)),
                     };
                     if order != Ordering::Equal { return order; }
@@ -142,6 +143,17 @@ pub fn sort_key(id: Cell, resolve: &mut impl FnMut(Cell) -> Option<Term>) -> Vec
             match ty {
                 Ty::Int => { out.push(0); number(out, arg); }
                 Ty::Id => { out.push(1); key(out, arg, resolve, depth + 1); }
+                Ty::Text => {
+                    out.push(2);
+                    key(out, arg, resolve, depth + 1);
+                }
+                Ty::Real => {
+                    out.push(3);
+                    let bits = if f64::from_bits(arg as u64) == 0.0 { 0 } else { arg as u64 };
+                    let ordered = if bits >> 63 == 0 { bits ^ (1 << 63) } else { !bits };
+                    out.extend_from_slice(&ordered.to_be_bytes());
+                }
+                Ty::Any => { out.push(4); number(out, arg); }
             }
         }
     }

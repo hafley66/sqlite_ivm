@@ -30,14 +30,16 @@
 use crate::error::{EngineError, ErrorKind, Stage};
 use crate::meter::Meter;
 use crate::observe;
-use crate::plan::{self, Compiled, Root, ScanSpec, TopKSpec};
+use crate::plan::{self, Compiled, Root, ScanSpec};
 use crate::OutputColumn;
-use ivm_ir::Program as IrProgram;
+use ivm_ir::{Program as IrProgram, Ty};
 use sqlite_ext::rusqlite::{types::Value, Connection};
 use std::sync::Arc;
 
 pub(crate) struct Installed {
     pub name: String,
+    pub ir: IrProgram,
+    pub sql_text: bool,
     pub install: u64,
     pub plan: Compiled,
     /// Output schema, in output order.
@@ -56,15 +58,6 @@ pub(crate) struct Installed {
 pub(crate) struct SettleSql {
     pub clears: Vec<(String, String)>,
     pub stage_insert: String,
-    pub scan_fills: Vec<(String, String)>,
-    pub join_fills: Vec<(String, String)>,
-    pub anti_fills: Vec<(String, String)>,
-    pub topk_fills: Vec<(String, String)>,
-    pub root_touch: String,
-    pub root_upsert: String,
-    pub root_extrema: Option<String>,
-    pub root_delete: String,
-    pub root_delta: String,
     pub bump: String,
     pub read_frontier: String,
     pub read_delta: String,
@@ -119,10 +112,6 @@ pub(crate) fn view(p: &str) -> String {
     format!("frontier_{p}")
 }
 
-pub(crate) fn root_index(p: &str) -> String {
-    format!("frontier_{p}_rootk")
-}
-
 pub(crate) fn source_index(p: &str, i: usize) -> String {
     format!("frontier_{p}_x{i}")
 }
@@ -134,6 +123,15 @@ pub(crate) fn collector(p: &str, install: u64) -> String {
 /// Double-quoted SQL identifier.
 pub(crate) fn quote(s: impl AsRef<str>) -> String {
     format!("\"{}\"", s.as_ref().replace('"', "\"\""))
+}
+
+pub(crate) fn decode_sql(ty: Ty, value: &str) -> String {
+    match ty {
+        Ty::Real => format!("ivm_real_value({value})"),
+        Ty::Text => format!("ivm_text_value({value})"),
+        Ty::Any => format!("ivm_any_value({value})"),
+        Ty::Int | Ty::Id => value.to_owned(),
+    }
 }
 
 fn validate_program_name(name: &str) -> Result<(), EngineError> {
@@ -254,7 +252,7 @@ pub(crate) fn install(
     watch: Watch,
 ) -> Result<Arc<Installed>, EngineError> {
     let parsed = compile(conn, name, select_sql)?;
-    let program = plan::lower_ir(&parsed)?;
+    let program = plan::lower_ir(&parsed, &|table| source_types(conn, table))?;
     install_program(conn, name, &program, parsed.output, watch, false)
 }
 
@@ -304,7 +302,7 @@ fn install_program(
     }
     let install = next_install(conn, &mut meter)?;
     let installed = {
-        let mut built = build_installed(name, install, compiled);
+        let mut built = build_installed(name, install, compiled, program.clone(), !typed_ir);
         built.derived = scan_derived_sources(conn, &built)?;
         if matches!(watch, Watch::Sources) && !built.derived.is_empty() {
             return Err(EngineError::unsupported(
@@ -342,6 +340,10 @@ fn install_program(
     meter
         .batch(conn, "install", name, &sql)
         .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
+    if let Err(e) = crate::terms::install(conn, program) {
+        rollback(conn, "frontier_sp_install");
+        return Err(EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())));
+    }
     if let Err(e) = bootstrap(conn, &installed, &mut meter) {
         rollback(conn, "frontier_sp_install");
         return Err(e);
@@ -412,7 +414,17 @@ fn bootstrap(conn: &Connection, inst: &Installed, meter: &mut Meter) -> Result<(
                 })
                 .collect()
         }
-        Root::Union { .. } | Root::Nodes(_) => Vec::new(),
+        Root::Nodes(_) => inst.ir.nodes.iter().filter_map(|op| {
+            let ivm_ir::Op::Reduce { input, aggs, .. } = op else { return None; };
+            let ivm_ir::Op::Mfp { input: get, project, .. } = inst.ir.nodes.get(*input as usize)? else { return None; };
+            let ivm_ir::Op::Get(rel) = inst.ir.nodes.get(*get as usize)? else { return None; };
+            let name = inst.ir.rel(*rel)?.name.clone();
+            Some(aggs.iter().filter_map(|agg| {
+                let ivm_ir::Agg::Sum(col) = agg else { return None; };
+                Some((name.clone(), project.get(*col as usize).copied().unwrap_or(*col) as usize))
+            }).collect::<Vec<_>>())
+        }).flatten().collect(),
+        Root::Union { .. } => Vec::new(),
     };
     for table in &inst.plan.sources {
         let scan = source_scan(inst, table);
@@ -469,6 +481,7 @@ fn bootstrap(conn: &Connection, inst: &Installed, meter: &mut Meter) -> Result<(
 
     // Net the staged rows through the engine's own fill statements.
     if let Root::Nodes(nodes) = &inst.plan.root {
+        if inst.sql_text { encode_stage(conn, inst)?; }
         nodes
             .run(conn, &mut ivm_engine::Counters::measured())
             .map_err(|e| EngineError::new(Stage::Install, p, ErrorKind::Sqlite(e.to_string())))?;
@@ -476,55 +489,32 @@ fn bootstrap(conn: &Connection, inst: &Installed, meter: &mut Meter) -> Result<(
             .map_err(|e| EngineError::new(Stage::Install, p, ErrorKind::Sqlite(e.to_string())))?;
         return Ok(());
     }
-    for (object, sql) in &inst.sqls.scan_fills {
-        let span =
-            tracing::info_span!(target: observe::TARGET, observe::SCAN_SPAN, object = %object);
-        let _guard = span.enter();
-        meter
-            .exec(conn, phase, object, sql, [object])
-            .map_err(|e| {
-                EngineError::new(Stage::Install, object, ErrorKind::Sqlite(e.to_string()))
-            })?;
-    }
-    for (object, sql) in &inst.sqls.join_fills {
-        let span =
-            tracing::info_span!(target: observe::TARGET, observe::JOIN_SPAN, object = %object);
-        let _guard = span.enter();
-        meter.exec(conn, phase, object, sql, []).map_err(|e| {
-            EngineError::new(Stage::Install, object, ErrorKind::Sqlite(e.to_string()))
-        })?;
-    }
-    for (object, sql) in &inst.sqls.anti_fills {
-        meter.exec(conn, phase, object, sql, []).map_err(|e| {
-            EngineError::new(Stage::Install, object, ErrorKind::Sqlite(e.to_string()))
-        })?;
-    }
-    for (object, sql) in &inst.sqls.topk_fills {
-        meter.exec(conn, phase, object, sql, []).map_err(|e| {
-            EngineError::new(Stage::Install, object, ErrorKind::Sqlite(e.to_string()))
-        })?;
-    }
-    {
-        let span = tracing::info_span!(target: observe::TARGET, observe::ROOT_SPAN, object = p);
-        let _guard = span.enter();
-        meter
-            .exec(conn, phase, p, &inst.sqls.root_touch, [])
-            .map_err(|e| EngineError::new(Stage::Install, p, ErrorKind::Sqlite(e.to_string())))?;
-        meter
-            .exec(conn, phase, p, &inst.sqls.root_upsert, [])
-            .map_err(|e| EngineError::new(Stage::Install, p, ErrorKind::Sqlite(e.to_string())))?;
-        if let Some(sql) = &inst.sqls.root_extrema {
-            meter.exec(conn, phase, p, sql, []).map_err(|e| {
-                EngineError::new(Stage::Install, p, ErrorKind::Sqlite(e.to_string()))
-            })?;
-        }
-    }
+    unreachable!("runtime plans always use NodesPlan")
+}
 
-    // Leave the transient tables exactly as a settled frontier does.
-    for (object, sql) in &inst.sqls.clears {
-        meter.exec(conn, phase, object, sql, []).map_err(|e| {
-            EngineError::new(Stage::Install, object, ErrorKind::Sqlite(e.to_string()))
-        })?;
+pub(crate) fn encode_stage(conn: &Connection, inst: &Installed) -> Result<(), EngineError> {
+    let width = inst.plan.stage_width;
+    let table = quote(stage(&inst.name));
+    let vals = (0..width).map(|i| format!("v{i}")).collect::<Vec<_>>().join(",");
+    let query = format!("SELECT rowid,__table,{vals} FROM {table}");
+    let mut stmt = conn.prepare(&query).map_err(|e| EngineError::new(Stage::Settle, &inst.name, ErrorKind::Sqlite(e.to_string())))?;
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?,
+            (0..width).map(|i| row.get::<_, Value>(i + 2)).collect::<Result<Vec<_>, _>>()?))
+    }).map_err(|e| EngineError::new(Stage::Settle, &inst.name, ErrorKind::Sqlite(e.to_string())))?
+        .collect::<Result<Vec<_>, _>>().map_err(|e| EngineError::new(Stage::Settle, &inst.name, ErrorKind::Sqlite(e.to_string())))?;
+    drop(stmt);
+    for (rowid, source, values) in rows {
+        let rel = inst.ir.rels.iter().find(|r| r.kind == ivm_ir::RelKind::Source && r.name == source)
+            .ok_or_else(|| EngineError::unsupported(Stage::Settle, &source, "source relation missing"))?;
+        let encoded = rel.cols.iter().zip(&values).map(|(ty, value)| {
+            crate::terms::encode_value(conn, *ty, value)
+                .map_err(|e| EngineError::new(Stage::Settle, &source, ErrorKind::Sqlite(e.to_string())))
+        }).collect::<Result<Vec<_>, _>>()?;
+        let assigns = (0..encoded.len()).map(|i| format!("v{i}=?{}", i + 1)).collect::<Vec<_>>().join(",");
+        let update = format!("UPDATE {table} SET {assigns} WHERE rowid=?{}", encoded.len() + 1);
+        conn.execute(&update, sqlite_ext::rusqlite::params_from_iter(encoded.into_iter().chain([rowid])))
+            .map_err(|e| EngineError::new(Stage::Settle, &source, ErrorKind::Sqlite(e.to_string())))?;
     }
     Ok(())
 }
@@ -546,6 +536,29 @@ fn compile(conn: &Connection, name: &str, select_sql: &str) -> Result<Compiled, 
             .filter(|cols| !cols.is_empty())
     };
     plan::compile(name, select_sql, &columns)
+}
+
+fn source_types(conn: &Connection, table: &str) -> Option<Vec<Ty>> {
+    if let Some(program_name) = table.strip_prefix("frontier_") {
+        if let Ok(json) = conn.query_row(
+            "SELECT program FROM frontier_catalog WHERE name=?1", [program_name],
+            |row| row.get::<_, String>(0),
+        ) {
+            let ir: IrProgram = serde_json::from_str(&json).ok()?;
+            return Some(ir.rel(*ir.outputs.first()?)?.cols.clone());
+        }
+    }
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", quote(table))).ok()?;
+    let declared = stmt.query_map([], |row| row.get::<_, String>(2)).ok()?
+        .collect::<Result<Vec<_>, _>>().ok()?;
+    if declared.is_empty() { return None; }
+    Some(declared.into_iter().map(|name| {
+        let name = name.to_ascii_uppercase();
+        if name.contains("INT") { Ty::Int }
+        else if name.contains("CHAR") || name.contains("CLOB") || name.contains("TEXT") { Ty::Text }
+        else if name.contains("REAL") || name.contains("FLOA") || name.contains("DOUB") { Ty::Real }
+        else { Ty::Any }
+    }).collect())
 }
 
 fn compile_ir(
@@ -639,7 +652,7 @@ fn migrate_legacy_catalog(conn: &Connection, meter: &mut Meter) -> Result<(), En
         .into_iter()
         .map(|(name, sql)| {
             let compiled = compile(conn, &name, &sql)?;
-            let ir = plan::lower_ir(&compiled)?;
+            let ir = plan::lower_ir(&compiled, &|table| source_types(conn, table))?;
             let json = serde_json::to_string(&ir).map_err(|e| {
                 EngineError::new(Stage::Install, &name, ErrorKind::State(e.to_string()))
             })?;
@@ -704,7 +717,7 @@ fn next_install(conn: &Connection, meter: &mut Meter) -> Result<u64, EngineError
         })
 }
 
-fn build_installed(name: &str, install: u64, mut compiled: Compiled) -> Installed {
+fn build_installed(name: &str, install: u64, mut compiled: Compiled, ir: IrProgram, sql_text: bool) -> Installed {
     for (i, scan) in compiled.scans.iter_mut().enumerate() {
         scan.stage = scan_stage(name, i);
     }
@@ -720,6 +733,8 @@ fn build_installed(name: &str, install: u64, mut compiled: Compiled) -> Installe
     let sqls = build_settle_sql(name, &compiled);
     Installed {
         name: name.to_string(),
+        ir,
+        sql_text,
         install,
         output: compiled.output.clone(),
         sources: compiled.sources.clone(),
@@ -777,10 +792,11 @@ fn push_program_ddl(inst: &Installed, sql: &mut String) {
             d = quote(delta(p)),
             cols = names.join(",")
         ));
+        let types = &inst.ir.rel(inst.ir.outputs[0]).expect("output relation").cols;
         let select = names
             .iter()
             .enumerate()
-            .map(|(i, name)| format!("c{i} AS {name}"))
+            .map(|(i, name)| format!("{} AS {name}", decode_sql(types[i], &format!("c{i}"))))
             .collect::<Vec<_>>()
             .join(",");
         sql.push_str(&format!(
@@ -788,311 +804,16 @@ fn push_program_ddl(inst: &Installed, sql: &mut String) {
             v = quote(view(p)),
             snapshot = nodes.output_snapshot
         ));
+        let support = names.iter().enumerate().map(|(i, name)| {
+            format!("{} AS {name}", decode_sql(types[i], &format!("c{i}")))
+        }).collect::<Vec<_>>().join(",");
+        sql.push_str(&format!(
+            "CREATE VIEW IF NOT EXISTS {v} AS SELECT {support},w AS __weight FROM ({snapshot});",
+            v = quote(root(p)), snapshot = nodes.output_snapshot
+        ));
         return;
     }
-    // One netted-delta table per scan.
-    for scan in &plan.scans {
-        let cols: Vec<String> = scan.needed.iter().map(|c| quote(c)).collect();
-        sql.push_str(&format!(
-            "CREATE TABLE IF NOT EXISTS {t}({cols}, __mult INTEGER NOT NULL);",
-            t = quote(&scan.stage),
-            cols = cols.join(","),
-        ));
-    }
-    // One derivation-delta table per join.
-    for join in &plan.joins {
-        let cols: Vec<String> = join.out_names.iter().map(|c| quote(c)).collect();
-        sql.push_str(&format!(
-            "CREATE TABLE IF NOT EXISTS {t}({cols}, __mult INTEGER NOT NULL);",
-            t = quote(&join.delta),
-            cols = cols.join(","),
-        ));
-    }
-    for anti in &plan.antis {
-        let cols: Vec<String> = plan.scans[anti.left].needed.iter().map(quote).collect();
-        sql.push_str(&format!(
-            "CREATE TABLE IF NOT EXISTS {t}({cols}, __mult INTEGER NOT NULL);",
-            t = quote(&anti.delta),
-            cols = cols.join(","),
-        ));
-    }
-    for topk in &plan.topks {
-        let cols: Vec<String> = plan.scans[topk.scan].needed.iter().map(quote).collect();
-        sql.push_str(&format!(
-            "CREATE TABLE IF NOT EXISTS {t}({cols}, __mult INTEGER NOT NULL);",
-            t = quote(&topk.delta),
-            cols = cols.join(","),
-        ));
-    }
-    // Root, its key index, the touch table and the delta table.
-    let key_cols: Vec<String> = plan.output.iter().map(|c| quote(&c.name)).collect();
-    match &plan.root {
-        Root::Nodes(_) => unreachable!(),
-        Root::Union { .. } => {
-            sql.push_str(&format!(
-                "CREATE TABLE IF NOT EXISTS {r}({keys}, __weight INTEGER NOT NULL);\
-                 CREATE UNIQUE INDEX IF NOT EXISTS {rk} ON {r}({keys});",
-                r = quote(root(p)),
-                keys = key_cols.join(","),
-                rk = quote(root_index(p)),
-            ));
-            sql.push_str(&format!(
-                "CREATE TABLE IF NOT EXISTS {t}({keys}, __bw INTEGER NOT NULL);",
-                t = quote(touch(p)),
-                keys = key_cols.join(","),
-            ));
-        }
-        Root::Group {
-            keys,
-            sums,
-            extremes,
-            ..
-        } => {
-            let key_names: Vec<String> = keys.iter().map(|k| quote(&k.name)).collect();
-            let mut state_cols: Vec<String> = key_names.clone();
-            state_cols.push("__n INTEGER NOT NULL".into());
-            for i in 0..sums.len() {
-                state_cols.push(format!("__s{i} INTEGER NOT NULL"));
-            }
-            for i in 0..extremes.len() {
-                state_cols.push(format!("__e{i} INTEGER"));
-            }
-            sql.push_str(&format!(
-                "CREATE TABLE IF NOT EXISTS {r}({cols});\
-                 CREATE UNIQUE INDEX IF NOT EXISTS {rk} ON {r}({keys});",
-                r = quote(root(p)),
-                cols = state_cols.join(","),
-                rk = quote(root_index(p)),
-                keys = key_names.join(","),
-            ));
-            let mut touch_cols: Vec<String> = key_names;
-            touch_cols.push("__bn INTEGER NOT NULL".into());
-            for i in 0..sums.len() {
-                touch_cols.push(format!("__bs{i} INTEGER NOT NULL"));
-            }
-            for i in 0..extremes.len() {
-                touch_cols.push(format!("__be{i} INTEGER"));
-            }
-            sql.push_str(&format!(
-                "CREATE TABLE IF NOT EXISTS {t}({cols});",
-                t = quote(touch(p)),
-                cols = touch_cols.join(","),
-            ));
-        }
-    }
-    sql.push_str(&format!(
-        "CREATE TABLE IF NOT EXISTS {d}(__sign INTEGER NOT NULL, {cols});",
-        d = quote(delta(p)),
-        cols = key_cols.join(","),
-    ));
-    // The visible-output view.
-    match &plan.root {
-        Root::Nodes(_) => unreachable!(),
-        Root::Union { .. } => {
-            sql.push_str(&format!(
-                "CREATE VIEW IF NOT EXISTS {v} AS SELECT {cols} FROM {r} WHERE __weight > 0;",
-                v = quote(view(p)),
-                cols = key_cols.join(","),
-                r = quote(root(p)),
-            ));
-        }
-        Root::Group {
-            keys,
-            sums,
-            extremes,
-            ..
-        } => {
-            let mut named: Vec<String> = keys.iter().map(|k| quote(&k.name)).collect();
-            named.push(format!("__n AS {}", quote(&inst.count_name())));
-            for (i, sum) in sums.iter().enumerate() {
-                named.push(format!("__s{i} AS {}", quote(&sum.name)));
-            }
-            for (i, extreme) in extremes.iter().enumerate() {
-                named.push(format!("__e{i} AS {}", quote(&extreme.name)));
-            }
-            sql.push_str(&format!(
-                "CREATE VIEW IF NOT EXISTS {v} AS SELECT {cols} FROM {r} WHERE __n > 0;",
-                v = quote(view(p)),
-                cols = named.join(","),
-                r = quote(root(p)),
-            ));
-        }
-    }
-    // Source indexes for every join probe side.
-    let mut indexed: Vec<(String, Vec<String>)> = Vec::new();
-    for join in &plan.joins {
-        let left = &plan.scans[join.left];
-        let right = &plan.scans[join.right];
-        for (table, cols) in [
-            (&left.table, &join.left_key),
-            (&right.table, &join.right_key),
-        ] {
-            if inst.derived.iter().any(|d| d == table) {
-                continue;
-            }
-            if !indexed.iter().any(|(t, c)| t == table && c == cols) {
-                indexed.push((table.clone(), cols.clone()));
-            }
-        }
-    }
-    for anti in &plan.antis {
-        let left = &plan.scans[anti.left];
-        let right = &plan.scans[anti.right];
-        for (table, cols) in [
-            (&left.table, &anti.left_key),
-            (&right.table, &anti.right_key),
-        ] {
-            if cols.is_empty() || inst.derived.iter().any(|d| d == table) {
-                continue;
-            }
-            if !indexed.iter().any(|(t, c)| t == table && c == cols) {
-                indexed.push((table.clone(), cols.clone()));
-            }
-        }
-    }
-    for topk in &plan.topks {
-        if topk.key.is_empty() {
-            continue;
-        }
-        let table = &plan.scans[topk.scan].table;
-        if !inst.derived.iter().any(|d| d == table)
-            && !indexed.iter().any(|(t, c)| t == table && c == &topk.key)
-        {
-            indexed.push((table.clone(), topk.key.clone()));
-        }
-    }
-    if let Root::Group {
-        scan,
-        keys,
-        extremes,
-        ..
-    } = &plan.root
-    {
-        let source = &plan.scans[*scan];
-        for extreme in extremes {
-            let mut cols = keys
-                .iter()
-                .map(|k| source.needed[k.take].clone())
-                .collect::<Vec<_>>();
-            cols.push(source.needed[extreme.take].clone());
-            if !inst.derived.iter().any(|d| d == &source.table)
-                && !indexed
-                    .iter()
-                    .any(|(t, c)| t == &source.table && c == &cols)
-            {
-                indexed.push((source.table.clone(), cols));
-            }
-        }
-    }
-    for (i, (table, cols)) in indexed.iter().enumerate() {
-        let cols: Vec<String> = cols.iter().map(|c| quote(c)).collect();
-        sql.push_str(&format!(
-            "CREATE INDEX IF NOT EXISTS {ix} ON {t}({cols});",
-            ix = quote(&source_index(p, i)),
-            t = quote(table),
-            cols = cols.join(","),
-        ));
-    }
-}
 
-impl Installed {
-    /// The output alias for the aggregate count column, if any.
-    pub(crate) fn count_name(&self) -> String {
-        match &self.plan.root {
-            Root::Group { keys, .. } => {
-                let key_len = keys.len();
-                self.plan
-                    .output
-                    .get(key_len)
-                    .map(|c| c.name.clone())
-                    .unwrap_or_else(|| "count".into())
-            }
-            _ => "count".into(),
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Settle SQL generation
-
-fn build_topk_sql(topk: &TopKSpec, plan: &Compiled) -> String {
-    let scan = &plan.scans[topk.scan];
-    let cols: Vec<String> = scan.needed.iter().map(quote).collect();
-    let col_list = cols.join(",");
-    let select = |alias: &str| {
-        cols.iter()
-            .map(|c| format!("{alias}.{c}"))
-            .collect::<Vec<_>>()
-            .join(",")
-    };
-    let same = |alias: &str| {
-        cols.iter()
-            .map(|c| format!("{alias}.{c}=c.{c}"))
-            .collect::<Vec<_>>()
-            .join(" AND ")
-    };
-    let touched = topk
-        .key
-        .iter()
-        .map(|k| format!("d.{}=s.{}", quote(k), quote(k)))
-        .collect::<Vec<_>>()
-        .join(" AND ");
-    let touched = if touched.is_empty() { "1" } else { &touched };
-    let partition = if topk.key.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "PARTITION BY {} ",
-            topk.key.iter().map(quote).collect::<Vec<_>>().join(",")
-        )
-    };
-    let order = topk
-        .order
-        .iter()
-        .map(|o| {
-            format!(
-                "{}{}",
-                cols[o.col as usize],
-                if o.desc { " DESC" } else { " ASC" }
-            )
-        })
-        .chain(cols.iter().map(|c| format!("{c} ASC")))
-        .collect::<Vec<_>>()
-        .join(",");
-    let window =
-        format!("{partition}ORDER BY {order} ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING");
-    let delta = format!(
-        "max(0,min(nw,{limit}-nb))-max(0,min(ow,{limit}-ob))",
-        limit = topk.limit,
-    );
-    format!(
-        "INSERT INTO {into}({cols},__mult) \
-         WITH candidates AS (SELECT DISTINCT {stage_cols} FROM {stage} s \
-           UNION SELECT DISTINCT {source_cols} FROM {source} s \
-           WHERE EXISTS (SELECT 1 FROM {stage} d WHERE {touched})), \
-         raw AS (SELECT {candidate_cols}, \
-           (SELECT count(*) FROM {source} p WHERE {post_same}) AS nw, \
-           (SELECT coalesce(sum(__mult),0) FROM {stage} d WHERE {delta_same}) AS dw \
-           FROM candidates c), \
-         counts AS (SELECT {cols},nw,nw-dw AS ow FROM raw), \
-         ranked AS (SELECT {cols},nw,ow, \
-           coalesce(sum(nw) OVER ({window}),0) AS nb, \
-           coalesce(sum(ow) OVER ({window}),0) AS ob FROM counts), \
-         changes AS (SELECT {cols},{delta} AS __mult FROM ranked) \
-         SELECT {cols},__mult FROM changes WHERE __mult<>0;",
-        into = quote(&topk.delta),
-        cols = col_list,
-        stage_cols = select("s"),
-        source_cols = select("s"),
-        stage = quote(&scan.stage),
-        source = quote(&scan.table),
-        touched = touched,
-        candidate_cols = select("c"),
-        post_same = same("p"),
-        delta_same = same("d"),
-        window = window,
-        delta = delta,
-    )
 }
 
 fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
@@ -1124,15 +845,6 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
                 "INSERT INTO {}(__seq,__table,__sign,{vals}) VALUES (?1,?2,?3,{placeholders});",
                 quote(stage(p))
             ),
-            scan_fills: Vec::new(),
-            join_fills: Vec::new(),
-            anti_fills: Vec::new(),
-            topk_fills: Vec::new(),
-            root_touch: String::new(),
-            root_upsert: String::new(),
-            root_extrema: None,
-            root_delete: String::new(),
-            root_delta: String::new(),
             bump: format!(
                 "UPDATE {} SET frontier=frontier+1 WHERE name=?1;",
                 quote(catalog())
@@ -1149,590 +861,7 @@ fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
             snapshot: format!("SELECT {names} FROM {} ORDER BY {names};", quote(view(p))),
         };
     }
-    let mut clears = Vec::new();
-    for object in [stage(p), touch(p), delta(p)] {
-        clears.push((object.clone(), format!("DELETE FROM {};", quote(&object))));
-    }
-    for scan in &plan.scans {
-        clears.push((
-            scan.stage.clone(),
-            format!("DELETE FROM {};", quote(&scan.stage)),
-        ));
-    }
-    for join in &plan.joins {
-        clears.push((
-            join.delta.clone(),
-            format!("DELETE FROM {};", quote(&join.delta)),
-        ));
-    }
-    for anti in &plan.antis {
-        clears.push((
-            anti.delta.clone(),
-            format!("DELETE FROM {};", quote(&anti.delta)),
-        ));
-    }
-    for topk in &plan.topks {
-        clears.push((
-            topk.delta.clone(),
-            format!("DELETE FROM {};", quote(&topk.delta)),
-        ));
-    }
-
-    let width = plan.stage_width.max(1);
-    let placeholders: Vec<String> = (0..width).map(|i| format!("?{}", i + 4)).collect();
-    let stage_insert = format!(
-        "INSERT INTO {t}(__seq, __table, __sign, {v}) VALUES (?1, ?2, ?3, {ph});",
-        t = quote(stage(p)),
-        v = (0..width)
-            .map(|i| format!("v{i}"))
-            .collect::<Vec<_>>()
-            .join(","),
-        ph = placeholders.join(","),
-    );
-
-    let mut scan_fills = Vec::new();
-    for scan in &plan.scans {
-        let positions: Vec<usize> = scan
-            .needed
-            .iter()
-            .map(|c| scan.columns.iter().position(|x| x == c).unwrap_or(0))
-            .collect();
-        let select_cols: Vec<String> = positions.iter().map(|i| format!("v{i}")).collect();
-        let out_cols: Vec<String> = scan.needed.iter().map(|c| quote(c)).collect();
-        let group: Vec<String> = (1..=positions.len()).map(|i| i.to_string()).collect();
-        scan_fills.push((
-            scan.table.clone(),
-            format!(
-                "INSERT INTO {into}({cols}, __mult) SELECT {sel}, SUM(__sign) FROM {st} WHERE __table = ?1 GROUP BY {g} HAVING SUM(__sign) <> 0;",
-                into = quote(&scan.stage),
-                cols = out_cols.join(","),
-                sel = select_cols.join(","),
-                st = quote(stage(p)),
-                g = group.join(","),
-            ),
-        ));
-    }
-
-    let mut join_fills = Vec::new();
-    for join in &plan.joins {
-        let left = &plan.scans[join.left];
-        let right = &plan.scans[join.right];
-        let l_names: Vec<&String> = join.left_proj.iter().map(|i| &left.needed[*i]).collect();
-        let r_names: Vec<&String> = join.right_proj.iter().map(|i| &right.needed[*i]).collect();
-        let out_names = &join.out_names;
-        let on: Vec<String> = join
-            .left_key
-            .iter()
-            .zip(&join.right_key)
-            .map(|(lk, rk)| format!("r.{} = l.{}", quote(rk), quote(lk)))
-            .collect();
-        let on = on.join(" AND ");
-        let select = |l_expr: &str, r_expr: &str, w: &str| -> String {
-            let mut exprs: Vec<String> = Vec::new();
-            for (i, name) in l_names.iter().enumerate() {
-                let alias = &out_names[i];
-                exprs.push(format!("{l_expr}.{} AS {}", quote(name), quote(alias)));
-            }
-            for (i, name) in r_names.iter().enumerate() {
-                let alias = &out_names[l_names.len() + i];
-                exprs.push(format!("{r_expr}.{} AS {}", quote(name), quote(alias)));
-            }
-            exprs.push(format!("{w} AS w"));
-            exprs.join(", ")
-        };
-        let group: Vec<String> = (1..=out_names.len()).map(|i| i.to_string()).collect();
-        let out_cols: Vec<String> = out_names.iter().map(|c| quote(c)).collect();
-        join_fills.push((
-            join.delta.clone(),
-            format!(
-                "INSERT INTO {into}({cols}, __mult) SELECT {outc}, SUM(w) FROM (\
-                   SELECT {t1} FROM {ls} l JOIN {rt} r ON {on}\
-                   UNION ALL SELECT {t2} FROM {lt} l JOIN {rs} r ON {on}\
-                   UNION ALL SELECT {t3} FROM {ls} l JOIN {rs} r ON {on}\
-                 ) GROUP BY {g};",
-                into = quote(&join.delta),
-                cols = out_cols.join(","),
-                outc = out_cols.join(","),
-                t1 = select("l", "r", "l.__mult"),
-                t2 = select("l", "r", "r.__mult"),
-                t3 = select("l", "r", "-(l.__mult * r.__mult)"),
-                ls = quote(&left.stage),
-                rs = quote(&right.stage),
-                lt = quote(&left.table),
-                rt = quote(&right.table),
-                g = group.join(","),
-            ),
-        ));
-    }
-
-    let mut anti_fills = Vec::new();
-    for anti in &plan.antis {
-        let left = &plan.scans[anti.left];
-        let right = &plan.scans[anti.right];
-        let cols: Vec<String> = left.needed.iter().map(quote).collect();
-        let lcols = cols
-            .iter()
-            .map(|c| format!("l.{c}"))
-            .collect::<Vec<_>>()
-            .join(",");
-        let ccols = cols
-            .iter()
-            .map(|c| format!("c.{c}"))
-            .collect::<Vec<_>>()
-            .join(",");
-        let same_row = cols
-            .iter()
-            .map(|c| format!("lp.{c}=c.{c}"))
-            .collect::<Vec<_>>()
-            .join(" AND ");
-        let same_delta = cols
-            .iter()
-            .map(|c| format!("ld.{c}=c.{c}"))
-            .collect::<Vec<_>>()
-            .join(" AND ");
-        let key_match = |alias: &str| -> String {
-            let terms: Vec<String> = anti
-                .left_key
-                .iter()
-                .zip(&anti.right_key)
-                .map(|(lk, rk)| format!("{alias}.{}=c.{}", quote(rk), quote(lk)))
-                .collect();
-            if terms.is_empty() {
-                "1".into()
-            } else {
-                terms.join(" AND ")
-            }
-        };
-        let touched_key = anti
-            .left_key
-            .iter()
-            .zip(&anti.right_key)
-            .map(|(lk, rk)| format!("rd.{}=l.{}", quote(rk), quote(lk)))
-            .collect::<Vec<_>>()
-            .join(" AND ");
-        let touched_key = if touched_key.is_empty() {
-            "1"
-        } else {
-            &touched_key
-        };
-        let filters = if anti.filters.is_empty() {
-            "1".into()
-        } else {
-            anti.filters.join(" AND ")
-        };
-        let sql = format!(
-            "INSERT INTO {into}({cols}, __mult) \
-             WITH candidates AS (SELECT DISTINCT {lcols} FROM {ld} l \
-               UNION SELECT DISTINCT {lcols} FROM {lt} l \
-               WHERE EXISTS (SELECT 1 FROM {rd} rd WHERE {touched_key})), \
-             counts AS (SELECT {ccols}, \
-               (SELECT count(*) FROM {lt} lp WHERE {same_row}) AS ln, \
-               (SELECT coalesce(sum(__mult),0) FROM {ld} ld WHERE {same_delta}) AS ld, \
-               (SELECT count(*) FROM {rt} rp WHERE {post_key}) AS rn, \
-               (SELECT coalesce(sum(__mult),0) FROM {rd} rd WHERE {delta_key}) AS rd \
-               FROM candidates c WHERE {filters}) \
-             SELECT {cols}, ln * (rn=0) - (ln-ld) * (rn-rd=0) AS __mult \
-             FROM counts WHERE ln * (rn=0) != (ln-ld) * (rn-rd=0);",
-            into = quote(&anti.delta),
-            cols = cols.join(","),
-            lcols = lcols,
-            ld = quote(&left.stage),
-            lt = quote(&left.table),
-            rd = quote(&right.stage),
-            rt = quote(&right.table),
-            touched_key = touched_key,
-            ccols = ccols,
-            same_row = same_row,
-            same_delta = same_delta,
-            post_key = key_match("rp"),
-            delta_key = key_match("rd"),
-            filters = filters,
-        );
-        anti_fills.push((anti.delta.clone(), sql));
-    }
-    let topk_fills = plan
-        .topks
-        .iter()
-        .map(|topk| (topk.delta.clone(), build_topk_sql(topk, plan)))
-        .collect();
-
-    let arity = plan.output.len();
-    let out_cols: Vec<String> = plan.output.iter().map(|c| quote(&c.name)).collect();
-    let group_ord: Vec<String> = (1..=arity).map(|i| i.to_string()).collect();
-
-    // Branch deltas: one SELECT per branch, UNION ALL-ed.
-    let branch_sql = |plan: &Compiled| -> String {
-        let mut parts = Vec::new();
-        if let Root::Union { branches } = &plan.root {
-            for branch in branches {
-                match branch {
-                    plan::BranchRef::Scan { scan, takes } => {
-                        let scan = &plan.scans[*scan];
-                        let cols: Vec<String> = takes
-                            .iter()
-                            .enumerate()
-                            .map(|(pos, i)| {
-                                format!(
-                                    "{} AS {}",
-                                    quote(&scan.needed[*i]),
-                                    quote(&plan.output[pos].name)
-                                )
-                            })
-                            .collect();
-                        parts.push(format!(
-                            "SELECT {cols}, __mult FROM {t}",
-                            cols = cols.join(","),
-                            t = quote(&scan.stage),
-                        ));
-                    }
-                    plan::BranchRef::MfpScan {
-                        scan,
-                        select,
-                        filters,
-                    } => {
-                        let scan = &plan.scans[*scan];
-                        let cols = select
-                            .iter()
-                            .enumerate()
-                            .map(|(pos, expr)| {
-                                format!("{expr} AS {}", quote(&plan.output[pos].name))
-                            })
-                            .collect::<Vec<_>>()
-                            .join(",");
-                        let where_sql = if filters.is_empty() {
-                            "1".into()
-                        } else {
-                            filters.join(" AND ")
-                        };
-                        parts.push(format!(
-                            "SELECT {cols}, __mult FROM {t} WHERE {where_sql}",
-                            t = quote(&scan.stage),
-                        ));
-                    }
-                    plan::BranchRef::MfpJoin {
-                        join,
-                        select,
-                        filters,
-                    } => {
-                        let join = &plan.joins[*join];
-                        let cols = select
-                            .iter()
-                            .enumerate()
-                            .map(|(pos, expr)| {
-                                format!("{expr} AS {}", quote(&plan.output[pos].name))
-                            })
-                            .collect::<Vec<_>>()
-                            .join(",");
-                        let where_sql = if filters.is_empty() {
-                            "1".into()
-                        } else {
-                            filters.join(" AND ")
-                        };
-                        parts.push(format!(
-                            "SELECT {cols}, __mult FROM {t} WHERE {where_sql}",
-                            t = quote(&join.delta),
-                        ));
-                    }
-                    plan::BranchRef::Join(j) => {
-                        let join = &plan.joins[*j];
-                        let cols: Vec<String> = join.out_names.iter().map(|c| quote(c)).collect();
-                        parts.push(format!(
-                            "SELECT {cols}, __mult FROM {t}",
-                            cols = cols.join(","),
-                            t = quote(&join.delta),
-                        ));
-                    }
-                    plan::BranchRef::Anti(i) => {
-                        let anti = &plan.antis[*i];
-                        let scan = &plan.scans[anti.left];
-                        let cols = scan
-                            .needed
-                            .iter()
-                            .enumerate()
-                            .map(|(pos, name)| {
-                                format!("{} AS {}", quote(name), quote(&plan.output[pos].name))
-                            })
-                            .collect::<Vec<_>>()
-                            .join(",");
-                        parts.push(format!("SELECT {cols}, __mult FROM {}", quote(&anti.delta)));
-                    }
-                    plan::BranchRef::TopK(i) => {
-                        let topk = &plan.topks[*i];
-                        let scan = &plan.scans[topk.scan];
-                        let cols = scan
-                            .needed
-                            .iter()
-                            .enumerate()
-                            .map(|(pos, name)| {
-                                format!("{} AS {}", quote(name), quote(&plan.output[pos].name))
-                            })
-                            .collect::<Vec<_>>()
-                            .join(",");
-                        parts.push(format!("SELECT {cols}, __mult FROM {}", quote(&topk.delta)));
-                    }
-                }
-            }
-        }
-        parts.join(" UNION ALL ")
-    };
-
-    let (root_touch, root_upsert, root_delete, root_delta, snapshot) = match &plan.root {
-        Root::Nodes(_) => unreachable!(),
-        Root::Union { .. } => {
-            let d = branch_sql(plan);
-            let key_cond: Vec<String> = plan
-                .output
-                .iter()
-                .map(|c| format!("r.{} = d.{}", quote(&c.name), quote(&c.name)))
-                .collect();
-            let key_cond = key_cond.join(" AND ");
-            let touch_sql = format!(
-                "INSERT INTO {t}({cols}, __bw) SELECT {dc}, COALESCE(r.__weight, 0) FROM (SELECT {cols} FROM ({d}) GROUP BY {g}) d LEFT JOIN {r} r ON {cond};",
-                t = quote(touch(p)),
-                cols = out_cols.join(","),
-                dc = out_cols
-                    .iter()
-                    .map(|c| format!("d.{c}"))
-                    .collect::<Vec<_>>()
-                    .join(","),
-                d = d,
-                g = group_ord.join(","),
-                r = quote(root(p)),
-                cond = key_cond,
-            );
-            let upsert_sql = format!(
-                "INSERT INTO {r}({cols}, __weight) SELECT {cols}, SUM(__mult) FROM ({d}) GROUP BY {g} ON CONFLICT({cols}) DO UPDATE SET __weight = __weight + excluded.__weight;",
-                r = quote(root(p)),
-                cols = out_cols.join(","),
-                d = d,
-                g = group_ord.join(","),
-            );
-            let delete_sql = format!(
-                "DELETE FROM {r} WHERE __weight <= 0 AND ({cols}) IN (SELECT {cols} FROM {t});",
-                r = quote(root(p)),
-                cols = out_cols.join(","),
-                t = quote(touch(p)),
-            );
-            let delta_sql = format!(
-                "INSERT INTO {dl}(__sign, {cols}) SELECT CASE WHEN t.__bw > 0 THEN -1 ELSE 1 END, {tc} FROM {t} t LEFT JOIN {r} r ON {tcond} WHERE (t.__bw > 0) != (COALESCE(r.__weight, 0) > 0);",
-                dl = quote(delta(p)),
-                cols = out_cols.join(","),
-                tc = out_cols
-                    .iter()
-                    .map(|c| format!("t.{c}"))
-                    .collect::<Vec<_>>()
-                    .join(","),
-                t = quote(touch(p)),
-                r = quote(root(p)),
-                tcond = key_cond.replace("d.", "t."),
-            );
-            let snapshot_sql = format!(
-                "SELECT {cols} FROM {r} WHERE __weight > 0 ORDER BY {cols};",
-                cols = out_cols.join(","),
-                r = quote(root(p)),
-            );
-            (touch_sql, upsert_sql, delete_sql, delta_sql, snapshot_sql)
-        }
-        Root::Group {
-            scan,
-            keys,
-            sums,
-            extremes,
-        } => {
-            let group_scan = &plan.scans[*scan];
-            let key_names: Vec<String> = keys.iter().map(|k| quote(&k.name)).collect();
-            let key_takes: Vec<String> = keys
-                .iter()
-                .map(|k| quote(&group_scan.needed[k.take]))
-                .collect();
-            let sum_exprs: Vec<String> = sums
-                .iter()
-                .map(|s| format!("SUM(__mult * {})", quote(&group_scan.needed[s.take])))
-                .collect();
-            let g = &group_ord[0];
-            let key_cond: Vec<String> = keys
-                .iter()
-                .map(|k| format!("r.{} = d.{}", quote(&k.name), quote(&k.name)))
-                .collect();
-            let key_cond = key_cond.join(" AND ");
-            let touch_sql = format!(
-                "INSERT INTO {t}({keys}, __bn, {bs}{bec}) SELECT {dc}, COALESCE(r.__n, 0), {bc}{bev} FROM (SELECT {kt}, SUM(__mult) AS __mn, {se} FROM {st} GROUP BY {g}) d LEFT JOIN {r} r ON {cond};",
-                t = quote(touch(p)),
-                keys = key_names.join(","),
-                bs = (0..sums.len()).map(|i| format!("__bs{i}")).collect::<Vec<_>>().join(","),
-                bec = (0..extremes.len()).map(|i| format!(",__be{i}")).collect::<String>(),
-                bev = (0..extremes.len()).map(|i| format!(",r.__e{i}")).collect::<String>(),
-                dc = key_names
-                    .iter()
-                    .map(|c| format!("d.{c}"))
-                    .collect::<Vec<_>>()
-                    .join(","),
-                bc = (0..sums.len())
-                    .map(|i| format!("COALESCE(r.__s{i}, 0)"))
-                    .collect::<Vec<_>>()
-                    .join(","),
-                kt = key_takes.join(","),
-                se = sum_exprs
-                    .iter()
-                    .enumerate()
-                    .map(|(i, e)| format!("{e} AS __ms{i}"))
-                    .collect::<Vec<_>>()
-                    .join(","),
-                st = quote(&group_scan.stage),
-                r = quote(root(p)),
-                cond = key_cond,
-                g = g,
-            );
-            let upsert_sql = format!(
-                "INSERT INTO {r}({keys}, __n, {ss}{ec}) SELECT {kt}, SUM(__mult), {se}{ev} FROM {st} GROUP BY {g} ON CONFLICT({keys}) DO UPDATE SET __n = __n + excluded.__n{extra};",
-                r = quote(root(p)),
-                keys = key_names.join(","),
-                ss = (0..sums.len()).map(|i| format!("__s{i}")).collect::<Vec<_>>().join(","),
-                ec = (0..extremes.len()).map(|i| format!(",__e{i}")).collect::<String>(),
-                ev = extremes.iter().map(|_| ",NULL").collect::<String>(),
-                kt = key_takes.join(","),
-                se = sum_exprs.join(","),
-                st = quote(&group_scan.stage),
-                g = g,
-                extra = sums
-                    .iter()
-                    .enumerate()
-                    .map(|(i, _)| format!(
-                        ", __s{i} = __s{i} + excluded.__s{i}"
-                    ))
-                    .collect::<String>(),
-            );
-            let delete_sql = format!(
-                "DELETE FROM {r} WHERE __n <= 0 AND ({keys}) IN (SELECT {keys} FROM {t});",
-                r = quote(root(p)),
-                keys = key_names.join(","),
-                t = quote(touch(p)),
-            );
-            let changed = {
-                let mut terms = vec!["r.__n != t.__bn".to_string()];
-                for i in 0..sums.len() {
-                    terms.push(format!("r.__s{i} != t.__bs{i}"));
-                }
-                for i in 0..extremes.len() {
-                    terms.push(format!("r.__e{i} IS NOT t.__be{i}"));
-                }
-                terms.join(" OR ")
-            };
-            let delta_sql = format!(
-                "INSERT INTO {dl}(__sign, {cols}) \
-                 SELECT -1, {tkeys}, t.__bn, {tbs} FROM {t} t LEFT JOIN {r} r ON {tcond} WHERE t.__bn > 0 AND (COALESCE(r.__n, 0) <= 0 OR {changed}) \
-                 UNION ALL \
-                 SELECT 1, {rkeys}, r.__n, {rbs} FROM {r} r JOIN {t} t ON {cond2} WHERE r.__n > 0 AND (t.__bn <= 0 OR {changed});",
-                dl = quote(delta(p)),
-                cols = out_cols.join(","),
-                tkeys = key_names
-                    .iter()
-                    .map(|c| format!("t.{c}"))
-                    .collect::<Vec<_>>()
-                    .join(","),
-                tbs = (0..sums.len())
-                    .map(|i| format!("t.__bs{i}"))
-                    .chain((0..extremes.len()).map(|i| format!("t.__be{i}")))
-                    .collect::<Vec<_>>()
-                    .join(","),
-                t = quote(touch(p)),
-                r = quote(root(p)),
-                tcond = key_cond.replace("d.", "t."),
-                changed = changed,
-                rkeys = key_names
-                    .iter()
-                    .map(|c| format!("r.{c}"))
-                    .collect::<Vec<_>>()
-                    .join(","),
-                rbs = (0..sums.len())
-                    .map(|i| format!("r.__s{i}"))
-                    .chain((0..extremes.len()).map(|i| format!("r.__e{i}")))
-                    .collect::<Vec<_>>()
-                    .join(","),
-                cond2 = key_cond.replace("d.", "t."),
-            );
-            let snapshot_sql = format!(
-                "SELECT {keys}, __n, {ss} FROM {r} WHERE __n > 0 ORDER BY {keys};",
-                keys = key_names.join(","),
-                ss = (0..sums.len())
-                    .map(|i| format!("__s{i}"))
-                    .chain((0..extremes.len()).map(|i| format!("__e{i}")))
-                    .collect::<Vec<_>>()
-                    .join(","),
-                r = quote(root(p)),
-            );
-            (touch_sql, upsert_sql, delete_sql, delta_sql, snapshot_sql)
-        }
-    };
-
-    let root_extrema = if let Root::Group {
-        scan,
-        keys,
-        extremes,
-        ..
-    } = &plan.root
-    {
-        if extremes.is_empty() {
-            None
-        } else {
-            let source = &plan.scans[*scan];
-            let assignments = extremes.iter().enumerate().map(|(i, extreme)| {
-                let matches = keys.iter().map(|key| {
-                    format!("s.{}=r.{}", quote(&source.needed[key.take]), quote(&key.name))
-                }).collect::<Vec<_>>().join(" AND ");
-                let value = quote(&source.needed[extreme.take]);
-                let direction = if extreme.max { "DESC" } else { "ASC" };
-                format!("__e{i}=(SELECT s.{value} FROM {table} s WHERE {matches} ORDER BY s.{value} {direction} LIMIT 1)",
-                    table=quote(&source.table))
-            }).collect::<Vec<_>>().join(",");
-            let touched = keys
-                .iter()
-                .map(|key| format!("t.{}=r.{}", quote(&key.name), quote(&key.name)))
-                .collect::<Vec<_>>()
-                .join(" AND ");
-            Some(format!("UPDATE {root} AS r SET {assignments} WHERE EXISTS (SELECT 1 FROM {touch} t WHERE {touched});",
-                root=quote(root(p)), touch=quote(touch(p))))
-        }
-    } else {
-        None
-    };
-    let weight_delta = if matches!(plan.root, Root::Union { .. }) {
-        Some(format!(
-            "SELECT {cols}, SUM(__mult) FROM ({d}) GROUP BY {group} HAVING SUM(__mult)<>0 ORDER BY {cols}",
-            cols = out_cols.join(","), d = branch_sql(plan), group = group_ord.join(","),
-        ))
-    } else {
-        None
-    };
-
-    SettleSql {
-        clears,
-        stage_insert,
-        scan_fills,
-        join_fills,
-        anti_fills,
-        topk_fills,
-        root_touch,
-        root_upsert,
-        root_extrema,
-        root_delete,
-        root_delta,
-        bump: format!(
-            "UPDATE {c} SET frontier = frontier + 1 WHERE name = ?1;",
-            c = quote(catalog())
-        ),
-        read_frontier: format!(
-            "SELECT frontier FROM {c} WHERE name = ?1;",
-            c = quote(catalog())
-        ),
-        read_delta: format!(
-            "SELECT __sign, {cols} FROM {d} ORDER BY {cols}, __sign;",
-            d = quote(delta(p)),
-            cols = out_cols.join(","),
-        ),
-        weight_delta,
-        snapshot,
-    }
+    unreachable!("runtime plans always use NodesPlan")
 }
 
 // ---------------------------------------------------------------------------
@@ -1766,7 +895,7 @@ pub(crate) fn open(conn: &Connection, name: &str) -> Result<Arc<Installed>, Engi
         )
         .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
     let compiled = compile_ir(conn, name, &program, output, typed_ir)?;
-    let mut installed = build_installed(name, install, compiled);
+    let mut installed = build_installed(name, install, compiled, program, !typed_ir);
     installed.derived = scan_derived_sources(conn, &installed)?;
     Ok(Arc::new(installed))
 }
@@ -1790,6 +919,7 @@ pub(crate) fn teardown(conn: &Connection, inst: &Installed) -> Result<(), Engine
     sql.push_str(&format!("DROP VIEW IF EXISTS {};", quote(view(p))));
     sql.push_str(&format!("DROP TABLE IF EXISTS {};", quote(delta(p))));
     if let Root::Nodes(nodes) = &inst.plan.root {
+        sql.push_str(&format!("DROP VIEW IF EXISTS {};", quote(root(p))));
         for (kind, object) in nodes.objects.iter().rev() {
             sql.push_str(&format!("DROP {kind} IF EXISTS {};", quote(object)));
         }
@@ -1807,7 +937,9 @@ pub(crate) fn teardown(conn: &Connection, inst: &Installed) -> Result<(), Engine
     for topk in &inst.plan.topks {
         sql.push_str(&format!("DROP TABLE IF EXISTS {};", quote(&topk.delta)));
     }
-    sql.push_str(&format!("DROP TABLE IF EXISTS {};", quote(root(p))));
+    if !matches!(inst.plan.root, Root::Nodes(_)) {
+        sql.push_str(&format!("DROP TABLE IF EXISTS {};", quote(root(p))));
+    }
     sql.push_str(&format!("DROP TABLE IF EXISTS {};", quote(stage(p))));
     // Source indexes: every distinct (table, columns) pair this program made.
     let mut indexed: Vec<(String, Vec<String>)> = Vec::new();

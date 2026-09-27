@@ -174,19 +174,33 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
         }))
     }
 
-    fn mfp(&mut self, c: Self::C, filter: &[Expr], map: &[Expr], project: &[ColId]) -> Self::C {
+    fn mfp(&mut self, c: Self::C, filter: &[Expr], map: &[Expr], project: &[ColId], input_types: &[Ty]) -> Self::C {
         let (filter, map, project) = (filter.to_vec(), map.to_vec(), project.to_vec());
+        let input_types = input_types.to_vec();
         let interner = self.interner.clone();
         let texts = self.texts.clone();
         c.flat_map(move |mut row: Row| {
             let lt = |a, b| interner.borrow().compare(a, b) == Ordering::Less;
             let literal = |index: u32| texts[index as usize];
             let nil = || interner.borrow().text_id("").expect("empty string");
-            if !filter.iter().all(|e| eval_with_text(e, &row, &lt, &literal, &nil) != 0) {
+            let compare = |ta: Ty, a: Cell, tb: Ty, b: Cell| {
+                let numeric = |ty: Ty| matches!(ty, Ty::Int | Ty::Real);
+                if numeric(ta) && numeric(tb) {
+                    if ta == Ty::Int && tb == Ty::Int { return a.cmp(&b); }
+                    let x = if ta == Ty::Real { f64::from_bits(a as u64) } else { a as f64 };
+                    let y = if tb == Ty::Real { f64::from_bits(b as u64) } else { b as f64 };
+                    return x.partial_cmp(&y).unwrap_or(Ordering::Equal);
+                }
+                let rank = |ty: Ty| match ty { Ty::Int | Ty::Real => 1, Ty::Text => 2, Ty::Id => 3, Ty::Any => 4 };
+                rank(ta).cmp(&rank(tb)).then_with(|| cmp_cell(ta, a, b, &interner.borrow()))
+            };
+            if !filter.iter().all(|e| eval_typed_with_text(e, &row, &input_types, &lt, &literal, &nil, &compare) != 0) {
                 return None;
             }
+            let mut types = input_types.clone();
             for e in &map {
-                let v = eval_with_text(e, &row, &lt, &literal, &nil);
+                let v = eval_typed_with_text(e, &row, &types, &lt, &literal, &nil, &compare);
+                types.push(expr_type(e, &types).expect("Mfp expression type"));
                 row.push(v);
             }
             Some(if project.is_empty() { row } else { cols(&row, &project) })
@@ -237,11 +251,11 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
         let extrema: Vec<Agg> = aggs.iter().filter(|a| matches!(a, Agg::Min(_) | Agg::Max(_))).cloned().collect();
         let extrema_types: Vec<Ty> = extrema.iter().map(|a| match a { Agg::Min(c) | Agg::Max(c) => input_types[*c as usize], _ => unreachable!() }).collect();
         let values = match (linear.is_empty(), extrema.is_empty()) {
-            (false, true) => accumulable_values(c, key, linear),
-            (true, false) => accumulable_values(c.clone(), key.clone(), vec![Agg::Count])
+            (false, true) => accumulable_values(c, key, linear, input_types.to_vec()),
+            (true, false) => accumulable_values(c.clone(), key.clone(), vec![Agg::Count], input_types.to_vec())
                 .join(hierarchical_extrema(c, key, extrema, extrema_types, self.interner.clone(), self.reduce_reads.clone()))
                 .map(|(group, (_, values))| (group, values)),
-            (false, false) => accumulable_values(c.clone(), key.clone(), linear)
+            (false, false) => accumulable_values(c.clone(), key.clone(), linear, input_types.to_vec())
                 .join(hierarchical_extrema(c, key, extrema, extrema_types, self.interner.clone(), self.reduce_reads.clone()))
                 .map(move |(group, (linear, extrema))| {
                     let (mut li, mut ei) = (linear.into_iter(), extrema.into_iter());
@@ -251,7 +265,7 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
                     }).collect();
                     (group, values)
                 }),
-            (true, true) => accumulable_values(c, key, linear),
+            (true, true) => accumulable_values(c, key, linear, input_types.to_vec()),
         };
         values.map(|(mut group, values)| {
             group.extend(values);
@@ -350,7 +364,24 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
 }
 
 /// Count and Sum ride in the diff (`[count, sums..]`), so a group is one record and a change costs O(1) in group size.
-fn accumulable_values<'s, T: Nest>(c: Coll<'s, T>, key: Vec<ColId>, aggs: Vec<Agg>) -> VecCollection<'s, T, (Row, Row), W> {
+fn accumulable_values<'s, T: Nest>(c: Coll<'s, T>, key: Vec<ColId>, aggs: Vec<Agg>, types: Vec<Ty>) -> VecCollection<'s, T, (Row, Row), W> {
+    if aggs.iter().any(|agg| matches!(agg, Agg::Sum(col) if types[*col as usize] == Ty::Real)) {
+        return c.map(move |row| (cols(&row, &key), row))
+            .reduce(move |_key, input: &[(&Row, W)], output: &mut Vec<(Row, W)>| {
+                let count: W = input.iter().map(|(_, w)| *w).sum();
+                if count <= 0 { return; }
+                let values = aggs.iter().map(|agg| match agg {
+                    Agg::Count => count,
+                    Agg::Sum(col) if types[*col as usize] == Ty::Real => {
+                        input.iter().map(|(row, w)| f64::from_bits(row[*col as usize] as u64) * *w as f64)
+                            .sum::<f64>().to_bits() as i64
+                    }
+                    Agg::Sum(col) => input.iter().fold(0i64, |sum, (row, w)| sum.wrapping_add(row[*col as usize].wrapping_mul(*w))),
+                    _ => unreachable!(),
+                }).collect();
+                output.push((values, 1));
+            });
+    }
     let sums: Vec<ColId> = aggs.iter().filter_map(|a| if let Agg::Sum(c) = a { Some(*c) } else { None }).collect();
     c.explode(move |row: Row| {
         let mut acc = vec![1 as W];
@@ -433,7 +464,12 @@ fn extrema(input: &[(&Row, W)], aggs: &[Agg], types: &[Ty], interner: &Interner,
 
 /// `order` first, then the whole row ascending, so ties resolve the same way in every engine.
 fn cmp_cell(ty: Ty, a: Cell, b: Cell, interner: &Interner) -> Ordering {
-    if ty == Ty::Id { interner.compare(a, b) } else { a.cmp(&b) }
+    match ty {
+        Ty::Id => interner.compare(a, b),
+        Ty::Text => interner.text(a).cmp(&interner.text(b)),
+        Ty::Real => f64::from_bits(a as u64).partial_cmp(&f64::from_bits(b as u64)).unwrap_or_else(|| a.cmp(&b)),
+        Ty::Int | Ty::Any => a.cmp(&b),
+    }
 }
 
 fn rank(order: &[Order], types: &[Ty], interner: &Interner, a: &Row, b: &Row) -> Ordering {

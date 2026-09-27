@@ -17,6 +17,9 @@ pub type W = i64;
 pub enum Ty {
     Int,
     Id,
+    Text,
+    Real,
+    Any,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -227,25 +230,37 @@ impl Program {
                 let mut out = key.iter().map(|c| cols.get(*c as usize).copied()).collect::<Option<Vec<_>>>()?;
                 out.extend(aggs.iter().map(|agg| match agg {
                     Agg::Min(c) | Agg::Max(c) => cols.get(*c as usize).copied(),
-                    Agg::Count | Agg::Sum(_) => Some(Ty::Int),
+                    Agg::Count => Some(Ty::Int),
+                    Agg::Sum(c) => match cols.get(*c as usize)? { Ty::Real => Some(Ty::Real), Ty::Any => Some(Ty::Any), _ => Some(Ty::Int) },
                 }).collect::<Option<Vec<_>>>()?);
                 out
             }
             Op::TopK { input, .. } => self.node_types(*input)?,
-            Op::Window { input, .. } => {
+            Op::Window { input, func, order, .. } => {
                 let mut cols = self.node_types(*input)?;
-                cols.push(Ty::Int);
+                let value = order.first().map_or(0, |o| o.col);
+                cols.push(match func {
+                    WinFn::Sum(c) => cols.get(*c as usize).copied()?,
+                    WinFn::Lag(_) | WinFn::Lead(_) => cols.get(value as usize).copied()?,
+                    _ => Ty::Int,
+                });
                 cols
             }
         })
     }
 }
 
-fn expr_type(expr: &Expr, cols: &[Ty]) -> Option<Ty> {
+pub fn expr_type(expr: &Expr, cols: &[Ty]) -> Option<Ty> {
     match expr {
         Expr::Col(c) => cols.get(*c as usize).copied(),
-        Expr::Text(_) | Expr::Call(Func::StrNil, _) => Some(Ty::Id),
-        Expr::Lit(_) | Expr::Call(_, _) => Some(Ty::Int),
+        Expr::Text(_) | Expr::Call(Func::StrNil, _) => Some(Ty::Text),
+        Expr::Lit(_) => Some(Ty::Int),
+        Expr::Call(Func::Add | Func::Sub, args) => {
+            let left = expr_type(args.first()?, cols)?;
+            let right = expr_type(args.get(1)?, cols)?;
+            Some(if left == Ty::Real || right == Ty::Real { Ty::Real } else { Ty::Int })
+        }
+        Expr::Call(_, _) => Some(Ty::Int),
     }
 }
 

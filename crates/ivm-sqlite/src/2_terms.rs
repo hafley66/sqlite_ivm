@@ -1,5 +1,5 @@
 use ivm_ir::{self, RelKind, Program, RelId, Row, Term, Ty, W};
-use sqlite_ext::rusqlite::{self, Connection, OptionalExtension, functions::FunctionFlags};
+use sqlite_ext::rusqlite::{self, Connection, OptionalExtension, functions::FunctionFlags, types::Value};
 use std::cmp::Ordering;
 
 pub(crate) fn ctor_table(name: &str) -> String {
@@ -21,6 +21,7 @@ pub(crate) fn install(db: &Connection, ir: &Program) -> rusqlite::Result<()> {
         }
     }
     db.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS ivm_term_text_unique ON ivm_term_dict(text)")?;
+    db.execute_batch("CREATE TABLE IF NOT EXISTS ivm_cell_dict(id INTEGER PRIMARY KEY, class INTEGER NOT NULL, payload INTEGER NOT NULL, UNIQUE(class,payload))")?;
     if ir.uses_strings() {
         intern_text(db, "")?;
         for text in &ir.texts { intern_text(db, text)?; }
@@ -42,6 +43,25 @@ pub(crate) fn install(db: &Connection, ir: &Program) -> rusqlite::Result<()> {
 }
 
 pub(crate) fn register(db: &Connection) -> rusqlite::Result<()> {
+    if db.prepare("SELECT ivm_any_value(0)").is_ok() { return Ok(()); }
+    db.create_scalar_function("ivm_real_value", 1, FunctionFlags::SQLITE_UTF8, |ctx| {
+        Ok(f64::from_bits(ctx.get::<i64>(0)? as u64))
+    })?;
+    db.create_scalar_function("ivm_real_bits", 1, FunctionFlags::SQLITE_UTF8, |ctx| {
+        Ok(ctx.get::<f64>(0)?.to_bits() as i64)
+    })?;
+    db.create_scalar_function("ivm_text_value", 1, FunctionFlags::SQLITE_UTF8, |ctx| {
+        let db = unsafe { ctx.get_connection()? };
+        text(&db, ctx.get(0)?)?.ok_or(rusqlite::Error::InvalidQuery)
+    })?;
+    db.create_scalar_function("ivm_any_value", 1, FunctionFlags::SQLITE_UTF8, |ctx| {
+        let db = unsafe { ctx.get_connection()? };
+        decode_any(&db, ctx.get(0)?)
+    })?;
+    db.create_scalar_function("ivm_text_key", 1, FunctionFlags::SQLITE_UTF8, |ctx| {
+        let db = unsafe { ctx.get_connection()? };
+        text(&db, ctx.get(0)?)?.ok_or(rusqlite::Error::InvalidQuery)
+    })?;
     db.create_scalar_function("ivm_term_lt", 2, FunctionFlags::SQLITE_UTF8, |ctx| {
         let (a, b): (i64, i64) = (ctx.get(0)?, ctx.get(1)?);
         // SQLite permits nested read statements from a scalar function on this connection.
@@ -86,6 +106,34 @@ pub(crate) fn register(db: &Connection) -> rusqlite::Result<()> {
         let value: String = ctx.get(0)?;
         Ok(value.chars().next().map(|c| value[c.len_utf8()..].to_owned()))
     })
+}
+
+pub(crate) fn encode_value(db: &Connection, ty: Ty, value: &Value) -> rusqlite::Result<i64> {
+    match (ty, value) {
+        (Ty::Int | Ty::Id, Value::Integer(v)) => Ok(*v),
+        (Ty::Real, Value::Real(v)) => Ok(v.to_bits() as i64),
+        (Ty::Real, Value::Integer(v)) => Ok((*v as f64).to_bits() as i64),
+        (Ty::Text, Value::Text(v)) => intern_text(db, v),
+        (Ty::Any, Value::Integer(v)) => intern_any(db, 1, *v),
+        (Ty::Any, Value::Real(v)) => intern_any(db, 2, v.to_bits() as i64),
+        (Ty::Any, Value::Text(v)) => intern_any(db, 3, intern_text(db, v)?),
+        _ => Err(rusqlite::Error::InvalidQuery),
+    }
+}
+
+fn intern_any(db: &Connection, class: i64, payload: i64) -> rusqlite::Result<i64> {
+    db.execute("INSERT INTO ivm_cell_dict(class,payload) VALUES (?1,?2) ON CONFLICT DO NOTHING", (class, payload))?;
+    db.query_row("SELECT id FROM ivm_cell_dict WHERE class=?1 AND payload=?2", (class, payload), |r| r.get(0))
+}
+
+fn decode_any(db: &Connection, id: i64) -> rusqlite::Result<Value> {
+    let (class, payload): (i64, i64) = db.query_row("SELECT class,payload FROM ivm_cell_dict WHERE id=?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))?;
+    match class {
+        1 => Ok(Value::Integer(payload)),
+        2 => Ok(Value::Real(f64::from_bits(payload as u64))),
+        3 => Ok(Value::Text(text(db, payload)?.ok_or(rusqlite::Error::InvalidQuery)?)),
+        _ => Err(rusqlite::Error::InvalidQuery),
+    }
 }
 
 pub(crate) fn text_id(db: &Connection, value: &str) -> rusqlite::Result<Option<i64>> {

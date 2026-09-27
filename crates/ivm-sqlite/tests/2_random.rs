@@ -29,6 +29,17 @@ fn random_sql_worker() {
 }
 
 #[test]
+fn random_typed_dd_sql() {
+    isolated("random_typed_dd_sql_worker");
+}
+
+#[test]
+#[ignore = "run by random_typed_dd_sql in a separate process"]
+fn random_typed_dd_sql_worker() {
+    run("random_typed_dd_sql", 1000, Case::generate_typed, drive::agreement::<Dd, Sqlite>);
+}
+
+#[test]
 fn random_mint_dd_sql() {
     isolated("random_mint_dd_sql_worker");
 }

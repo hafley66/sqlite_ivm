@@ -9,6 +9,45 @@ pub const DOMAIN: usize = 3;
 /// Widest relation a node may produce.
 const WIDE: usize = 4;
 
+/// Typed source rows use the pre-interned one-character text IDs (empty=1, z=2, a=3, m=4)
+/// and IEEE-754 payloads. The two engines receive the same typed cells.
+pub fn typed_program(rng: &mut Rng) -> Program {
+    let descending = rng.chance(50);
+    Program {
+        texts: vec!["z".into(), "a".into(), "m".into()],
+        rels: vec![
+            Relation { id: 0, name: "typed_source".into(), cols: vec![Ty::Text, Ty::Real], kind: RelKind::Source },
+            Relation { id: 1, name: "typed_sum".into(), cols: vec![Ty::Text, Ty::Real], kind: RelKind::Derived },
+            Relation { id: 2, name: "typed_top".into(), cols: vec![Ty::Text, Ty::Real], kind: RelKind::Derived },
+            Relation { id: 3, name: "typed_filter".into(), cols: vec![Ty::Text, Ty::Real], kind: RelKind::Derived },
+        ],
+        nodes: vec![
+            Op::Get(0),
+            Op::Reduce { input: 0, key: vec![0], aggs: vec![Agg::Sum(1)] },
+            Op::TopK { input: 0, key: vec![], order: vec![Order { col: if rng.chance(50) { 0 } else { 1 }, desc: descending }], limit: 2 },
+            Op::Mfp { input: 0, filter: vec![
+                Expr::Call(Func::Lt, vec![Expr::Col(0), Expr::Text(0)]),
+                Expr::Call(Func::Ge, vec![Expr::Col(1), Expr::Lit(2)]),
+            ], map: vec![], project: vec![] },
+        ],
+        strata: vec![Stratum::Let { id: 1, body: 1 }, Stratum::Let { id: 2, body: 2 }, Stratum::Let { id: 3, body: 3 }],
+        outputs: vec![1, 2, 3],
+    }
+}
+
+pub fn typed_frontiers(rng: &mut Rng) -> Vec<Frontier> {
+    let mut live = BTreeSet::new();
+    let mut frontiers = Vec::new();
+    for _ in 0..12 {
+        let text = 2 + rng.below(3) as i64;
+        let real = (rng.below(5) as f64 + 0.5).to_bits() as i64;
+        let row = vec![text, real];
+        let w = if live.remove(&row) { -1 } else { live.insert(row.clone()); 1 };
+        frontiers.push(Frontier { changes: vec![SourceChange { rel: 0, row, w }] });
+    }
+    frontiers
+}
+
 struct Gen<'r> {
     rng: &'r mut Rng,
     nodes: Vec<Op>,

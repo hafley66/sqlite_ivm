@@ -174,30 +174,14 @@ fn frontier_of(conn: &Connection, name: &str) -> u64 {
     .unwrap()
 }
 
-/// Union-support weights straight from the root.
-fn weights(conn: &Connection, name: &str) -> Vec<(Vec<Cell>, i64)> {
-    let sql = format!(
-        "SELECT person, resource, __weight FROM frontier_{name}_root ORDER BY person, resource"
-    );
-    let mut stmt = conn.prepare(&sql).unwrap();
-    stmt.query_map([], |row| {
-        Ok((
-            vec![cell(row.get(0).unwrap()), cell(row.get(1).unwrap())],
-            row.get::<_, i64>(2).unwrap(),
-        ))
-    })
-    .unwrap()
-    .collect::<Result<Vec<_>, _>>()
-    .unwrap()
-}
-
-fn group_state(conn: &Connection, name: &str) -> Vec<(i64, i64, i64)> {
-    let sql = format!("SELECT team, __n, __s0 FROM frontier_{name}_root ORDER BY team");
-    let mut stmt = conn.prepare(&sql).unwrap();
-    stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
-        .unwrap()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap()
+/// Group output through the public snapshot API.
+fn group_state(conn: &Connection, program: &Program) -> Vec<(i64, i64, i64)> {
+    snapshot(conn, program).into_iter().map(|row| {
+        let [Cell::Integer(team), Cell::Integer(count), Cell::Integer(sum)] = row.as_slice() else {
+            panic!("unexpected group row: {row:?}");
+        };
+        (*team, *count, *sum)
+    }).collect()
 }
 
 /// Every program-shaped object is gone; only the shared catalog tables may
@@ -247,8 +231,8 @@ fn union_duplicate_supports_from_prepopulated_rows() {
     let program = Program::install(&conn, "access", ACCESS_SQL).unwrap();
 
     assert_eq!(
-        weights(&conn, "access"),
-        vec![(vec![Cell::Integer(1), Cell::Integer(100)], 2)]
+        snapshot(&conn, &program),
+        vec![vec![Cell::Integer(1), Cell::Integer(100)]]
     );
     assert_snapshot(&conn, &program, "SELECT person, resource FROM direct_grant UNION SELECT m.person, p.resource FROM membership AS m JOIN permission AS p ON p.team = m.team ORDER BY person, resource");
     assert_eq!(frontier_of(&conn, "access"), 0);
@@ -262,8 +246,8 @@ fn union_duplicate_supports_from_prepopulated_rows() {
         .unwrap();
     assert_snapshot(&conn, &program, "SELECT person, resource FROM direct_grant UNION SELECT m.person, p.resource FROM membership AS m JOIN permission AS p ON p.team = m.team ORDER BY person, resource");
     assert_eq!(
-        weights(&conn, "access"),
-        vec![(vec![Cell::Integer(1), Cell::Integer(100)], 1)]
+        snapshot(&conn, &program),
+        vec![vec![Cell::Integer(1), Cell::Integer(100)]]
     );
     assert!(
         delta(&conn, "access", 2).is_empty(),
@@ -275,7 +259,7 @@ fn union_duplicate_supports_from_prepopulated_rows() {
     conn.execute("DELETE FROM membership WHERE person = 1 AND team = 10", [])
         .unwrap();
     assert_snapshot(&conn, &program, "SELECT person, resource FROM direct_grant UNION SELECT m.person, p.resource FROM membership AS m JOIN permission AS p ON p.team = m.team ORDER BY person, resource");
-    assert!(weights(&conn, "access").is_empty());
+    assert!(snapshot(&conn, &program).is_empty());
     assert_eq!(
         delta(&conn, "access", 2),
         vec![(-1, vec![Cell::Integer(1), Cell::Integer(100)])]
@@ -299,10 +283,10 @@ fn join_both_inputs_prepopulated_then_cross_term_batch() {
     let program = Program::install(&conn, "pairs", JOIN_SQL).unwrap();
 
     assert_eq!(
-        weights(&conn, "pairs"),
+        snapshot(&conn, &program),
         vec![
-            (vec![Cell::Integer(1), Cell::Integer(100)], 1),
-            (vec![Cell::Integer(2), Cell::Integer(100)], 1),
+            vec![Cell::Integer(1), Cell::Integer(100)],
+            vec![Cell::Integer(2), Cell::Integer(100)],
         ]
     );
     assert_snapshot(&conn, &program, "SELECT m.person, p.resource FROM membership AS m JOIN permission AS p ON p.team = m.team ORDER BY person, resource");
@@ -327,10 +311,10 @@ fn join_both_inputs_prepopulated_then_cross_term_batch() {
         .unwrap();
     assert_snapshot(&conn, &program, "SELECT m.person, p.resource FROM membership AS m JOIN permission AS p ON p.team = m.team ORDER BY person, resource");
     assert_eq!(
-        weights(&conn, "pairs"),
+        snapshot(&conn, &program),
         vec![
-            (vec![Cell::Integer(2), Cell::Integer(100)], 1),
-            (vec![Cell::Integer(2), Cell::Integer(200)], 1),
+            vec![Cell::Integer(2), Cell::Integer(100)],
+            vec![Cell::Integer(2), Cell::Integer(200)],
         ]
     );
     assert_eq!(
@@ -356,7 +340,7 @@ fn group_prepopulated_then_replacement() {
     let program = Program::install(&conn, "team_total", TEAM_COST_SQL).unwrap();
 
     assert_eq!(
-        group_state(&conn, "team_total"),
+        group_state(&conn, &program),
         vec![(10, 2, 12), (20, 1, 11)]
     );
     assert_snapshot(&conn, &program, "SELECT team, count(*) AS jobs, sum(cost) AS total_cost FROM job GROUP BY team ORDER BY team");
@@ -368,7 +352,7 @@ fn group_prepopulated_then_replacement() {
         .unwrap();
     assert_snapshot(&conn, &program, "SELECT team, count(*) AS jobs, sum(cost) AS total_cost FROM job GROUP BY team ORDER BY team");
     assert_eq!(
-        group_state(&conn, "team_total"),
+        group_state(&conn, &program),
         vec![(10, 2, 14), (20, 1, 11)]
     );
     assert_eq!(
@@ -398,7 +382,7 @@ fn group_prepopulated_then_replacement() {
     .unwrap();
     assert_snapshot(&conn, &program, "SELECT team, count(*) AS jobs, sum(cost) AS total_cost FROM job GROUP BY team ORDER BY team");
     assert_eq!(
-        group_state(&conn, "team_total"),
+        group_state(&conn, &program),
         vec![(10, 3, 25), (20, 1, 11)]
     );
     assert_eq!(
@@ -471,16 +455,7 @@ fn prepopulated_producer_then_consumer_composition() {
 
     // Producer support seeded with its duplicate weight; the consumer already
     // sees the seeded producer rows joined with the seeded grants.
-    let support: Vec<(i64, i64)> = {
-        let mut stmt = conn
-            .prepare("SELECT person, __weight FROM frontier_bodies_root WHERE __weight > 0 ORDER BY person")
-            .unwrap();
-        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap()
-    };
-    assert_eq!(support, vec![(1, 2)]);
+    assert_eq!(snapshot(&conn, composition.producer()), vec![vec![Cell::Integer(1)]]);
     let visible: Vec<(i64, i64)> = {
         let mut stmt = conn
             .prepare("SELECT person, resource FROM frontier_grants ORDER BY person, resource")
@@ -514,16 +489,7 @@ fn prepopulated_producer_then_consumer_composition() {
 
     // One COMMIT settles both: producer 0 -> 1, consumer 0 -> 1.
     conn.execute("INSERT INTO body_c VALUES (2)", []).unwrap();
-    let support: Vec<(i64, i64)> = {
-        let mut stmt = conn
-            .prepare("SELECT person, __weight FROM frontier_bodies_root WHERE __weight > 0 ORDER BY person")
-            .unwrap();
-        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-            .unwrap()
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap()
-    };
-    assert_eq!(support, vec![(1, 2), (2, 1)]);
+    assert_eq!(snapshot(&conn, composition.producer()), vec![vec![Cell::Integer(1)], vec![Cell::Integer(2)]]);
     let visible: Vec<(i64, i64)> = {
         let mut stmt = conn
             .prepare("SELECT person, resource FROM frontier_grants ORDER BY person, resource")

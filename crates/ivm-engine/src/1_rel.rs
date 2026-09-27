@@ -107,7 +107,7 @@ pub trait Rel {
     fn get(&mut self, rel: RelId) -> Result<Self::C, EngineError>;
     fn mint(&mut self, c: Self::C, functor: RelId, args: &[ColId]) -> Result<Self::C, EngineError>;
     fn str_cons(&mut self, c: Self::C, mode: &StrMode) -> Result<Self::C, EngineError>;
-    fn mfp(&mut self, c: Self::C, filter: &[Expr], map: &[Expr], project: &[ColId]) -> Self::C;
+    fn mfp(&mut self, c: Self::C, filter: &[Expr], map: &[Expr], project: &[ColId], input_types: &[Ty]) -> Self::C;
     fn union(&mut self, cs: Vec<Self::C>) -> Self::C;
     fn negate(&mut self, c: Self::C) -> Self::C;
     fn join(&mut self, cs: Vec<Self::C>, eq: &[Vec<(u8, ColId)>]) -> Result<Self::C, EngineError>;
@@ -161,6 +161,46 @@ pub fn eval_with_text(expr: &Expr, row: &[Cell], term_lt: &dyn Fn(Cell, Cell) ->
                 Func::Not => (a(0) == 0) as Cell,
                 Func::TermLt => term_lt(a(0), a(1)) as Cell,
                 Func::StrNil => nil(),
+            }
+        }
+    }
+}
+
+pub fn eval_typed_with_text(
+    expr: &Expr, row: &[Cell], types: &[Ty],
+    term_lt: &dyn Fn(Cell, Cell) -> bool,
+    text: &dyn Fn(u32) -> Cell, nil: &dyn Fn() -> Cell,
+    compare: &dyn Fn(Ty, Cell, Ty, Cell) -> std::cmp::Ordering,
+) -> Cell {
+    use std::cmp::Ordering;
+    match expr {
+        Expr::Col(c) => row[*c as usize],
+        Expr::Lit(v) => *v,
+        Expr::Text(index) => text(*index),
+        Expr::Call(Func::StrNil, _) => nil(),
+        Expr::Call(func, args) => {
+            let a = |i: usize| eval_typed_with_text(&args[i], row, types, term_lt, text, nil, compare);
+            let cmp = || compare(expr_type(&args[0], types).unwrap(), a(0), expr_type(&args[1], types).unwrap(), a(1));
+            match func {
+                Func::Eq => (cmp() == Ordering::Equal) as Cell,
+                Func::Ne => (cmp() != Ordering::Equal) as Cell,
+                Func::Lt => (cmp() == Ordering::Less) as Cell,
+                Func::Le => (cmp() != Ordering::Greater) as Cell,
+                Func::Gt => (cmp() == Ordering::Greater) as Cell,
+                Func::Ge => (cmp() != Ordering::Less) as Cell,
+                Func::Add | Func::Sub if expr_type(expr, types) == Some(Ty::Real) => {
+                    let number = |i: usize| if expr_type(&args[i], types) == Some(Ty::Real) {
+                        f64::from_bits(a(i) as u64)
+                    } else { a(i) as f64 };
+                    (if *func == Func::Add { number(0) + number(1) } else { number(0) - number(1) }).to_bits() as i64
+                }
+                Func::Add => a(0).wrapping_add(a(1)),
+                Func::Sub => a(0).wrapping_sub(a(1)),
+                Func::And => (a(0) != 0 && a(1) != 0) as Cell,
+                Func::Or => (a(0) != 0 || a(1) != 0) as Cell,
+                Func::Not => (a(0) == 0) as Cell,
+                Func::TermLt => term_lt(a(0), a(1)) as Cell,
+                Func::StrNil => unreachable!(),
             }
         }
     }
@@ -222,7 +262,8 @@ pub fn lower_node<A: Rel>(
         }
         Op::Mfp { input, filter, map, project } => {
             let c = sub(*input, a)?;
-            a.mfp(c, filter, map, project)
+            let types = p.node_types(*input).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Mfp input types")))?;
+            a.mfp(c, filter, map, project, &types)
         }
         Op::Union(inputs) => {
             let cs = inputs.iter().map(|n| sub(*n, a)).collect::<Result<Vec<_>, _>>()?;

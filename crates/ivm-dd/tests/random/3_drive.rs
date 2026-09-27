@@ -39,6 +39,11 @@ impl Case {
         Case { seed, program, frontiers }
     }
 
+    pub fn generate_typed(seed: u64) -> Self {
+        let mut rng = Rng(seed);
+        Case { seed, program: gen::typed_program(&mut rng), frontiers: gen::typed_frontiers(&mut rng) }
+    }
+
     pub fn generate_mint(seed: u64) -> Self {
         let mut rng = Rng(seed);
         let args = if rng.chance(50) { vec![0, 1] } else { vec![1, 0] };

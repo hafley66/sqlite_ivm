@@ -6,7 +6,6 @@ use crate::{
 use ivm_engine::{Counters, Engine, EngineError, ErrorKind, Host, Stage};
 use ivm_ir::{Delta, Frontier, Op, Program, RelId, RelKind, Row, Stratum, W};
 use sqlite_ext::rusqlite::{self, Connection};
-use std::borrow::Cow;
 
 pub struct Sqlite {
     programs: Vec<OutputProgram>,
@@ -20,20 +19,8 @@ impl Sqlite {
     pub fn statements(&self) -> Vec<&str> {
         let mut all = Vec::new();
         for output in &self.programs {
-            if let crate::plan::Root::Nodes(nodes) = &output.program.inner.plan.root {
-                all.extend(nodes.statements());
-            } else {
-                let sqls = &output.program.inner.sqls;
-                all.extend(sqls.clears.iter().map(|(_, sql)| sql.as_str()));
-                all.push(&sqls.stage_insert);
-                all.extend(sqls.scan_fills.iter().chain(&sqls.join_fills).chain(&sqls.anti_fills).chain(&sqls.topk_fills).map(|(_, sql)| sql.as_str()));
-                all.extend([
-                    &sqls.root_touch, &sqls.root_upsert, &sqls.root_delete,
-                    &sqls.root_delta, &sqls.bump, &sqls.read_frontier, &sqls.read_delta,
-                ].into_iter().map(String::as_str));
-                all.extend(sqls.root_extrema.as_deref());
-                all.extend(sqls.weight_delta.as_deref());
-            }
+            let crate::plan::Root::Nodes(nodes) = &output.program.inner.plan.root else { unreachable!() };
+            all.extend(nodes.statements());
         }
         all.into_iter().filter(|sql| !sql.is_empty()).collect()
     }
@@ -314,26 +301,8 @@ impl Engine for Sqlite {
         let db = conn(host, Stage::Snapshot)?;
         let plan = &output.program.inner.plan;
         let width = plan.output.len();
-        let sql: Cow<'_, str> = match &plan.root {
-            crate::plan::Root::Nodes(nodes) => Cow::Borrowed(&nodes.output_snapshot),
-            crate::plan::Root::Union { .. } => {
-                let cols = plan
-                    .output
-                    .iter()
-                    .map(|c| catalog::quote(&c.name))
-                    .collect::<Vec<_>>()
-                    .join(",");
-                Cow::Owned(format!(
-                    "SELECT {cols},__weight FROM {} WHERE __weight>0 ORDER BY {cols}",
-                    catalog::quote(catalog::root(&output.program.inner.name))
-                ))
-            }
-            crate::plan::Root::Group { .. } => {
-                let snapshot = output.program.inner.sqls.snapshot.trim_end_matches(';');
-                Cow::Owned(format!("SELECT *,1 FROM ({snapshot})"))
-            }
-        };
-        let mut stmt = db.prepare_cached(&sql).map_err(|e| error(Stage::Snapshot, e))?;
+        let crate::plan::Root::Nodes(nodes) = &plan.root else { unreachable!() };
+        let mut stmt = db.prepare_cached(&nodes.output_snapshot).map_err(|e| error(Stage::Snapshot, e))?;
         let result = stmt
             .query_map([], |r| {
                 let row = row_of(r, width)?;

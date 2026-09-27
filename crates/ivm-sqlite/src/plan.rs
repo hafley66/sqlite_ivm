@@ -15,7 +15,7 @@ use crate::error::{EngineError, ErrorKind, Stage};
 use crate::nodes::NodesPlan;
 use crate::OutputColumn;
 use ivm_ir::{
-    Agg, ColId, Expr, Func, NodeId, Op, Order, Program as IrProgram, RelId, RelKind, Relation,
+    Agg, ColId, NodeId, Op, Order, Program as IrProgram, RelId, RelKind, Relation,
     Stratum, Ty,
 };
 
@@ -57,98 +57,8 @@ pub(crate) enum BranchRef {
         scan: usize,
         takes: Vec<usize>,
     },
-    /// A scalar filter/map/projection over one source scan's delta.
-    MfpScan {
-        scan: usize,
-        select: Vec<String>,
-        filters: Vec<String>,
-    },
-    MfpJoin {
-        join: usize,
-        select: Vec<String>,
-        filters: Vec<String>,
-    },
-    Anti(usize),
-    TopK(usize),
     /// A join branch: its output order is the union output order.
     Join(usize),
-}
-
-fn render_expr(expr: &Expr, columns: &[String], maps: &[String]) -> Option<String> {
-    Some(match expr {
-        Expr::Col(col) if (*col as usize) < columns.len() => quote_ident(&columns[*col as usize]),
-        Expr::Col(col) => maps.get(*col as usize - columns.len())?.clone(),
-        Expr::Lit(v) if *v == i64::MIN => "(-9223372036854775807 - 1)".into(),
-        Expr::Lit(v) => format!("({v})"),
-        Expr::Text(_) => return None,
-        Expr::Call(func, args) => {
-            let a = |i: usize| render_expr(args.get(i)?, columns, maps);
-            let bin = |op: &str| Some(format!("(({}) {op} ({}))", a(0)?, a(1)?));
-            match func {
-                Func::Eq => bin("=")?,
-                Func::Ne => bin("<>")?,
-                Func::Lt => bin("<")?,
-                Func::Le => bin("<=")?,
-                Func::Gt => bin(">")?,
-                Func::Ge => bin(">=")?,
-                Func::Add | Func::Sub => {
-                    let (x, y) = (a(0)?, a(1)?);
-                    let min = "(-9223372036854775807 - 1)";
-                    let max = "9223372036854775807";
-                    match func {
-                        Func::Add => format!(
-                            "(CASE WHEN {y} > 0 AND {x} > {max} - {y} THEN ({x} + {min}) + ({y} + {min}) \
-                             WHEN {y} < 0 AND {x} < {min} - {y} THEN ({x} - {min}) + ({y} - {min}) \
-                             ELSE {x} + {y} END)"
-                        ),
-                        Func::Sub => format!(
-                            "(CASE WHEN {y} < 0 AND {x} > {max} + {y} THEN ({x} + {min}) - ({y} - {min}) \
-                             WHEN {y} > 0 AND {x} < {min} + {y} THEN ({x} - {min}) - ({y} + {min}) \
-                             ELSE {x} - {y} END)"
-                        ),
-                        _ => unreachable!(),
-                    }
-                }
-                Func::And => format!("((({}) <> 0) AND (({}) <> 0))", a(0)?, a(1)?),
-                Func::Or => format!("((({}) <> 0) OR (({}) <> 0))", a(0)?, a(1)?),
-                Func::Not => format!("(({}) = 0)", a(0)?),
-                Func::TermLt => format!("ivm_term_lt({}, {})", a(0)?, a(1)?),
-                Func::StrNil => return None,
-            }
-        }
-    })
-}
-
-fn quote_ident(name: &str) -> String {
-    format!("\"{}\"", name.replace('"', "\"\""))
-}
-
-fn render_mfp(
-    columns: &[String],
-    filter: &[Expr],
-    map: &[Expr],
-    project: &[ColId],
-) -> Option<(Vec<String>, Vec<String>)> {
-    let mut maps = Vec::new();
-    for expr in map {
-        maps.push(render_expr(expr, columns, &maps)?);
-    }
-    let filters = filter
-        .iter()
-        .map(|expr| Some(format!("({}) <> 0", render_expr(expr, columns, &[])?)))
-        .collect::<Option<Vec<_>>>()?;
-    let projected: Vec<ColId> = if project.is_empty() {
-        (0..columns.len() + maps.len())
-            .map(|i| i as ColId)
-            .collect()
-    } else {
-        project.to_vec()
-    };
-    let select = projected
-        .iter()
-        .map(|&col| render_expr(&Expr::Col(col), columns, &maps))
-        .collect::<Option<Vec<_>>>()?;
-    Some((select, filters))
 }
 
 /// Group keys resolved into the input scan's needed columns.
@@ -371,7 +281,7 @@ fn finish(c: Compiler<'_>, root: Root, output: Vec<OutputColumn>) -> Result<Comp
 
 /// Lower the supported SQL plan into the persisted engine-independent program.
 /// Source column names are resolved from the database again when the IR is compiled.
-pub(crate) fn lower_ir(plan: &Compiled) -> Result<IrProgram, EngineError> {
+pub(crate) fn lower_ir(plan: &Compiled, source_types: &dyn Fn(&str) -> Option<Vec<Ty>>) -> Result<IrProgram, EngineError> {
     let mut rels = Vec::new();
     for (id, name) in plan.sources.iter().enumerate() {
         let columns = plan
@@ -382,7 +292,8 @@ pub(crate) fn lower_ir(plan: &Compiled) -> Result<IrProgram, EngineError> {
         rels.push(Relation {
             id: id as RelId,
             name: name.clone(),
-            cols: vec![Ty::Id; columns.columns.len()],
+            cols: source_types(name).filter(|types| types.len() == columns.columns.len())
+                .ok_or_else(|| EngineError::unsupported(Stage::Plan, name, "source type schema missing"))?,
             kind: RelKind::Source,
         });
     }
@@ -390,7 +301,7 @@ pub(crate) fn lower_ir(plan: &Compiled) -> Result<IrProgram, EngineError> {
     rels.push(Relation {
         id: output_id,
         name: String::new(),
-        cols: vec![Ty::Id; plan.output.len()],
+        cols: Vec::new(),
         kind: RelKind::Derived,
     });
     let mut nodes = Vec::new();
@@ -438,27 +349,6 @@ pub(crate) fn lower_ir(plan: &Compiled) -> Result<IrProgram, EngineError> {
                         scan_nodes[*scan],
                         takes.iter().map(|&i| i as ColId).collect(),
                     ),
-                    BranchRef::MfpScan { .. } | BranchRef::MfpJoin { .. } => {
-                        return Err(EngineError::unsupported(
-                            Stage::Plan,
-                            "",
-                            "SQL lowering cannot reconstruct an MfpScan",
-                        ));
-                    }
-                    BranchRef::Anti(_) => {
-                        return Err(EngineError::unsupported(
-                            Stage::Plan,
-                            "",
-                            "SQL lowering cannot reconstruct Antijoin",
-                        ))
-                    }
-                    BranchRef::TopK(_) => {
-                        return Err(EngineError::unsupported(
-                            Stage::Plan,
-                            "",
-                            "SQL lowering cannot reconstruct TopK",
-                        ))
-                    }
                     BranchRef::Join(join_id) => {
                         let join = &plan.joins[*join_id];
                         let left = &plan.scans[join.left];
@@ -541,7 +431,7 @@ pub(crate) fn lower_ir(plan: &Compiled) -> Result<IrProgram, EngineError> {
             root
         }
     };
-    Ok(IrProgram {
+    let mut program = IrProgram {
         texts: vec![],
         rels,
         nodes,
@@ -550,7 +440,10 @@ pub(crate) fn lower_ir(plan: &Compiled) -> Result<IrProgram, EngineError> {
             body,
         }],
         outputs: vec![output_id],
-    })
+    };
+    program.rels.last_mut().expect("output relation").cols = program.node_types(body)
+        .ok_or_else(|| EngineError::unsupported(Stage::Plan, "", "output types unavailable"))?;
+    Ok(program)
 }
 
 /// Compile the persisted IR back into the existing scan/join/root layout.
@@ -560,24 +453,9 @@ pub(crate) fn compile_ir(
     ir: &IrProgram,
     output: Vec<OutputColumn>,
     schema: &Schema<'_>,
-    typed_ir: bool,
+    _typed_ir: bool,
 ) -> Result<Compiled, EngineError> {
-    let dictionary_order = ir.nodes.iter().any(|op| match op {
-        Op::TopK { input, .. } => ir.node_types(*input)
-            .is_some_and(|types| types.contains(&ivm_ir::Ty::Id)),
-        Op::Reduce { input, aggs, .. } => ir.node_types(*input).is_some_and(|types| aggs.iter().any(|agg| {
-            matches!(agg, Agg::Min(c) | Agg::Max(c) if types.get(*c as usize) == Some(&ivm_ir::Ty::Id))
-        })),
-        _ => false,
-    });
-    if !typed_ir && !dictionary_order && ir.strata.len() == 1
-        && !ir.strata.iter().any(|stratum| matches!(stratum, Stratum::LetRec { .. }))
-    {
-        if let Ok(compiled) = compile_ir_legacy(name, ir, output.clone(), schema) {
-            return Ok(compiled);
-        }
-    }
-    let nodes = NodesPlan::compile(name, ir).map_err(|e| match e.kind {
+    let nodes = NodesPlan::compile(name, ir, !_typed_ir).map_err(|e| match e.kind {
         ivm_engine::ErrorKind::Unsupported(why) => EngineError::unsupported(Stage::Plan, name, why),
         _ => EngineError::new(Stage::Plan, name, ErrorKind::State(e.to_string())),
     })?;
@@ -608,392 +486,6 @@ pub(crate) fn compile_ir(
             output,
             stage_width,
         })
-}
-
-fn compile_ir_legacy(
-    name: &str,
-    ir: &IrProgram,
-    output: Vec<OutputColumn>,
-    schema: &Schema<'_>,
-) -> Result<Compiled, EngineError> {
-    let unsupported = || {
-        EngineError::unsupported(
-            Stage::Plan,
-            name,
-            "IR operator outside the SQL frontier subset",
-        )
-    };
-    let &[output_id] = ir.outputs.as_slice() else {
-        return Err(unsupported());
-    };
-    let [Stratum::Let { id, body }] = ir.strata.as_slice() else {
-        return Err(unsupported());
-    };
-    if *id != output_id {
-        return Err(unsupported());
-    }
-    let mut scans = Vec::new();
-    let mut scan_nodes = Vec::<(NodeId, usize)>::new();
-    let mut joins = Vec::new();
-    let mut antis = Vec::new();
-    let mut topks = Vec::new();
-
-    fn scan_at(
-        id: NodeId,
-        ir: &IrProgram,
-        schema: &Schema<'_>,
-        scans: &mut Vec<ScanSpec>,
-        scan_nodes: &mut Vec<(NodeId, usize)>,
-    ) -> Option<usize> {
-        if let Some((_, index)) = scan_nodes.iter().find(|(node, _)| *node == id) {
-            return Some(*index);
-        }
-        let (rel, projected) = match ir.nodes.get(id as usize)? {
-            Op::Get(rel) => (*rel, None),
-            Op::Mfp {
-                input,
-                filter,
-                map,
-                project,
-            } if filter.is_empty() && map.is_empty() => {
-                let Op::Get(rel) = ir.nodes.get(*input as usize)? else {
-                    return None;
-                };
-                (*rel, Some(project))
-            }
-            _ => return None,
-        };
-        let relation = ir
-            .rels
-            .iter()
-            .find(|r| r.id == rel && r.kind == RelKind::Source)?;
-        let columns = schema(&relation.name)?;
-        let project: Vec<usize> = match projected {
-            Some(project) if !project.is_empty() => project.iter().map(|&p| p as usize).collect(),
-            _ => (0..columns.len()).collect(),
-        };
-        let needed = project
-            .iter()
-            .map(|&p| columns.get(p).cloned())
-            .collect::<Option<Vec<_>>>()?;
-        let index = scans.len();
-        scans.push(ScanSpec {
-            table: relation.name.clone(),
-            columns,
-            needed,
-            stage: String::new(),
-        });
-        scan_nodes.push((id, index));
-        Some(index)
-    }
-
-    let root_node = match ir.nodes.get(*body as usize).ok_or_else(unsupported)? {
-        Op::Threshold(input) => *input,
-        _ => *body,
-    };
-    let root_op = ir.nodes.get(root_node as usize).ok_or_else(unsupported)?;
-    let wrapped = matches!(
-        root_op,
-        Op::Get(_) | Op::Mfp { .. } | Op::Antijoin { .. } | Op::TopK { .. }
-    )
-    .then(|| Op::Union(vec![root_node]));
-    let mut branches = Vec::new();
-    let root = match wrapped.as_ref().unwrap_or(root_op) {
-        Op::Union(inputs) => {
-            for &branch in inputs {
-                if let Some(Op::TopK {
-                    input,
-                    key,
-                    order,
-                    limit,
-                }) = ir.nodes.get(branch as usize)
-                {
-                    let scan = scan_at(*input, ir, schema, &mut scans, &mut scan_nodes)
-                        .ok_or_else(unsupported)?;
-                    if scans[scan].needed.len() != output.len()
-                        || order.iter().any(|o| o.col as usize >= output.len())
-                    {
-                        return Err(unsupported());
-                    }
-                    let key = key
-                        .iter()
-                        .map(|&col| {
-                            scans[scan]
-                                .needed
-                                .get(col as usize)
-                                .cloned()
-                                .ok_or_else(unsupported)
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-                    let index = topks.len();
-                    topks.push(TopKSpec {
-                        scan,
-                        key,
-                        order: order.clone(),
-                        limit: *limit,
-                        delta: String::new(),
-                    });
-                    branches.push(BranchRef::TopK(index));
-                    continue;
-                }
-                if let Some(Op::Antijoin { l, r, lk, rk }) = ir.nodes.get(branch as usize) {
-                    if lk.len() != rk.len() {
-                        return Err(unsupported());
-                    }
-                    let (left_node, filters) =
-                        match ir.nodes.get(*l as usize).ok_or_else(unsupported)? {
-                            Op::Mfp {
-                                input,
-                                filter,
-                                map,
-                                project,
-                            } if map.is_empty() && project.is_empty() => {
-                                (*input, filter.as_slice())
-                            }
-                            Op::Get(_) => (*l, &[][..]),
-                            _ => return Err(unsupported()),
-                        };
-                    let left = scan_at(left_node, ir, schema, &mut scans, &mut scan_nodes)
-                        .ok_or_else(unsupported)?;
-                    let right = scan_at(*r, ir, schema, &mut scans, &mut scan_nodes)
-                        .ok_or_else(unsupported)?;
-                    if scans[left].needed.len() != output.len() {
-                        return Err(unsupported());
-                    }
-                    let (_, filters) = render_mfp(&scans[left].needed, filters, &[], &[])
-                        .ok_or_else(unsupported)?;
-                    let left_key = lk
-                        .iter()
-                        .map(|&col| {
-                            scans[left]
-                                .needed
-                                .get(col as usize)
-                                .cloned()
-                                .ok_or_else(unsupported)
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-                    let right_key = rk
-                        .iter()
-                        .map(|&col| {
-                            scans[right]
-                                .needed
-                                .get(col as usize)
-                                .cloned()
-                                .ok_or_else(unsupported)
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-                    let index = antis.len();
-                    antis.push(AntiSpec {
-                        left,
-                        right,
-                        left_key,
-                        right_key,
-                        filters,
-                        delta: String::new(),
-                    });
-                    branches.push(BranchRef::Anti(index));
-                    continue;
-                }
-                if matches!(ir.nodes.get(branch as usize), Some(Op::Get(_))) {
-                    let scan = scan_at(branch, ir, schema, &mut scans, &mut scan_nodes)
-                        .ok_or_else(unsupported)?;
-                    branches.push(BranchRef::Scan {
-                        scan,
-                        takes: (0..scans[scan].needed.len()).collect(),
-                    });
-                    continue;
-                }
-                let Op::Mfp {
-                    input,
-                    filter,
-                    map,
-                    project,
-                } = ir.nodes.get(branch as usize).ok_or_else(unsupported)?
-                else {
-                    return Err(unsupported());
-                };
-                match ir.nodes.get(*input as usize).ok_or_else(unsupported)? {
-                    Op::Get(_) | Op::Mfp { .. } => {
-                        let scan = scan_at(*input, ir, schema, &mut scans, &mut scan_nodes)
-                            .ok_or_else(unsupported)?;
-                        let columns = &scans[scan].needed;
-                        if filter.is_empty() && map.is_empty() {
-                            let takes = if project.is_empty() {
-                                (0..columns.len()).collect()
-                            } else {
-                                project.iter().map(|&p| p as usize).collect()
-                            };
-                            branches.push(BranchRef::Scan { scan, takes });
-                        } else {
-                            let (select, filters) = render_mfp(columns, filter, map, project)
-                                .ok_or_else(unsupported)?;
-                            if select.len() != output.len() {
-                                return Err(unsupported());
-                            }
-                            branches.push(BranchRef::MfpScan {
-                                scan,
-                                select,
-                                filters,
-                            });
-                        }
-                    }
-                    Op::Join {
-                        inputs,
-                        equivalences,
-                    } if inputs.len() == 2 => {
-                        let left = scan_at(inputs[0], ir, schema, &mut scans, &mut scan_nodes)
-                            .ok_or_else(unsupported)?;
-                        let right = scan_at(inputs[1], ir, schema, &mut scans, &mut scan_nodes)
-                            .ok_or_else(unsupported)?;
-                        let (l, r) = (&scans[left], &scans[right]);
-                        let mut left_key = Vec::new();
-                        let mut right_key = Vec::new();
-                        for eq in equivalences {
-                            let &[(0, lc), (1, rc)] = eq.as_slice() else {
-                                return Err(unsupported());
-                            };
-                            left_key
-                                .push(l.needed.get(lc as usize).ok_or_else(unsupported)?.clone());
-                            right_key
-                                .push(r.needed.get(rc as usize).ok_or_else(unsupported)?.clone());
-                        }
-                        let left_width = l.needed.len();
-                        let (left_proj, right_proj, out_names) =
-                            if filter.is_empty() && map.is_empty() {
-                                let mut left_proj = Vec::new();
-                                let mut right_proj = Vec::new();
-                                for &col in project {
-                                    let col = col as usize;
-                                    if col < left_width {
-                                        left_proj.push(col);
-                                    } else {
-                                        right_proj.push(col - left_width);
-                                    }
-                                }
-                                (
-                                    left_proj,
-                                    right_proj,
-                                    output.iter().map(|c| c.name.clone()).collect(),
-                                )
-                            } else {
-                                let width = left_width + r.needed.len();
-                                (
-                                    (0..left_width).collect(),
-                                    (0..r.needed.len()).collect(),
-                                    (0..width).map(|i| format!("v{i}")).collect(),
-                                )
-                            };
-                        let index = joins.len();
-                        joins.push(JoinSpec {
-                            left,
-                            right,
-                            left_key,
-                            right_key,
-                            left_proj,
-                            right_proj,
-                            out_names,
-                            delta: String::new(),
-                        });
-                        if filter.is_empty() && map.is_empty() {
-                            branches.push(BranchRef::Join(index));
-                        } else {
-                            let (select, filters) =
-                                render_mfp(&joins[index].out_names, filter, map, project)
-                                    .ok_or_else(unsupported)?;
-                            if select.len() != output.len() {
-                                return Err(unsupported());
-                            }
-                            branches.push(BranchRef::MfpJoin {
-                                join: index,
-                                select,
-                                filters,
-                            });
-                        }
-                    }
-                    _ => return Err(unsupported()),
-                }
-            }
-            Root::Union { branches }
-        }
-        Op::Reduce { input, key, aggs } => {
-            let scan =
-                scan_at(*input, ir, schema, &mut scans, &mut scan_nodes).ok_or_else(unsupported)?;
-            if !matches!(aggs.first(), Some(Agg::Count)) {
-                return Err(unsupported());
-            }
-            let keys = key
-                .iter()
-                .map(|&take| {
-                    let take = take as usize;
-                    Ok(KeysOf {
-                        take,
-                        name: scans[scan]
-                            .needed
-                            .get(take)
-                            .ok_or_else(unsupported)?
-                            .clone(),
-                    })
-                })
-                .collect::<Result<Vec<_>, EngineError>>()?;
-            let mut sums = Vec::new();
-            let mut extremes = Vec::new();
-            for (i, agg) in aggs[1..].iter().enumerate() {
-                let name = output
-                    .get(key.len() + i + 1)
-                    .ok_or_else(unsupported)?
-                    .name
-                    .clone();
-                match agg {
-                    Agg::Sum(take) if extremes.is_empty() => sums.push(SumOf {
-                        take: *take as usize,
-                        name,
-                    }),
-                    Agg::Min(take) | Agg::Max(take) => extremes.push(ExtremeOf {
-                        take: *take as usize,
-                        name,
-                        max: matches!(agg, Agg::Max(_)),
-                    }),
-                    _ => return Err(unsupported()),
-                }
-            }
-            if key.is_empty() || sums.is_empty() {
-                return Err(unsupported());
-            }
-            Root::Group {
-                scan,
-                keys,
-                sums,
-                extremes,
-            }
-        }
-        _ => return Err(unsupported()),
-    };
-    for source in ir.rels.iter().filter(|r| r.kind == RelKind::Source) {
-        if scans.iter().any(|scan| scan.table == source.name) { continue; }
-        let columns = schema(&source.name).ok_or_else(unsupported)?;
-        scans.push(ScanSpec { table: source.name.clone(), needed: columns.clone(), columns, stage: String::new() });
-    }
-    let sources = ir
-        .rels
-        .iter()
-        .filter(|r| r.kind == RelKind::Source)
-        .map(|r| r.name.clone())
-        .collect();
-    let stage_width = scans
-        .iter()
-        .map(|scan| scan.columns.len())
-        .max()
-        .unwrap_or(0);
-    Ok(Compiled {
-        root,
-        scans,
-        joins,
-        antis,
-        topks,
-        output,
-        sources,
-        stage_width,
-    })
 }
 
 struct Compiler<'a> {
