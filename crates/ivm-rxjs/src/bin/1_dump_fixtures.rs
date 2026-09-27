@@ -61,6 +61,61 @@ fn dump(dir: &Path, name: &str, program: Program, frontiers: Vec<Frontier>) -> V
     json!({ "name": name, "program": program, "frontiers": frontiers, "expected": expected, "constructors": constructors, "texts": texts })
 }
 
+fn edge_frontiers(program: &Program, bundle: &Value) -> Vec<Frontier> {
+    let initial: Frontier = serde_json::from_value(bundle["frontier0"].clone()).unwrap();
+    let db = Connection::open_in_memory().unwrap();
+    let mut host = Raw::with_connection(&db);
+    let mut dd = <Dd as Engine>::install(program, &mut host).unwrap();
+    let mut ids = BTreeMap::new();
+    let first_atom = bundle["atoms"].as_object().unwrap().keys()
+        .map(|id| id.parse::<i64>().unwrap()).min().unwrap();
+    for id in 1..first_atom { ids.insert(id, id); }
+    for (id, value) in bundle["atoms"].as_object().unwrap() {
+        if let Some(text) = value["printed"]["s"].as_str() {
+            ids.insert(id.parse::<i64>().unwrap(), dd.intern_text(text, &mut host).unwrap());
+        }
+    }
+    let mut staged = Vec::new();
+    let mut atoms = bundle["atoms"].as_object().unwrap().iter()
+        .map(|(id, value)| (id.parse::<i64>().unwrap(), value["original"].as_i64().unwrap()))
+        .collect::<Vec<_>>();
+    atoms.sort();
+    while !atoms.is_empty() {
+        let index = atoms.iter().position(|(id, original)| {
+            if ids.contains_key(id) { return true; }
+            let change = initial.changes.iter().find(|change| {
+                program.rel(change.rel).unwrap().name.starts_with("__ir_prewarm_") && change.row[0] == *original
+            }).unwrap();
+            change.row.iter().zip(&program.rel(change.rel).unwrap().cols)
+                .all(|(cell, ty)| *ty != Ty::Id || ids.contains_key(cell))
+        }).expect("cyclic edge term bootstrap");
+        let (id, original) = atoms.remove(index);
+        if ids.contains_key(&id) { continue; }
+        let change = initial.changes.iter().find(|change| {
+            program.rel(change.rel).unwrap().name.starts_with("__ir_prewarm_") && change.row[0] == original
+        }).unwrap();
+        let source = program.rel(change.rel).unwrap();
+        let row = change.row.iter().zip(&source.cols).map(|(cell, ty)| {
+            if *ty == Ty::Id { ids[cell] } else { *cell }
+        }).collect();
+        let frontier = Frontier { changes: vec![SourceChange { rel: change.rel, row, w: 1 }] };
+        let delta = dd.settle(frontier.clone(), &mut host).unwrap();
+        let output = program.rels.iter().find(|rel| rel.name == source.name.replacen("__ir_prewarm_", "__ir_prewarm_out_", 1)).unwrap();
+        let minted = delta.changes.iter().find(|(rel, row, _)| *rel == output.id && row[0] == original).unwrap().1.last().copied().unwrap();
+        ids.insert(id, minted);
+        staged.push(frontier);
+    }
+    let changes = initial.changes.iter().filter(|change| !program.rel(change.rel).unwrap().name.starts_with("__ir_prewarm_")).map(|change| {
+        let rel = program.rel(change.rel).unwrap();
+        let row = change.row.iter().zip(&rel.cols).map(|(cell, ty)| {
+            if *ty == Ty::Id { *ids.get(cell).unwrap() } else { *cell }
+        }).collect();
+        SourceChange { rel: change.rel, row, w: change.w }
+    }).collect();
+    staged.push(Frontier { changes });
+    staged
+}
+
 fn main() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let dir = root.join("../../target/ivm-rxjs-fixtures");
@@ -83,6 +138,25 @@ fn main() {
         all.push(dump(&dir, &file, script.program, frontiers));
     }
     let script_count = all.len();
+    let fixtures = root.join("fixtures");
+    for name in ["9_3_count_case", "10_16_intern_row_reuse_case"] {
+        let case: Value = serde_json::from_slice(&fs::read(fixtures.join(format!("{name}.json"))).unwrap()).unwrap();
+        let program = serde_json::from_value(case["program"].clone()).unwrap();
+        let frontiers = serde_json::from_value(case["dd_frontiers"].clone()).unwrap();
+        all.push(dump(&dir, name, program, frontiers));
+    }
+    let program = serde_json::from_slice(&fs::read(fixtures.join("8_c15_program.json")).unwrap()).unwrap();
+    all.push(dump(&dir, "8_c15_program", program, vec![Frontier { changes: vec![] }]));
+    let bundle: Value = serde_json::from_slice(&fs::read(fixtures.join("5_edge_ref.bundle.json")).unwrap()).unwrap();
+    let program: Program = serde_json::from_value(bundle["program"].clone()).unwrap();
+    let frontiers = edge_frontiers(&program, &bundle);
+    let all_sources = program.rels.iter().find(|rel| rel.name == "__ir_all_sources").unwrap().id;
+    let edge = dump(&dir, "5_edge_ref", program, frontiers);
+    let closure_rows = edge["expected"].as_array().unwrap().last().unwrap().as_array().unwrap().iter()
+        .filter(|change| change[0].as_u64().unwrap() != u64::from(all_sources)).count();
+    let dd_output: Value = serde_json::from_slice(&fs::read(fixtures.join("5_edge_ref.ir_dd.json")).unwrap()).unwrap();
+    assert_eq!(closure_rows, dd_output["closure"].as_array().unwrap().len());
+    all.push(edge);
     for seed in 0..200 {
         let mut rng = rng::Rng(seed);
         let program = gen::program(&mut rng);
