@@ -225,6 +225,7 @@ impl Program {
 
     /// Reload an installed program from the connection's catalog.
     pub fn open(conn: &rusqlite::Connection, name: &str) -> Result<Self, EngineError> {
+        terms::register(conn).map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
         Ok(Self {
             inner: catalog::open(conn, name)?,
         })

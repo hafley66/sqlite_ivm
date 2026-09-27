@@ -572,18 +572,17 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                         trace.set_logical_compaction(AntichainRef::new(&[epoch]));
                         trace.set_physical_compaction(AntichainRef::new(&[epoch]));
                     }
-                    let mut changes: Vec<(RelId, Row, W)> = captured
-                        .borrow_mut()
-                        .drain(..)
-                        .map(|(rel, row, t, w)| {
-                            let _ = t;
-                            (rel, row, w)
-                        })
+                    let mut net: BTreeMap<(RelId, Row), W> = BTreeMap::new();
+                    for (rel, row, _, w) in captured.borrow_mut().drain(..) {
+                        *net.entry((rel, row)).or_default() += w;
+                    }
+                    let changes = net.into_iter()
+                        .filter(|(_, w)| *w != 0)
+                        .map(|((rel, row), w)| (rel, row, w))
                         .collect();
-                    changes.sort();
                     let mut seen: BTreeMap<(NodeId, u64, Option<u64>, Row), W> = BTreeMap::new();
                     for tap in taps.iter().flat_map(|t| t.borrow_mut().drain(..).collect::<Vec<_>>()) {
-                        *seen.entry((tap.node, tap.tick, tap.round, tap.row)).or_default() += tap.w;
+                        *seen.entry((tap.node, frontier_tick, tap.round, tap.row)).or_default() += tap.w;
                     }
                     let seen = seen
                         .into_iter()

@@ -109,3 +109,21 @@ pub fn sort_key(id: Cell, resolve: &mut impl FnMut(Cell) -> Option<Term>) -> Vec
     key(&mut out, id, resolve, 0);
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nested_terms_compare_by_fields_independent_of_insertion_ids() {
+        let mut terms = Interner::default();
+        let larger = terms.mint("pair", &[1, 3], &[Ty::Int, Ty::Int]);
+        let smaller = terms.mint("pair", &[1, 2], &[Ty::Int, Ty::Int]);
+        let wrapped_larger = terms.mint("wrap", &[larger], &[Ty::Id]);
+        let wrapped_smaller = terms.mint("wrap", &[smaller], &[Ty::Id]);
+        assert_eq!(terms.mint("pair", &[1, 2], &[Ty::Int, Ty::Int]), smaller);
+        assert_eq!(terms.compare(wrapped_smaller, wrapped_larger), Ordering::Less);
+        assert!(sort_key(wrapped_smaller, &mut |id| terms.get(id).cloned())
+            < sort_key(wrapped_larger, &mut |id| terms.get(id).cloned()));
+    }
+}

@@ -558,7 +558,15 @@ pub(crate) fn compile_ir(
     output: Vec<OutputColumn>,
     schema: &Schema<'_>,
 ) -> Result<Compiled, EngineError> {
-    if ir.strata.len() == 1
+    let dictionary_order = ir.nodes.iter().any(|op| match op {
+        Op::TopK { input, .. } => ir.node_types(*input)
+            .is_some_and(|types| types.contains(&ivm_ir::Ty::Id)),
+        Op::Reduce { input, aggs, .. } => ir.node_types(*input).is_some_and(|types| aggs.iter().any(|agg| {
+            matches!(agg, Agg::Min(c) | Agg::Max(c) if types.get(*c as usize) == Some(&ivm_ir::Ty::Id))
+        })),
+        _ => false,
+    });
+    if !dictionary_order && ir.strata.len() == 1
         && !ir.strata.iter().any(|stratum| matches!(stratum, Stratum::LetRec { .. }))
     {
         if let Ok(compiled) = compile_ir_legacy(name, ir, output.clone(), schema) {
