@@ -1,9 +1,9 @@
 //! Host-backed typed Engine adapter. The handle keeps no SQLite connection.
 
 use crate::{
-    catalog, Cell, Frontier as SqlFrontier, Program as SqlProgram, Sign, SourceChange as SqlChange,
+    catalog, Cell, Program as SqlProgram, Sign, SourceChange as SqlChange,
 };
-use ivm_engine::{Engine, EngineError, ErrorKind, Host, Stage};
+use ivm_engine::{Counters, Engine, EngineError, ErrorKind, Host, Stage};
 use ivm_ir::{Delta, Frontier, Op, Program, RelId, RelKind, Row, Stratum, W};
 use sqlite_ext::rusqlite::{self, Connection};
 use std::borrow::Cow;
@@ -12,6 +12,7 @@ pub struct Sqlite {
     programs: Vec<OutputProgram>,
     ir: Program,
     tick: u64,
+    counters: Counters,
 }
 
 impl Sqlite {
@@ -123,6 +124,7 @@ impl Engine for Sqlite {
             programs,
             ir: ir.clone(),
             tick: 0,
+            counters: Counters::default(),
         };
         // A frontier visits every installed output. Rusqlite's default cache of 16
         // statements evicts each output's SQL before the next frontier reaches it.
@@ -133,9 +135,14 @@ impl Engine for Sqlite {
 
     fn settle(&mut self, frontier: Frontier, host: &mut impl Host) -> Result<Delta, EngineError> {
         let db = conn(host, Stage::Settle)?;
+        let before: i64 = db.query_row("SELECT count(*) FROM ivm_term_dict", [], |r| r.get(0))
+            .map_err(|e| error(Stage::Settle, e))?;
+        let mut counters = Counters::measured();
+        *counters.statements.as_mut().unwrap() += 1;
         db.execute_batch("SAVEPOINT ivm_engine_frontier;")
             .map_err(|e| error(Stage::Settle, e))?;
-        let run = || -> Result<Vec<(RelId, Row, W)>, EngineError> {
+        *counters.statements.as_mut().unwrap() += 1;
+        let mut run = || -> Result<Vec<(RelId, Row, W)>, EngineError> {
             let mut batch = Vec::new();
             for change in &frontier.changes {
                 let source = self
@@ -186,6 +193,7 @@ impl Engine for Sqlite {
                     .prepare_cached(&count_sql)
                     .and_then(|mut stmt| stmt.query_row(rusqlite::params_from_iter(&change.row), |r| r.get(0)))
                     .map_err(|e| error(Stage::Settle, e))?;
+                *counters.statements.as_mut().unwrap() += 1;
                 if change.w > 0 && count > 0 {
                     return Err(EngineError::new(
                         Stage::Settle,
@@ -207,6 +215,7 @@ impl Engine for Sqlite {
                 db.prepare_cached(&sql)
                     .and_then(|mut stmt| stmt.execute(rusqlite::params_from_iter(&change.row)))
                     .map_err(|e| error(Stage::Settle, e))?;
+                *counters.statements.as_mut().unwrap() += 1;
                 batch.push(SqlChange {
                     relation: source.name.clone(),
                     sign: if change.w > 0 {
@@ -219,10 +228,21 @@ impl Engine for Sqlite {
             }
             let mut changes = Vec::new();
             for output in &self.programs {
-                let visible = output
-                    .program
-                    .settle(db, &batch)
+                let (visible, work) = crate::engine::settle_counted(db, &output.program.inner, &batch, false)
                     .map_err(|e| error(Stage::Settle, e))?;
+                for (target, source) in [
+                    (&mut counters.delta_rows.filter, work.delta_rows.filter),
+                    (&mut counters.delta_rows.join, work.delta_rows.join),
+                    (&mut counters.delta_rows.antijoin, work.delta_rows.antijoin),
+                    (&mut counters.delta_rows.reduce, work.delta_rows.reduce),
+                    (&mut counters.delta_rows.topk, work.delta_rows.topk),
+                    (&mut counters.delta_rows.window, work.delta_rows.window),
+                    (&mut counters.delta_rows.mint, work.delta_rows.mint),
+                ] {
+                    if let (Some(target), Some(source)) = (target.as_mut(), source) { *target += source; }
+                }
+                *counters.rounds.as_mut().unwrap() += work.rounds.unwrap_or(0);
+                *counters.statements.as_mut().unwrap() += work.statements.unwrap_or(0);
                 if output.threshold || output.program.inner.sqls.weight_delta.is_none() {
                     for change in visible {
                         let row = change
@@ -243,6 +263,7 @@ impl Engine for Sqlite {
                     let rows = stmt
                         .query_map([], |r| Ok((row_of(r, width)?, r.get::<_, W>(width)?)))
                         .map_err(|e| error(Stage::Settle, e))?;
+                    *counters.statements.as_mut().unwrap() += 1;
                     for row in rows {
                         let (row, weight) = row.map_err(|e| error(Stage::Settle, e))?;
                         changes.push((output.rel, row, weight));
@@ -254,8 +275,20 @@ impl Engine for Sqlite {
         };
         match run() {
             Ok(changes) => {
+                let after: i64 = match db.query_row("SELECT count(*) FROM ivm_term_dict", [], |r| r.get(0)) {
+                    Ok(after) => after,
+                    Err(e) => {
+                        let _ = db.execute_batch("ROLLBACK TO ivm_engine_frontier; RELEASE ivm_engine_frontier;");
+                        return Err(error(Stage::Settle, e));
+                    }
+                };
+                *counters.statements.as_mut().unwrap() += 1;
                 db.execute_batch("RELEASE ivm_engine_frontier;")
                     .map_err(|e| error(Stage::Settle, e))?;
+                *counters.statements.as_mut().unwrap() += 1;
+                counters.interned = Some((after - before) as u64);
+                counters.rows_written = changes.len() as u64;
+                self.counters = counters;
                 let tick = self.tick;
                 self.tick += 1;
                 Ok(Delta { tick, changes })
@@ -267,6 +300,8 @@ impl Engine for Sqlite {
             }
         }
     }
+
+    fn counters(&self) -> Counters { self.counters }
 
     fn snapshot(&self, rel: RelId, host: &mut impl Host) -> Result<Vec<(Row, W)>, EngineError> {
         let output = self

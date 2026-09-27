@@ -3,7 +3,7 @@
 //! Every read of integrated state is driven from a delta (CROSS JOIN fixes the loop order); aliases of
 //! integrated tables end in `_i` so query plans name them.
 
-use ivm_engine::{lower, lower_node, EngineError, ErrorKind, Rel, Stage};
+use ivm_engine::{lower, lower_node, Counters, EngineError, ErrorKind, Rel, Stage};
 use ivm_ir::*;
 use sqlite_ext::rusqlite::{self, Connection};
 
@@ -35,6 +35,37 @@ enum Owner {
     Loop(usize),
     /// Filled by the settle pass, integrated by the SCC loop; an outer input frozen per round.
     Copy(usize),
+}
+
+#[derive(Clone, Copy)]
+enum WorkKind { Filter, Join, Antijoin, Reduce, Topk, Window, Mint }
+
+impl WorkKind {
+    fn of(op: &Op) -> Option<Self> {
+        Some(match op {
+            Op::Mfp { .. } => Self::Filter,
+            Op::Join { .. } => Self::Join,
+            Op::Antijoin { .. } => Self::Antijoin,
+            Op::Reduce { .. } => Self::Reduce,
+            Op::TopK { .. } => Self::Topk,
+            Op::Window { .. } => Self::Window,
+            Op::Mint { .. } | Op::StrCons { .. } => Self::Mint,
+            _ => return None,
+        })
+    }
+
+    fn add(self, counters: &mut Counters, rows: u64) {
+        let field = match self {
+            Self::Filter => &mut counters.delta_rows.filter,
+            Self::Join => &mut counters.delta_rows.join,
+            Self::Antijoin => &mut counters.delta_rows.antijoin,
+            Self::Reduce => &mut counters.delta_rows.reduce,
+            Self::Topk => &mut counters.delta_rows.topk,
+            Self::Window => &mut counters.delta_rows.window,
+            Self::Mint => &mut counters.delta_rows.mint,
+        };
+        *field.as_mut().unwrap() += rows;
+    }
 }
 
 struct Node {
@@ -74,6 +105,7 @@ pub struct SqlRel {
     /// SQL node count when the last observed node returned; nodes pushed after it belong to the next one.
     mark: usize,
     tags: Vec<(NodeId, bool, Vec<usize>)>,
+    work_nodes: Vec<(NodeId, usize)>,
     /// Join SQL node -> its three delta terms, each consolidated: Δa⋈Δb, I⁻a⋈Δb, Δa⋈I⁻b.
     terms: Vec<(usize, Vec<String>)>,
     constructors: std::collections::BTreeMap<RelId, (String, Vec<Ty>)>,
@@ -212,6 +244,7 @@ impl SqlRel {
             traced,
             mark: 0,
             tags: Vec::new(),
+            work_nodes: Vec::new(),
             terms: Vec::new(),
             constructors: p.rels.iter().filter(|r| r.kind == RelKind::Constructor)
                 .map(|r| (r.id, (r.name.clone(), r.cols.iter().skip(1).copied().collect()))).collect(),
@@ -925,6 +958,7 @@ impl Rel for SqlRel {
 
     /// The returned SQL node is the IR node's own delta; SQL nodes pushed since the previous observe are its internals.
     fn observe(&mut self, id: NodeId, c: Self::C) -> Self::C {
+        self.work_nodes.push((id, c.node));
         if !self.traced {
             return c;
         }
@@ -980,6 +1014,7 @@ pub(crate) struct NodesPlan {
     pub output_delta: String,
     pub output_snapshot: String,
     pub output_arity: usize,
+    work: Vec<(Owner, String, WorkKind, usize)>,
 }
 
 impl NodesPlan {
@@ -1012,6 +1047,11 @@ impl NodesPlan {
         if let Some(error) = rel.err {
             return Err(error);
         }
+        let work = rel.work_nodes.iter().filter_map(|(id, node)| {
+            let kind = WorkKind::of(program.nodes.get(*id as usize)?)?;
+            let built = rel.nodes.get(*node)?;
+            Some((built.owner, built.c.d.clone(), kind, built.c.arity))
+        }).collect();
         let mut ddl = Vec::new();
         let mut objects = Vec::new();
         let mut source_fills = Vec::new();
@@ -1172,6 +1212,7 @@ impl NodesPlan {
                 output.i
             ),
             output_arity: output.arity,
+            work,
         };
         plan.prefix(name);
         Ok(plan)
@@ -1221,50 +1262,78 @@ impl NodesPlan {
         self.clears.iter_mut().for_each(&fix);
         fix(&mut self.output_delta);
         fix(&mut self.output_snapshot);
+        for (_, table, _, _) in &mut self.work { fix(table); }
     }
 
-    fn exec(db: &Connection, sql: &str) -> rusqlite::Result<usize> {
-        db.prepare_cached(sql)?.execute([])
+    fn exec(db: &Connection, sql: &str, counters: &mut Counters) -> rusqlite::Result<usize> {
+        let result = db.prepare_cached(sql)?.execute([])?;
+        *counters.statements.as_mut().unwrap() += 1;
+        Ok(result)
     }
 
     fn exec_all<'a>(
         db: &Connection,
         sqls: impl IntoIterator<Item = &'a String>,
+        counters: &mut Counters,
     ) -> rusqlite::Result<()> {
         for sql in sqls {
-            Self::exec(db, sql)?;
+            Self::exec(db, sql, counters)?;
         }
         Ok(())
     }
 
-    fn round(&self, db: &Connection, scc: &SccSql, deleting: bool) -> rusqlite::Result<bool> {
+    fn count_work(&self, db: &Connection, owner: Owner, counters: &mut Counters) -> rusqlite::Result<()> {
+        for (at, table, kind, arity) in &self.work {
+            let matches = match (*at, owner) {
+                (Owner::Settle | Owner::Copy(_), Owner::Settle) => true,
+                (Owner::Loop(a), Owner::Loop(b)) => a == b,
+                _ => false,
+            };
+            if matches {
+                let cols = list("", 0..*arity);
+                let sql = format!("SELECT count(*) FROM (SELECT {cols} FROM {table} GROUP BY {cols} HAVING sum(w)<>0)");
+                let rows: i64 = db.query_row(&sql, [], |r| r.get(0))?;
+                *counters.statements.as_mut().unwrap() += 1;
+                kind.add(counters, rows as u64);
+            }
+        }
+        Ok(())
+    }
+
+    fn round(&self, db: &Connection, scc_id: usize, deleting: bool, counters: &mut Counters) -> rusqlite::Result<bool> {
+        let scc = &self.sccs[scc_id];
         let phase_fills = if deleting { &scc.delete_fills } else { &scc.insert_fills };
-        Self::exec_all(db, phase_fills.iter().chain(&scc.integrates))?;
+        Self::exec_all(db, phase_fills.iter().chain(&scc.integrates), counters)?;
+        self.count_work(db, Owner::Loop(scc_id), counters)?;
         Self::exec_all(
             db,
             scc.vars
                 .iter()
                 .map(|v| if deleting { &v.over_delete } else { &v.insert }),
+            counters,
         )?;
-        Self::exec_all(db, &scc.clears)?;
+        Self::exec_all(db, &scc.clears, counters)?;
         let mut more = false;
         for v in &scc.vars {
-            Self::exec_all(db, [&v.to_delta, &v.to_acc])?;
+            Self::exec_all(db, [&v.to_delta, &v.to_acc], counters)?;
             if deleting {
-                Self::exec(db, &v.to_del)?;
+                Self::exec(db, &v.to_del, counters)?;
             }
-            Self::exec(db, &v.clear_nx)?;
+            Self::exec(db, &v.clear_nx, counters)?;
             more |= db
                 .prepare_cached(&v.any)?
                 .query_row([], |r| r.get::<_, bool>(0))?;
+            *counters.statements.as_mut().unwrap() += 1;
         }
+        if more { *counters.rounds.as_mut().unwrap() += 1; }
         Ok(more)
     }
 
-    fn fixpoint(&self, db: &Connection, scc: &SccSql) -> rusqlite::Result<()> {
-        Self::exec_all(db, &scc.stash)?;
-        Self::exec_all(db, &scc.delete_seeds)?;
-        while self.round(db, scc, true)? {}
+    fn fixpoint(&self, db: &Connection, scc_id: usize, counters: &mut Counters) -> rusqlite::Result<()> {
+        let scc = &self.sccs[scc_id];
+        Self::exec_all(db, &scc.stash, counters)?;
+        Self::exec_all(db, &scc.delete_seeds, counters)?;
+        while self.round(db, scc_id, true, counters)? {}
         for v in &scc.vars {
             Self::exec_all(
                 db,
@@ -1275,27 +1344,29 @@ impl NodesPlan {
                     &v.to_acc,
                     &v.clear_nx,
                 ],
+                counters,
             )?;
         }
-        Self::exec_all(db, &scc.restore)?;
-        Self::exec_all(db, &scc.insert_seeds)?;
-        while self.round(db, scc, false)? {}
+        Self::exec_all(db, &scc.restore, counters)?;
+        Self::exec_all(db, &scc.insert_seeds, counters)?;
+        while self.round(db, scc_id, false, counters)? {}
         for v in &scc.vars {
-            Self::exec_all(db, [&v.finish, &v.clear_acc])?;
+            Self::exec_all(db, [&v.finish, &v.clear_acc], counters)?;
         }
         Ok(())
     }
 
-    pub fn run(&self, db: &Connection) -> rusqlite::Result<Vec<(Row, W)>> {
-        Self::exec_all(db, &self.source_fills)?;
+    pub fn run(&self, db: &Connection, counters: &mut Counters) -> rusqlite::Result<Vec<(Row, W)>> {
+        Self::exec_all(db, &self.source_fills, counters)?;
         for step in &self.steps {
             match step {
                 Step::Fill(sql) => {
-                    Self::exec(db, sql)?;
+                    Self::exec(db, sql, counters)?;
                 }
-                Step::Loop(s) => self.fixpoint(db, &self.sccs[*s])?,
+                Step::Loop(s) => self.fixpoint(db, *s, counters)?,
             }
         }
+        self.count_work(db, Owner::Settle, counters)?;
         let mut stmt = db.prepare_cached(&self.output_delta)?;
         let changes = stmt
             .query_map([], |r| {
@@ -1307,7 +1378,8 @@ impl NodesPlan {
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        Self::exec_all(db, self.integrates.iter().chain(&self.clears))?;
+        *counters.statements.as_mut().unwrap() += 1;
+        Self::exec_all(db, self.integrates.iter().chain(&self.clears), counters)?;
         Ok(changes)
     }
 }

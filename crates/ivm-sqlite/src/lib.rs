@@ -170,6 +170,17 @@ impl std::fmt::Debug for Program {
 }
 
 impl Program {
+    /// Settle a SQL-text or typed program and return work measured during this
+    /// frontier. Legacy SQL-text plans report output rows and SQL statements;
+    /// operator counts unavailable on that plan are `None`.
+    pub fn settle_counted(
+        &self,
+        conn: &rusqlite::Connection,
+        batch: &[SourceChange],
+    ) -> Result<(Vec<OutputChange>, ivm_engine::Counters), EngineError> {
+        engine::settle_counted(conn, &self.inner, batch, false)
+    }
+
     /// Install a typed IR program in the database's persistent catalog.
     /// The current compiler accepts the scan/join/union/group subset; later
     /// operator ports extend the same compiled plan and catalog shape.

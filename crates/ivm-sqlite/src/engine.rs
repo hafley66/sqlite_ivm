@@ -23,6 +23,7 @@ use crate::error::{EngineError, ErrorKind, Stage};
 use crate::meter::Meter;
 use crate::observe;
 use crate::{Cell, OutputChange, Sign, SourceChange, Tuple};
+use ivm_engine::Counters;
 use sqlite_ext::rusqlite::{self, Connection};
 use std::sync::Arc;
 
@@ -111,24 +112,46 @@ pub(crate) fn settle(
     batch: &[SourceChange],
     in_commit: bool,
 ) -> Result<Vec<OutputChange>, EngineError> {
+    settle_counted(conn, inst, batch, in_commit).map(|(changes, _)| changes)
+}
+
+pub(crate) fn settle_counted(
+    conn: &Connection,
+    inst: &Installed,
+    batch: &[SourceChange],
+    in_commit: bool,
+) -> Result<(Vec<OutputChange>, Counters), EngineError> {
     let span = tracing::info_span!(
         target: observe::TARGET,
         observe::SETTLE_SPAN,
         program = %inst.name,
     );
     let _guard = span.enter();
+    let mut counters = if matches!(inst.plan.root, crate::plan::Root::Nodes(_)) {
+        Counters::measured()
+    } else {
+        Counters { statements: Some(0), ..Counters::default() }
+    };
+    counters.interned = None;
     if in_commit {
         let mut meter = Meter::default();
-        return settle_inner(conn, inst, batch, &mut meter);
+        let changes = settle_inner(conn, inst, batch, &mut meter, &mut counters)?;
+        counters.rows_written = changes.len() as u64;
+        *counters.statements.as_mut().unwrap() += meter.statements;
+        return Ok((changes, counters));
     }
     let mut meter = Meter::default();
     conn.execute_batch("SAVEPOINT frontier_sp_settle;")
         .map_err(|e| fail("savepoint", &inst.name, e))?;
-    match settle_inner(conn, inst, batch, &mut meter) {
+    *counters.statements.as_mut().unwrap() += 1;
+    match settle_inner(conn, inst, batch, &mut meter, &mut counters) {
         Ok(changes) => {
             conn.execute_batch("RELEASE frontier_sp_settle;")
                 .map_err(|e| fail("release", &inst.name, e))?;
-            Ok(changes)
+            *counters.statements.as_mut().unwrap() += 1;
+            counters.rows_written = changes.len() as u64;
+            *counters.statements.as_mut().unwrap() += meter.statements;
+            Ok((changes, counters))
         }
         Err(e) => {
             conn.execute_batch("ROLLBACK TO frontier_sp_settle; RELEASE frontier_sp_settle;")
@@ -143,6 +166,7 @@ fn settle_inner(
     inst: &Installed,
     batch: &[SourceChange],
     meter: &mut Meter,
+    counters: &mut Counters,
 ) -> Result<Vec<OutputChange>, EngineError> {
     let phase = "settle";
     validate_batch(inst, batch)?;
@@ -173,7 +197,7 @@ fn settle_inner(
     }
     if let crate::plan::Root::Nodes(nodes) = &inst.plan.root {
         let changes = nodes
-            .run(conn)
+            .run(conn, counters)
             .map_err(|e| fail("node settle", &inst.name, e))?;
         let cols = inst
             .output

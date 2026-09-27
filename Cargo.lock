@@ -632,8 +632,10 @@ name = "ivm-dd"
 version = "0.1.0"
 dependencies = [
  "differential-dataflow",
+ "hafley-observe",
  "ivm-engine",
  "ivm-ir",
+ "ivm-sqlite",
  "rusqlite",
  "serde_json",
  "timely",

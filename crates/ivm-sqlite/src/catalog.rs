@@ -470,7 +470,7 @@ fn bootstrap(conn: &Connection, inst: &Installed, meter: &mut Meter) -> Result<(
     // Net the staged rows through the engine's own fill statements.
     if let Root::Nodes(nodes) = &inst.plan.root {
         nodes
-            .run(conn)
+            .run(conn, &mut ivm_engine::Counters::measured())
             .map_err(|e| EngineError::new(Stage::Install, p, ErrorKind::Sqlite(e.to_string())))?;
         conn.execute(&format!("DELETE FROM {}", quote(stage(p))), [])
             .map_err(|e| EngineError::new(Stage::Install, p, ErrorKind::Sqlite(e.to_string())))?;

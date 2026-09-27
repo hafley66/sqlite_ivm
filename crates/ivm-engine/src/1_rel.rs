@@ -43,10 +43,53 @@ impl fmt::Display for EngineError {
 
 impl std::error::Error for EngineError {}
 
+/// Work observed during the most recent successful settle. `None` means the
+/// engine or installed planner does not measure that field.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DeltaRows {
+    pub filter: Option<u64>,
+    pub join: Option<u64>,
+    pub antijoin: Option<u64>,
+    pub reduce: Option<u64>,
+    pub topk: Option<u64>,
+    pub window: Option<u64>,
+    pub mint: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Counters {
+    /// Number of nonzero net output delta rows returned by settle.
+    pub rows_written: u64,
+    /// Rows emitted by each IR operator, before downstream operators run.
+    pub delta_rows: DeltaRows,
+    /// LetRec rounds that produced a nonempty next delta, summed across scopes.
+    pub rounds: Option<u64>,
+    /// New dictionary entries created during settle.
+    pub interned: Option<u64>,
+    /// SQLite statements executed during settle.
+    pub statements: Option<u64>,
+}
+
+impl Counters {
+    pub fn measured() -> Self {
+        Self {
+            delta_rows: DeltaRows {
+                filter: Some(0), join: Some(0), antijoin: Some(0), reduce: Some(0),
+                topk: Some(0), window: Some(0), mint: Some(0),
+            },
+            rounds: Some(0),
+            interned: Some(0),
+            statements: Some(0),
+            ..Self::default()
+        }
+    }
+}
+
 /// Lifecycle every engine implements; the oracle harness is written against this trait only.
 pub trait Engine: Sized {
     fn install(program: &Program, host: &mut impl Host) -> Result<Self, EngineError>;
     fn settle(&mut self, frontier: Frontier, host: &mut impl Host) -> Result<Delta, EngineError>;
+    fn counters(&self) -> Counters;
     fn snapshot(&self, rel: RelId, host: &mut impl Host) -> Result<Vec<(Row, W)>, EngineError>;
     fn intern_snapshot(&self, _functor: RelId, _host: &mut impl Host) -> Result<Vec<(Row, W)>, EngineError> {
         Err(EngineError::new(Stage::Snapshot, None, ErrorKind::Unsupported("intern_snapshot")))

@@ -21,6 +21,8 @@ pub struct Interner {
 }
 
 impl Interner {
+    pub fn len(&self) -> usize { self.by_id.len() }
+
     pub fn mint(&mut self, functor: &str, args: &[Cell], types: &[Ty]) -> Cell {
         let key = (functor.to_owned(), args.to_vec());
         if let Some(id) = self.by_key.get(&key) {

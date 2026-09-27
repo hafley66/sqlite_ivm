@@ -64,6 +64,7 @@ impl Nest for Time {
         outer.scoped::<Inner, _, _>("LetRec", |sub| {
             let mut inner = DdRel {
                 scope: sub,
+                rec: rec.ids.first().copied(),
                 sources: rel.sources.iter().map(|(id, c)| (*id, c.clone().enter(sub))).collect(),
                 outputs: Vec::new(),
                 taps: rel.taps.clone(),
@@ -98,6 +99,7 @@ impl Nest for Time {
 
 pub struct DdRel<'s, T: Nest = Time> {
     scope: Scope<'s, T>,
+    rec: Option<RelId>,
     sources: BTreeMap<RelId, Coll<'s, T>>,
     outputs: Vec<(RelId, Coll<'s, T>)>,
     /// Traced mode only: every observed node's records land here.
@@ -113,6 +115,8 @@ pub struct DdRel<'s, T: Nest = Time> {
 pub struct DdTap {
     pub node: NodeId,
     pub tick: u64,
+    /// Relation identifying the enclosing LetRec scope.
+    pub rec: Option<RelId>,
     /// Inner timestamp of the LetRec scope; `None` outside a loop.
     pub round: Option<u64>,
     pub row: Row,
@@ -337,9 +341,10 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
     fn observe(&mut self, id: NodeId, c: Self::C) -> Self::C {
         let Some(sink) = &self.taps else { return c };
         let sink = Rc::clone(sink);
+        let rec = self.rec;
         c.inspect(move |(row, t, w)| {
             let (tick, round) = t.split();
-            sink.borrow_mut().push(DdTap { node: id, tick, round, row: row.clone(), w: *w });
+            sink.borrow_mut().push(DdTap { node: id, tick, rec, round, row: row.clone(), w: *w });
         })
     }
 }
@@ -444,7 +449,7 @@ fn rank(order: &[Order], types: &[Ty], interner: &Interner, a: &Row, b: &Row) ->
 }
 
 enum Command {
-    Settle(Frontier, mpsc::Sender<Result<(Delta, Vec<DdTap>), EngineError>>),
+    Settle(Frontier, mpsc::Sender<Result<(Delta, Vec<DdTap>, Counters), EngineError>>),
     Snapshot(RelId, mpsc::Sender<Result<Vec<(Row, W)>, EngineError>>),
     InternSnapshot(RelId, mpsc::Sender<Result<Vec<(Row, W)>, EngineError>>),
     InternText(String, mpsc::Sender<Cell>),
@@ -455,6 +460,7 @@ enum Command {
 pub struct Dd {
     tx: mpsc::Sender<Command>,
     thread: Option<JoinHandle<()>>,
+    counters: Counters,
 }
 
 /// Runs on the worker before the dataflow is built; tests register timely/differential loggers here.
@@ -479,7 +485,9 @@ impl Dd {
     pub fn settle_traced(&mut self, frontier: Frontier) -> Result<(Delta, Vec<DdTap>), EngineError> {
         let (reply, answer) = mpsc::channel();
         self.tx.send(Command::Settle(frontier, reply)).map_err(|e| worker_error(Stage::Settle, e))?;
-        answer.recv().map_err(|e| worker_error(Stage::Settle, e))?
+        let (delta, taps, counters) = answer.recv().map_err(|e| worker_error(Stage::Settle, e))??;
+        self.counters = counters;
+        Ok((delta, taps))
     }
 
     fn start(program: &Program, hook: Option<Hook>, traced: bool) -> Result<Self, EngineError> {
@@ -489,7 +497,7 @@ impl Dd {
         let thread = thread::spawn(move || worker(program, hook, traced, rx, ready_tx));
         let worker_gone = |_| EngineError::new(Stage::Install, None, ErrorKind::Worker("worker exited".into()));
         ready_rx.recv().map_err(worker_gone)??;
-        Ok(Self { tx, thread: Some(thread) })
+        Ok(Self { tx, thread: Some(thread), counters: Counters::default() })
     }
 }
 
@@ -501,6 +509,8 @@ impl Engine for Dd {
     fn settle(&mut self, frontier: Frontier, _host: &mut impl Host) -> Result<Delta, EngineError> {
         self.settle_traced(frontier).map(|(delta, _)| delta)
     }
+
+    fn counters(&self) -> Counters { self.counters }
 
     fn snapshot(&self, rel: RelId, _host: &mut impl Host) -> Result<Vec<(Row, W)>, EngineError> {
         let (reply, answer) = mpsc::channel();
@@ -555,7 +565,7 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
         let reduce_reads = worker.log_register().and_then(|registry| registry.get::<ReduceReadEventBuilder>("lab/reduce_reads"));
         let mut probe = ProbeHandle::new();
         let captured: Rc<RefCell<Vec<(RelId, Row, Time, W)>>> = Rc::default();
-        let taps: Option<Rc<RefCell<Vec<DdTap>>>> = traced.then(Rc::default);
+        let taps: Option<Rc<RefCell<Vec<DdTap>>>> = Some(Rc::default());
         let interner = Rc::new(RefCell::new(Interner::default()));
         let texts = {
             let mut dict = interner.borrow_mut();
@@ -585,7 +595,7 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                 constructor_inputs.insert(rel.id, input);
                 sources.insert(rel.id, c);
             }
-            let mut rel = DdRel { scope, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone(), constructors: constructors.clone(), interner: interner.clone(), texts: texts.clone() };
+            let mut rel = DdRel { scope, rec: None, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone(), constructors: constructors.clone(), interner: interner.clone(), texts: texts.clone() };
             lower(&program, &mut rel)?;
             let mut outputs = BTreeMap::new();
             for (id, c) in rel.outputs {
@@ -616,6 +626,7 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
             let Ok(command) = rx.lock().unwrap().recv() else { break };
             match command {
                 Command::Settle(frontier, reply) => {
+                    let interned_before = interner.borrow().len();
                     let accepted = match guard(&program, &mut built.guards, epoch, &frontier) {
                         Ok(accepted) => accepted,
                         Err(e) => {
@@ -665,20 +676,40 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                     for (rel, row, _, w) in captured.borrow_mut().drain(..) {
                         *net.entry((rel, row)).or_default() += w;
                     }
-                    let changes = net.into_iter()
+                    let changes: Vec<_> = net.into_iter()
                         .filter(|(_, w)| *w != 0)
                         .map(|((rel, row), w)| (rel, row, w))
                         .collect();
-                    let mut seen: BTreeMap<(NodeId, u64, Option<u64>, Row), W> = BTreeMap::new();
+                    let mut seen: BTreeMap<(NodeId, u64, Option<RelId>, Option<u64>, Row), W> = BTreeMap::new();
                     for tap in taps.iter().flat_map(|t| t.borrow_mut().drain(..).collect::<Vec<_>>()) {
-                        *seen.entry((tap.node, frontier_tick, tap.round, tap.row)).or_default() += tap.w;
+                        *seen.entry((tap.node, frontier_tick, tap.rec, tap.round, tap.row)).or_default() += tap.w;
                     }
-                    let seen = seen
+                    let seen: Vec<DdTap> = seen
                         .into_iter()
                         .filter(|(_, w)| *w != 0)
-                        .map(|((node, tick, round, row), w)| DdTap { node, tick, round, row, w })
+                        .map(|((node, tick, rec, round, row), w)| DdTap { node, tick, rec, round, row, w })
                         .collect();
-                    let _ = reply.send(Ok((Delta { tick: frontier_tick, changes }, seen)));
+                    let mut counters = Counters::measured();
+                    counters.statements = None;
+                    counters.rows_written = changes.len() as u64;
+                    counters.interned = Some((interner.borrow().len() - interned_before) as u64);
+                    let mut rounds = std::collections::BTreeSet::new();
+                    for tap in &seen {
+                        if let (Some(rec), Some(round)) = (tap.rec, tap.round) { rounds.insert((rec, round)); }
+                        let field = match program.nodes.get(tap.node as usize) {
+                            Some(Op::Mfp { .. }) => &mut counters.delta_rows.filter,
+                            Some(Op::Join { .. }) => &mut counters.delta_rows.join,
+                            Some(Op::Antijoin { .. }) => &mut counters.delta_rows.antijoin,
+                            Some(Op::Reduce { .. }) => &mut counters.delta_rows.reduce,
+                            Some(Op::TopK { .. }) => &mut counters.delta_rows.topk,
+                            Some(Op::Window { .. }) => &mut counters.delta_rows.window,
+                            Some(Op::Mint { .. } | Op::StrCons { .. }) => &mut counters.delta_rows.mint,
+                            _ => continue,
+                        };
+                        *field.as_mut().unwrap() += 1;
+                    }
+                    counters.rounds = Some(rounds.into_iter().filter(|(_, round)| *round > 0).count() as u64);
+                    let _ = reply.send(Ok((Delta { tick: frontier_tick, changes }, if traced { seen } else { Vec::new() }, counters)));
                     frontier_tick += 1;
                 }
                 Command::Snapshot(rel, reply) => {
