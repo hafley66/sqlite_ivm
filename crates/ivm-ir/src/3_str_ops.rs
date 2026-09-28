@@ -14,8 +14,8 @@ pub enum StrOp {
     StripSuffix,
     Replace,
     Split,
-    IntToStr,
-    StrToInt,
+    ToStr,
+    ToInt,
     StartsWith,
     Contains,
     Snake,
@@ -36,8 +36,8 @@ impl StrOp {
         StrOp::StripSuffix,
         StrOp::Replace,
         StrOp::Split,
-        StrOp::IntToStr,
-        StrOp::StrToInt,
+        StrOp::ToStr,
+        StrOp::ToInt,
         StrOp::StartsWith,
         StrOp::Contains,
         StrOp::Snake,
@@ -58,8 +58,8 @@ impl StrOp {
             StrOp::StripSuffix => "str.strip_suffix",
             StrOp::Replace => "str.replace",
             StrOp::Split => "str.split",
-            StrOp::IntToStr => "int.to_str",
-            StrOp::StrToInt => "str.to_int",
+            StrOp::ToStr => "int.to_str",
+            StrOp::ToInt => "str.to_int",
             StrOp::StartsWith => "str.starts_with",
             StrOp::Contains => "str.contains",
             StrOp::Snake => "str.snake",
@@ -81,8 +81,8 @@ impl StrOp {
             "str.strip_suffix" => Some(StrOp::StripSuffix),
             "str.replace" => Some(StrOp::Replace),
             "str.split" => Some(StrOp::Split),
-            "int.to_str" => Some(StrOp::IntToStr),
-            "str.to_int" => Some(StrOp::StrToInt),
+            "int.to_str" => Some(StrOp::ToStr),
+            "str.to_int" => Some(StrOp::ToInt),
             "str.starts_with" => Some(StrOp::StartsWith),
             "str.contains" => Some(StrOp::Contains),
             "str.snake" => Some(StrOp::Snake),
@@ -105,8 +105,8 @@ impl StrOp {
             StrOp::StripSuffix => &[StrKind::Text, StrKind::Text, ],
             StrOp::Replace => &[StrKind::Text, StrKind::Text, StrKind::Text, ],
             StrOp::Split => &[StrKind::Text, StrKind::Text, StrKind::Int, ],
-            StrOp::IntToStr => &[StrKind::Int, ],
-            StrOp::StrToInt => &[StrKind::Text, ],
+            StrOp::ToStr => &[StrKind::Int, ],
+            StrOp::ToInt => &[StrKind::Text, ],
             StrOp::StartsWith => &[StrKind::Text, StrKind::Text, ],
             StrOp::Contains => &[StrKind::Text, StrKind::Text, ],
             StrOp::Snake => &[StrKind::Text, ],
@@ -128,8 +128,8 @@ impl StrOp {
             StrOp::StripSuffix => Some(StrKind::Text),
             StrOp::Replace => Some(StrKind::Text),
             StrOp::Split => Some(StrKind::Text),
-            StrOp::IntToStr => Some(StrKind::Text),
-            StrOp::StrToInt => Some(StrKind::Int),
+            StrOp::ToStr => Some(StrKind::Text),
+            StrOp::ToInt => Some(StrKind::Int),
             StrOp::StartsWith => None,
             StrOp::Contains => None,
             StrOp::Snake => Some(StrKind::Text),
@@ -189,11 +189,11 @@ impl StrOp {
                 let a2 = int(args, 2)?;
                 { let parts: Vec<&str> = a0.split(a1).collect(); let at = if a2 < 0 { a2.checked_add(parts.len() as i64)? } else { a2 }; parts.get(usize::try_from(at).ok()?).map(|part| Text(part.to_string())) }
             }
-            StrOp::IntToStr => {
+            StrOp::ToStr => {
                 let a0 = int(args, 0)?;
                 Some(Text(a0.to_string()))
             }
-            StrOp::StrToInt => {
+            StrOp::ToInt => {
                 let a0 = text(args, 0)?;
                 a0.parse::<i64>().ok().map(Int)
             }
