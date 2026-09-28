@@ -223,10 +223,11 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
                 }
                 op.apply(&values)?
             };
-            row.push(match out {
-                StrOut::Text(text) => interner.borrow_mut().mint_text(&text),
-                StrOut::Int(value) => value,
-            });
+            match out {
+                StrOut::Text(text) => row.push(interner.borrow_mut().mint_text(&text)),
+                StrOut::Int(value) => row.push(value),
+                StrOut::Holds => {}
+            }
             Some(row)
         }))
     }

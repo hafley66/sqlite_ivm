@@ -16,6 +16,8 @@ pub enum StrOp {
     Split,
     IntToStr,
     StrToInt,
+    StartsWith,
+    Contains,
 }
 
 impl StrOp {
@@ -32,6 +34,8 @@ impl StrOp {
         StrOp::Split,
         StrOp::IntToStr,
         StrOp::StrToInt,
+        StrOp::StartsWith,
+        StrOp::Contains,
     ];
 
     pub fn name(self) -> &'static str {
@@ -48,6 +52,8 @@ impl StrOp {
             StrOp::Split => "str.split",
             StrOp::IntToStr => "int.to_str",
             StrOp::StrToInt => "str.to_int",
+            StrOp::StartsWith => "str.starts_with",
+            StrOp::Contains => "str.contains",
         }
     }
 
@@ -65,6 +71,8 @@ impl StrOp {
             "str.split" => Some(StrOp::Split),
             "int.to_str" => Some(StrOp::IntToStr),
             "str.to_int" => Some(StrOp::StrToInt),
+            "str.starts_with" => Some(StrOp::StartsWith),
+            "str.contains" => Some(StrOp::Contains),
             _ => None,
         }
     }
@@ -83,29 +91,33 @@ impl StrOp {
             StrOp::Split => &[StrKind::Text, StrKind::Text, StrKind::Int, ],
             StrOp::IntToStr => &[StrKind::Int, ],
             StrOp::StrToInt => &[StrKind::Text, ],
+            StrOp::StartsWith => &[StrKind::Text, StrKind::Text, ],
+            StrOp::Contains => &[StrKind::Text, StrKind::Text, ],
         }
     }
 
-    pub fn out(self) -> StrKind {
+    pub fn out(self) -> Option<StrKind> {
         match self {
-            StrOp::Len => StrKind::Int,
-            StrOp::Lower => StrKind::Text,
-            StrOp::Upper => StrKind::Text,
-            StrOp::Lcfirst => StrKind::Text,
-            StrOp::Ucfirst => StrKind::Text,
-            StrOp::Trim => StrKind::Text,
-            StrOp::StripPrefix => StrKind::Text,
-            StrOp::StripSuffix => StrKind::Text,
-            StrOp::Replace => StrKind::Text,
-            StrOp::Split => StrKind::Text,
-            StrOp::IntToStr => StrKind::Text,
-            StrOp::StrToInt => StrKind::Int,
+            StrOp::Len => Some(StrKind::Int),
+            StrOp::Lower => Some(StrKind::Text),
+            StrOp::Upper => Some(StrKind::Text),
+            StrOp::Lcfirst => Some(StrKind::Text),
+            StrOp::Ucfirst => Some(StrKind::Text),
+            StrOp::Trim => Some(StrKind::Text),
+            StrOp::StripPrefix => Some(StrKind::Text),
+            StrOp::StripSuffix => Some(StrKind::Text),
+            StrOp::Replace => Some(StrKind::Text),
+            StrOp::Split => Some(StrKind::Text),
+            StrOp::IntToStr => Some(StrKind::Text),
+            StrOp::StrToInt => Some(StrKind::Int),
+            StrOp::StartsWith => None,
+            StrOp::Contains => None,
         }
     }
 
     pub fn apply(self, args: &[StrVal]) -> Option<StrOut> {
         use crate::{int, text};
-        use StrOut::{Int, Text};
+        use StrOut::{Holds, Int, Text};
         match self {
             StrOp::Len => {
                 let a0 = text(args, 0)?;
@@ -160,6 +172,16 @@ impl StrOp {
             StrOp::StrToInt => {
                 let a0 = text(args, 0)?;
                 a0.parse::<i64>().ok().map(Int)
+            }
+            StrOp::StartsWith => {
+                let a0 = text(args, 0)?;
+                let a1 = text(args, 1)?;
+                a0.starts_with(a1).then_some(Holds)
+            }
+            StrOp::Contains => {
+                let a0 = text(args, 0)?;
+                let a1 = text(args, 1)?;
+                a0.contains(a1).then_some(Holds)
             }
         }
     }

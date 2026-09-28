@@ -476,7 +476,14 @@ impl Rel for SqlRel {
         let call = format!("ivm_str_op({})", values.join(","));
         let carried = (0..old).map(|i| format!("d.c{i} AS c{i}")).collect::<Vec<_>>().join(",");
         let next = match op.out() {
-            StrKind::Text => {
+            None => {
+                let next = self.push(old, c.rec, |_| Some(format!(
+                    "SELECT {carried}, d.w FROM {} d{joins} WHERE {call} IS NOT NULL", c.d,
+                )));
+                self.nodes[next.node].inline = true;
+                next
+            }
+            Some(StrKind::Text) => {
                 let source = format!("SELECT {call} AS text FROM {} d{joins} WHERE d.w>0 AND {call} IS NOT NULL", c.d);
                 let next = self.push(old + 1, c.rec, |_| Some(format!(
                     "SELECT {carried}, dict.id AS c{old}, d.w FROM {} d{joins} JOIN ivm_term_dict dict ON dict.text={call}", c.d,
@@ -487,7 +494,7 @@ impl Rel for SqlRel {
                 ]);
                 next
             }
-            StrKind::Int => {
+            Some(StrKind::Int) => {
                 let next = self.push(old + 1, c.rec, |_| Some(format!(
                     "SELECT {carried}, {call} AS c{old}, d.w FROM {} d{joins} WHERE {call} IS NOT NULL", c.d,
                 )));

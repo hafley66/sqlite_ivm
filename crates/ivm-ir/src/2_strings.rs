@@ -17,6 +17,8 @@ pub enum StrVal<'a> {
 pub enum StrOut {
     Text(String),
     Int(i64),
+    /// A filter op held; it adds no column and a miss drops the row.
+    Holds,
 }
 
 pub(crate) fn text<'a>(args: &[StrVal<'a>], at: usize) -> Option<&'a str> {

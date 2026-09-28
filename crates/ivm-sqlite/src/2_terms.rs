@@ -121,6 +121,7 @@ pub(crate) fn register(db: &Connection) -> rusqlite::Result<()> {
         Ok(match op.apply(&values) {
             Some(ivm_ir::StrOut::Text(text)) => Value::Text(text),
             Some(ivm_ir::StrOut::Int(value)) => Value::Integer(value),
+            Some(ivm_ir::StrOut::Holds) => Value::Integer(1),
             None => Value::Null,
         })
     })?;

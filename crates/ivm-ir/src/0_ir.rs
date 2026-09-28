@@ -266,7 +266,7 @@ impl Program {
             }
             Op::Str { input, op, .. } => {
                 let mut cols = self.node_types(*input)?;
-                cols.push(match op.out() { StrKind::Text => Ty::Id, StrKind::Int => Ty::Int });
+                match op.out() { Some(StrKind::Text) => cols.push(Ty::Id), Some(StrKind::Int) => cols.push(Ty::Int), None => {} }
                 cols
             }
             Op::Mfp { input, map, project, .. } => {
