@@ -18,6 +18,10 @@ pub enum StrOp {
     StrToInt,
     StartsWith,
     Contains,
+    Snake,
+    Camel,
+    Pascal,
+    Kebab,
 }
 
 impl StrOp {
@@ -36,6 +40,10 @@ impl StrOp {
         StrOp::StrToInt,
         StrOp::StartsWith,
         StrOp::Contains,
+        StrOp::Snake,
+        StrOp::Camel,
+        StrOp::Pascal,
+        StrOp::Kebab,
     ];
 
     pub fn name(self) -> &'static str {
@@ -54,6 +62,10 @@ impl StrOp {
             StrOp::StrToInt => "str.to_int",
             StrOp::StartsWith => "str.starts_with",
             StrOp::Contains => "str.contains",
+            StrOp::Snake => "str.snake",
+            StrOp::Camel => "str.camel",
+            StrOp::Pascal => "str.pascal",
+            StrOp::Kebab => "str.kebab",
         }
     }
 
@@ -73,6 +85,10 @@ impl StrOp {
             "str.to_int" => Some(StrOp::StrToInt),
             "str.starts_with" => Some(StrOp::StartsWith),
             "str.contains" => Some(StrOp::Contains),
+            "str.snake" => Some(StrOp::Snake),
+            "str.camel" => Some(StrOp::Camel),
+            "str.pascal" => Some(StrOp::Pascal),
+            "str.kebab" => Some(StrOp::Kebab),
             _ => None,
         }
     }
@@ -93,6 +109,10 @@ impl StrOp {
             StrOp::StrToInt => &[StrKind::Text, ],
             StrOp::StartsWith => &[StrKind::Text, StrKind::Text, ],
             StrOp::Contains => &[StrKind::Text, StrKind::Text, ],
+            StrOp::Snake => &[StrKind::Text, ],
+            StrOp::Camel => &[StrKind::Text, ],
+            StrOp::Pascal => &[StrKind::Text, ],
+            StrOp::Kebab => &[StrKind::Text, ],
         }
     }
 
@@ -112,6 +132,10 @@ impl StrOp {
             StrOp::StrToInt => Some(StrKind::Int),
             StrOp::StartsWith => None,
             StrOp::Contains => None,
+            StrOp::Snake => Some(StrKind::Text),
+            StrOp::Camel => Some(StrKind::Text),
+            StrOp::Pascal => Some(StrKind::Text),
+            StrOp::Kebab => Some(StrKind::Text),
         }
     }
 
@@ -182,6 +206,22 @@ impl StrOp {
                 let a0 = text(args, 0)?;
                 let a1 = text(args, 1)?;
                 a0.contains(a1).then_some(Holds)
+            }
+            StrOp::Snake => {
+                let a0 = text(args, 0)?;
+                Some(Text(heck::ToSnakeCase::to_snake_case(a0)))
+            }
+            StrOp::Camel => {
+                let a0 = text(args, 0)?;
+                Some(Text(heck::ToLowerCamelCase::to_lower_camel_case(a0)))
+            }
+            StrOp::Pascal => {
+                let a0 = text(args, 0)?;
+                Some(Text(heck::ToUpperCamelCase::to_upper_camel_case(a0)))
+            }
+            StrOp::Kebab => {
+                let a0 = text(args, 0)?;
+                Some(Text(heck::ToKebabCase::to_kebab_case(a0)))
             }
         }
     }
