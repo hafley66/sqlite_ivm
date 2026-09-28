@@ -22,6 +22,8 @@ pub enum StrOp {
     Camel,
     Pascal,
     Kebab,
+    Escape,
+    Json,
 }
 
 impl StrOp {
@@ -44,6 +46,8 @@ impl StrOp {
         StrOp::Camel,
         StrOp::Pascal,
         StrOp::Kebab,
+        StrOp::Escape,
+        StrOp::Json,
     ];
 
     pub fn name(self) -> &'static str {
@@ -66,6 +70,8 @@ impl StrOp {
             StrOp::Camel => "str.camel",
             StrOp::Pascal => "str.pascal",
             StrOp::Kebab => "str.kebab",
+            StrOp::Escape => "str.escape",
+            StrOp::Json => "str.json",
         }
     }
 
@@ -89,6 +95,8 @@ impl StrOp {
             "str.camel" => Some(StrOp::Camel),
             "str.pascal" => Some(StrOp::Pascal),
             "str.kebab" => Some(StrOp::Kebab),
+            "str.escape" => Some(StrOp::Escape),
+            "str.json" => Some(StrOp::Json),
             _ => None,
         }
     }
@@ -113,6 +121,8 @@ impl StrOp {
             StrOp::Camel => &[StrKind::Text, ],
             StrOp::Pascal => &[StrKind::Text, ],
             StrOp::Kebab => &[StrKind::Text, ],
+            StrOp::Escape => &[StrKind::Text, ],
+            StrOp::Json => &[StrKind::Text, ],
         }
     }
 
@@ -136,6 +146,8 @@ impl StrOp {
             StrOp::Camel => Some(StrKind::Text),
             StrOp::Pascal => Some(StrKind::Text),
             StrOp::Kebab => Some(StrKind::Text),
+            StrOp::Escape => Some(StrKind::Text),
+            StrOp::Json => Some(StrKind::Text),
         }
     }
 
@@ -222,6 +234,14 @@ impl StrOp {
             StrOp::Kebab => {
                 let a0 = text(args, 0)?;
                 Some(Text(heck::ToKebabCase::to_kebab_case(a0)))
+            }
+            StrOp::Escape => {
+                let a0 = text(args, 0)?;
+                Some(Text(a0.escape_debug().to_string()))
+            }
+            StrOp::Json => {
+                let a0 = text(args, 0)?;
+                serde_json::to_string(a0).ok().map(Text)
             }
         }
     }
