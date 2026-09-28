@@ -14,6 +14,8 @@ pub enum StrOp {
     StripSuffix,
     Replace,
     Split,
+    IntToStr,
+    StrToInt,
 }
 
 impl StrOp {
@@ -28,35 +30,41 @@ impl StrOp {
         StrOp::StripSuffix,
         StrOp::Replace,
         StrOp::Split,
+        StrOp::IntToStr,
+        StrOp::StrToInt,
     ];
 
     pub fn name(self) -> &'static str {
         match self {
-            StrOp::Len => "len",
-            StrOp::Lower => "lower",
-            StrOp::Upper => "upper",
-            StrOp::Lcfirst => "lcfirst",
-            StrOp::Ucfirst => "ucfirst",
-            StrOp::Trim => "trim",
-            StrOp::StripPrefix => "strip_prefix",
-            StrOp::StripSuffix => "strip_suffix",
-            StrOp::Replace => "replace",
-            StrOp::Split => "split",
+            StrOp::Len => "str.len",
+            StrOp::Lower => "str.lower",
+            StrOp::Upper => "str.upper",
+            StrOp::Lcfirst => "str.lcfirst",
+            StrOp::Ucfirst => "str.ucfirst",
+            StrOp::Trim => "str.trim",
+            StrOp::StripPrefix => "str.strip_prefix",
+            StrOp::StripSuffix => "str.strip_suffix",
+            StrOp::Replace => "str.replace",
+            StrOp::Split => "str.split",
+            StrOp::IntToStr => "int.to_str",
+            StrOp::StrToInt => "str.to_int",
         }
     }
 
     pub fn from_name(name: &str) -> Option<StrOp> {
         match name {
-            "len" => Some(StrOp::Len),
-            "lower" => Some(StrOp::Lower),
-            "upper" => Some(StrOp::Upper),
-            "lcfirst" => Some(StrOp::Lcfirst),
-            "ucfirst" => Some(StrOp::Ucfirst),
-            "trim" => Some(StrOp::Trim),
-            "strip_prefix" => Some(StrOp::StripPrefix),
-            "strip_suffix" => Some(StrOp::StripSuffix),
-            "replace" => Some(StrOp::Replace),
-            "split" => Some(StrOp::Split),
+            "str.len" => Some(StrOp::Len),
+            "str.lower" => Some(StrOp::Lower),
+            "str.upper" => Some(StrOp::Upper),
+            "str.lcfirst" => Some(StrOp::Lcfirst),
+            "str.ucfirst" => Some(StrOp::Ucfirst),
+            "str.trim" => Some(StrOp::Trim),
+            "str.strip_prefix" => Some(StrOp::StripPrefix),
+            "str.strip_suffix" => Some(StrOp::StripSuffix),
+            "str.replace" => Some(StrOp::Replace),
+            "str.split" => Some(StrOp::Split),
+            "int.to_str" => Some(StrOp::IntToStr),
+            "str.to_int" => Some(StrOp::StrToInt),
             _ => None,
         }
     }
@@ -73,6 +81,8 @@ impl StrOp {
             StrOp::StripSuffix => &[StrKind::Text, StrKind::Text, ],
             StrOp::Replace => &[StrKind::Text, StrKind::Text, StrKind::Text, ],
             StrOp::Split => &[StrKind::Text, StrKind::Text, StrKind::Int, ],
+            StrOp::IntToStr => &[StrKind::Int, ],
+            StrOp::StrToInt => &[StrKind::Text, ],
         }
     }
 
@@ -88,6 +98,8 @@ impl StrOp {
             StrOp::StripSuffix => StrKind::Text,
             StrOp::Replace => StrKind::Text,
             StrOp::Split => StrKind::Text,
+            StrOp::IntToStr => StrKind::Text,
+            StrOp::StrToInt => StrKind::Int,
         }
     }
 
@@ -140,6 +152,14 @@ impl StrOp {
                 let a1 = text(args, 1)?;
                 let a2 = int(args, 2)?;
                 { let parts: Vec<&str> = a0.split(a1).collect(); let at = if a2 < 0 { a2.checked_add(parts.len() as i64)? } else { a2 }; parts.get(usize::try_from(at).ok()?).map(|part| Text(part.to_string())) }
+            }
+            StrOp::IntToStr => {
+                let a0 = int(args, 0)?;
+                Some(Text(a0.to_string()))
+            }
+            StrOp::StrToInt => {
+                let a0 = text(args, 0)?;
+                a0.parse::<i64>().ok().map(Int)
             }
         }
     }
