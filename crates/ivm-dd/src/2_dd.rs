@@ -43,7 +43,7 @@ fn rec_inputs(p: &Program, rec: &LetRec) -> BTreeSet<RelId> {
         *seen = true;
         match &p.nodes[index] {
             Op::Get(rel) => { inputs.insert(*rel); }
-            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Mfp { input, .. }
+            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Mfp { input, .. }
             | Op::Reduce { input, .. } | Op::TopK { input, .. } | Op::Window { input, .. } => pending.push(*input),
             Op::Negate(input) | Op::Threshold(input) | Op::Delay(input) => pending.push(*input),
             Op::Union(nodes) | Op::Join { inputs: nodes, .. } => pending.extend(nodes.iter().copied()),
@@ -199,6 +199,34 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
                     let (head, rest) = interner.borrow().split(row[whole as usize])?;
                     row.extend([head, rest]);
                 }
+            }
+            Some(row)
+        }))
+    }
+
+    fn str_op(&mut self, c: Self::C, op: StrOp, args: &[ColId]) -> Result<Self::C, EngineError> {
+        if args.len() != op.args().len() {
+            return Err(EngineError::new(Stage::Install, None, ErrorKind::Arity { expected: op.args().len(), actual: args.len() }));
+        }
+        let columns = args.to_vec();
+        let interner = self.interner.clone();
+        Ok(c.flat_map(move |mut row| {
+            let out = {
+                let dict = interner.borrow();
+                let mut values = Vec::with_capacity(columns.len());
+                for (column, kind) in columns.iter().zip(op.args()) {
+                    let cell = row[*column as usize];
+                    values.push(match kind {
+                        StrKind::Text => StrVal::Text(dict.text(cell)?),
+                        StrKind::Int => StrVal::Int(cell),
+                    });
+                }
+                op.apply(&values)?
+            };
+            match out {
+                StrOut::Text(text) => row.push(interner.borrow_mut().mint_text(&text)),
+                StrOut::Int(value) => row.push(value),
+                StrOut::Holds => {}
             }
             Some(row)
         }))
@@ -945,7 +973,7 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                             Some(Op::Reduce { .. }) => &mut counters.delta_rows.reduce,
                             Some(Op::TopK { .. }) => &mut counters.delta_rows.topk,
                             Some(Op::Window { .. }) => &mut counters.delta_rows.window,
-                            Some(Op::Mint { .. } | Op::StrCons { .. }) => &mut counters.delta_rows.mint,
+                            Some(Op::Mint { .. } | Op::StrCons { .. } | Op::Str { .. }) => &mut counters.delta_rows.mint,
                             _ => continue,
                         };
                         *field.as_mut().unwrap() += 1;

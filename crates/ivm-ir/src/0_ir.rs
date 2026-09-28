@@ -1,6 +1,7 @@
 //! The program as data; nothing here names DD or SQLite.
 //! Op names follow Materialize MIR (plans/2026-09-24-ivm-cousins/4_design.md §2.1).
 
+use crate::{StrKind, StrOp};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 
@@ -151,6 +152,13 @@ pub enum Op {
         args: Vec<ColId>,
     },
     StrCons { input: NodeId, mode: StrMode },
+    /// Apply one string op to `args` columns of each row and append its result: a dictionary
+    /// text id for a text result, a raw integer otherwise. A miss drops the row.
+    Str {
+        input: NodeId,
+        op: StrOp,
+        args: Vec<ColId>,
+    },
     /// Filter, then append `map` columns, then keep `project` (empty = keep all).
     Mfp {
         input: NodeId,
@@ -232,7 +240,7 @@ impl Program {
             }
         }
         !self.texts.is_empty() || self.nodes.iter().any(|op| match op {
-            Op::StrCons { .. } => true,
+            Op::StrCons { .. } | Op::Str { .. } => true,
             Op::Mfp { filter, map, .. } => filter.iter().chain(map).any(expr),
             _ => false,
         })
@@ -254,6 +262,11 @@ impl Program {
             Op::StrCons { input, mode } => {
                 let mut cols = self.node_types(*input)?;
                 cols.extend(std::iter::repeat(Ty::Id).take(match mode { StrMode::Construct { .. } => 1, StrMode::Decompose { .. } => 2 }));
+                cols
+            }
+            Op::Str { input, op, .. } => {
+                let mut cols = self.node_types(*input)?;
+                match op.out() { Some(StrKind::Text) => cols.push(Ty::Id), Some(StrKind::Int) => cols.push(Ty::Int), None => {} }
                 cols
             }
             Op::Mfp { input, map, project, .. } => {

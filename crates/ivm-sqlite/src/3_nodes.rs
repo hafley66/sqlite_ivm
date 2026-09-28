@@ -59,7 +59,7 @@ impl WorkKind {
             Op::Reduce { .. } => Self::Reduce,
             Op::TopK { .. } => Self::Topk,
             Op::Window { .. } => Self::Window,
-            Op::Mint { .. } | Op::StrCons { .. } => Self::Mint,
+            Op::Mint { .. } | Op::StrCons { .. } | Op::Str { .. } => Self::Mint,
             _ => return None,
         })
     }
@@ -454,6 +454,54 @@ impl Rel for SqlRel {
         if matches!(mode, StrMode::Decompose { .. }) {
             self.nodes[next.node].inline = true;
         }
+        Ok(next)
+    }
+
+    fn str_op(&mut self, c: Self::C, op: StrOp, args: &[ColId]) -> Result<Self::C, EngineError> {
+        let old = c.arity;
+        if args.len() != op.args().len() || args.iter().any(|col| *col as usize >= old) {
+            return Err(unsupported("Str column out of range"));
+        }
+        let mut joins = String::new();
+        let mut values = vec![format!("'{}'", op.name())];
+        for (at, (col, kind)) in args.iter().zip(op.args()).enumerate() {
+            match kind {
+                StrKind::Text => {
+                    joins.push_str(&format!(" JOIN ivm_term_dict a{at} ON a{at}.id=d.c{col} AND a{at}.text IS NOT NULL"));
+                    values.push(format!("a{at}.text"));
+                }
+                StrKind::Int => values.push(format!("d.c{col}")),
+            }
+        }
+        let call = format!("ivm_str_op({})", values.join(","));
+        let carried = (0..old).map(|i| format!("d.c{i} AS c{i}")).collect::<Vec<_>>().join(",");
+        let next = match op.out() {
+            None => {
+                let next = self.push(old, c.rec, |_| Some(format!(
+                    "SELECT {carried}, d.w FROM {} d{joins} WHERE {call} IS NOT NULL", c.d,
+                )));
+                self.nodes[next.node].inline = true;
+                next
+            }
+            Some(StrKind::Text) => {
+                let source = format!("SELECT {call} AS text FROM {} d{joins} WHERE d.w>0 AND {call} IS NOT NULL", c.d);
+                let next = self.push(old + 1, c.rec, |_| Some(format!(
+                    "SELECT {carried}, dict.id AS c{old}, d.w FROM {} d{joins} JOIN ivm_term_dict dict ON dict.text={call}", c.d,
+                )));
+                self.nodes[next.node].fill.splice(0..0, [
+                    format!("WITH RECURSIVE parts(text) AS ({source} UNION SELECT ivm_str_rest_text(text) FROM parts WHERE text<>''), all_texts(text) AS (SELECT text FROM parts UNION SELECT ivm_str_head_text(text) FROM parts WHERE text<>'') INSERT INTO ivm_term_dict(functor,args,types,text) SELECT '@str',json_array(text),'[]',text FROM all_texts WHERE true ON CONFLICT DO NOTHING"),
+                    "UPDATE ivm_term_dict AS d SET head_id=(SELECT id FROM ivm_term_dict h WHERE h.text=ivm_str_head_text(d.text)), rest_id=(SELECT id FROM ivm_term_dict r WHERE r.text=ivm_str_rest_text(d.text)) WHERE d.text IS NOT NULL AND d.text<>'' AND d.head_id IS NULL".into(),
+                ]);
+                next
+            }
+            Some(StrKind::Int) => {
+                let next = self.push(old + 1, c.rec, |_| Some(format!(
+                    "SELECT {carried}, {call} AS c{old}, d.w FROM {} d{joins} WHERE {call} IS NOT NULL", c.d,
+                )));
+                self.nodes[next.node].inline = true;
+                next
+            }
+        };
         Ok(next)
     }
 
@@ -1160,7 +1208,7 @@ impl NodesPlan {
                 && rel.nodes.get(*node).is_some_and(|built| built.inline)
         });
         let mint_measured = !rel.work_nodes.iter().any(|(id, node)| {
-            matches!(program.nodes.get(*id as usize), Some(Op::Mint { .. } | Op::StrCons { .. }))
+            matches!(program.nodes.get(*id as usize), Some(Op::Mint { .. } | Op::StrCons { .. } | Op::Str { .. }))
                 && rel.nodes.get(*node).is_some_and(|built| built.inline)
         });
         let work = rel.work_nodes.iter().filter_map(|(id, node)| {
