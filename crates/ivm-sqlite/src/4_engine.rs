@@ -86,7 +86,7 @@ fn output_program(ir: &Program, output: RelId) -> Program {
         *slot = true;
         match &ir.nodes[node as usize] {
             Op::Get(id) => relations.push(*id),
-            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Mfp { input, .. }
+            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Mfp { input, .. }
             | Op::Negate(input) | Op::Reduce { input, .. } | Op::Threshold(input)
             | Op::TopK { input, .. } | Op::Window { input, .. } | Op::Delay(input) => {
                 visit_node(ir, *input, seen, relations);
@@ -145,7 +145,7 @@ fn output_program(ir: &Program, output: RelId) -> Program {
         };
         match &mut op {
             Op::Get(_) => {}
-            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Mfp { input, .. }
+            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Mfp { input, .. }
             | Op::Negate(input) | Op::Reduce { input, .. } | Op::Threshold(input)
             | Op::TopK { input, .. } | Op::Window { input, .. } | Op::Delay(input) => rewrite(input),
             Op::Union(inputs) | Op::Join { inputs, .. } => inputs.iter_mut().for_each(&mut rewrite),

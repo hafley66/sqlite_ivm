@@ -113,6 +113,7 @@ pub trait Rel {
     fn get(&mut self, rel: RelId) -> Result<Self::C, EngineError>;
     fn mint(&mut self, c: Self::C, functor: RelId, args: &[ColId]) -> Result<Self::C, EngineError>;
     fn str_cons(&mut self, c: Self::C, mode: &StrMode) -> Result<Self::C, EngineError>;
+    fn str_op(&mut self, c: Self::C, op: StrOp, args: &[ColId]) -> Result<Self::C, EngineError>;
     fn mfp(&mut self, c: Self::C, filter: &[Expr], map: &[Expr], project: &[ColId], input_types: &[Ty]) -> Self::C;
     fn union(&mut self, cs: Vec<Self::C>) -> Self::C;
     fn negate(&mut self, c: Self::C) -> Self::C;
@@ -265,6 +266,10 @@ pub fn lower_node<A: Rel>(
         Op::StrCons { input, mode } => {
             let c = sub(*input, a)?;
             a.str_cons(c, mode)?
+        }
+        Op::Str { input, op, args } => {
+            let c = sub(*input, a)?;
+            a.str_op(c, *op, args)?
         }
         Op::Mfp { input, filter, map, project } => {
             let c = sub(*input, a)?;

@@ -106,6 +106,24 @@ pub(crate) fn register(db: &Connection) -> rusqlite::Result<()> {
         let db = unsafe { ctx.get_connection()? };
         text_id(&db, &value)?.ok_or(rusqlite::Error::InvalidQuery)
     })?;
+    db.create_scalar_function("ivm_str_op", -1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
+        use sqlite_ext::rusqlite::types::ValueRef;
+        let name: String = ctx.get(0)?;
+        let op = ivm_ir::StrOp::from_name(&name).ok_or(rusqlite::Error::InvalidQuery)?;
+        let mut values = Vec::with_capacity(ctx.len() - 1);
+        for at in 1..ctx.len() {
+            values.push(match ctx.get_raw(at) {
+                ValueRef::Text(bytes) => ivm_ir::StrVal::Text(std::str::from_utf8(bytes).map_err(|error| rusqlite::Error::Utf8Error(0, error))?),
+                ValueRef::Integer(value) => ivm_ir::StrVal::Int(value),
+                _ => return Ok(Value::Null),
+            });
+        }
+        Ok(match op.apply(&values) {
+            Some(ivm_ir::StrOut::Text(text)) => Value::Text(text),
+            Some(ivm_ir::StrOut::Int(value)) => Value::Integer(value),
+            None => Value::Null,
+        })
+    })?;
     db.create_scalar_function("ivm_str_head", 1, FunctionFlags::SQLITE_UTF8, |ctx| {
         let db = unsafe { ctx.get_connection()? };
         db.query_row("SELECT head_id FROM ivm_term_dict WHERE id=?1 AND text<>''", [ctx.get::<i64>(0)?], |r| r.get::<_, i64>(0)).optional()
