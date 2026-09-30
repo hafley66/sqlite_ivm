@@ -1,3 +1,7 @@
+#[path = "../../ivm-dd/tests/random/mod.rs"]
+#[allow(dead_code)]
+mod random;
+
 use std::{collections::BTreeMap, ffi::{c_int, c_void, CStr}, time::Instant};
 
 use hafley_observe::{assert_growth_sized, Growth, SpanCounts};
@@ -151,7 +155,7 @@ fn pure_delta_chain_has_fixed_create_count() {
     let db = Connection::open_in_memory().unwrap();
     let (mut engine, creates) = counted_install(&program, &db);
     eprintln!("pure chain creates={creates}");
-    assert_eq!(creates, 20);
+    assert_eq!(creates, 21);
     let mut host = Raw::with_connection(&db);
     assert_eq!(engine.settle(Frontier { changes: vec![SourceChange { rel: 0, row: vec![2], w: 1 }] }, &mut host).unwrap().changes,
         vec![(1, vec![3], 1)]);
@@ -311,7 +315,7 @@ fn output_install_remaps_text_literals() {
     for (rel, text) in [(1, "first"), (2, "second")] {
         let id: i64 = db
             .query_row(
-                "SELECT id FROM ivm_term_dict WHERE text=?1",
+                "SELECT id FROM ivm_text WHERE text=?1",
                 [text],
                 |row| row.get(0),
             )
@@ -352,7 +356,7 @@ fn c15_shaped_ir_installs_one_shared_plan() {
         program.strata.len(),
         program.outputs.len()
     );
-    assert_eq!(creates, 5825);
+    assert_eq!(creates, 5826);
     assert!(
         objects < 8_000,
         "c15-shaped install created {objects} schema objects"
@@ -443,7 +447,9 @@ fn bench_materialization_boundaries() {
     let fixture = |text: &str| {
         let json: serde_json::Value = serde_json::from_str(text).unwrap();
         let program = serde_json::from_value(json["program"].clone()).unwrap();
-        let frontiers = serde_json::from_value(json["sqlite_frontiers"].clone()).unwrap();
+        let dd_frontiers: Vec<Frontier> = serde_json::from_value(json["dd_frontiers"].clone()).unwrap();
+        let texts: Vec<String> = serde_json::from_value(json["texts"].clone()).unwrap();
+        let frontiers = random::drive::translated_frontiers::<Dd, Sqlite>(&program, &texts, &dd_frontiers).unwrap();
         (program, frontiers)
     };
     let count = fixture(include_str!("corpus/9_3_count_case.json"));

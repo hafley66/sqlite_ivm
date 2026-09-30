@@ -69,8 +69,8 @@ fn random_any_sqlite_oracle_worker() {
 
 #[test]
 fn captured_oracle_ir_agrees_with_dd() {
-    // Lowered from sprefa oracle/eval on 2026-09-27. Each engine's bootstrap
-    // frontiers carry its own intern ids; agreement decodes terms before comparing.
+    // Lowered from sprefa oracle/eval on 2026-09-27. The corpus holds the dd frontiers; the sqlite
+    // frontiers are the same rows with each term id translated to the sqlite engine's id.
     for (name, source) in [
         ("3_count", include_str!("corpus/9_3_count_case.json")),
         ("16_intern_row_reuse", include_str!("corpus/10_16_intern_row_reuse_case.json")),
@@ -79,8 +79,7 @@ fn captured_oracle_ir_agrees_with_dd() {
         let program: ivm_ir::Program = serde_json::from_value(fixture["program"].clone()).unwrap();
         let texts: Vec<String> = serde_json::from_value(fixture["texts"].clone()).unwrap();
         let dd_frontiers: Vec<ivm_ir::Frontier> = serde_json::from_value(fixture["dd_frontiers"].clone()).unwrap();
-        let sqlite_frontiers: Vec<ivm_ir::Frontier> = serde_json::from_value(fixture["sqlite_frontiers"].clone()).unwrap();
-        drive::agreement_frontiers::<Dd, Sqlite>(&program, &texts, &dd_frontiers, &sqlite_frontiers)
+        drive::agreement_frontiers::<Dd, Sqlite>(&program, &texts, &dd_frontiers)
             .unwrap_or_else(|error| panic!("{name}: {error}"));
     }
 }
