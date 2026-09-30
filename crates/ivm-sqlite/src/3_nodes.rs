@@ -431,9 +431,7 @@ impl Rel for SqlRel {
         // get their ivm_term rows. Same inputs hit UNIQUE(c1..cn) and keep their id.
         let aliases = (1..=args.len()).map(|i| format!("a{i}")).collect::<Vec<_>>();
         let picked = args.iter().zip(&aliases).map(|(x, a)| format!("d.c{x} AS {a}")).chain(["1 AS k".to_owned()]).collect::<Vec<_>>().join(",");
-        // Id order is the text order of "[a1,a2,..]", the order the JSON dictionary assigned; the
-        // captured corpus frontiers (tests/corpus) pin those numbers.
-        let order = if aliases.is_empty() { "k".to_owned() } else { format!("'['||{}||']'", aliases.join("||','||")) };
+        let order = if aliases.is_empty() { "k".to_owned() } else { aliases.join(",") };
         let ctor_cols = ["c0".to_owned()].into_iter().chain((1..=args.len()).map(|i| format!("c{i}"))).collect::<Vec<_>>().join(",");
         let ctor_vals = ["(SELECT coalesce(max(id),0) FROM ivm_term)+row_number() OVER (ORDER BY ".to_owned() + &order + ")"].into_iter().chain(aliases.iter().cloned()).collect::<Vec<_>>().join(",");
         let insert_ctor = format!(

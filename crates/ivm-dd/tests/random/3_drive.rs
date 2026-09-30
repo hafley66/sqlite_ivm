@@ -175,10 +175,31 @@ pub fn agreement<A: Engine, B: Engine>(case: &Case) -> Result<(), String> {
 }
 
 /// Compare the same logical updates when each engine assigns its own intern ids.
-pub fn agreement_frontiers<A: Engine, B: Engine>(program: &Program, texts: &[String], left_frontiers: &[Frontier], right_frontiers: &[Frontier]) -> Result<(), String> {
-    if left_frontiers.len() != right_frontiers.len() {
-        return Err("frontier count differs".into());
+/// Only the left engine's frontiers are captured; each right frontier is the left one with every
+/// constructor id replaced by the right engine's id for the same term.
+pub fn agreement_frontiers<A: Engine, B: Engine>(program: &Program, texts: &[String], left_frontiers: &[Frontier]) -> Result<(), String> {
+    lockstep::<A, B>(program, texts, left_frontiers, true).map(|_| ())
+}
+
+/// The right engine's frontiers for `left_frontiers`, translated term by term as `agreement_frontiers` does.
+pub fn translated_frontiers<A: Engine, B: Engine>(program: &Program, texts: &[String], left_frontiers: &[Frontier]) -> Result<Vec<Frontier>, String> {
+    lockstep::<A, B>(program, texts, left_frontiers, false)
+}
+
+impl Terms {
+    /// Right-engine id of the term the left engine's id `cell` denotes; cells that are not constructor ids pass through.
+    fn translate(&self, right_ids: &BTreeMap<Value, Cell>, cell: Cell, ty: Ty) -> Result<Cell, String> {
+        if ty == Ty::Int || !self.by_id.contains_key(&cell) { return Ok(cell); }
+        let value = self.value(cell, ty, &mut Vec::new())?;
+        right_ids.get(&value).copied().ok_or_else(|| format!("term {value:?} absent from the right engine"))
     }
+
+    fn ids(&self) -> Result<BTreeMap<Value, Cell>, String> {
+        self.by_id.keys().map(|id| Ok((self.value(*id, Ty::Id, &mut Vec::new())?, *id))).collect()
+    }
+}
+
+fn lockstep<A: Engine, B: Engine>(program: &Program, texts: &[String], left_frontiers: &[Frontier], compare: bool) -> Result<Vec<Frontier>, String> {
     let left_db = memory_connection().map_err(sql_err)?;
     let right_db = memory_connection().map_err(sql_err)?;
     let mut left = A::install(program, &mut Raw::with_connection(&left_db)).map_err(|e| format!("left install: {e}"))?;
@@ -187,12 +208,22 @@ pub fn agreement_frontiers<A: Engine, B: Engine>(program: &Program, texts: &[Str
         left.intern_text(text, &mut Raw::with_connection(&left_db)).map_err(|e| format!("left intern text: {e}"))?;
         right.intern_text(text, &mut Raw::with_connection(&right_db)).map_err(|e| format!("right intern text: {e}"))?;
     }
-    for (at, (left_frontier, right_frontier)) in left_frontiers.iter().zip(right_frontiers).enumerate() {
+    let mut translated = Vec::new();
+    for (at, left_frontier) in left_frontiers.iter().enumerate() {
+        let (left_terms, right_terms) = (Terms::read(program, &left, &left_db)?, Terms::read(program, &right, &right_db)?);
+        let right_ids = right_terms.ids()?;
+        let changes = left_frontier.changes.iter().map(|change| {
+            let types = &program.rel(change.rel).ok_or_else(|| format!("frontier {at}: unknown rel {}", change.rel))?.cols;
+            let row = change.row.iter().zip(types).map(|(cell, ty)| left_terms.translate(&right_ids, *cell, *ty)).collect::<Result<Row, String>>()?;
+            Ok(SourceChange { rel: change.rel, row, w: change.w })
+        }).collect::<Result<Vec<_>, String>>()?;
+        let right_frontier = Frontier { changes };
         let a = left.settle(left_frontier.clone(), &mut Raw::with_connection(&left_db)).map_err(|e| format!("left frontier {at}: {e}"))?;
         let b = right.settle(right_frontier.clone(), &mut Raw::with_connection(&right_db)).map_err(|e| format!("right frontier {at}: {e}"))?;
-        agree_frontier(program, at, &left, &left_db, &a, &right, &right_db, &b)?;
+        if compare { agree_frontier(program, at, &left, &left_db, &a, &right, &right_db, &b)?; }
+        translated.push(right_frontier);
     }
-    Ok(())
+    Ok(translated)
 }
 
 pub fn term_lt_structure<E: Engine>(case: &Case) -> Result<(), String> {

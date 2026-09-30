@@ -1,3 +1,7 @@
+#[path = "../../ivm-dd/tests/random/mod.rs"]
+#[allow(dead_code)]
+mod random;
+
 use std::{collections::BTreeMap, ffi::{c_int, c_void, CStr}, time::Instant};
 
 use hafley_observe::{assert_growth_sized, Growth, SpanCounts};
@@ -443,7 +447,9 @@ fn bench_materialization_boundaries() {
     let fixture = |text: &str| {
         let json: serde_json::Value = serde_json::from_str(text).unwrap();
         let program = serde_json::from_value(json["program"].clone()).unwrap();
-        let frontiers = serde_json::from_value(json["sqlite_frontiers"].clone()).unwrap();
+        let dd_frontiers: Vec<Frontier> = serde_json::from_value(json["dd_frontiers"].clone()).unwrap();
+        let texts: Vec<String> = serde_json::from_value(json["texts"].clone()).unwrap();
+        let frontiers = random::drive::translated_frontiers::<Dd, Sqlite>(&program, &texts, &dd_frontiers).unwrap();
         (program, frontiers)
     };
     let count = fixture(include_str!("corpus/9_3_count_case.json"));
