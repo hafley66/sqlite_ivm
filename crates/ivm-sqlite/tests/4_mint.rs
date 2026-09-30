@@ -70,7 +70,7 @@ fn failed_constructor_write_rolls_back_source_and_dictionary() {
     let ctor: String = db.query_row("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'ivm_ctor_%'", [], |row| row.get(0)).unwrap();
     db.execute_batch(&format!("CREATE TRIGGER fail_ctor BEFORE INSERT ON \"{ctor}\" BEGIN SELECT RAISE(FAIL, 'injected'); END;")).unwrap();
     assert!(engine.settle(change([7, 8], 1), &mut Raw::with_connection(&db)).is_err());
-    let dict_rows: i64 = db.query_row("SELECT count(*) FROM ivm_term_dict", [], |row| row.get(0)).unwrap();
+    let dict_rows: i64 = db.query_row("SELECT count(*) FROM ivm_term", [], |row| row.get(0)).unwrap();
     let source_rows: i64 = db.query_row("SELECT count(*) FROM rollback_source", [], |row| row.get(0)).unwrap();
     assert_eq!((dict_rows, source_rows), (0, 0));
     db.execute_batch("DROP TRIGGER fail_ctor").unwrap();

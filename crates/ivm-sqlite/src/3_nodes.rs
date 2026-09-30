@@ -375,6 +375,15 @@ impl SqlRel {
     }
 }
 
+/// Fill statements that mint every suffix and head character of the strings from `source`
+/// (a select yielding column `text`) into `ivm_text`/`ivm_term`.
+fn suffix_texts_sql(source: &str) -> [String; 2] {
+    crate::terms::mint_texts_sql(
+        &format!("WITH RECURSIVE parts(text) AS ({source} UNION SELECT ivm_str_rest_text(text) FROM parts WHERE text<>''), all_texts(text) AS (SELECT text FROM parts UNION SELECT ivm_str_head_text(text) FROM parts WHERE text<>'')"),
+        "SELECT text FROM all_texts",
+    )
+}
+
 impl Rel for SqlRel {
     type C = SqlC;
 
@@ -407,23 +416,33 @@ impl Rel for SqlRel {
             return Err(unsupported("Mint column out of range"));
         }
         let functor = name.replace('\'', "''");
-        let types_json = serde_json::to_string(&types).expect("Ty serialization").replace('\'', "''");
-        let arg_expr = format!("json_array({})", args.iter().map(|x| format!("d.c{x}")).collect::<Vec<_>>().join(","));
-        let arg_cols = args.iter().enumerate().map(|(i, x)| format!("d.c{x} AS c{}", i + 1)).collect::<Vec<_>>().join(",");
         let ctor = crate::catalog::quote(crate::terms::ctor_table(&name));
         let old = c.arity;
+        let fid = format!("(SELECT id FROM ivm_functor WHERE name='{functor}')");
+        // Variant match: integer equality of each argument column against the constructor table.
+        let matches = |alias: &str, src: &str| if args.is_empty() { "1".to_owned() } else {
+            args.iter().enumerate().map(|(i, x)| format!("{alias}.c{} = {src}.c{x}", i + 1)).collect::<Vec<_>>().join(" AND ")
+        };
         let next = self.push(old + 1, c.rec, |_| Some(format!(
-            "SELECT {}, dict.id AS c{old}, d.w FROM {} d JOIN ivm_term_dict dict ON dict.functor='{functor}' AND dict.args={arg_expr}",
-            (0..old).map(|i| format!("d.c{i} AS c{i}")).collect::<Vec<_>>().join(","), c.d,
+            "SELECT {}, k.c0 AS c{old}, d.w FROM {} d JOIN {ctor} k ON {}",
+            (0..old).map(|i| format!("d.c{i} AS c{i}")).collect::<Vec<_>>().join(","), c.d, matches("k", "d"),
         )));
-        let insert_dict = format!(
-            "INSERT INTO ivm_term_dict(functor,args,types) SELECT '{functor}', {arg_expr}, '{types_json}' FROM {} d WHERE d.w>0 AND NOT EXISTS (SELECT 1 FROM ivm_term_dict x WHERE x.functor='{functor}' AND x.args={arg_expr}) GROUP BY {arg_expr} ORDER BY {arg_expr} ON CONFLICT(functor,args) DO NOTHING", c.d,
-        );
+        // New argument tuples take ids above the current ivm_term maximum, in argument order, then
+        // get their ivm_term rows. Same inputs hit UNIQUE(c1..cn) and keep their id.
+        let aliases = (1..=args.len()).map(|i| format!("a{i}")).collect::<Vec<_>>();
+        let picked = args.iter().zip(&aliases).map(|(x, a)| format!("d.c{x} AS {a}")).chain(["1 AS k".to_owned()]).collect::<Vec<_>>().join(",");
+        // Id order is the text order of "[a1,a2,..]", the order the JSON dictionary assigned; the
+        // captured corpus frontiers (tests/corpus) pin those numbers.
+        let order = if aliases.is_empty() { "k".to_owned() } else { format!("'['||{}||']'", aliases.join("||','||")) };
+        let ctor_cols = ["c0".to_owned()].into_iter().chain((1..=args.len()).map(|i| format!("c{i}"))).collect::<Vec<_>>().join(",");
+        let ctor_vals = ["(SELECT coalesce(max(id),0) FROM ivm_term)+row_number() OVER (ORDER BY ".to_owned() + &order + ")"].into_iter().chain(aliases.iter().cloned()).collect::<Vec<_>>().join(",");
         let insert_ctor = format!(
-            "INSERT INTO {ctor} SELECT dict.id AS c0{} FROM {} d JOIN ivm_term_dict dict ON dict.functor='{functor}' AND dict.args={arg_expr} WHERE d.w>0 GROUP BY {arg_expr} ORDER BY {arg_expr} ON CONFLICT(c0) DO NOTHING",
-            if arg_cols.is_empty() { String::new() } else { format!(",{arg_cols}") }, c.d,
+            "INSERT INTO {ctor}({ctor_cols}) SELECT {ctor_vals} FROM (SELECT DISTINCT {picked} FROM {} d WHERE d.w>0 AND NOT EXISTS (SELECT 1 FROM {ctor} x WHERE {}))", c.d, matches("x", "d"),
         );
-        self.nodes[next.node].fill.splice(0..0, [insert_dict, insert_ctor]);
+        let insert_term = format!(
+            "INSERT INTO ivm_term(id,functor_id) SELECT c0, {fid} FROM {ctor} WHERE c0>(SELECT coalesce(max(id),0) FROM ivm_term)",
+        );
+        self.nodes[next.node].fill.splice(0..0, [insert_ctor, insert_term]);
         Ok(next)
     }
 
@@ -432,21 +451,18 @@ impl Rel for SqlRel {
         let next = match mode {
             StrMode::Construct { head, rest } => {
                 if *head as usize >= old || *rest as usize >= old { return Err(unsupported("StrCons column out of range")); }
-                let source = format!("SELECT h.text || r.text AS text FROM {} d JOIN ivm_term_dict h ON h.id=d.c{head} AND h.text IS NOT NULL JOIN ivm_term_dict r ON r.id=d.c{rest} AND r.text IS NOT NULL WHERE d.w>0", c.d);
+                let source = format!("SELECT h.text || r.text AS text FROM {} d JOIN ivm_text h ON h.id=d.c{head} JOIN ivm_text r ON r.id=d.c{rest} WHERE d.w>0", c.d);
                 let next = self.push(old + 1, c.rec, |_| Some(format!(
-                    "SELECT {}, dict.id AS c{old}, d.w FROM {} d JOIN ivm_term_dict h ON h.id=d.c{head} JOIN ivm_term_dict r ON r.id=d.c{rest} JOIN ivm_term_dict dict ON dict.text=h.text||r.text",
+                    "SELECT {}, dict.id AS c{old}, d.w FROM {} d JOIN ivm_text h ON h.id=d.c{head} JOIN ivm_text r ON r.id=d.c{rest} JOIN ivm_text dict ON dict.text=h.text||r.text",
                     (0..old).map(|i| format!("d.c{i} AS c{i}")).collect::<Vec<_>>().join(","), c.d,
                 )));
-                self.nodes[next.node].fill.splice(0..0, [
-                    format!("WITH RECURSIVE parts(text) AS ({source} UNION SELECT ivm_str_rest_text(text) FROM parts WHERE text<>''), all_texts(text) AS (SELECT text FROM parts UNION SELECT ivm_str_head_text(text) FROM parts WHERE text<>'') INSERT INTO ivm_term_dict(functor,args,types,text) SELECT '@str',json_array(text),'[]',text FROM all_texts WHERE true ON CONFLICT DO NOTHING"),
-                    "UPDATE ivm_term_dict AS d SET head_id=(SELECT id FROM ivm_term_dict h WHERE h.text=ivm_str_head_text(d.text)), rest_id=(SELECT id FROM ivm_term_dict r WHERE r.text=ivm_str_rest_text(d.text)) WHERE d.text IS NOT NULL AND d.text<>'' AND d.head_id IS NULL".into(),
-                ]);
+                self.nodes[next.node].fill.splice(0..0, suffix_texts_sql(&source));
                 next
             }
             StrMode::Decompose { whole } => {
                 if *whole as usize >= old { return Err(unsupported("StrCons column out of range")); }
                 self.push(old + 2, c.rec, |_| Some(format!(
-                    "SELECT {}, ivm_str_head(d.c{whole}) AS c{old}, ivm_str_rest(d.c{whole}) AS c{}, d.w FROM {} d WHERE ivm_str_head(d.c{whole}) IS NOT NULL",
+                    "SELECT {}, h.id AS c{old}, r.id AS c{}, d.w FROM {} d JOIN ivm_text w ON w.id=d.c{whole} AND w.text<>'' JOIN ivm_text h ON h.text=ivm_str_head_text(w.text) JOIN ivm_text r ON r.text=ivm_str_rest_text(w.text)",
                     (0..old).map(|i| format!("d.c{i} AS c{i}")).collect::<Vec<_>>().join(","), old + 1, c.d,
                 )))
             }
@@ -467,7 +483,7 @@ impl Rel for SqlRel {
         for (at, (col, kind)) in args.iter().zip(op.args()).enumerate() {
             match kind {
                 StrKind::Text => {
-                    joins.push_str(&format!(" JOIN ivm_term_dict a{at} ON a{at}.id=d.c{col} AND a{at}.text IS NOT NULL"));
+                    joins.push_str(&format!(" JOIN ivm_text a{at} ON a{at}.id=d.c{col}"));
                     values.push(format!("a{at}.text"));
                 }
                 StrKind::Int => values.push(format!("d.c{col}")),
@@ -486,12 +502,9 @@ impl Rel for SqlRel {
             Some(StrKind::Text) => {
                 let source = format!("SELECT {call} AS text FROM {} d{joins} WHERE d.w>0 AND {call} IS NOT NULL", c.d);
                 let next = self.push(old + 1, c.rec, |_| Some(format!(
-                    "SELECT {carried}, dict.id AS c{old}, d.w FROM {} d{joins} JOIN ivm_term_dict dict ON dict.text={call}", c.d,
+                    "SELECT {carried}, dict.id AS c{old}, d.w FROM {} d{joins} JOIN ivm_text dict ON dict.text={call}", c.d,
                 )));
-                self.nodes[next.node].fill.splice(0..0, [
-                    format!("WITH RECURSIVE parts(text) AS ({source} UNION SELECT ivm_str_rest_text(text) FROM parts WHERE text<>''), all_texts(text) AS (SELECT text FROM parts UNION SELECT ivm_str_head_text(text) FROM parts WHERE text<>'') INSERT INTO ivm_term_dict(functor,args,types,text) SELECT '@str',json_array(text),'[]',text FROM all_texts WHERE true ON CONFLICT DO NOTHING"),
-                    "UPDATE ivm_term_dict AS d SET head_id=(SELECT id FROM ivm_term_dict h WHERE h.text=ivm_str_head_text(d.text)), rest_id=(SELECT id FROM ivm_term_dict r WHERE r.text=ivm_str_rest_text(d.text)) WHERE d.text IS NOT NULL AND d.text<>'' AND d.head_id IS NULL".into(),
-                ]);
+                self.nodes[next.node].fill.splice(0..0, suffix_texts_sql(&source));
                 next
             }
             Some(StrKind::Int) => {

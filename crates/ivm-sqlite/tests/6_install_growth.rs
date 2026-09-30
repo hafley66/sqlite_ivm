@@ -151,7 +151,7 @@ fn pure_delta_chain_has_fixed_create_count() {
     let db = Connection::open_in_memory().unwrap();
     let (mut engine, creates) = counted_install(&program, &db);
     eprintln!("pure chain creates={creates}");
-    assert_eq!(creates, 20);
+    assert_eq!(creates, 21);
     let mut host = Raw::with_connection(&db);
     assert_eq!(engine.settle(Frontier { changes: vec![SourceChange { rel: 0, row: vec![2], w: 1 }] }, &mut host).unwrap().changes,
         vec![(1, vec![3], 1)]);
@@ -311,7 +311,7 @@ fn output_install_remaps_text_literals() {
     for (rel, text) in [(1, "first"), (2, "second")] {
         let id: i64 = db
             .query_row(
-                "SELECT id FROM ivm_term_dict WHERE text=?1",
+                "SELECT id FROM ivm_text WHERE text=?1",
                 [text],
                 |row| row.get(0),
             )
@@ -352,7 +352,7 @@ fn c15_shaped_ir_installs_one_shared_plan() {
         program.strata.len(),
         program.outputs.len()
     );
-    assert_eq!(creates, 5825);
+    assert_eq!(creates, 5826);
     assert!(
         objects < 8_000,
         "c15-shaped install created {objects} schema objects"

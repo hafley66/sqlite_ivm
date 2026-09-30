@@ -298,7 +298,7 @@ impl Engine for Sqlite {
 
     fn settle(&mut self, frontier: Frontier, host: &mut impl Host) -> Result<Delta, EngineError> {
         let db = conn(host, Stage::Settle)?;
-        let before: i64 = db.query_row("SELECT count(*) FROM ivm_term_dict", [], |r| r.get(0))
+        let before: i64 = db.query_row("SELECT count(*) FROM ivm_term", [], |r| r.get(0))
             .map_err(|e| error(Stage::Settle, e))?;
         let mut counters = Counters::measured();
         *counters.statements.as_mut().unwrap() += 1;
@@ -389,7 +389,7 @@ impl Engine for Sqlite {
                 let mut used = batch.iter().filter(|change| output.program.inner.plan.sources.contains(&change.relation)).cloned().collect::<Vec<_>>();
                 let mut terms = if output.members.is_empty() { 0 } else {
                     *counters.statements.as_mut().unwrap() += 1;
-                    db.query_row("SELECT count(*) FROM ivm_term_dict", [], |r| r.get::<_, i64>(0))
+                    db.query_row("SELECT count(*) FROM ivm_term", [], |r| r.get::<_, i64>(0))
                         .map_err(|e| error(Stage::Settle, e))?
                 };
                 // Later strata and recursive rounds can mint rows after an earlier
@@ -450,7 +450,7 @@ impl Engine for Sqlite {
                     }
                     if output.members.is_empty() { break; }
                     *counters.statements.as_mut().unwrap() += 1;
-                    let after: i64 = db.query_row("SELECT count(*) FROM ivm_term_dict", [], |r| r.get(0))
+                    let after: i64 = db.query_row("SELECT count(*) FROM ivm_term", [], |r| r.get(0))
                         .map_err(|e| error(Stage::Settle, e))?;
                     if after == terms { break; }
                     if pass == 8192 {
@@ -477,7 +477,7 @@ impl Engine for Sqlite {
         };
         match run() {
             Ok(changes) => {
-                let after: i64 = match db.query_row("SELECT count(*) FROM ivm_term_dict", [], |r| r.get(0)) {
+                let after: i64 = match db.query_row("SELECT count(*) FROM ivm_term", [], |r| r.get(0)) {
                     Ok(after) => after,
                     Err(e) => {
                         let _ = db.execute_batch("ROLLBACK TO ivm_engine_frontier; RELEASE ivm_engine_frontier;");

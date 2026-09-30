@@ -7,20 +7,27 @@ pub(crate) fn ctor_table(name: &str) -> String {
     format!("ivm_ctor_{hex}")
 }
 
+/// Functor-dictionary name of string terms. String ids live in `ivm_term` and `ivm_text`.
+pub(crate) const STR_FUNCTOR: &str = "@str";
+
+/// `ivm_functor_col.ty` code of a column type.
+fn ty_code(ty: Ty) -> i64 { ty as u8 as i64 }
+
+fn ty_from_code(code: i64) -> rusqlite::Result<Ty> {
+    [Ty::Int, Ty::Id, Ty::Text, Ty::Real, Ty::Any].into_iter().find(|ty| ty_code(*ty) == code).ok_or(rusqlite::Error::InvalidQuery)
+}
+
+fn functor_id(db: &Connection, name: &str) -> rusqlite::Result<i64> {
+    db.execute("INSERT INTO ivm_functor(name) VALUES (?1) ON CONFLICT(name) DO NOTHING", [name])?;
+    db.query_row("SELECT id FROM ivm_functor WHERE name=?1", [name], |r| r.get(0))
+}
+
 pub(crate) fn install(db: &Connection, ir: &Program) -> rusqlite::Result<()> {
-    db.execute_batch("CREATE TABLE IF NOT EXISTS ivm_term_dict(\
-        id INTEGER PRIMARY KEY AUTOINCREMENT, functor TEXT NOT NULL, args TEXT NOT NULL, types TEXT NOT NULL,\
-        text TEXT, head_id INTEGER, rest_id INTEGER,\
-        UNIQUE(functor,args));\
-        CREATE TABLE IF NOT EXISTS ivm_term_functors(name TEXT PRIMARY KEY, types TEXT NOT NULL);")?;
-    let columns: Vec<String> = db.prepare("PRAGMA table_info(ivm_term_dict)")?
-        .query_map([], |r| r.get(1))?.collect::<rusqlite::Result<_>>()?;
-    for column in ["text", "head_id", "rest_id"] {
-        if !columns.iter().any(|existing| existing == column) {
-            db.execute_batch(&format!("ALTER TABLE ivm_term_dict ADD COLUMN {column} {}", if column == "text" { "TEXT" } else { "INTEGER" }))?;
-        }
-    }
-    db.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS ivm_term_text_unique ON ivm_term_dict(text)")?;
+    db.execute_batch("CREATE TABLE IF NOT EXISTS ivm_functor(id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);\
+        CREATE TABLE IF NOT EXISTS ivm_functor_col(functor_id INTEGER NOT NULL, pos INTEGER NOT NULL, ty INTEGER NOT NULL, PRIMARY KEY(functor_id,pos)) WITHOUT ROWID;\
+        CREATE TABLE IF NOT EXISTS ivm_term(id INTEGER PRIMARY KEY, functor_id INTEGER NOT NULL);\
+        CREATE TABLE IF NOT EXISTS ivm_text(id INTEGER PRIMARY KEY, text TEXT NOT NULL UNIQUE);")?;
+    functor_id(db, STR_FUNCTOR)?;
     db.execute_batch("CREATE TABLE IF NOT EXISTS ivm_cell_dict(id INTEGER PRIMARY KEY, class INTEGER NOT NULL, payload INTEGER NOT NULL, UNIQUE(class,payload))")?;
     db.execute_batch("CREATE TABLE IF NOT EXISTS ivm_blob_dict(id INTEGER PRIMARY KEY AUTOINCREMENT, bytes BLOB NOT NULL UNIQUE)")?;
     if ir.uses_strings() {
@@ -31,14 +38,21 @@ pub(crate) fn install(db: &Connection, ir: &Program) -> rusqlite::Result<()> {
         if rel.name.is_empty() || rel.cols.first() != Some(&Ty::Id) {
             return Err(rusqlite::Error::InvalidQuery);
         }
-        let types = serde_json::to_string(&rel.cols[1..]).map_err(|_| rusqlite::Error::InvalidQuery)?;
-        db.execute("INSERT INTO ivm_term_functors(name,types) VALUES (?1,?2) ON CONFLICT(name) DO NOTHING", (&rel.name, &types))?;
-        let stored: String = db.query_row("SELECT types FROM ivm_term_functors WHERE name=?1", [&rel.name], |r| r.get(0))?;
-        if stored != types { return Err(rusqlite::Error::InvalidQuery); }
+        let fid = functor_id(db, &rel.name)?;
+        let stored: Vec<(i64, i64)> = db.prepare("SELECT pos,ty FROM ivm_functor_col WHERE functor_id=?1 ORDER BY pos")?
+            .query_map([fid], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+        let declared: Vec<(i64, i64)> = rel.cols[1..].iter().enumerate().map(|(i, ty)| (i as i64 + 1, ty_code(*ty))).collect();
+        if stored.is_empty() {
+            for (pos, ty) in &declared {
+                db.execute("INSERT INTO ivm_functor_col(functor_id,pos,ty) VALUES (?1,?2,?3)", (fid, pos, ty))?;
+            }
+        } else if stored != declared { return Err(rusqlite::Error::InvalidQuery); }
         let table = crate::catalog::quote(ctor_table(&rel.name));
         let fields = (1..rel.cols.len()).map(|i| format!("c{i} INTEGER NOT NULL")).collect::<Vec<_>>();
-        db.execute_batch(&format!("CREATE TABLE IF NOT EXISTS {table}(c0 INTEGER PRIMARY KEY{});",
-            if fields.is_empty() { String::new() } else { format!(",{}", fields.join(",")) }))?;
+        let unique = (1..rel.cols.len()).map(|i| format!("c{i}")).collect::<Vec<_>>();
+        db.execute_batch(&format!("CREATE TABLE IF NOT EXISTS {table}(c0 INTEGER PRIMARY KEY{}{});",
+            if fields.is_empty() { String::new() } else { format!(",{}", fields.join(",")) },
+            if unique.is_empty() { String::new() } else { format!(",UNIQUE({})", unique.join(",")) }))?;
     }
     register(db)
 }
@@ -125,14 +139,6 @@ pub(crate) fn register(db: &Connection) -> rusqlite::Result<()> {
             None => Value::Null,
         })
     })?;
-    db.create_scalar_function("ivm_str_head", 1, FunctionFlags::SQLITE_UTF8, |ctx| {
-        let db = unsafe { ctx.get_connection()? };
-        db.query_row("SELECT head_id FROM ivm_term_dict WHERE id=?1 AND text<>''", [ctx.get::<i64>(0)?], |r| r.get::<_, i64>(0)).optional()
-    })?;
-    db.create_scalar_function("ivm_str_rest", 1, FunctionFlags::SQLITE_UTF8, |ctx| {
-        let db = unsafe { ctx.get_connection()? };
-        db.query_row("SELECT rest_id FROM ivm_term_dict WHERE id=?1 AND text<>''", [ctx.get::<i64>(0)?], |r| r.get::<_, i64>(0)).optional()
-    })?;
     db.create_scalar_function("ivm_str_head_text", 1, FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC, |ctx| {
         let value: String = ctx.get(0)?;
         Ok(value.chars().next().map(|c| c.to_string()))
@@ -216,40 +222,54 @@ fn decode_any(db: &Connection, id: i64) -> rusqlite::Result<Value> {
 }
 
 pub(crate) fn text_id(db: &Connection, value: &str) -> rusqlite::Result<Option<i64>> {
-    db.query_row("SELECT id FROM ivm_term_dict WHERE text=?1", [value], |r| r.get(0)).optional()
+    db.query_row("SELECT id FROM ivm_text WHERE text=?1", [value], |r| r.get(0)).optional()
 }
 
 pub(crate) fn text(db: &Connection, id: i64) -> rusqlite::Result<Option<String>> {
-    db.query_row("SELECT text FROM ivm_term_dict WHERE id=?1 AND text IS NOT NULL", [id], |r| r.get(0)).optional()
+    db.query_row("SELECT text FROM ivm_text WHERE id=?1", [id], |r| r.get(0)).optional()
+}
+
+/// SQL pair that mints every `text` of `source` (a query yielding column `text`) missing from
+/// `ivm_text`: ids are allocated above the current `ivm_term` maximum, then the new ids get their
+/// `ivm_term` rows. `source` is a CTE-free select; `with` is an optional `WITH ...` prefix.
+pub(crate) fn mint_texts_sql(with: &str, source: &str) -> [String; 2] {
+    [
+        format!("{with} INSERT INTO ivm_text(id,text) SELECT (SELECT coalesce(max(id),0) FROM ivm_term)+row_number() OVER (ORDER BY text), text FROM (SELECT DISTINCT text FROM ({source}) WHERE text NOT IN (SELECT text FROM ivm_text))"),
+        format!("INSERT INTO ivm_term(id,functor_id) SELECT id, (SELECT id FROM ivm_functor WHERE name='{STR_FUNCTOR}') FROM ivm_text WHERE id>(SELECT coalesce(max(id),0) FROM ivm_term)"),
+    ]
 }
 
 pub(crate) fn intern_text(db: &Connection, value: &str) -> rusqlite::Result<i64> {
     if let Some(id) = text_id(db, value)? { return Ok(id); }
-    let split = if let Some(first) = value.chars().next() {
+    if let Some(first) = value.chars().next() {
         let (head, rest) = value.split_at(first.len_utf8());
-        let rest_id = intern_text(db, rest)?;
-        Some((if rest.is_empty() { None } else { Some(intern_text(db, head)?) }, rest_id))
-    } else { None };
-    db.execute("INSERT INTO ivm_term_dict(functor,args,types,text) VALUES ('@str',json_array(?1),'[]',?1) ON CONFLICT DO NOTHING", [value])?;
-    let id = text_id(db, value)?.ok_or(rusqlite::Error::InvalidQuery)?;
-    if let Some((head, rest)) = split {
-        db.execute("UPDATE ivm_term_dict SET head_id=?1,rest_id=?2 WHERE id=?3", (head.unwrap_or(id), rest, id))?;
+        intern_text(db, rest)?;
+        if !rest.is_empty() { intern_text(db, head)?; }
     }
+    let id: i64 = db.query_row(
+        "INSERT INTO ivm_term(id,functor_id) SELECT coalesce(max(id),0)+1, (SELECT id FROM ivm_functor WHERE name=?1) FROM ivm_term RETURNING id",
+        [STR_FUNCTOR], |r| r.get(0))?;
+    db.execute("INSERT INTO ivm_text(id,text) VALUES (?1,?2)", (id, value))?;
     Ok(id)
 }
 
 fn lookup(db: &Connection, id: i64) -> rusqlite::Result<Option<Term>> {
-    let row: Option<(String, String, String, Option<String>, Option<i64>, Option<i64>)> = db.query_row(
-        "SELECT functor,args,types,text,head_id,rest_id FROM ivm_term_dict WHERE id=?1", [id],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
-    ).optional()?;
-    row.map(|(functor, args, types, text, head, rest)| Ok(Term {
-        functor,
-        args: if text.is_some() { vec![] } else { serde_json::from_str(&args).map_err(|_| rusqlite::Error::InvalidQuery)? },
-        types: if text.is_some() { vec![] } else { serde_json::from_str(&types).map_err(|_| rusqlite::Error::InvalidQuery)? },
-        text,
-        split: head.zip(rest),
-    })).transpose()
+    let row: Option<(i64, String, Option<String>)> = db.prepare_cached(
+        "SELECT f.id,f.name,x.text FROM ivm_term t JOIN ivm_functor f ON f.id=t.functor_id LEFT JOIN ivm_text x ON x.id=t.id WHERE t.id=?1")?
+        .query_row([id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
+    let Some((fid, functor, text)) = row else { return Ok(None); };
+    if text.is_some() {
+        return Ok(Some(Term { functor: String::new(), args: vec![], types: vec![], text, split: None }));
+    }
+    let types: Vec<Ty> = db.prepare_cached("SELECT ty FROM ivm_functor_col WHERE functor_id=?1 ORDER BY pos")?
+        .query_map([fid], |r| r.get::<_, i64>(0))?.map(|code| ty_from_code(code?)).collect::<rusqlite::Result<_>>()?;
+    let args: Row = if types.is_empty() { vec![] } else {
+        let table = crate::catalog::quote(ctor_table(&functor));
+        let columns = (1..=types.len()).map(|i| format!("c{i}")).collect::<Vec<_>>().join(",");
+        db.prepare_cached(&format!("SELECT {columns} FROM {table} WHERE c0=?1"))?
+            .query_row([id], |r| (0..types.len()).map(|i| r.get(i)).collect::<rusqlite::Result<Row>>())?
+    };
+    Ok(Some(Term { functor, args, types, text: None, split: None }))
 }
 
 pub(crate) fn snapshot(db: &Connection, ir: &Program, functor: RelId) -> rusqlite::Result<Vec<(Row, W)>> {
