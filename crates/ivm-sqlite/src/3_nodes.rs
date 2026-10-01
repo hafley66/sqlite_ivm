@@ -17,9 +17,19 @@ fn decl(arity: usize) -> String {
 const I64_MIN: &str = "(-9223372036854775807 - 1)";
 const I64_MAX: &str = "9223372036854775807";
 
+/// Equality of two typed cells. Id and Text cells are hash-consed (`UNIQUE` constructor arguments,
+/// `UNIQUE` text), so equal terms have equal ids and the plain integer `=` holds; the planner can then
+/// probe the key index. Other pairs compare their ordered values. `op` is `=` or `<>`.
+fn equal(op: &str, lt: Ty, left: String, rt: Ty, right: String) -> String {
+    match (lt, rt) {
+        (Ty::Id, Ty::Id) | (Ty::Text, Ty::Text) | (Ty::Int, Ty::Int) => format!("{left} {op} {right}"),
+        _ => format!("{} {op} {}", ordered(lt, left), ordered(rt, right)),
+    }
+}
+
 fn ordered(ty: Ty, value: String) -> String {
     match ty {
-        Ty::Id => format!("ivm_term_key({value})"),
+        Ty::Id => crate::terms::sort_key_sql(&value),
         Ty::Text => format!("ivm_text_value({value})"),
         Ty::Real => format!("ivm_real_value({value})"),
         Ty::Any => format!("ivm_any_value({value})"),
@@ -122,6 +132,9 @@ pub struct SqlRel {
     terms: Vec<(usize, Vec<String>)>,
     constructors: std::collections::BTreeMap<RelId, (String, Vec<Ty>)>,
     texts: Vec<String>,
+    /// Join SQL node per (left node, right node, predicates): rules that join the same inputs on the
+    /// same keys share one plan node.
+    joins: std::collections::HashMap<(usize, usize, Vec<String>), SqlC>,
 }
 
 fn list(alias: &str, cols: impl IntoIterator<Item = usize>) -> String {
@@ -171,14 +184,15 @@ fn render(e: &Expr, arity: usize, maps: &[String], texts: &[String], types: &[Ty
                 let arg = args.get(i).ok_or_else(|| unsupported("Func arity"))?;
                 render(arg, arity, maps, texts, types)
             };
+            let ty = |i: usize| expr_type(&args[i], types).ok_or_else(|| unsupported("expression type"));
             let bin = |op: &str| -> Result<String, EngineError> {
-                let left = ordered(expr_type(&args[0], types).ok_or_else(|| unsupported("expression type"))?, a(0)?);
-                let right = ordered(expr_type(&args[1], types).ok_or_else(|| unsupported("expression type"))?, a(1)?);
+                let left = ordered(ty(0)?, a(0)?);
+                let right = ordered(ty(1)?, a(1)?);
                 Ok(format!("({left} {op} {right})"))
             };
             match func {
-                Func::Eq => bin("=")?,
-                Func::Ne => bin("<>")?,
+                Func::Eq => format!("({})", equal("=", ty(0)?, a(0)?, ty(1)?, a(1)?)),
+                Func::Ne => format!("({})", equal("<>", ty(0)?, a(0)?, ty(1)?, a(1)?)),
                 Func::Lt => bin("<")?,
                 Func::Le => bin("<=")?,
                 Func::Gt => bin(">")?,
@@ -268,6 +282,7 @@ impl SqlRel {
             constructors: p.rels.iter().filter(|r| r.kind == RelKind::Constructor)
                 .map(|r| (r.id, (r.name.clone(), r.cols.iter().skip(1).copied().collect()))).collect(),
             texts: p.texts.clone(),
+            joins: std::collections::HashMap::new(),
         };
         for r in p.rels.iter().filter(|r| r.kind == RelKind::Source) {
             let c = rel.push(r.cols.len(), false, |_| None);
@@ -377,7 +392,7 @@ impl SqlRel {
 
 /// Fill statements that mint every suffix and head character of the strings from `source`
 /// (a select yielding column `text`) into `ivm_text`/`ivm_term`.
-fn suffix_texts_sql(source: &str) -> [String; 2] {
+fn suffix_texts_sql(source: &str) -> [String; 3] {
     crate::terms::mint_texts_sql(
         &format!("WITH RECURSIVE parts(text) AS ({source} UNION SELECT ivm_str_rest_text(text) FROM parts WHERE text<>''), all_texts(text) AS (SELECT text FROM parts UNION SELECT ivm_str_head_text(text) FROM parts WHERE text<>'')"),
         "SELECT text FROM all_texts",
@@ -440,7 +455,8 @@ impl Rel for SqlRel {
         let insert_term = format!(
             "INSERT INTO ivm_term(id,functor_id) SELECT c0, {fid} FROM {ctor} WHERE c0>(SELECT coalesce(max(id),0) FROM ivm_term)",
         );
-        self.nodes[next.node].fill.splice(0..0, [insert_ctor, insert_term]);
+        let insert_keys = crate::terms::ctor_keys_sql(&name, &types);
+        self.nodes[next.node].fill.splice(0..0, [insert_ctor, insert_term, insert_keys]);
         Ok(next)
     }
 
@@ -620,11 +636,13 @@ impl Rel for SqlRel {
                 .ok_or_else(|| unsupported("Join class missing a side"))
         };
         let (lk, rk) = (side(0)?, side(1)?);
-        let predicates = lk.iter().zip(&rk).map(|(l, r)| {
-            let left = ordered(types[0][*l], format!("{{la}}.c{l}"));
-            let right = ordered(types[1][*r], format!("{{ra}}.c{r}"));
-            format!("{left} = {right}")
-        }).collect::<Vec<_>>();
+        let predicates = lk.iter().zip(&rk)
+            .map(|(l, r)| equal("=", types[0][*l], format!("{{la}}.c{l}"), types[1][*r], format!("{{ra}}.c{r}")))
+            .collect::<Vec<_>>();
+        let shared = (a.node, b.node, predicates.clone());
+        if let Some(out) = self.joins.get(&shared) {
+            return Ok(out.clone());
+        }
         self.integrate(&a, lk.clone());
         self.integrate(&b, rk.clone());
         let term = |l: &str, r: &str, l_first: bool| {
@@ -665,6 +683,7 @@ impl Rel for SqlRel {
                 .collect();
             self.terms.push((out.node, terms));
         }
+        self.joins.insert(shared, out.clone());
         Ok(out)
     }
 
@@ -1564,8 +1583,9 @@ impl NodesPlan {
         for (_, table, _, _) in &mut self.work { fix(table); }
     }
 
+    /// One settle statement under its own `stmt` span (object: the table it writes).
     fn exec(db: &Connection, sql: &str, counters: &mut Counters) -> rusqlite::Result<usize> {
-        let result = db.prepare_cached(sql)?.execute([])?;
+        let result = sqlite_ext::statements::exec_cached(db, "settle", object_of(sql), sql, [])?;
         *counters.statements.as_mut().unwrap() += 1;
         Ok(result)
     }
@@ -1600,6 +1620,7 @@ impl NodesPlan {
     }
 
     fn round(&self, db: &Connection, scc_id: usize, deleting: bool, counters: &mut Counters) -> rusqlite::Result<bool> {
+        let _round = tracing::debug_span!(target: crate::observe::TARGET, "frontier_round", scc = scc_id, deleting).entered();
         let scc = &self.sccs[scc_id];
         let phase_fills = if deleting { &scc.delete_fills } else { &scc.insert_fills };
         Self::exec_all(db, phase_fills.iter().chain(&scc.integrates), counters)?;
@@ -1619,9 +1640,7 @@ impl NodesPlan {
                 Self::exec(db, &v.to_del, counters)?;
             }
             Self::exec(db, &v.clear_nx, counters)?;
-            more |= db
-                .prepare_cached(&v.any)?
-                .query_row([], |r| r.get::<_, bool>(0))?;
+            more |= sqlite_ext::statements::query_cached(db, "settle", object_of(&v.any), &v.any, [], |r| r.get::<_, bool>(0))?;
             *counters.statements.as_mut().unwrap() += 1;
         }
         if more { *counters.rounds.as_mut().unwrap() += 1; }
@@ -1629,10 +1648,15 @@ impl NodesPlan {
     }
 
     fn fixpoint(&self, db: &Connection, scc_id: usize, counters: &mut Counters) -> rusqlite::Result<Vec<bool>> {
+        let span = tracing::debug_span!(target: crate::observe::TARGET, "frontier_fixpoint", scc = scc_id,
+            delete_rounds = tracing::field::Empty, insert_rounds = tracing::field::Empty);
+        let _fixpoint = span.enter();
         let scc = &self.sccs[scc_id];
         Self::exec_all(db, &scc.stash, counters)?;
         Self::exec_all(db, &scc.delete_seeds, counters)?;
-        while self.round(db, scc_id, true, counters)? {}
+        let mut rounds = 1u64;
+        while self.round(db, scc_id, true, counters)? { rounds += 1; }
+        span.record("delete_rounds", rounds);
         for v in &scc.vars {
             Self::exec_all(
                 db,
@@ -1648,7 +1672,9 @@ impl NodesPlan {
         }
         Self::exec_all(db, &scc.restore, counters)?;
         Self::exec_all(db, &scc.insert_seeds, counters)?;
-        while self.round(db, scc_id, false, counters)? {}
+        let mut rounds = 1u64;
+        while self.round(db, scc_id, false, counters)? { rounds += 1; }
+        span.record("insert_rounds", rounds);
         let mut results = Vec::with_capacity(scc.vars.len());
         for v in &scc.vars {
             results.push(Self::exec(db, &v.finish, counters)? > 0);
@@ -1689,6 +1715,8 @@ impl NodesPlan {
             }
         }
         self.count_work(db, Owner::Settle, Some(&active), counters)?;
+        let statement = sqlite_ext::statements::open("settle", "output", &self.output_delta, sqlite_ext::statements::CACHED);
+        let _statement = statement.enter();
         let mut stmt = db.prepare_cached(&self.output_delta)?;
         let changes = stmt
             .query_map([], |r| {
@@ -1700,6 +1728,8 @@ impl NodesPlan {
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
+        statement.rows(changes.len());
+        drop(_statement);
         *counters.statements.as_mut().unwrap() += 1;
         for (sql, reads) in self.integrates.iter().zip(&self.integrate_reads) {
             if reads.is_empty() || reads.iter().any(|id| active.get(*id) == Some(&true)) {
@@ -1713,6 +1743,15 @@ impl NodesPlan {
         }
         Ok(changes)
     }
+}
+
+/// Table a settle statement writes (`INSERT INTO t`, `DELETE FROM t`) or reads (`FROM t`), for its span.
+fn object_of(sql: &str) -> &str {
+    let tail = sql.rsplit_once("INSERT INTO ")
+        .or_else(|| sql.split_once("DELETE FROM "))
+        .or_else(|| sql.split_once("FROM "))
+        .map_or("", |(_, tail)| tail);
+    tail.split(|c: char| !c.is_ascii_alphanumeric() && c != '_').next().unwrap_or("")
 }
 
 fn ddl_object(sql: &str) -> Option<(String, String)> {

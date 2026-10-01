@@ -69,3 +69,77 @@ fn k1_sqlite_no_scan_of_integrated_tables() {
     }
     assert!(scans.is_empty(), "{} scans:\n{}", scans.len(), scans.join("\n"));
 }
+
+/// Hot shape from the dl8 compiler: two `Ty::Id` relations joined on an Id column, then an Id
+/// equality filter. Ids are hash-consed, so the join and the filter are integer `=` that probe the
+/// integrated key index; no dictionary function appears in any predicate.
+#[test]
+fn id_join_probes_the_key_index_without_dictionary_functions() {
+    let program: Program = serde_json::from_str(r#"{
+        "rels": [
+            {"id": 0, "name": "edge", "cols": ["Id", "Id"], "kind": "Source"},
+            {"id": 1, "name": "label", "cols": ["Id", "Text"], "kind": "Source"},
+            {"id": 2, "name": "out", "cols": ["Id", "Id", "Text"], "kind": "Derived"}
+        ],
+        "nodes": [
+            {"Get": 0},
+            {"Get": 1},
+            {"Join": {"inputs": [0, 1], "equivalences": [[[0, 1], [1, 0]]]}},
+            {"Mfp": {"input": 2, "filter": [{"Call": ["Ne", [{"Col": 0}, {"Col": 1}]]}], "project": [0, 1, 3]}}
+        ],
+        "strata": [{"Let": {"id": 2, "body": 3}}],
+        "outputs": [2]
+    }"#).unwrap();
+    let db = Connection::open_in_memory().unwrap();
+    let sql = Sqlite::install(&program, &mut Raw::with_connection(&db)).unwrap();
+    let statements = sql.statements();
+    let udf = statements.iter().filter(|s| ["ivm_term_key(", "ivm_text_value(", "ivm_any_value("].iter().any(|f| s.contains(f))).count();
+    let join = statements.iter().find(|s| s.contains("CROSS JOIN") && s.contains("l_i") && s.contains("r_d")).unwrap();
+    let mut eqp = db.prepare(&format!("EXPLAIN QUERY PLAN {join}")).unwrap();
+    let plan: Vec<String> = eqp.query_map([], |r| r.get::<_, String>(3)).unwrap().map(Result::unwrap)
+        .filter(|detail| detail.contains("_i "))
+        .collect();
+    assert_eq!((udf, plan), (0, vec![
+        "SEARCH l_i USING INDEX frontier_out_n0_x1 (c1=?)".to_owned(),
+        "SEARCH r_i USING PRIMARY KEY (c0=?)".to_owned(),
+    ]));
+}
+
+/// Two rules that join the same inputs on the same keys share one join plan node: one join fill
+/// statement, and the union of both rules still counts each joined row twice, as DD does.
+#[test]
+fn identical_joins_share_one_plan_node() {
+    let program: Program = serde_json::from_str(r#"{
+        "rels": [
+            {"id": 0, "name": "edge", "cols": ["Id", "Id"], "kind": "Source"},
+            {"id": 1, "name": "label", "cols": ["Id", "Int"], "kind": "Source"},
+            {"id": 2, "name": "out", "cols": ["Id", "Int"], "kind": "Derived"}
+        ],
+        "nodes": [
+            {"Get": 0},
+            {"Get": 1},
+            {"Join": {"inputs": [0, 1], "equivalences": [[[0, 1], [1, 0]]]}},
+            {"Join": {"inputs": [0, 1], "equivalences": [[[0, 1], [1, 0]]]}},
+            {"Mfp": {"input": 2, "project": [0, 3]}},
+            {"Mfp": {"input": 3, "project": [0, 3]}},
+            {"Union": [4, 5]}
+        ],
+        "strata": [{"Let": {"id": 2, "body": 6}}],
+        "outputs": [2]
+    }"#).unwrap();
+    let load = vec![
+        SourceChange { rel: 0, row: vec![1, 2], w: 1 },
+        SourceChange { rel: 0, row: vec![3, 2], w: 1 },
+        SourceChange { rel: 1, row: vec![2, 7], w: 1 },
+    ];
+    let db = Connection::open_in_memory().unwrap();
+    let mut sql = Sqlite::install(&program, &mut Raw::with_connection(&db)).unwrap();
+    let joins = sql.statements().iter().filter(|s| s.contains("CROSS JOIN") && s.contains("r_d")).count();
+    let mut rows = sql.settle(Frontier { changes: load.clone() }, &mut Raw::with_connection(&db)).unwrap().changes;
+    rows.sort();
+    let dd_db = Connection::open_in_memory().unwrap();
+    let mut dd = ivm_dd::Dd::install(&program).unwrap();
+    let mut expected = dd.settle(Frontier { changes: load }, &mut Raw::with_connection(&dd_db)).unwrap().changes;
+    expected.sort();
+    assert_eq!((joins, &rows), (1, &expected));
+}
