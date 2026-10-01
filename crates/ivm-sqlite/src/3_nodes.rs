@@ -17,6 +17,16 @@ fn decl(arity: usize) -> String {
 const I64_MIN: &str = "(-9223372036854775807 - 1)";
 const I64_MAX: &str = "9223372036854775807";
 
+/// Equality of two typed cells. Id and Text cells are hash-consed (`UNIQUE` constructor arguments,
+/// `UNIQUE` text), so equal terms have equal ids and the plain integer `=` holds; the planner can then
+/// probe the key index. Other pairs compare their ordered values. `op` is `=` or `<>`.
+fn equal(op: &str, lt: Ty, left: String, rt: Ty, right: String) -> String {
+    match (lt, rt) {
+        (Ty::Id, Ty::Id) | (Ty::Text, Ty::Text) | (Ty::Int, Ty::Int) => format!("{left} {op} {right}"),
+        _ => format!("{} {op} {}", ordered(lt, left), ordered(rt, right)),
+    }
+}
+
 fn ordered(ty: Ty, value: String) -> String {
     match ty {
         Ty::Id => format!("ivm_term_key({value})"),
@@ -171,14 +181,15 @@ fn render(e: &Expr, arity: usize, maps: &[String], texts: &[String], types: &[Ty
                 let arg = args.get(i).ok_or_else(|| unsupported("Func arity"))?;
                 render(arg, arity, maps, texts, types)
             };
+            let ty = |i: usize| expr_type(&args[i], types).ok_or_else(|| unsupported("expression type"));
             let bin = |op: &str| -> Result<String, EngineError> {
-                let left = ordered(expr_type(&args[0], types).ok_or_else(|| unsupported("expression type"))?, a(0)?);
-                let right = ordered(expr_type(&args[1], types).ok_or_else(|| unsupported("expression type"))?, a(1)?);
+                let left = ordered(ty(0)?, a(0)?);
+                let right = ordered(ty(1)?, a(1)?);
                 Ok(format!("({left} {op} {right})"))
             };
             match func {
-                Func::Eq => bin("=")?,
-                Func::Ne => bin("<>")?,
+                Func::Eq => format!("({})", equal("=", ty(0)?, a(0)?, ty(1)?, a(1)?)),
+                Func::Ne => format!("({})", equal("<>", ty(0)?, a(0)?, ty(1)?, a(1)?)),
                 Func::Lt => bin("<")?,
                 Func::Le => bin("<=")?,
                 Func::Gt => bin(">")?,
@@ -620,11 +631,9 @@ impl Rel for SqlRel {
                 .ok_or_else(|| unsupported("Join class missing a side"))
         };
         let (lk, rk) = (side(0)?, side(1)?);
-        let predicates = lk.iter().zip(&rk).map(|(l, r)| {
-            let left = ordered(types[0][*l], format!("{{la}}.c{l}"));
-            let right = ordered(types[1][*r], format!("{{ra}}.c{r}"));
-            format!("{left} = {right}")
-        }).collect::<Vec<_>>();
+        let predicates = lk.iter().zip(&rk)
+            .map(|(l, r)| equal("=", types[0][*l], format!("{{la}}.c{l}"), types[1][*r], format!("{{ra}}.c{r}")))
+            .collect::<Vec<_>>();
         self.integrate(&a, lk.clone());
         self.integrate(&b, rk.clone());
         let term = |l: &str, r: &str, l_first: bool| {
