@@ -125,8 +125,11 @@ pub(crate) fn settle_counted(
         target: observe::TARGET,
         observe::SETTLE_SPAN,
         program = %inst.name,
+        udf_calls = tracing::field::Empty,
+        term_lookups = tracing::field::Empty,
     );
     let _guard = span.enter();
+    let _dictionary = crate::terms::DictCounts::start(&span);
     let mut counters = if matches!(inst.plan.root, crate::plan::Root::Nodes(_)) {
         Counters::measured()
     } else {

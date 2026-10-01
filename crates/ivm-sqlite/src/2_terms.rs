@@ -3,6 +3,33 @@ use sqlite_ext::rusqlite::{self, Connection, OptionalExtension, functions::{Cont
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+
+/// Process-wide counts of dictionary work: calls of the dictionary UDFs, and term or key lookups
+/// (UDF reads and install backfill). `DictCounts` records their growth on the settle span.
+static UDF_CALLS: AtomicU64 = AtomicU64::new(0);
+static TERM_LOOKUPS: AtomicU64 = AtomicU64::new(0);
+
+/// Records the dictionary work done while it lives as `udf_calls`/`term_lookups` on `span`.
+/// Counts are process-wide, so concurrent settles on other connections add to them.
+pub(crate) struct DictCounts {
+    span: tracing::Span,
+    calls: u64,
+    lookups: u64,
+}
+
+impl DictCounts {
+    pub(crate) fn start(span: &tracing::Span) -> Self {
+        Self { span: span.clone(), calls: UDF_CALLS.load(Relaxed), lookups: TERM_LOOKUPS.load(Relaxed) }
+    }
+}
+
+impl Drop for DictCounts {
+    fn drop(&mut self) {
+        self.span.record("udf_calls", UDF_CALLS.load(Relaxed) - self.calls);
+        self.span.record("term_lookups", TERM_LOOKUPS.load(Relaxed) - self.lookups);
+    }
+}
 
 pub(crate) fn ctor_table(name: &str) -> String {
     let hex: String = name.as_bytes().iter().map(|b| format!("{b:02x}")).collect();
@@ -85,6 +112,7 @@ fn fill_keys(db: &Connection) -> rusqlite::Result<()> {
 
 /// Stored sort key of `id`; ids that are not dictionary terms are atoms.
 fn stored_key(db: &Connection, id: i64) -> rusqlite::Result<Vec<u8>> {
+    TERM_LOOKUPS.fetch_add(1, Relaxed);
     let key: Option<Vec<u8>> = db.prepare_cached("SELECT key FROM ivm_term_sortkey WHERE id=?1")?
         .query_row([id], |r| r.get(0)).optional()?;
     Ok(key.unwrap_or_else(|| ivm_ir::atom_key(id)))
@@ -129,6 +157,16 @@ const DICT_AUX: std::os::raw::c_int = -0x4956;
 struct Dict {
     db: Connection,
     ctors: Ctors,
+    calls: u64,
+    lookups: u64,
+}
+
+impl Drop for Dict {
+    /// One event per statement run that used the dictionary, under that statement's span.
+    fn drop(&mut self) {
+        tracing::debug!(target: crate::observe::TARGET, udf_calls = self.calls,
+            term_lookups = TERM_LOOKUPS.load(Relaxed) - self.lookups, "dictionary_run");
+    }
 }
 
 /// Functor id -> (row select of its constructor table, argument types).
@@ -140,10 +178,12 @@ fn with_dict<T>(ctx: &Context<'_>, f: impl FnOnce(&mut Dict) -> rusqlite::Result
         None => {
             // SAFETY: the view never closes the handle and is dropped with the statement's aux data.
             let db = unsafe { Connection::from_handle(ctx.get_connection()?.handle())? };
-            ctx.set_aux(DICT_AUX, Mutex::new(Dict { db, ctors: Ctors::new() }))?
+            ctx.set_aux(DICT_AUX, Mutex::new(Dict { db, ctors: Ctors::new(), calls: 0, lookups: TERM_LOOKUPS.load(Relaxed) }))?
         }
     };
     let mut dict: std::sync::MutexGuard<'_, Dict> = dict.lock().map_err(|_| rusqlite::Error::InvalidQuery)?;
+    UDF_CALLS.fetch_add(1, Relaxed);
+    dict.calls += 1;
     f(&mut dict)
 }
 
@@ -360,6 +400,7 @@ pub(crate) fn intern_text(db: &Connection, value: &str) -> rusqlite::Result<i64>
 /// One term by id. `ctors` memoizes each functor's row select and types, so the constructor-table
 /// name is formatted once per functor per cache.
 fn lookup(db: &Connection, ctors: &mut Ctors, id: i64) -> rusqlite::Result<Option<Term>> {
+    TERM_LOOKUPS.fetch_add(1, Relaxed);
     let row: Option<(i64, String, Option<String>)> = db.prepare_cached(
         "SELECT f.id,f.name,x.text FROM ivm_term t JOIN ivm_functor f ON f.id=t.functor_id LEFT JOIN ivm_text x ON x.id=t.id WHERE t.id=?1")?
         .query_row([id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
