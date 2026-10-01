@@ -29,7 +29,7 @@ fn equal(op: &str, lt: Ty, left: String, rt: Ty, right: String) -> String {
 
 fn ordered(ty: Ty, value: String) -> String {
     match ty {
-        Ty::Id => format!("ivm_term_key({value})"),
+        Ty::Id => crate::terms::sort_key_sql(&value),
         Ty::Text => format!("ivm_text_value({value})"),
         Ty::Real => format!("ivm_real_value({value})"),
         Ty::Any => format!("ivm_any_value({value})"),
@@ -388,7 +388,7 @@ impl SqlRel {
 
 /// Fill statements that mint every suffix and head character of the strings from `source`
 /// (a select yielding column `text`) into `ivm_text`/`ivm_term`.
-fn suffix_texts_sql(source: &str) -> [String; 2] {
+fn suffix_texts_sql(source: &str) -> [String; 3] {
     crate::terms::mint_texts_sql(
         &format!("WITH RECURSIVE parts(text) AS ({source} UNION SELECT ivm_str_rest_text(text) FROM parts WHERE text<>''), all_texts(text) AS (SELECT text FROM parts UNION SELECT ivm_str_head_text(text) FROM parts WHERE text<>'')"),
         "SELECT text FROM all_texts",
@@ -451,7 +451,8 @@ impl Rel for SqlRel {
         let insert_term = format!(
             "INSERT INTO ivm_term(id,functor_id) SELECT c0, {fid} FROM {ctor} WHERE c0>(SELECT coalesce(max(id),0) FROM ivm_term)",
         );
-        self.nodes[next.node].fill.splice(0..0, [insert_ctor, insert_term]);
+        let insert_keys = crate::terms::ctor_keys_sql(&name, &types);
+        self.nodes[next.node].fill.splice(0..0, [insert_ctor, insert_term, insert_keys]);
         Ok(next)
     }
 

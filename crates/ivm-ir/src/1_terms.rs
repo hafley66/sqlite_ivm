@@ -141,55 +141,59 @@ pub fn compare(a: Cell, b: Cell, resolve: &mut impl FnMut(Cell) -> Option<Term>)
     }
 }
 
-/// A byte key whose lexical order matches `compare` for acyclic terms.
-pub fn sort_key(id: Cell, resolve: &mut impl FnMut(Cell) -> Option<Term>) -> Vec<u8> {
-    fn number(out: &mut Vec<u8>, value: Cell) {
-        out.extend_from_slice(&((value as u64) ^ (1u64 << 63)).to_be_bytes());
-    }
-    fn key(out: &mut Vec<u8>, id: Cell, resolve: &mut impl FnMut(Cell) -> Option<Term>, depth: usize) {
-        if depth >= 128 {
-            out.push(0);
-            number(out, id);
-            return;
-        }
-        let Some(term) = resolve(id) else {
-            out.push(0);
-            number(out, id);
-            return;
-        };
-        if let Some(text) = term.text {
-            out.push(1);
-            for b in text.bytes() { if b == 0 { out.extend_from_slice(&[0, 255]); } else { out.push(b); } }
-            out.extend_from_slice(&[0, 0]);
-            return;
-        }
-        out.push(2);
-        out.extend_from_slice(&(term.args.len() as u32).to_be_bytes());
-        for b in term.functor.bytes() {
-            if b == 0 { out.extend_from_slice(&[0, 255]); } else { out.push(b); }
-        }
-        out.extend_from_slice(&[0, 0]);
-        for (arg, ty) in term.args.into_iter().zip(term.types) {
-            match ty {
-                Ty::Int => { out.push(0); number(out, arg); }
-                Ty::Id => { out.push(1); key(out, arg, resolve, depth + 1); }
-                Ty::Text => {
-                    out.push(2);
-                    key(out, arg, resolve, depth + 1);
-                }
-                Ty::Real => {
-                    out.push(3);
-                    let bits = if f64::from_bits(arg as u64) == 0.0 { 0 } else { arg as u64 };
-                    let ordered = if bits >> 63 == 0 { bits ^ (1 << 63) } else { !bits };
-                    out.extend_from_slice(&ordered.to_be_bytes());
-                }
-                Ty::Any => { out.push(4); number(out, arg); }
-            }
-        }
-    }
-    let mut out = Vec::new();
-    key(&mut out, id, resolve, 0);
+fn key_number(out: &mut Vec<u8>, value: Cell) {
+    out.extend_from_slice(&((value as u64) ^ (1u64 << 63)).to_be_bytes());
+}
+
+/// Key of an id that is not a dictionary term.
+pub fn atom_key(id: Cell) -> Vec<u8> {
+    let mut out = vec![0];
+    key_number(&mut out, id);
     out
+}
+
+/// Key of one term, given the key of each `Ty::Id`/`Ty::Text` argument. Mint calls this once per term
+/// with the stored keys of its children; a term never changes, so the result is final.
+pub fn term_key(term: &Term, child_key: &mut impl FnMut(Cell) -> Vec<u8>) -> Vec<u8> {
+    let mut out = Vec::new();
+    if let Some(text) = &term.text {
+        out.push(1);
+        for b in text.bytes() { if b == 0 { out.extend_from_slice(&[0, 255]); } else { out.push(b); } }
+        out.extend_from_slice(&[0, 0]);
+        return out;
+    }
+    out.push(2);
+    out.extend_from_slice(&(term.args.len() as u32).to_be_bytes());
+    for b in term.functor.bytes() {
+        if b == 0 { out.extend_from_slice(&[0, 255]); } else { out.push(b); }
+    }
+    out.extend_from_slice(&[0, 0]);
+    for (&arg, ty) in term.args.iter().zip(&term.types) {
+        match ty {
+            Ty::Int => { out.push(0); key_number(&mut out, arg); }
+            Ty::Id => { out.push(1); out.extend(child_key(arg)); }
+            Ty::Text => { out.push(2); out.extend(child_key(arg)); }
+            Ty::Real => {
+                out.push(3);
+                let bits = if f64::from_bits(arg as u64) == 0.0 { 0 } else { arg as u64 };
+                let ordered = if bits >> 63 == 0 { bits ^ (1 << 63) } else { !bits };
+                out.extend_from_slice(&ordered.to_be_bytes());
+            }
+            Ty::Any => { out.push(4); key_number(&mut out, arg); }
+        }
+    }
+    out
+}
+
+/// A byte key whose lexical order matches `compare` for acyclic terms. Recomputes from `resolve`;
+/// the SQLite engine stores `term_key` at mint instead.
+pub fn sort_key(id: Cell, resolve: &mut impl FnMut(Cell) -> Option<Term>) -> Vec<u8> {
+    fn key(id: Cell, resolve: &mut impl FnMut(Cell) -> Option<Term>, depth: usize) -> Vec<u8> {
+        if depth >= 128 { return atom_key(id); }
+        let Some(term) = resolve(id) else { return atom_key(id); };
+        term_key(&term, &mut |child| key(child, resolve, depth + 1))
+    }
+    key(id, resolve, 0)
 }
 
 #[cfg(test)]
