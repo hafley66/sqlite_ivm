@@ -132,6 +132,9 @@ pub struct SqlRel {
     terms: Vec<(usize, Vec<String>)>,
     constructors: std::collections::BTreeMap<RelId, (String, Vec<Ty>)>,
     texts: Vec<String>,
+    /// Join SQL node per (left node, right node, predicates): rules that join the same inputs on the
+    /// same keys share one plan node.
+    joins: std::collections::HashMap<(usize, usize, Vec<String>), SqlC>,
 }
 
 fn list(alias: &str, cols: impl IntoIterator<Item = usize>) -> String {
@@ -279,6 +282,7 @@ impl SqlRel {
             constructors: p.rels.iter().filter(|r| r.kind == RelKind::Constructor)
                 .map(|r| (r.id, (r.name.clone(), r.cols.iter().skip(1).copied().collect()))).collect(),
             texts: p.texts.clone(),
+            joins: std::collections::HashMap::new(),
         };
         for r in p.rels.iter().filter(|r| r.kind == RelKind::Source) {
             let c = rel.push(r.cols.len(), false, |_| None);
@@ -635,6 +639,10 @@ impl Rel for SqlRel {
         let predicates = lk.iter().zip(&rk)
             .map(|(l, r)| equal("=", types[0][*l], format!("{{la}}.c{l}"), types[1][*r], format!("{{ra}}.c{r}")))
             .collect::<Vec<_>>();
+        let shared = (a.node, b.node, predicates.clone());
+        if let Some(out) = self.joins.get(&shared) {
+            return Ok(out.clone());
+        }
         self.integrate(&a, lk.clone());
         self.integrate(&b, rk.clone());
         let term = |l: &str, r: &str, l_first: bool| {
@@ -675,6 +683,7 @@ impl Rel for SqlRel {
                 .collect();
             self.terms.push((out.node, terms));
         }
+        self.joins.insert(shared, out.clone());
         Ok(out)
     }
 

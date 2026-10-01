@@ -104,3 +104,42 @@ fn id_join_probes_the_key_index_without_dictionary_functions() {
         "SEARCH r_i USING PRIMARY KEY (c0=?)".to_owned(),
     ]));
 }
+
+/// Two rules that join the same inputs on the same keys share one join plan node: one join fill
+/// statement, and the union of both rules still counts each joined row twice, as DD does.
+#[test]
+fn identical_joins_share_one_plan_node() {
+    let program: Program = serde_json::from_str(r#"{
+        "rels": [
+            {"id": 0, "name": "edge", "cols": ["Id", "Id"], "kind": "Source"},
+            {"id": 1, "name": "label", "cols": ["Id", "Int"], "kind": "Source"},
+            {"id": 2, "name": "out", "cols": ["Id", "Int"], "kind": "Derived"}
+        ],
+        "nodes": [
+            {"Get": 0},
+            {"Get": 1},
+            {"Join": {"inputs": [0, 1], "equivalences": [[[0, 1], [1, 0]]]}},
+            {"Join": {"inputs": [0, 1], "equivalences": [[[0, 1], [1, 0]]]}},
+            {"Mfp": {"input": 2, "project": [0, 3]}},
+            {"Mfp": {"input": 3, "project": [0, 3]}},
+            {"Union": [4, 5]}
+        ],
+        "strata": [{"Let": {"id": 2, "body": 6}}],
+        "outputs": [2]
+    }"#).unwrap();
+    let load = vec![
+        SourceChange { rel: 0, row: vec![1, 2], w: 1 },
+        SourceChange { rel: 0, row: vec![3, 2], w: 1 },
+        SourceChange { rel: 1, row: vec![2, 7], w: 1 },
+    ];
+    let db = Connection::open_in_memory().unwrap();
+    let mut sql = Sqlite::install(&program, &mut Raw::with_connection(&db)).unwrap();
+    let joins = sql.statements().iter().filter(|s| s.contains("CROSS JOIN") && s.contains("r_d")).count();
+    let mut rows = sql.settle(Frontier { changes: load.clone() }, &mut Raw::with_connection(&db)).unwrap().changes;
+    rows.sort();
+    let dd_db = Connection::open_in_memory().unwrap();
+    let mut dd = ivm_dd::Dd::install(&program).unwrap();
+    let mut expected = dd.settle(Frontier { changes: load }, &mut Raw::with_connection(&dd_db)).unwrap().changes;
+    expected.sort();
+    assert_eq!((joins, &rows), (1, &expected));
+}
