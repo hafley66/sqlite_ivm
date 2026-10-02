@@ -307,6 +307,8 @@ impl Engine for Sqlite {
         *counters.statements.as_mut().unwrap() += 1;
         let mut run = || -> Result<Vec<(RelId, Row, W)>, EngineError> {
             let mut batch = Vec::new();
+            // Per source: its insert and its delete, built on first use.
+            let mut statements: std::collections::HashMap<RelId, (String, String)> = std::collections::HashMap::new();
             for change in &frontier.changes {
                 let source = self
                     .ir
@@ -336,44 +338,43 @@ impl Engine for Sqlite {
                         ErrorKind::Unsupported("weight other than +1/-1"),
                     ));
                 }
-                let names = self.programs.iter().find_map(|output| {
-                    output.program.inner.plan.scans.iter().find(|scan| scan.table == source.name)
-                        .map(|scan| scan.columns.clone())
-                }).unwrap_or_else(|| (0..source.cols.len()).map(|i| format!("c{i}")).collect());
-                let match_row = names
-                    .iter()
-                    .map(|c| format!("{}=?", catalog::quote(c)))
-                    .collect::<Vec<_>>()
-                    .join(" AND ");
-                let table = catalog::quote(&source.name);
-                let count_sql = format!("SELECT count(*) FROM {table} WHERE {match_row}");
-                let count: i64 = db
-                    .prepare_cached(&count_sql)
-                    .and_then(|mut stmt| stmt.query_row(rusqlite::params_from_iter(&change.row), |r| r.get(0)))
-                    .map_err(|e| error(Stage::Settle, e))?;
+                let (insert, delete) = statements.entry(change.rel).or_insert_with(|| {
+                    let names = self.programs.iter().find_map(|output| {
+                        output.program.inner.plan.scans.iter().find(|scan| scan.table == source.name)
+                            .map(|scan| scan.columns.clone())
+                    }).unwrap_or_else(|| (0..source.cols.len()).map(|i| format!("c{i}")).collect());
+                    let match_row = names
+                        .iter()
+                        .map(|c| format!("{}=?", catalog::quote(c)))
+                        .collect::<Vec<_>>()
+                        .join(" AND ");
+                    let table = catalog::quote(&source.name);
+                    (
+                        format!("INSERT INTO {table} VALUES ({})", vec!["?"; names.len()].join(",")),
+                        format!("DELETE FROM {table} WHERE {match_row}"),
+                    )
+                });
+                // The source's unique index rejects a present insert; a delete of an absent
+                // row matches nothing and changes nothing.
+                let sql = if change.w > 0 { &*insert } else { &*delete };
+                let changed = match db.prepare_cached(sql)
+                    .and_then(|mut stmt| stmt.execute(rusqlite::params_from_iter(&change.row)))
+                {
+                    Err(rusqlite::Error::SqliteFailure(failure, _))
+                        if change.w > 0 && failure.code == rusqlite::ErrorCode::ConstraintViolation =>
+                    {
+                        return Err(EngineError::new(
+                            Stage::Settle,
+                            Some(change.rel),
+                            ErrorKind::PresentInsert(change.row.clone()),
+                        ));
+                    }
+                    changed => changed.map_err(|e| error(Stage::Settle, e))?,
+                };
                 *counters.statements.as_mut().unwrap() += 1;
-                if change.w > 0 && count > 0 {
-                    return Err(EngineError::new(
-                        Stage::Settle,
-                        Some(change.rel),
-                        ErrorKind::PresentInsert(change.row.clone()),
-                    ));
-                }
-                if change.w < 0 && count == 0 {
+                if changed == 0 {
                     continue;
                 }
-                let sql = if change.w > 0 {
-                    format!(
-                        "INSERT INTO {table} VALUES ({})",
-                        vec!["?"; names.len()].join(",")
-                    )
-                } else {
-                    format!("DELETE FROM {table} WHERE {match_row}")
-                };
-                db.prepare_cached(&sql)
-                    .and_then(|mut stmt| stmt.execute(rusqlite::params_from_iter(&change.row)))
-                    .map_err(|e| error(Stage::Settle, e))?;
-                *counters.statements.as_mut().unwrap() += 1;
                 batch.push(SqlChange {
                     relation: source.name.clone(),
                     sign: if change.w > 0 {
@@ -517,28 +518,41 @@ impl Engine for Sqlite {
         let plan = &output.program.inner.plan;
         let width = plan.output.len();
         let crate::plan::Root::Nodes(nodes) = &plan.root else { unreachable!() };
-        let mut stmt = db.prepare_cached(&nodes.output_snapshot).map_err(|e| error(Stage::Snapshot, e))?;
-        let result = stmt
-            .query_map([], |r| {
-                let row = row_of(r, width)?;
-                let weight: W = r.get(width)?;
-                Ok((row, weight))
-            })
-            .map_err(|e| error(Stage::Snapshot, e))?
-            .map(|r| r.map_err(|e| error(Stage::Snapshot, e)))
-            .collect::<Result<Vec<_>, _>>()?;
         if output.members.is_empty() {
+            let mut stmt = db.prepare_cached(&nodes.output_snapshot).map_err(|e| error(Stage::Snapshot, e))?;
+            let result = stmt
+                .query_map([], |r| Ok((row_of(r, width)?, r.get::<_, W>(width)?)))
+                .map_err(|e| error(Stage::Snapshot, e))?
+                .map(|r| r.map_err(|e| error(Stage::Snapshot, e)))
+                .collect::<Result<Vec<_>, _>>()?;
             Ok(result.into_iter().map(|(row, weight)| (row, if output.threshold { weight.min(1) } else { weight })).collect())
         } else {
+            // The bundle's integrated table is keyed by its columns, the member id first:
+            // one member is one index range.
             let arity = output.members.iter().find(|(id, _)| *id == rel).expect("selected member").1;
-            Ok(result.into_iter().filter(|(row, _)| row[0] == rel as i64)
-                .map(|(row, weight)| (row[1..=arity].to_vec(), weight)).collect())
+            let mut stmt = db.prepare_cached(&nodes.member_snapshot).map_err(|e| error(Stage::Snapshot, e))?;
+            let rows = stmt.query_map([rel as i64], |r| Ok(((1..=arity).map(|i| r.get(i)).collect::<Result<Row, _>>()?, r.get::<_, W>(width)?)))
+                .map_err(|e| error(Stage::Snapshot, e))?
+                .map(|r| r.map_err(|e| error(Stage::Snapshot, e)))
+                .collect();
+            rows
         }
     }
 
     fn intern_snapshot(&self, functor: RelId, host: &mut impl Host) -> Result<Vec<(Row, W)>, EngineError> {
         let db = conn(host, Stage::Snapshot)?;
         crate::terms::snapshot(db, &self.ir, functor).map_err(|e| error(Stage::Snapshot, e))
+    }
+    fn intern_terms(&mut self, terms: &[(RelId, Row)], host: &mut impl Host) -> Result<Vec<i64>, EngineError> {
+        let db = conn(host, Stage::Settle)?;
+        terms.iter().map(|(functor, args)| {
+            let rel = self.ir.rel(*functor).filter(|rel| rel.kind == RelKind::Constructor)
+                .ok_or_else(|| EngineError::new(Stage::Settle, Some(*functor), ErrorKind::UnknownRel(*functor)))?;
+            if args.len() + 1 != rel.cols.len() {
+                return Err(EngineError::new(Stage::Settle, Some(*functor), ErrorKind::Arity { expected: rel.cols.len() - 1, actual: args.len() }));
+            }
+            crate::terms::intern_term(db, &rel.name, &rel.cols[1..], args).map_err(|e| error(Stage::Settle, e))
+        }).collect()
     }
     fn intern_text(&mut self, value: &str, host: &mut impl Host) -> Result<i64, EngineError> {
         let db = conn(host, Stage::Settle)?;
