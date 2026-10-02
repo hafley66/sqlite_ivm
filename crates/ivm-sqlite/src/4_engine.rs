@@ -1,14 +1,16 @@
-//! Host-backed typed Engine adapter. The handle keeps no SQLite connection.
+//! Typed Engine adapter. The engine opens and owns its SQLite connection.
 
 use crate::{
     catalog, Cell, Program as SqlProgram, Sign, SourceChange as SqlChange,
 };
-use ivm_engine::{Counters, Engine, EngineError, ErrorKind, Host, Stage};
+use ivm_engine::{Counters, Engine, EngineError, ErrorKind, Stage};
 use ivm_ir::{Delta, Expr, Frontier, NodeId, Op, Program, RelId, RelKind, Row, Stratum, W};
 use sqlite_ext::rusqlite::{self, Connection};
 use std::collections::{BTreeSet, HashSet};
 
 pub struct Sqlite {
+    /// The database every installed program, term and source table lives in.
+    pub db: Connection,
     programs: Vec<OutputProgram>,
     ir: Program,
     tick: u64,
@@ -43,18 +45,6 @@ fn plan_error(e: crate::EngineError) -> EngineError {
         crate::ErrorKind::Unsupported(why) => EngineError::new(Stage::Install, None, ErrorKind::Unsupported(why)),
         _ => error(Stage::Install, e),
     }
-}
-
-fn conn(host: &mut impl Host, stage: Stage) -> Result<&Connection, EngineError> {
-    host.conn()
-        .and_then(|c| c.downcast_ref::<Connection>())
-        .ok_or_else(|| {
-            EngineError::new(
-                stage,
-                None,
-                ErrorKind::Unsupported("SQLite Connection host required"),
-            )
-        })
 }
 
 fn row_of(row: &rusqlite::Row<'_>, width: usize) -> rusqlite::Result<Row> {
@@ -227,9 +217,10 @@ fn bundled_program(ir: &Program) -> Result<(Program, Vec<(RelId, usize)>), Engin
     Ok((bundle, members))
 }
 
-impl Engine for Sqlite {
-    fn install(ir: &Program, host: &mut impl Host) -> Result<Self, EngineError> {
-        let db = conn(host, Stage::Install)?;
+impl Sqlite {
+    /// Installs `ir` into `db` and takes ownership of it. `Engine::install` opens an in-memory one.
+    pub fn install_on(owned: Connection, ir: &Program) -> Result<Self, EngineError> {
+        let db = &owned;
         if ir.outputs.is_empty() {
             return Err(EngineError::new(
                 Stage::Install,
@@ -284,6 +275,7 @@ impl Engine for Sqlite {
             }
         }
         let engine = Self {
+            db: owned,
             programs,
             ir: ir.clone(),
             tick: 0,
@@ -292,12 +284,28 @@ impl Engine for Sqlite {
         // A frontier visits every installed output. Rusqlite's default cache of 16
         // statements evicts each output's SQL before the next frontier reaches it.
         let capacity = engine.statements().len() + ir.outputs.len() * 2 + ir.rels.len() * 3 + 16;
-        db.set_prepared_statement_cache_capacity(capacity);
+        engine.db.set_prepared_statement_cache_capacity(capacity);
+        if !tracing::enabled!(target: "ivm_sqlite", tracing::Level::INFO) {
+            return Ok(engine);
+        }
+        if let Ok(creates @ 1..) = engine.db.query_row(
+            "SELECT (SELECT count(*) FROM sqlite_master WHERE sql LIKE 'CREATE %') + (SELECT count(*) FROM sqlite_temp_master WHERE sql LIKE 'CREATE %')",
+            [], |row| row.get::<_, i64>(0),
+        ) {
+            tracing::info!(target: "ivm_sqlite", sqlite_create_count = creates, "ir schema");
+        }
         Ok(engine)
     }
+}
 
-    fn settle(&mut self, frontier: Frontier, host: &mut impl Host) -> Result<Delta, EngineError> {
-        let db = conn(host, Stage::Settle)?;
+impl Engine for Sqlite {
+    fn install(ir: &Program) -> Result<Self, EngineError> {
+        let db = Connection::open_in_memory().map_err(|e| error(Stage::Install, e))?;
+        Self::install_on(db, ir)
+    }
+
+    fn settle(&mut self, frontier: Frontier) -> Result<Delta, EngineError> {
+        let db = &self.db;
         let before: i64 = db.query_row("SELECT count(*) FROM ivm_term", [], |r| r.get(0))
             .map_err(|e| error(Stage::Settle, e))?;
         let mut counters = Counters::measured();
@@ -506,7 +514,7 @@ impl Engine for Sqlite {
 
     fn counters(&self) -> Counters { self.counters }
 
-    fn snapshot(&self, rel: RelId, host: &mut impl Host) -> Result<Vec<(Row, W)>, EngineError> {
+    fn snapshot(&self, rel: RelId) -> Result<Vec<(Row, W)>, EngineError> {
         let output = self
             .programs
             .iter()
@@ -514,7 +522,7 @@ impl Engine for Sqlite {
             .ok_or_else(|| {
                 EngineError::new(Stage::Snapshot, Some(rel), ErrorKind::UnknownRel(rel))
             })?;
-        let db = conn(host, Stage::Snapshot)?;
+        let db = &self.db;
         let plan = &output.program.inner.plan;
         let width = plan.output.len();
         let crate::plan::Root::Nodes(nodes) = &plan.root else { unreachable!() };
@@ -539,12 +547,12 @@ impl Engine for Sqlite {
         }
     }
 
-    fn intern_snapshot(&self, functor: RelId, host: &mut impl Host) -> Result<Vec<(Row, W)>, EngineError> {
-        let db = conn(host, Stage::Snapshot)?;
+    fn intern_snapshot(&self, functor: RelId) -> Result<Vec<(Row, W)>, EngineError> {
+        let db = &self.db;
         crate::terms::snapshot(db, &self.ir, functor).map_err(|e| error(Stage::Snapshot, e))
     }
-    fn intern_terms(&mut self, terms: &[(RelId, Row)], host: &mut impl Host) -> Result<Vec<i64>, EngineError> {
-        let db = conn(host, Stage::Settle)?;
+    fn intern_terms(&mut self, terms: &[(RelId, Row)]) -> Result<Vec<i64>, EngineError> {
+        let db = &self.db;
         terms.iter().map(|(functor, args)| {
             let rel = self.ir.rel(*functor).filter(|rel| rel.kind == RelKind::Constructor)
                 .ok_or_else(|| EngineError::new(Stage::Settle, Some(*functor), ErrorKind::UnknownRel(*functor)))?;
@@ -554,20 +562,20 @@ impl Engine for Sqlite {
             crate::terms::intern_term(db, &rel.name, args).map_err(|e| error(Stage::Settle, e))
         }).collect()
     }
-    fn intern_text(&mut self, value: &str, host: &mut impl Host) -> Result<i64, EngineError> {
-        let db = conn(host, Stage::Settle)?;
+    fn intern_text(&mut self, value: &str) -> Result<i64, EngineError> {
+        let db = &self.db;
         crate::terms::intern_text(db, value).map_err(|e| error(Stage::Settle, e))
     }
-    fn text(&self, id: i64, host: &mut impl Host) -> Result<Option<String>, EngineError> {
-        let db = conn(host, Stage::Snapshot)?;
+    fn text(&self, id: i64) -> Result<Option<String>, EngineError> {
+        let db = &self.db;
         crate::terms::text(db, id).map_err(|e| error(Stage::Snapshot, e))
     }
-    fn intern_any(&mut self, value: &ivm_ir::AnyValue, host: &mut impl Host) -> Result<i64, EngineError> {
-        let db = conn(host, Stage::Settle)?;
+    fn intern_any(&mut self, value: &ivm_ir::AnyValue) -> Result<i64, EngineError> {
+        let db = &self.db;
         crate::terms::intern_any_value(db, value).map_err(|e| error(Stage::Settle, e))
     }
-    fn any_value(&self, id: i64, host: &mut impl Host) -> Result<ivm_ir::AnyValue, EngineError> {
-        let db = conn(host, Stage::Snapshot)?;
+    fn any_value(&self, id: i64) -> Result<ivm_ir::AnyValue, EngineError> {
+        let db = &self.db;
         crate::terms::any_value(db, id).map_err(|e| error(Stage::Snapshot, e))
     }
 }

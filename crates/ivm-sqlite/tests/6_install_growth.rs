@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, ffi::{c_int, c_void, CStr}, time::Instant};
 
 use hafley_observe::{assert_growth_sized, Growth, SpanCounts};
 use ivm_dd::Dd;
-use ivm_engine::{Engine, Raw};
+use ivm_engine::Engine;
 use ivm_ir::{Expr, Frontier, Func, LetRec, Op, Program, RelKind, Relation, SourceChange, Stratum, Ty};
 use ivm_sqlite::Sqlite;
 use rusqlite::Connection;
@@ -22,7 +22,8 @@ extern "C" fn count_create(_event: u32, context: *mut c_void, statement: *mut c_
     0
 }
 
-fn counted_install(program: &Program, db: &Connection) -> (Sqlite, usize) {
+fn counted_install(program: &Program) -> (Sqlite, usize) {
+    let db = Connection::open_in_memory().unwrap();
     let mut creates = 0usize;
     let handle = unsafe { db.handle() };
     let result = unsafe { rusqlite::ffi::sqlite3_trace_v2(
@@ -32,9 +33,9 @@ fn counted_install(program: &Program, db: &Connection) -> (Sqlite, usize) {
         (&mut creates as *mut usize).cast(),
     ) };
     assert_eq!(result, rusqlite::ffi::SQLITE_OK);
-    let installed = Sqlite::install(program, &mut Raw::with_connection(db));
+    let installed = Sqlite::install_on(db, program).unwrap();
     unsafe { rusqlite::ffi::sqlite3_trace_v2(handle, 0, None, std::ptr::null_mut()); }
-    (installed.unwrap(), creates)
+    (installed, creates)
 }
 
 fn recursive_program(strata: usize) -> Program {
@@ -90,11 +91,10 @@ fn install_size(strata: usize) -> (usize, usize) {
         + program.nodes.iter().filter(|op| matches!(op,
             Op::Join { .. } | Op::Antijoin { .. } | Op::Reduce { .. }
             | Op::TopK { .. } | Op::Window { .. } | Op::Mint { .. })).count();
-    let db = Connection::open_in_memory().unwrap();
     let start = Instant::now();
-    let (_engine, creates) = counted_install(&program, &db);
+    let (engine, creates) = counted_install(&program);
     let elapsed = start.elapsed();
-    let mut statement = db
+    let mut statement = engine.db
         .prepare(
             "SELECT type, count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' GROUP BY type",
         )
@@ -152,14 +152,12 @@ fn pure_delta_chain_has_fixed_create_count() {
         strata: vec![Stratum::Let { id: 1, body: 3 }],
         outputs: vec![1],
     };
-    let db = Connection::open_in_memory().unwrap();
-    let (mut engine, creates) = counted_install(&program, &db);
+    let (mut engine, creates) = counted_install(&program);
     eprintln!("pure chain creates={creates}");
     assert_eq!(creates, 21); // includes the dictionary tables
-    let mut host = Raw::with_connection(&db);
-    assert_eq!(engine.settle(Frontier { changes: vec![SourceChange { rel: 0, row: vec![2], w: 1 }] }, &mut host).unwrap().changes,
+    assert_eq!(engine.settle(Frontier { changes: vec![SourceChange { rel: 0, row: vec![2], w: 1 }] }).unwrap().changes,
         vec![(1, vec![3], 1)]);
-    assert_eq!(engine.snapshot(1, &mut host).unwrap(), vec![(vec![3], 1)]);
+    assert_eq!(engine.snapshot(1).unwrap(), vec![(vec![3], 1)]);
     let mut extended = program.clone();
     extended.nodes.pop();
     for _ in 0..20 {
@@ -174,8 +172,7 @@ fn pure_delta_chain_has_fixed_create_count() {
     let input = (extended.nodes.len() - 1) as u32;
     extended.nodes.push(Op::Threshold(input));
     extended.strata[0] = Stratum::Let { id: 1, body: input + 1 };
-    let db = Connection::open_in_memory().unwrap();
-    let (_, extended_creates) = counted_install(&extended, &db);
+    let (_, extended_creates) = counted_install(&extended);
     assert_eq!(extended_creates, creates);
 }
 
@@ -223,9 +220,7 @@ fn output_install_keeps_transitive_strata_and_filters_other_sources() {
         ],
         outputs: vec![2, 3, 4],
     };
-    let db = Connection::open_in_memory().unwrap();
-    let mut host = Raw::with_connection(&db);
-    let mut engine = Sqlite::install(&program, &mut host).unwrap();
+    let mut engine = Sqlite::install(&program).unwrap();
     let delta = engine
         .settle(
             Frontier {
@@ -242,14 +237,13 @@ fn output_install_keeps_transitive_strata_and_filters_other_sources() {
                     },
                 ],
             },
-            &mut host,
         )
         .unwrap();
     assert_eq!(
         delta.changes,
         vec![(2, vec![7], 1), (3, vec![7], 1), (4, vec![9], 1)]
     );
-    assert_eq!(engine.snapshot(3, &mut host).unwrap(), vec![(vec![7], 1)]);
+    assert_eq!(engine.snapshot(3).unwrap(), vec![(vec![7], 1)]);
 }
 
 #[test]
@@ -297,9 +291,7 @@ fn output_install_remaps_text_literals() {
         ],
         outputs: vec![1, 2],
     };
-    let db = Connection::open_in_memory().unwrap();
-    let mut host = Raw::with_connection(&db);
-    let mut engine = Sqlite::install(&program, &mut host).unwrap();
+    let mut engine = Sqlite::install(&program).unwrap();
     engine
         .settle(
             Frontier {
@@ -309,11 +301,10 @@ fn output_install_remaps_text_literals() {
                     w: 1,
                 }],
             },
-            &mut host,
         )
         .unwrap();
     for (rel, text) in [(1, "first"), (2, "second")] {
-        let id: i64 = db
+        let id: i64 = engine.db
             .query_row(
                 "SELECT id FROM ivm_text WHERE text=?1",
                 [text],
@@ -321,7 +312,7 @@ fn output_install_remaps_text_literals() {
             )
             .unwrap();
         assert_eq!(
-            engine.snapshot(rel, &mut host).unwrap(),
+            engine.snapshot(rel).unwrap(),
             vec![(vec![id], 1)]
         );
     }
@@ -339,11 +330,10 @@ fn c15_shaped_ir_installs_one_shared_plan() {
         ),
         (4011, 164, 93)
     );
-    let db = Connection::open_in_memory().unwrap();
     let start = Instant::now();
-    let (engine, creates) = counted_install(&program, &db);
+    let (engine, creates) = counted_install(&program);
     let elapsed = start.elapsed();
-    let objects: i64 = db
+    let objects: i64 = engine.db
         .query_row(
             "SELECT count(*) FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'",
             [],
@@ -363,7 +353,7 @@ fn c15_shaped_ir_installs_one_shared_plan() {
     );
     for &rel in [program.outputs[0], *program.outputs.last().unwrap()].iter() {
         assert!(engine
-            .snapshot(rel, &mut Raw::with_connection(&db))
+            .snapshot(rel)
             .unwrap()
             .is_empty());
     }
@@ -372,18 +362,14 @@ fn c15_shaped_ir_installs_one_shared_plan() {
 #[test]
 fn c15_empty_frontier_agrees_with_dd() {
     let program: Program = serde_json::from_str(include_str!("corpus/8_c15_program.json")).unwrap();
-    let sqlite_db = Connection::open_in_memory().unwrap();
-    let dd_db = Connection::open_in_memory().unwrap();
-    let mut sqlite_host = Raw::with_connection(&sqlite_db);
-    let mut dd_host = Raw::with_connection(&dd_db);
-    let mut sqlite = Sqlite::install(&program, &mut sqlite_host).unwrap();
-    let mut dd = <Dd as Engine>::install(&program, &mut dd_host).unwrap();
+    let mut sqlite = Sqlite::install(&program).unwrap();
+    let mut dd = <Dd as Engine>::install(&program).unwrap();
     let frontier = Frontier { changes: vec![] };
-    assert_eq!(sqlite.settle(frontier.clone(), &mut sqlite_host).unwrap().changes,
-        dd.settle(frontier, &mut dd_host).unwrap().changes);
+    assert_eq!(sqlite.settle(frontier.clone()).unwrap().changes,
+        dd.settle(frontier).unwrap().changes);
     for &rel in &program.outputs {
-        assert_eq!(sqlite.snapshot(rel, &mut sqlite_host).unwrap(),
-            dd.snapshot(rel, &mut dd_host).unwrap(), "output {rel}");
+        assert_eq!(sqlite.snapshot(rel).unwrap(),
+            dd.snapshot(rel).unwrap(), "output {rel}");
     }
 }
 
@@ -418,9 +404,7 @@ fn bundled_outputs_keep_set_and_bag_weights() {
         ],
         outputs: vec![1, 2],
     };
-    let db = Connection::open_in_memory().unwrap();
-    let mut host = Raw::with_connection(&db);
-    let mut engine = Sqlite::install(&program, &mut host).unwrap();
+    let mut engine = Sqlite::install(&program).unwrap();
     let change = |w| Frontier {
         changes: vec![SourceChange {
             rel: 0,
@@ -429,13 +413,13 @@ fn bundled_outputs_keep_set_and_bag_weights() {
         }],
     };
     assert_eq!(
-        engine.settle(change(1), &mut host).unwrap().changes,
+        engine.settle(change(1)).unwrap().changes,
         vec![(1, vec![7], 1), (2, vec![7], 2)]
     );
-    assert_eq!(engine.snapshot(1, &mut host).unwrap(), vec![(vec![7], 1)]);
-    assert_eq!(engine.snapshot(2, &mut host).unwrap(), vec![(vec![7], 2)]);
+    assert_eq!(engine.snapshot(1).unwrap(), vec![(vec![7], 1)]);
+    assert_eq!(engine.snapshot(2).unwrap(), vec![(vec![7], 2)]);
     assert_eq!(
-        engine.settle(change(-1), &mut host).unwrap().changes,
+        engine.settle(change(-1)).unwrap().changes,
         vec![(1, vec![7], -1), (2, vec![7], -2)]
     );
 }
@@ -460,14 +444,12 @@ fn bench_materialization_boundaries() {
         ("16_intern_row_reuse", intern.0, intern.1),
     ];
     for (name, program, frontiers) in cases {
-        let db = Connection::open_in_memory().unwrap();
-        let mut host = Raw::with_connection(&db);
         let start = Instant::now();
-        let mut engine = Sqlite::install(&program, &mut host).unwrap();
+        let mut engine = Sqlite::install(&program).unwrap();
         let install_ms = start.elapsed().as_secs_f64() * 1000.0;
         let start = Instant::now();
         for frontier in frontiers {
-            engine.settle(frontier, &mut host).unwrap();
+            engine.settle(frontier).unwrap();
         }
         let settle_ms = start.elapsed().as_secs_f64() * 1000.0;
         eprintln!("bench_ {name} install_ms={install_ms:.3} settle_ms={settle_ms:.3} total_ms={:.3}", install_ms + settle_ms);
@@ -488,14 +470,12 @@ fn bench_settle_frontiers() {
         SourceChange { rel: source.id, row: vec![ordinal; source.cols.len()], w: 1 }
     }).collect() });
     fn measure<E: Engine>(name: &str, program: &Program, frontiers: &[Frontier]) -> Vec<Vec<(u32, Vec<i64>, i64)>> {
-        let db = Connection::open_in_memory().unwrap();
-        let mut host = Raw::with_connection(&db);
         let start = Instant::now();
-        let mut engine = E::install(program, &mut host).unwrap();
+        let mut engine = E::install(program).unwrap();
         eprintln!("settle_bench engine={name} install_ms={:.3}", start.elapsed().as_secs_f64() * 1000.0);
         frontiers.iter().enumerate().map(|(at, frontier)| {
             let start = Instant::now();
-            let delta = engine.settle(frontier.clone(), &mut host).unwrap();
+            let delta = engine.settle(frontier.clone()).unwrap();
             eprintln!("settle_bench engine={name} frontier={at} inputs={} outputs={} statements={:?} settle_ms={:.3}",
                 frontier.changes.len(), delta.changes.len(), engine.counters().statements,
                 start.elapsed().as_secs_f64() * 1000.0);

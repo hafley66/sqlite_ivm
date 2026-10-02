@@ -780,48 +780,48 @@ impl Dd {
 }
 
 impl Engine for Dd {
-    fn install(program: &Program, _host: &mut impl Host) -> Result<Self, EngineError> {
+    fn install(program: &Program) -> Result<Self, EngineError> {
         Self::start(program, None, false)
     }
 
-    fn settle(&mut self, frontier: Frontier, _host: &mut impl Host) -> Result<Delta, EngineError> {
+    fn settle(&mut self, frontier: Frontier) -> Result<Delta, EngineError> {
         self.settle_traced(frontier).map(|(delta, _)| delta)
     }
 
     fn counters(&self) -> Counters { self.counters }
 
-    fn snapshot(&self, rel: RelId, _host: &mut impl Host) -> Result<Vec<(Row, W)>, EngineError> {
+    fn snapshot(&self, rel: RelId) -> Result<Vec<(Row, W)>, EngineError> {
         let (reply, answer) = mpsc::channel();
         self.tx.send(Command::Snapshot(rel, reply)).map_err(|e| worker_error(Stage::Snapshot, e))?;
         answer.recv().map_err(|e| worker_error(Stage::Snapshot, e))?
     }
 
-    fn intern_snapshot(&self, functor: RelId, _host: &mut impl Host) -> Result<Vec<(Row, W)>, EngineError> {
+    fn intern_snapshot(&self, functor: RelId) -> Result<Vec<(Row, W)>, EngineError> {
         let (reply, answer) = mpsc::channel();
         self.tx.send(Command::InternSnapshot(functor, reply)).map_err(|e| worker_error(Stage::Snapshot, e))?;
         answer.recv().map_err(|e| worker_error(Stage::Snapshot, e))?
     }
-    fn intern_terms(&mut self, terms: &[(RelId, Row)], _host: &mut impl Host) -> Result<Vec<Cell>, EngineError> {
+    fn intern_terms(&mut self, terms: &[(RelId, Row)]) -> Result<Vec<Cell>, EngineError> {
         let (reply, answer) = mpsc::channel();
         self.tx.send(Command::InternTerms(terms.to_vec(), reply)).map_err(|e| worker_error(Stage::Settle, e))?;
         answer.recv().map_err(|e| worker_error(Stage::Settle, e))?
     }
-    fn intern_text(&mut self, value: &str, _host: &mut impl Host) -> Result<Cell, EngineError> {
+    fn intern_text(&mut self, value: &str) -> Result<Cell, EngineError> {
         let (reply, answer) = mpsc::channel();
         self.tx.send(Command::InternText(value.to_owned(), reply)).map_err(|e| worker_error(Stage::Settle, e))?;
         answer.recv().map_err(|e| worker_error(Stage::Settle, e))
     }
-    fn text(&self, id: Cell, _host: &mut impl Host) -> Result<Option<String>, EngineError> {
+    fn text(&self, id: Cell) -> Result<Option<String>, EngineError> {
         let (reply, answer) = mpsc::channel();
         self.tx.send(Command::Text(id, reply)).map_err(|e| worker_error(Stage::Snapshot, e))?;
         answer.recv().map_err(|e| worker_error(Stage::Snapshot, e))
     }
-    fn intern_any(&mut self, value: &AnyValue, _host: &mut impl Host) -> Result<Cell, EngineError> {
+    fn intern_any(&mut self, value: &AnyValue) -> Result<Cell, EngineError> {
         let (reply, answer) = mpsc::channel();
         self.tx.send(Command::InternAny(value.clone(), reply)).map_err(|e| worker_error(Stage::Settle, e))?;
         answer.recv().map_err(|e| worker_error(Stage::Settle, e))
     }
-    fn any_value(&self, id: Cell, _host: &mut impl Host) -> Result<AnyValue, EngineError> {
+    fn any_value(&self, id: Cell) -> Result<AnyValue, EngineError> {
         let (reply, answer) = mpsc::channel();
         self.tx.send(Command::AnyValue(id, reply)).map_err(|e| worker_error(Stage::Snapshot, e))?;
         answer.recv().map_err(|e| worker_error(Stage::Snapshot, e))?

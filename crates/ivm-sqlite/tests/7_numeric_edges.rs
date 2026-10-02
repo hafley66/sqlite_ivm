@@ -1,5 +1,5 @@
 use ivm_dd::Dd;
-use ivm_engine::{Engine, Raw};
+use ivm_engine::Engine;
 use ivm_ir::{Agg, AnyValue, Frontier, Op, Program, RelKind, Relation, SourceChange, Stratum, Ty};
 use ivm_sqlite::Sqlite;
 use rusqlite::{types::Value, Connection};
@@ -31,31 +31,29 @@ fn check_numeric_equivalence<E: Engine>() {
     oracle.execute_batch("CREATE TABLE src(k, n INTEGER); INSERT INTO src VALUES (5, 1), (5.0, 2), ('5', 3), (6, 4), (NULL, 5), (NULL, 6);").unwrap();
     let want_groups = sqlite_rows(&oracle, "SELECT k, count(*) FROM src GROUP BY k");
     let want_joins = sqlite_rows(&oracle, "SELECT a.k, a.n, b.k, b.n FROM src a JOIN src b ON a.k = b.k");
-    let db = Connection::open_in_memory().unwrap();
-    let mut host = Raw::with_connection(&db);
-    let mut engine = E::install(&ir(), &mut host).unwrap();
+    let mut engine = E::install(&ir()).unwrap();
     let values = [AnyValue::Integer(5), AnyValue::Real(5.0f64.to_bits()), AnyValue::Text("5".into()), AnyValue::Integer(6), AnyValue::Null, AnyValue::Null];
     let changes = values.iter().enumerate().map(|(i, value)| SourceChange {
         rel: 0,
-        row: vec![engine.intern_any(value, &mut host).unwrap(), i as i64 + 1],
+        row: vec![engine.intern_any(value).unwrap(), i as i64 + 1],
         w: 1,
     }).collect();
-    engine.settle(Frontier { changes }, &mut host).unwrap();
-    assert_rows(&engine, &mut host, want_groups, want_joins);
+    engine.settle(Frontier { changes }).unwrap();
+    assert_rows(&engine, want_groups, want_joins);
     oracle.execute_batch("DELETE FROM src WHERE typeof(k)='integer' AND k=5").unwrap();
-    let id = engine.intern_any(&AnyValue::Integer(5), &mut host).unwrap();
-    engine.settle(Frontier { changes: vec![SourceChange { rel: 0, row: vec![id, 1], w: -1 }] }, &mut host).unwrap();
-    assert_rows(&engine, &mut host,
+    let id = engine.intern_any(&AnyValue::Integer(5)).unwrap();
+    engine.settle(Frontier { changes: vec![SourceChange { rel: 0, row: vec![id, 1], w: -1 }] }).unwrap();
+    assert_rows(&engine,
         sqlite_rows(&oracle, "SELECT k, count(*) FROM src GROUP BY k"),
         sqlite_rows(&oracle, "SELECT a.k, a.n, b.k, b.n FROM src a JOIN src b ON a.k = b.k"));
 }
 
-fn assert_rows<E: Engine>(engine: &E, host: &mut Raw<'_>, groups: Vec<Vec<Value>>, joins: Vec<Vec<Value>>) {
+fn assert_rows<E: Engine>(engine: &E, groups: Vec<Vec<Value>>, joins: Vec<Vec<Value>>) {
     for (rel, want, classes) in [(1, groups, vec![0]), (2, joins, vec![0, 2])] {
-        let mut got = engine.snapshot(rel, host).unwrap().into_iter().flat_map(|(row, w)| {
+        let mut got = engine.snapshot(rel).unwrap().into_iter().flat_map(|(row, w)| {
             let values = row.into_iter().enumerate().map(|(i, cell)| {
                 if classes.contains(&i) {
-                    match engine.any_value(cell, host).unwrap() {
+                    match engine.any_value(cell).unwrap() {
                         AnyValue::Null => Value::Null,
                         AnyValue::Integer(v) => Value::Integer(v),
                         AnyValue::Real(bits) => Value::Real(f64::from_bits(bits)),

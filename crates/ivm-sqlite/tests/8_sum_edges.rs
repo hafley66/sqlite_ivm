@@ -1,5 +1,5 @@
 use ivm_dd::Dd;
-use ivm_engine::{Engine, Raw};
+use ivm_engine::Engine;
 use ivm_ir::{Agg, AnyValue, Frontier, Op, Program, RelKind, Relation, SourceChange, Stratum, Ty};
 use ivm_sqlite::Sqlite;
 use rusqlite::{types::Value, Connection};
@@ -24,9 +24,7 @@ fn sum_ir() -> Program {
 fn check_sum<E: Engine>() {
     let oracle = Connection::open_in_memory().unwrap();
     oracle.execute_batch("CREATE TABLE src(id INTEGER PRIMARY KEY, g INTEGER, v);").unwrap();
-    let db = Connection::open_in_memory().unwrap();
-    let mut host = Raw::with_connection(&db);
-    let mut engine = E::install(&sum_ir(), &mut host).unwrap();
+    let mut engine = E::install(&sum_ir()).unwrap();
     for (id, value, literal, sign) in [
         (1, AnyValue::Integer(5), "5", 1),
         (2, AnyValue::Integer(7), "7", 1),
@@ -42,11 +40,11 @@ fn check_sum<E: Engine>() {
         let sql = if sign > 0 { format!("INSERT INTO src VALUES ({id}, 9, {literal})") }
             else { format!("DELETE FROM src WHERE id={id}") };
         oracle.execute_batch(&sql).unwrap();
-        let encoded = engine.intern_any(&value, &mut host).unwrap();
-        engine.settle(Frontier { changes: vec![SourceChange { rel: 0, row: vec![id, 9, encoded], w: sign }] }, &mut host).unwrap();
+        let encoded = engine.intern_any(&value).unwrap();
+        engine.settle(Frontier { changes: vec![SourceChange { rel: 0, row: vec![id, 9, encoded], w: sign }] }).unwrap();
         let want = sqlite_rows(&oracle, "SELECT g, sum(v), count(*) FROM src GROUP BY g");
-        let mut got = engine.snapshot(1, &mut host).unwrap().into_iter().map(|(row, _)| {
-            let sum = match engine.any_value(row[1], &mut host).unwrap() {
+        let mut got = engine.snapshot(1).unwrap().into_iter().map(|(row, _)| {
+            let sum = match engine.any_value(row[1]).unwrap() {
                 AnyValue::Null => Value::Null,
                 AnyValue::Integer(v) => Value::Integer(v),
                 AnyValue::Real(bits) => Value::Real(f64::from_bits(bits)),
@@ -73,13 +71,11 @@ fn check_overflow<E: Engine>() {
     let total: f64 = oracle.query_row("SELECT total(v) FROM src", [], |r| r.get(0)).unwrap();
     assert!(total.is_finite());
 
-    let db = Connection::open_in_memory().unwrap();
-    let mut host = Raw::with_connection(&db);
-    let mut engine = E::install(&sum_ir(), &mut host).unwrap();
+    let mut engine = E::install(&sum_ir()).unwrap();
     let changes = [(1, i64::MAX), (2, 1)].into_iter().map(|(id, v)| SourceChange {
-        rel: 0, row: vec![id, 9, engine.intern_any(&AnyValue::Integer(v), &mut host).unwrap()], w: 1,
+        rel: 0, row: vec![id, 9, engine.intern_any(&AnyValue::Integer(v)).unwrap()], w: 1,
     }).collect();
-    let error = engine.settle(Frontier { changes }, &mut host).unwrap_err().to_string();
+    let error = engine.settle(Frontier { changes }).unwrap_err().to_string();
     assert!(error.contains("integer overflow"), "{error}");
 }
 
@@ -93,14 +89,12 @@ fn check_overflow_cleared<E: Engine>() {
     let oracle = Connection::open_in_memory().unwrap();
     oracle.execute_batch("CREATE TABLE src(id INTEGER, g INTEGER, v); INSERT INTO src VALUES (1,9,9223372036854775807),(2,9,1),(3,9,0.0);").unwrap();
     let want = sqlite_rows(&oracle, "SELECT g,sum(v),count(*) FROM src GROUP BY g");
-    let db = Connection::open_in_memory().unwrap();
-    let mut host = Raw::with_connection(&db);
-    let mut engine = E::install(&sum_ir(), &mut host).unwrap();
+    let mut engine = E::install(&sum_ir()).unwrap();
     let changes = [(1, AnyValue::Integer(i64::MAX)), (2, AnyValue::Integer(1)), (3, AnyValue::Real(0.0f64.to_bits()))]
-        .iter().map(|(id, value)| SourceChange { rel: 0, row: vec![*id, 9, engine.intern_any(value, &mut host).unwrap()], w: 1 }).collect();
-    engine.settle(Frontier { changes }, &mut host).unwrap();
-    let row = &engine.snapshot(1, &mut host).unwrap()[0].0;
-    let sum = match engine.any_value(row[1], &mut host).unwrap() {
+        .iter().map(|(id, value)| SourceChange { rel: 0, row: vec![*id, 9, engine.intern_any(value).unwrap()], w: 1 }).collect();
+    engine.settle(Frontier { changes }).unwrap();
+    let row = &engine.snapshot(1).unwrap()[0].0;
+    let sum = match engine.any_value(row[1]).unwrap() {
         AnyValue::Real(bits) => Value::Real(f64::from_bits(bits)),
         value => panic!("sum class {value:?}"),
     };

@@ -10,7 +10,7 @@ use drive::Case;
 use std::process::Command;
 
 fn any_oracle<E: ivm_dd::Engine>(seed: u64) {
-    use ivm_dd::{AnyValue, Frontier, Raw, RelKind, SourceChange, Ty};
+    use ivm_dd::{AnyValue, Frontier, RelKind, SourceChange, Ty};
     use rusqlite::{types::Value, Connection};
 
     let mut rng = random::rng::Rng(seed);
@@ -18,23 +18,21 @@ fn any_oracle<E: ivm_dd::Engine>(seed: u64) {
     let values = random::gen::any_values(&mut rng);
     let oracle = Connection::open_in_memory().unwrap();
     oracle.execute_batch(&random::sql::ddl(&program)).unwrap();
-    let db = Connection::open_in_memory().unwrap();
-    let mut host = Raw::with_connection(&db);
-    let mut engine = E::install(&program, &mut host).unwrap();
+    let mut engine = E::install(&program).unwrap();
     let mut changes = Vec::new();
     for (i, value) in values.iter().enumerate() {
         oracle.execute_batch(&format!("INSERT INTO mixed_source VALUES ({}, {})", random::sql::any_literal(value), i + 1)).unwrap();
-        changes.push(SourceChange { rel: 0, row: vec![engine.intern_any(value, &mut host).unwrap(), i as i64 + 1], w: 1 });
+        changes.push(SourceChange { rel: 0, row: vec![engine.intern_any(value).unwrap(), i as i64 + 1], w: 1 });
     }
-    engine.settle(Frontier { changes }, &mut host).unwrap();
+    engine.settle(Frontier { changes }).unwrap();
     for rel in program.rels.iter().filter(|rel| rel.kind == RelKind::Derived) {
         let mut stmt = oracle.prepare(&format!("SELECT * FROM {}", rel.name)).unwrap();
         let width = stmt.column_count();
         let mut want = stmt.query_map([], |row| (0..width).map(|i| row.get::<_, Value>(i)).collect::<rusqlite::Result<Vec<_>>>())
             .unwrap().map(Result::unwrap).collect::<Vec<_>>();
-        let mut got = engine.snapshot(rel.id, &mut host).unwrap().into_iter().flat_map(|(row, weight)| {
+        let mut got = engine.snapshot(rel.id).unwrap().into_iter().flat_map(|(row, weight)| {
             let row = row.iter().zip(&rel.cols).map(|(cell, ty)| match ty {
-                Ty::Any => match engine.any_value(*cell, &mut host).unwrap() {
+                Ty::Any => match engine.any_value(*cell).unwrap() {
                     AnyValue::Null => Value::Null,
                     AnyValue::Integer(v) => Value::Integer(v),
                     AnyValue::Real(bits) => Value::Real(f64::from_bits(bits)),

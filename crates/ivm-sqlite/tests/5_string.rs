@@ -1,5 +1,5 @@
 use ivm_dd::Dd;
-use ivm_engine::{Engine, Raw};
+use ivm_engine::Engine;
 use ivm_ir::{Delta, Frontier, Program, SourceChange};
 use ivm_sqlite::Sqlite;
 use rusqlite::Connection;
@@ -9,9 +9,9 @@ use std::collections::BTreeMap;
 #[allow(dead_code)]
 mod rng;
 
-fn rows<E: Engine>(engine: &E, db: &Connection, raw: Vec<(Vec<i64>, i64)>) -> Vec<(Vec<String>, i64)> {
+fn rows<E: Engine>(engine: &E, raw: Vec<(Vec<i64>, i64)>) -> Vec<(Vec<String>, i64)> {
     let mut out = raw.into_iter().map(|(row, w)| {
-        let row = row.into_iter().map(|id| engine.text(id, &mut Raw::with_connection(db)).unwrap().unwrap()).collect();
+        let row = row.into_iter().map(|id| engine.text(id).unwrap().unwrap()).collect();
         (row, w)
     }).collect::<Vec<_>>();
     out.sort();
@@ -33,8 +33,7 @@ fn run<E: Engine>(steps: Vec<(u32, String, i64)>) {
     let program: Program = serde_json::from_str(include_str!("../../ivm-dd/oracle/16_string.program.json")).unwrap();
     let oracle = Connection::open_in_memory().unwrap();
     oracle.execute_batch(include_str!("../../ivm-dd/oracle/16_string.sql")).unwrap();
-    let db = Connection::open_in_memory().unwrap();
-    let mut engine = E::install(&program, &mut Raw::with_connection(&db)).unwrap();
+    let mut engine = E::install(&program).unwrap();
     let names = [(2, "greeting"), (3, "split"), (4, "empty"), (5, "ordering"), (6, "roundtrip")];
     for (at, (rel, value, w)) in steps.into_iter().enumerate() {
         let mut before = BTreeMap::new();
@@ -42,12 +41,12 @@ fn run<E: Engine>(steps: Vec<(u32, String, i64)>) {
         let source = if rel == 0 { "name" } else { "word" };
         let statement = if w > 0 { format!("INSERT INTO {source} VALUES (?1)") } else { format!("DELETE FROM {source} WHERE c0=?1") };
         oracle.execute(&statement, [&value]).unwrap();
-        let id = engine.intern_text(&value, &mut Raw::with_connection(&db)).unwrap();
-        assert_eq!(engine.text(id, &mut Raw::with_connection(&db)).unwrap().as_deref(), Some(value.as_str()));
-        let delta = engine.settle(Frontier { changes: vec![SourceChange { rel, row: vec![id], w }] }, &mut Raw::with_connection(&db)).unwrap_or_else(|e| panic!("step {at}: {e}"));
+        let id = engine.intern_text(&value).unwrap();
+        assert_eq!(engine.text(id).unwrap().as_deref(), Some(value.as_str()));
+        let delta = engine.settle(Frontier { changes: vec![SourceChange { rel, row: vec![id], w }] }).unwrap_or_else(|e| panic!("step {at}: {e}"));
         let Delta { changes, .. } = delta;
         let mut actual_delta = changes.into_iter().map(|(rel, row, weight)| {
-            let value = rows(&engine, &db, vec![(row, weight)]).pop().unwrap();
+            let value = rows(&engine, vec![(row, weight)]).pop().unwrap();
             (rel, value.0, value.1)
         }).collect::<Vec<_>>();
         actual_delta.sort();
@@ -58,8 +57,8 @@ fn run<E: Engine>(steps: Vec<(u32, String, i64)>) {
             for (row, weight) in &after { *net.entry(row.clone()).or_default() += weight; }
             for (row, weight) in &before[name] { *net.entry(row.clone()).or_default() -= weight; }
             expected_delta.extend(net.into_iter().filter(|(_, weight)| *weight != 0).map(|(row, weight)| (id, row, weight)));
-            let raw = engine.snapshot(id, &mut Raw::with_connection(&db)).unwrap();
-            assert_eq!(rows(&engine, &db, raw), after, "step {at} {name} snapshot");
+            let raw = engine.snapshot(id).unwrap();
+            assert_eq!(rows(&engine, raw), after, "step {at} {name} snapshot");
         }
         expected_delta.sort();
         assert_eq!(actual_delta, expected_delta, "step {at} delta");
@@ -102,12 +101,11 @@ fn random_string_sqlite() {
 
 fn nul_roundtrip<E: Engine>() {
     let program: Program = serde_json::from_str(include_str!("../../ivm-dd/oracle/16_string.program.json")).unwrap();
-    let db = Connection::open_in_memory().unwrap();
-    let mut engine = E::install(&program, &mut Raw::with_connection(&db)).unwrap();
-    let id = engine.intern_text("a\0b", &mut Raw::with_connection(&db)).unwrap();
-    engine.settle(Frontier { changes: vec![SourceChange { rel: 1, row: vec![id], w: 1 }] }, &mut Raw::with_connection(&db)).unwrap();
-    assert_eq!(rows(&engine, &db, engine.snapshot(3, &mut Raw::with_connection(&db)).unwrap()), vec![(vec!["a".into(), "\0b".into()], 1)]);
-    assert_eq!(rows(&engine, &db, engine.snapshot(6, &mut Raw::with_connection(&db)).unwrap()), vec![(vec!["a\0b".into()], 1)]);
+    let mut engine = E::install(&program).unwrap();
+    let id = engine.intern_text("a\0b").unwrap();
+    engine.settle(Frontier { changes: vec![SourceChange { rel: 1, row: vec![id], w: 1 }] }).unwrap();
+    assert_eq!(rows(&engine, engine.snapshot(3).unwrap()), vec![(vec!["a".into(), "\0b".into()], 1)]);
+    assert_eq!(rows(&engine, engine.snapshot(6).unwrap()), vec![(vec!["a\0b".into()], 1)]);
 }
 
 #[test]
@@ -127,16 +125,15 @@ const SMALL_STACK: usize = 256 << 10;
 fn megabyte_mint<E: Engine + 'static>() -> (bool, bool) {
     std::thread::Builder::new().stack_size(SMALL_STACK).spawn(|| {
         let program: Program = serde_json::from_str(include_str!("../../ivm-dd/oracle/16_string.program.json")).unwrap();
-        let db = Connection::open_in_memory().unwrap();
-        let mut engine = E::install(&program, &mut Raw::with_connection(&db)).unwrap();
+        let mut engine = E::install(&program).unwrap();
         let text = "ab😀é".repeat(MEGABYTE / 8);
         let started = std::time::Instant::now();
-        let id = engine.intern_text(&text, &mut Raw::with_connection(&db)).unwrap();
-        let back = engine.text(id, &mut Raw::with_connection(&db)).unwrap();
+        let id = engine.intern_text(&text).unwrap();
+        let back = engine.text(id).unwrap();
         let elapsed = started.elapsed();
         assert!(elapsed < MINT_BUDGET, "{elapsed:?}");
-        let suffix = engine.text(id, &mut Raw::with_connection(&db)).unwrap().map(|whole| whole[1..].to_owned()).unwrap();
-        let unminted = engine.intern_text(&suffix, &mut Raw::with_connection(&db)).unwrap() > id;
+        let suffix = engine.text(id).unwrap().map(|whole| whole[1..].to_owned()).unwrap();
+        let unminted = engine.intern_text(&suffix).unwrap() > id;
         (back.as_deref() == Some(text.as_str()), unminted)
     }).unwrap().join().unwrap()
 }
@@ -186,17 +183,16 @@ fn walk_program() -> Program {
 
 /// Decoded `head` rows after inserting then retracting the long string, on one engine.
 fn walk<E: Engine>(text: &str) -> (Vec<(i64, String)>, usize) {
-    let db = Connection::open_in_memory().unwrap();
-    let mut engine = E::install(&walk_program(), &mut Raw::with_connection(&db)).unwrap();
-    let id = engine.intern_text(text, &mut Raw::with_connection(&db)).unwrap();
-    engine.settle(Frontier { changes: vec![SourceChange { rel: 0, row: vec![id], w: 1 }] }, &mut Raw::with_connection(&db)).unwrap();
-    let mut heads = engine.snapshot(2, &mut Raw::with_connection(&db)).unwrap().into_iter().map(|(row, w)| {
+    let mut engine = E::install(&walk_program()).unwrap();
+    let id = engine.intern_text(text).unwrap();
+    engine.settle(Frontier { changes: vec![SourceChange { rel: 0, row: vec![id], w: 1 }] }).unwrap();
+    let mut heads = engine.snapshot(2).unwrap().into_iter().map(|(row, w)| {
         assert_eq!(w, 1);
-        (row[0], engine.text(row[1], &mut Raw::with_connection(&db)).unwrap().unwrap())
+        (row[0], engine.text(row[1]).unwrap().unwrap())
     }).collect::<Vec<_>>();
     heads.sort();
-    engine.settle(Frontier { changes: vec![SourceChange { rel: 0, row: vec![id], w: -1 }] }, &mut Raw::with_connection(&db)).unwrap();
-    (heads, engine.snapshot(2, &mut Raw::with_connection(&db)).unwrap().len())
+    engine.settle(Frontier { changes: vec![SourceChange { rel: 0, row: vec![id], w: -1 }] }).unwrap();
+    (heads, engine.snapshot(2).unwrap().len())
 }
 
 #[test]

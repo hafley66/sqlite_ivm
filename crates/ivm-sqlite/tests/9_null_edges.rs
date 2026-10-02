@@ -1,5 +1,5 @@
 use ivm_dd::Dd;
-use ivm_engine::{Engine, Raw};
+use ivm_engine::Engine;
 use ivm_ir::{Agg, AnyValue, Frontier, Op, Program, RelKind, Relation, SourceChange, Stratum, Ty};
 use ivm_sqlite::Sqlite;
 use ivm_sqlite::Frontier as _;
@@ -45,14 +45,12 @@ fn check_null_extrema<E: Engine>() {
     let oracle = Connection::open_in_memory().unwrap();
     oracle.execute_batch("CREATE TABLE src(g INTEGER, v); INSERT INTO src VALUES (9,NULL),(9,5),(9,'z'),(9,x'01'),(8,NULL);").unwrap();
     let want = sqlite_rows(&oracle, "SELECT g,min(v),max(v) FROM src GROUP BY g");
-    let db = Connection::open_in_memory().unwrap();
-    let mut host = Raw::with_connection(&db);
-    let mut engine = E::install(&extrema_ir(), &mut host).unwrap();
+    let mut engine = E::install(&extrema_ir()).unwrap();
     let changes = [(9, AnyValue::Null), (9, AnyValue::Integer(5)), (9, AnyValue::Text("z".into())), (9, AnyValue::Blob(vec![1])), (8, AnyValue::Null)]
-        .iter().map(|(group, value)| SourceChange { rel: 0, row: vec![*group, engine.intern_any(value, &mut host).unwrap()], w: 1 }).collect();
-    engine.settle(Frontier { changes }, &mut host).unwrap();
-    let mut got = engine.snapshot(1, &mut host).unwrap().into_iter().map(|(row, _)| {
-        let mut value = |id| match engine.any_value(id, &mut host).unwrap() {
+        .iter().map(|(group, value)| SourceChange { rel: 0, row: vec![*group, engine.intern_any(value).unwrap()], w: 1 }).collect();
+    engine.settle(Frontier { changes }).unwrap();
+    let mut got = engine.snapshot(1).unwrap().into_iter().map(|(row, _)| {
+        let mut value = |id| match engine.any_value(id).unwrap() {
             AnyValue::Null => Value::Null,
             AnyValue::Integer(v) => Value::Integer(v),
             AnyValue::Real(bits) => Value::Real(f64::from_bits(bits)),

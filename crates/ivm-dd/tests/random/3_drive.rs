@@ -105,10 +105,10 @@ struct Terms {
 }
 
 impl Terms {
-    fn read<E: Engine>(p: &Program, engine: &E, db: &Connection) -> Result<Self, String> {
+    fn read<E: Engine>(p: &Program, engine: &E) -> Result<Self, String> {
         let mut by_id = BTreeMap::new();
         for rel in p.rels.iter().filter(|r| r.kind == RelKind::Constructor) {
-            let rows = engine.intern_snapshot(rel.id, &mut Raw::with_connection(db)).map_err(|e| e.to_string())?;
+            let rows = engine.intern_snapshot(rel.id).map_err(|e| e.to_string())?;
             for (row, w) in rows {
                 if w != 1 { return Err(format!("constructor {} has weight {w}", rel.name)); }
                 by_id.insert(row[0], (rel.name.clone(), rel.cols[1..].to_vec(), row[1..].to_vec()));
@@ -139,8 +139,8 @@ impl Terms {
         Ok(rows)
     }
 
-    fn snapshot<E: Engine>(&self, p: &Program, engine: &E, rel: RelId, db: &Connection) -> Result<Vec<(Vec<Value>, W)>, String> {
-        let mut rows = snapshot(engine, rel, db)?.into_iter().map(|(row, w)| {
+    fn snapshot<E: Engine>(&self, p: &Program, engine: &E, rel: RelId) -> Result<Vec<(Vec<Value>, W)>, String> {
+        let mut rows = snapshot(engine, rel)?.into_iter().map(|(row, w)| {
             Ok((self.row(&row, &p.rel(rel).unwrap().cols)?, w))
         }).collect::<Result<Vec<_>, String>>()?;
         rows.sort();
@@ -148,28 +148,26 @@ impl Terms {
     }
 }
 
-fn agree_frontier<A: Engine, B: Engine>(p: &Program, at: usize, left: &A, left_db: &Connection, a: &Delta, right: &B, right_db: &Connection, b: &Delta) -> Result<(), String> {
-    let left_terms = Terms::read(p, left, left_db)?;
-    let right_terms = Terms::read(p, right, right_db)?;
+fn agree_frontier<A: Engine, B: Engine>(p: &Program, at: usize, left: &A, a: &Delta, right: &B, b: &Delta) -> Result<(), String> {
+    let left_terms = Terms::read(p, left)?;
+    let right_terms = Terms::read(p, right)?;
     let (a, b) = (left_terms.delta(p, a)?, right_terms.delta(p, b)?);
     if a != b { return Err(format!("frontier {at}: delta {a:?} != {b:?}")); }
     for rel in &p.outputs {
-        let a = left_terms.snapshot(p, left, *rel, left_db)?;
-        let b = right_terms.snapshot(p, right, *rel, right_db)?;
+        let a = left_terms.snapshot(p, left, *rel)?;
+        let b = right_terms.snapshot(p, right, *rel)?;
         if a != b { return Err(format!("frontier {at}: relation {rel} {a:?} != {b:?}")); }
     }
     Ok(())
 }
 
 pub fn agreement<A: Engine, B: Engine>(case: &Case) -> Result<(), String> {
-    let left_db = memory_connection().map_err(sql_err)?;
-    let right_db = memory_connection().map_err(sql_err)?;
-    let mut left = A::install(&case.program, &mut Raw::with_connection(&left_db)).map_err(|e| format!("left install: {e}"))?;
-    let mut right = B::install(&case.program, &mut Raw::with_connection(&right_db)).map_err(|e| format!("right install: {e}"))?;
+    let mut left = A::install(&case.program).map_err(|e| format!("left install: {e}"))?;
+    let mut right = B::install(&case.program).map_err(|e| format!("right install: {e}"))?;
     for (at, frontier) in case.frontiers.iter().enumerate() {
-        let a = left.settle(frontier.clone(), &mut Raw::with_connection(&left_db)).map_err(|e| format!("left frontier {at}: {e}"))?;
-        let b = right.settle(frontier.clone(), &mut Raw::with_connection(&right_db)).map_err(|e| format!("right frontier {at}: {e}"))?;
-        agree_frontier(&case.program, at, &left, &left_db, &a, &right, &right_db, &b)?;
+        let a = left.settle(frontier.clone()).map_err(|e| format!("left frontier {at}: {e}"))?;
+        let b = right.settle(frontier.clone()).map_err(|e| format!("right frontier {at}: {e}"))?;
+        agree_frontier(&case.program, at, &left, &a, &right, &b)?;
     }
     Ok(())
 }
@@ -200,17 +198,15 @@ impl Terms {
 }
 
 fn lockstep<A: Engine, B: Engine>(program: &Program, texts: &[String], left_frontiers: &[Frontier], compare: bool) -> Result<Vec<Frontier>, String> {
-    let left_db = memory_connection().map_err(sql_err)?;
-    let right_db = memory_connection().map_err(sql_err)?;
-    let mut left = A::install(program, &mut Raw::with_connection(&left_db)).map_err(|e| format!("left install: {e}"))?;
-    let mut right = B::install(program, &mut Raw::with_connection(&right_db)).map_err(|e| format!("right install: {e}"))?;
+    let mut left = A::install(program).map_err(|e| format!("left install: {e}"))?;
+    let mut right = B::install(program).map_err(|e| format!("right install: {e}"))?;
     for text in texts {
-        left.intern_text(text, &mut Raw::with_connection(&left_db)).map_err(|e| format!("left intern text: {e}"))?;
-        right.intern_text(text, &mut Raw::with_connection(&right_db)).map_err(|e| format!("right intern text: {e}"))?;
+        left.intern_text(text).map_err(|e| format!("left intern text: {e}"))?;
+        right.intern_text(text).map_err(|e| format!("right intern text: {e}"))?;
     }
     let mut translated = Vec::new();
     for (at, left_frontier) in left_frontiers.iter().enumerate() {
-        let (left_terms, right_terms) = (Terms::read(program, &left, &left_db)?, Terms::read(program, &right, &right_db)?);
+        let (left_terms, right_terms) = (Terms::read(program, &left)?, Terms::read(program, &right)?);
         let right_ids = right_terms.ids()?;
         let changes = left_frontier.changes.iter().map(|change| {
             let types = &program.rel(change.rel).ok_or_else(|| format!("frontier {at}: unknown rel {}", change.rel))?.cols;
@@ -218,21 +214,20 @@ fn lockstep<A: Engine, B: Engine>(program: &Program, texts: &[String], left_fron
             Ok(SourceChange { rel: change.rel, row, w: change.w })
         }).collect::<Result<Vec<_>, String>>()?;
         let right_frontier = Frontier { changes };
-        let a = left.settle(left_frontier.clone(), &mut Raw::with_connection(&left_db)).map_err(|e| format!("left frontier {at}: {e}"))?;
-        let b = right.settle(right_frontier.clone(), &mut Raw::with_connection(&right_db)).map_err(|e| format!("right frontier {at}: {e}"))?;
-        if compare { agree_frontier(program, at, &left, &left_db, &a, &right, &right_db, &b)?; }
+        let a = left.settle(left_frontier.clone()).map_err(|e| format!("left frontier {at}: {e}"))?;
+        let b = right.settle(right_frontier.clone()).map_err(|e| format!("right frontier {at}: {e}"))?;
+        if compare { agree_frontier(program, at, &left, &a, &right, &b)?; }
         translated.push(right_frontier);
     }
     Ok(translated)
 }
 
 pub fn term_lt_structure<E: Engine>(case: &Case) -> Result<(), String> {
-    let db = memory_connection().map_err(sql_err)?;
-    let mut engine = E::install(&case.program, &mut Raw::with_connection(&db)).map_err(|e| format!("install: {e}"))?;
+    let mut engine = E::install(&case.program).map_err(|e| format!("install: {e}"))?;
     for (at, frontier) in case.frontiers.iter().enumerate() {
-        engine.settle(frontier.clone(), &mut Raw::with_connection(&db)).map_err(|e| format!("frontier {at}: {e}"))?;
-        let terms = snapshot(&engine, 3, &db)?;
-        let ordered = snapshot(&engine, 7, &db)?;
+        engine.settle(frontier.clone()).map_err(|e| format!("frontier {at}: {e}"))?;
+        let terms = snapshot(&engine, 3)?;
+        let ordered = snapshot(&engine, 7)?;
         let mut expected = Vec::new();
         for (a, _) in &terms {
             for (b, _) in &terms {
@@ -321,8 +316,8 @@ pub fn raw(d: &Delta) -> Result<(), String> {
     Ok(())
 }
 
-pub fn snapshot<E: Engine>(e: &E, rel: RelId, db: &Connection) -> Result<Vec<(Row, W)>, String> {
-    let mut rows = e.snapshot(rel, &mut Raw::with_connection(db)).map_err(|e| format!("snapshot: {e}"))?;
+pub fn snapshot<E: Engine>(e: &E, rel: RelId) -> Result<Vec<(Row, W)>, String> {
+    let mut rows = e.snapshot(rel).map_err(|e| format!("snapshot: {e}"))?;
     rows.sort();
     Ok(rows)
 }
@@ -331,13 +326,12 @@ pub fn snapshot<E: Engine>(e: &E, rel: RelId, db: &Connection) -> Result<Vec<(Ro
 pub fn oracle<E: Engine>(case: &Case) -> Result<(), String> {
     let p = &case.program;
     let oracle = Oracle::new(p)?;
-    let engine_db = memory_connection().map_err(sql_err)?;
-    let mut engine = E::install(p, &mut Raw::with_connection(&engine_db)).map_err(|e| format!("install: {e}"))?;
+    let mut engine = E::install(p).map_err(|e| format!("install: {e}"))?;
     let mut before = oracle.bags()?;
     for (i, f) in case.frontiers.iter().enumerate() {
         oracle.apply(p, f)?;
         let after = oracle.bags()?;
-        let delta = engine.settle(f.clone(), &mut Raw::with_connection(&engine_db)).map_err(|e| format!("frontier {i}: settle: {e}"))?;
+        let delta = engine.settle(f.clone()).map_err(|e| format!("frontier {i}: settle: {e}"))?;
         raw(&delta).map_err(|e| format!("frontier {i}: {e}"))?;
         let mut expected = Vec::new();
         for (k, (rel, _)) in oracle.outputs.iter().enumerate() {
@@ -352,7 +346,7 @@ pub fn oracle<E: Engine>(case: &Case) -> Result<(), String> {
             return Err(format!("frontier {i}: delta\n  expected {expected:?}\n  got      {:?}", delta.changes));
         }
         for (k, (rel, _)) in oracle.outputs.iter().enumerate() {
-            let got = snapshot(&engine, *rel, &engine_db)?;
+            let got = snapshot(&engine, *rel)?;
             let want: Vec<(Row, W)> = after[k].clone().into_iter().collect();
             if got != want {
                 return Err(format!("frontier {i}: snapshot of rel {rel}\n  expected {want:?}\n  got      {got:?}"));

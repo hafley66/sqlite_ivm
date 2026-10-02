@@ -1,5 +1,4 @@
-use ivm_dd::{Dd, Engine, Frontier, Op, Program, Raw, RelKind, Relation, SourceChange, Stratum, Ty};
-use rusqlite::Connection;
+use ivm_dd::{Dd, Engine, Frontier, Op, Program, RelKind, Relation, SourceChange, Stratum, Ty};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::fs;
@@ -27,13 +26,11 @@ fn names(dir: &Path, prefix: &str, out: &mut Vec<String>) {
 }
 
 fn dump(dir: &Path, name: &str, program: Program, frontiers: Vec<Frontier>) -> Value {
-    let db = Connection::open_in_memory().unwrap();
-    let mut host = Raw::with_connection(&db);
-    let mut dd = <Dd as Engine>::install(&program, &mut host).unwrap();
+    let mut dd = <Dd as Engine>::install(&program).unwrap();
     let mut expected = Vec::new();
     let mut values = Vec::new();
     for frontier in &frontiers {
-        let delta = dd.settle(frontier.clone(), &mut host).unwrap();
+        let delta = dd.settle(frontier.clone()).unwrap();
         for (rel, row, _) in &delta.changes {
             let types = &program.rel(*rel).unwrap().cols;
             for (cell, ty) in row.iter().zip(types) {
@@ -44,7 +41,7 @@ fn dump(dir: &Path, name: &str, program: Program, frontiers: Vec<Frontier>) -> V
     }
     let mut constructors = BTreeMap::new();
     for rel in program.rels.iter().filter(|r| r.kind == RelKind::Constructor) {
-        for (row, _) in dd.intern_snapshot(rel.id, &mut host).unwrap() {
+        for (row, _) in dd.intern_snapshot(rel.id).unwrap() {
             for (cell, ty) in row[1..].iter().zip(&rel.cols[1..]) {
                 if *ty == Ty::Id { values.push(*cell); }
             }
@@ -53,7 +50,7 @@ fn dump(dir: &Path, name: &str, program: Program, frontiers: Vec<Frontier>) -> V
     }
     let mut texts = BTreeMap::new();
     for id in values {
-        if let Some(value) = dd.text(id, &mut host).unwrap() { texts.insert(id, value); }
+        if let Some(value) = dd.text(id).unwrap() { texts.insert(id, value); }
     }
     let module = ivm_rxjs::emit(&program).unwrap();
     assert!(!module.contains(".subscribe("));
@@ -63,16 +60,14 @@ fn dump(dir: &Path, name: &str, program: Program, frontiers: Vec<Frontier>) -> V
 
 fn edge_frontiers(program: &Program, bundle: &Value) -> Vec<Frontier> {
     let initial: Frontier = serde_json::from_value(bundle["frontier0"].clone()).unwrap();
-    let db = Connection::open_in_memory().unwrap();
-    let mut host = Raw::with_connection(&db);
-    let mut dd = <Dd as Engine>::install(program, &mut host).unwrap();
+    let mut dd = <Dd as Engine>::install(program).unwrap();
     let mut ids = BTreeMap::new();
     let first_atom = bundle["atoms"].as_object().unwrap().keys()
         .map(|id| id.parse::<i64>().unwrap()).min().unwrap();
     for id in 1..first_atom { ids.insert(id, id); }
     for (id, value) in bundle["atoms"].as_object().unwrap() {
         if let Some(text) = value["printed"]["s"].as_str() {
-            ids.insert(id.parse::<i64>().unwrap(), dd.intern_text(text, &mut host).unwrap());
+            ids.insert(id.parse::<i64>().unwrap(), dd.intern_text(text).unwrap());
         }
     }
     let mut staged = Vec::new();
@@ -99,7 +94,7 @@ fn edge_frontiers(program: &Program, bundle: &Value) -> Vec<Frontier> {
             if *ty == Ty::Id { ids[cell] } else { *cell }
         }).collect();
         let frontier = Frontier { changes: vec![SourceChange { rel: change.rel, row, w: 1 }] };
-        let delta = dd.settle(frontier.clone(), &mut host).unwrap();
+        let delta = dd.settle(frontier.clone()).unwrap();
         let output = program.rels.iter().find(|rel| rel.name == source.name.replacen("__ir_prewarm_", "__ir_prewarm_out_", 1)).unwrap();
         let minted = delta.changes.iter().find(|(rel, row, _)| *rel == output.id && row[0] == original).unwrap().1.last().copied().unwrap();
         ids.insert(id, minted);
@@ -128,8 +123,7 @@ fn main() {
         let script = support::script(&name);
         if script.program.nodes.iter().any(|op| matches!(op, Op::Delay(_))) {
             assert!(ivm_rxjs::emit(&script.program).is_err());
-            let db = Connection::open_in_memory().unwrap();
-            assert!(<Dd as Engine>::install(&script.program, &mut Raw::with_connection(&db)).is_err());
+            assert!(<Dd as Engine>::install(&script.program).is_err());
             continue;
         }
         let (_, steps) = support::oracle(&script);
