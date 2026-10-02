@@ -377,9 +377,38 @@ pub(crate) fn text(db: &Connection, id: i64) -> rusqlite::Result<Option<String>>
 pub(crate) fn mint_texts_sql(source: &str) -> [String; 3] {
     [
         format!("INSERT INTO ivm_text(id,text) SELECT (SELECT coalesce(max(id),0) FROM ivm_term)+row_number() OVER (ORDER BY text), text FROM (SELECT DISTINCT text FROM ({source}) WHERE text NOT IN (SELECT text FROM ivm_text))"),
-        format!("INSERT INTO ivm_term(id,functor_id) SELECT id, (SELECT id FROM ivm_functor WHERE name='{STR_FUNCTOR}') FROM ivm_text WHERE id>(SELECT coalesce(max(id),0) FROM ivm_term)"),
-        TEXT_KEYS_SQL.to_owned(),
+        format!("{AFTER_MINT}INSERT INTO ivm_term(id,functor_id) SELECT id, (SELECT id FROM ivm_functor WHERE name='{STR_FUNCTOR}') FROM ivm_text WHERE id>(SELECT coalesce(max(id),0) FROM ivm_term)"),
+        format!("{AFTER_MINT}{TEXT_KEYS_SQL}"),
     ]
+}
+
+/// Prefix of a statement that registers the rows the statement before it minted; the
+/// settle runs it only when that statement inserted rows.
+pub(crate) const AFTER_MINT: &str = "/*after mint*/ ";
+
+/// Interns `name(args)` as a Mint of that row would: an existing row keeps its id, a new one
+/// takes the next `ivm_term` id and gets its `ivm_term` and sort-key rows.
+pub(crate) fn intern_term(db: &Connection, name: &str, types: &[Ty], args: &[i64]) -> rusqlite::Result<i64> {
+    let table = crate::catalog::quote(ctor_table(name));
+    let lookup = if args.is_empty() {
+        format!("SELECT c0 FROM {table} LIMIT 1")
+    } else {
+        format!("SELECT c0 FROM {table} WHERE {}", (1..=args.len()).map(|i| format!("c{i}=?{i}")).collect::<Vec<_>>().join(" AND "))
+    };
+    if let Some(id) = db.prepare_cached(&lookup)?.query_row(rusqlite::params_from_iter(args), |r| r.get(0)).optional()? {
+        return Ok(id);
+    }
+    let id: i64 = db.prepare_cached(
+        "INSERT INTO ivm_term(id,functor_id) SELECT coalesce(max(id),0)+1, (SELECT id FROM ivm_functor WHERE name=?1) FROM ivm_term RETURNING id")?
+        .query_row([name], |r| r.get(0))?;
+    let insert = format!(
+        "INSERT INTO {table}(c0{}) VALUES (?1{})",
+        (1..=args.len()).map(|i| format!(",c{i}")).collect::<String>(),
+        (2..=args.len() + 1).map(|i| format!(",?{i}")).collect::<String>(),
+    );
+    db.prepare_cached(&insert)?.execute(rusqlite::params_from_iter(std::iter::once(&id).chain(args)))?;
+    db.prepare_cached(&ctor_keys_sql(name, types))?.execute([])?;
+    Ok(id)
 }
 
 /// Interns `value` whole: one `ivm_term`, `ivm_text` and sort-key row. Decompose mints the head and

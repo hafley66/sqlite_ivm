@@ -166,6 +166,10 @@ pub(crate) fn settle_counted(
     }
 }
 
+/// Stage rows per multi-row insert: 64 rows of at most a few dozen cells stay far below
+/// SQLite's bound-parameter limit.
+const STAGE_CHUNK: usize = 64;
+
 fn settle_inner(
     conn: &Connection,
     inst: &Installed,
@@ -182,14 +186,33 @@ fn settle_inner(
             .map_err(|e| fail("clear", object, e))?;
     }
 
-    for (i, change) in batch.iter().enumerate() {
-        let width = inst.plan.stage_width.max(1);
-        let mut params = Vec::with_capacity(3 + width);
+    // Staged in chunks of STAGE_CHUNK rows per statement; the tail one row at a time.
+    let width = inst.plan.stage_width.max(1);
+    let row_params = |i: usize, change: &SourceChange, params: &mut Vec<Cell>| {
         params.push(Cell::Integer(i as i64));
         params.push(Cell::Text(change.relation.clone()));
         params.push(Cell::Integer(change.sign.as_integer()));
         params.extend(change.row.iter().cloned());
-        params.resize(3 + width, Cell::Null);
+        params.resize(params.len() + 3 + width - (3 + change.row.len()), Cell::Null);
+    };
+    let chunked = batch.len() / STAGE_CHUNK * STAGE_CHUNK;
+    if chunked > 0 {
+        let (head, _) = inst.sqls.stage_insert.split_once(" VALUES ").expect("stage insert has VALUES");
+        let one = format!("({})", vec!["?"; 3 + width].join(","));
+        let sql = format!("{head} VALUES {}", vec![one; STAGE_CHUNK].join(","));
+        for (at, chunk) in batch[..chunked].chunks(STAGE_CHUNK).enumerate() {
+            let mut params = Vec::with_capacity(STAGE_CHUNK * (3 + width));
+            for (offset, change) in chunk.iter().enumerate() {
+                row_params(at * STAGE_CHUNK + offset, change, &mut params);
+            }
+            meter
+                .exec(conn, phase, &chunk[0].relation, &sql, rusqlite::params_from_iter(params))
+                .map_err(|e| fail("stage", &chunk[0].relation, e))?;
+        }
+    }
+    for (i, change) in batch.iter().enumerate().skip(chunked) {
+        let mut params = Vec::with_capacity(3 + width);
+        row_params(i, change, &mut params);
         meter
             .exec(
                 conn,
@@ -219,13 +242,15 @@ fn settle_inner(
                     .map(|(i, ty)| if inst.sql_text { catalog::decode_sql(*ty, &format!("?{}", i + 2)) } else { format!("?{}", i + 2) })
             ).collect::<Vec<_>>().join(",")
         );
+        let mut insert = conn.prepare_cached(&sql).map_err(|e| fail("node delta", &inst.name, e))?;
         for (row, weight) in changes {
             let params = std::iter::once(weight)
                 .chain(row.into_iter())
                 .collect::<Vec<_>>();
-            conn.execute(&sql, rusqlite::params_from_iter(params))
+            insert.execute(rusqlite::params_from_iter(params))
                 .map_err(|e| fail("node delta", &inst.name, e))?;
         }
+        drop(insert);
         meter
             .exec(
                 conn,

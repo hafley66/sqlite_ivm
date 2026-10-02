@@ -97,6 +97,12 @@ pub trait Engine: Sized {
     fn intern_text(&mut self, _text: &str, _host: &mut impl Host) -> Result<Cell, EngineError> {
         Err(EngineError::new(Stage::Settle, None, ErrorKind::Unsupported("intern_text")))
     }
+    /// Interns constructor terms `functor(args)` in order and returns their ids, as a Mint of
+    /// the same row would. Each argument is an interned term, a text cell or a raw value.
+    /// The constructor's rows hold the new terms from the next settle on.
+    fn intern_terms(&mut self, _terms: &[(RelId, Row)], _host: &mut impl Host) -> Result<Vec<Cell>, EngineError> {
+        Err(EngineError::new(Stage::Settle, None, ErrorKind::Unsupported("intern_terms")))
+    }
     fn text(&self, _id: Cell, _host: &mut impl Host) -> Result<Option<String>, EngineError> {
         Err(EngineError::new(Stage::Snapshot, None, ErrorKind::Unsupported("text")))
     }
@@ -118,6 +124,13 @@ pub trait Rel {
     fn union(&mut self, cs: Vec<Self::C>) -> Self::C;
     fn negate(&mut self, c: Self::C) -> Self::C;
     fn join(&mut self, cs: Vec<Self::C>, eq: &[Vec<(u8, ColId)>], types: &[Vec<Ty>]) -> Result<Self::C, EngineError>;
+    /// `c ⋈ functor` on `c.col = functor.c0`: each row extended by the constructor row of the term
+    /// its `col` names. A row names only terms minted before it, so the engine reads the
+    /// constructor's current rows and no constructor change ever drives the result.
+    fn decode(&mut self, c: Self::C, functor: RelId, col: ColId, types: &[Vec<Ty>]) -> Result<Self::C, EngineError> {
+        let k = self.get(functor)?;
+        self.join(vec![c, k], &[vec![(0, col), (1, 0)]], types)
+    }
     fn antijoin(&mut self, l: Self::C, r: Self::C, lk: &[ColId], rk: &[ColId]) -> Self::C;
     fn reduce(&mut self, c: Self::C, key: &[ColId], aggs: &[Agg], input_types: &[Ty]) -> Self::C;
     fn threshold(&mut self, c: Self::C) -> Self::C;
@@ -239,6 +252,20 @@ pub fn lower<A: Rel>(p: &Program, a: &mut A) -> Result<(), EngineError> {
     Ok(())
 }
 
+/// A two-input join whose one equivalence pairs a constructor's id column with a column of the
+/// other input: `(constructor side, other input's column, constructor)`.
+fn decoded<C>(p: &Program, defined: &[(RelId, C)], inputs: &[NodeId], equivalences: &[Vec<(u8, ColId)>]) -> Option<(usize, ColId, RelId)> {
+    let [class] = equivalences else { return None };
+    let [first, second] = class.as_slice() else { return None };
+    if inputs.len() != 2 || first.0 == second.0 { return None; }
+    [first, second].into_iter().find_map(|&(side, col)| {
+        let Op::Get(rel) = p.nodes.get(*inputs.get(side as usize)? as usize)? else { return None };
+        let constructor = p.rel(*rel)?.kind == RelKind::Constructor && !defined.iter().any(|(id, _)| id == rel);
+        let other = if first.0 == side { second } else { first };
+        (constructor && col == 0).then_some((side as usize, other.1, *rel))
+    })
+}
+
 pub fn lower_node<A: Rel>(
     p: &Program,
     a: &mut A,
@@ -283,6 +310,24 @@ pub fn lower_node<A: Rel>(
         Op::Negate(input) => {
             let c = sub(*input, a)?;
             a.negate(c)
+        }
+        Op::Join { inputs, equivalences } if decoded(p, defined, inputs, equivalences).is_some() => {
+            let (side, col, functor) = decoded(p, defined, inputs, equivalences).unwrap();
+            let other = inputs[1 - side];
+            let types = [other, inputs[side]].map(|n| p.node_types(n).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Join input types"))));
+            let types = [types[0].clone()?, types[1].clone()?];
+            let c = sub(other, a)?;
+            let c = a.decode(c, functor, col, &types)?;
+            if side == 1 {
+                c
+            } else {
+                // The constructor input came first: its columns lead.
+                let (width, ctor) = (types[0].len(), types[1].len());
+                let project = (width..width + ctor).chain(0..width).map(|x| x as ColId).collect::<Vec<_>>();
+                let mut all = types[0].clone();
+                all.extend(types[1].iter().copied());
+                a.mfp(c, &[], &[], &project, &all)
+            }
         }
         Op::Join { inputs, equivalences } => {
             let cs = inputs.iter().map(|n| sub(*n, a)).collect::<Result<Vec<_>, _>>()?;

@@ -183,6 +183,20 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
         }))
     }
 
+    fn decode(&mut self, c: Self::C, functor: RelId, col: ColId, _types: &[Vec<Ty>]) -> Result<Self::C, EngineError> {
+        let (name, _) = self.constructors.get(&functor)
+            .ok_or_else(|| EngineError::new(Stage::Install, Some(functor), ErrorKind::UnknownRel(functor)))?.clone();
+        let interner = self.interner.clone();
+        Ok(c.flat_map(move |mut row| {
+            let id = *row.get(col as usize)?;
+            let dict = interner.borrow();
+            let term = dict.get(id).filter(|term| term.functor == name)?;
+            row.push(id);
+            row.extend_from_slice(&term.args);
+            Some(row)
+        }))
+    }
+
     fn str_cons(&mut self, c: Self::C, mode: &StrMode) -> Result<Self::C, EngineError> {
         let mode = mode.clone();
         let interner = self.interner.clone();
@@ -713,6 +727,7 @@ enum Command {
     Settle(Frontier, mpsc::Sender<Result<(Delta, Vec<DdTap>, Counters), EngineError>>),
     Snapshot(RelId, mpsc::Sender<Result<Vec<(Row, W)>, EngineError>>),
     InternSnapshot(RelId, mpsc::Sender<Result<Vec<(Row, W)>, EngineError>>),
+    InternTerms(Vec<(RelId, Row)>, mpsc::Sender<Result<Vec<Cell>, EngineError>>),
     InternText(String, mpsc::Sender<Cell>),
     Text(Cell, mpsc::Sender<Option<String>>),
     InternAny(AnyValue, mpsc::Sender<Cell>),
@@ -785,6 +800,11 @@ impl Engine for Dd {
         let (reply, answer) = mpsc::channel();
         self.tx.send(Command::InternSnapshot(functor, reply)).map_err(|e| worker_error(Stage::Snapshot, e))?;
         answer.recv().map_err(|e| worker_error(Stage::Snapshot, e))?
+    }
+    fn intern_terms(&mut self, terms: &[(RelId, Row)], _host: &mut impl Host) -> Result<Vec<Cell>, EngineError> {
+        let (reply, answer) = mpsc::channel();
+        self.tx.send(Command::InternTerms(terms.to_vec(), reply)).map_err(|e| worker_error(Stage::Settle, e))?;
+        answer.recv().map_err(|e| worker_error(Stage::Settle, e))?
     }
     fn intern_text(&mut self, value: &str, _host: &mut impl Host) -> Result<Cell, EngineError> {
         let (reply, answer) = mpsc::channel();
@@ -910,6 +930,12 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                     for change in accepted {
                         built.inputs.get_mut(&change.rel).unwrap().update(change.row, change.w);
                     }
+                    // Terms interned since the last settle enter with the frontier.
+                    for (name, row) in interner.borrow_mut().drain_pending() {
+                        if let Some(id) = constructors.iter().find(|(_, (functor, _))| functor == &name).map(|(id, _)| *id) {
+                            built.constructor_inputs.get_mut(&id).unwrap().update(row, 1);
+                        }
+                    }
                     epoch += 1;
                     for input in built.inputs.values_mut() {
                         input.advance_to(epoch);
@@ -1001,6 +1027,17 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                     let answer = constructors.get(&rel)
                         .map(|(name, _)| interner.borrow().snapshot(name))
                         .ok_or_else(|| EngineError::new(Stage::Snapshot, Some(rel), ErrorKind::UnknownRel(rel)));
+                    let _ = reply.send(answer);
+                }
+                Command::InternTerms(terms, reply) => {
+                    let answer = terms.iter().map(|(functor, args)| {
+                        let (name, types) = constructors.get(functor)
+                            .ok_or_else(|| EngineError::new(Stage::Settle, Some(*functor), ErrorKind::UnknownRel(*functor)))?;
+                        if args.len() != types.len() {
+                            return Err(EngineError::new(Stage::Settle, Some(*functor), ErrorKind::Arity { expected: types.len(), actual: args.len() }));
+                        }
+                        Ok(interner.borrow_mut().mint(name, args, types))
+                    }).collect();
                     let _ = reply.send(answer);
                 }
                 Command::InternText(value, reply) => { let _ = reply.send(interner.borrow_mut().mint_text(&value)); }
