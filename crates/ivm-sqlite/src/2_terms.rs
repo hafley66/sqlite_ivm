@@ -55,13 +55,10 @@ pub(crate) fn install(db: &Connection, ir: &Program) -> rusqlite::Result<()> {
     db.execute_batch("CREATE TABLE IF NOT EXISTS ivm_functor(id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE);\
         CREATE TABLE IF NOT EXISTS ivm_functor_col(functor_id INTEGER NOT NULL, pos INTEGER NOT NULL, ty INTEGER NOT NULL, PRIMARY KEY(functor_id,pos)) WITHOUT ROWID;\
         CREATE TABLE IF NOT EXISTS ivm_term(id INTEGER PRIMARY KEY, functor_id INTEGER NOT NULL);\
-        CREATE TABLE IF NOT EXISTS ivm_text(id INTEGER PRIMARY KEY, text TEXT NOT NULL UNIQUE);\
-        CREATE TABLE IF NOT EXISTS ivm_term_sortkey(id INTEGER PRIMARY KEY, key BLOB NOT NULL);")?;
+        CREATE TABLE IF NOT EXISTS ivm_text(id INTEGER PRIMARY KEY, text TEXT NOT NULL UNIQUE);")?;
     functor_id(db, STR_FUNCTOR)?;
     db.execute_batch("CREATE TABLE IF NOT EXISTS ivm_cell_dict(id INTEGER PRIMARY KEY, class INTEGER NOT NULL, payload INTEGER NOT NULL, UNIQUE(class,payload))")?;
     db.execute_batch("CREATE TABLE IF NOT EXISTS ivm_blob_dict(id INTEGER PRIMARY KEY AUTOINCREMENT, bytes BLOB NOT NULL UNIQUE)")?;
-    // Terms of an earlier install that predate stored keys; before any mint below moves the watermark.
-    fill_keys(db)?;
     if ir.uses_strings() {
         intern_text(db, "")?;
         for text in &ir.texts { intern_text(db, text)?; }
@@ -89,60 +86,38 @@ pub(crate) fn install(db: &Connection, ir: &Program) -> rusqlite::Result<()> {
     register(db)
 }
 
-/// Stores the sort key of every term without one, in id order. A term's arguments have smaller ids
-/// than the term (mint allocates above the current maximum), so each child key is already known.
-/// Install runs this once; afterwards every mint path stores its keys as it mints.
-fn fill_keys(db: &Connection) -> rusqlite::Result<()> {
-    let ids: Vec<i64> = db.prepare("SELECT id FROM ivm_term WHERE id>(SELECT coalesce(max(id),0) FROM ivm_term_sortkey) ORDER BY id")?
-        .query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
-    let (mut keys, mut ctors) = (HashMap::new(), Ctors::new());
-    for id in ids {
-        let Some(term) = lookup(db, &mut ctors, id)? else { continue };
-        let mut failure = None;
-        let key = ivm_ir::term_key(&term, &mut |child| match keys.get(&child) {
-            Some(key) => Vec::clone(key),
-            None => stored_key(db, child).unwrap_or_else(|error| { failure = Some(error); vec![] }),
-        });
-        if let Some(error) = failure { return Err(error); }
-        db.prepare_cached("INSERT INTO ivm_term_sortkey(id,key) VALUES (?1,?2)")?.execute((id, &key))?;
-        keys.insert(id, key);
+/// The sort key of `id`, built from the dictionary when an ordering reads it: a term's key embeds
+/// its children's keys, so keys stored at mint grow with nesting depth for every term minted. `memo`
+/// holds the keys of one statement run. Non-dictionary ids are atoms.
+fn term_key_of(db: &Connection, ctors: &mut Ctors, memo: &mut HashMap<i64, Vec<u8>>, id: i64) -> rusqlite::Result<Vec<u8>> {
+    enum Step { Enter(i64), Exit(i64, Term) }
+    let mut stack = vec![Step::Enter(id)];
+    while let Some(step) = stack.pop() {
+        match step {
+            Step::Enter(at) => {
+                if memo.contains_key(&at) { continue; }
+                let Some(term) = lookup(db, ctors, at)? else {
+                    memo.insert(at, ivm_ir::atom_key(at));
+                    continue;
+                };
+                let children: Vec<i64> = term.args.iter().zip(&term.types)
+                    .filter(|(child, ty)| matches!(ty, Ty::Id | Ty::Text) && !memo.contains_key(child))
+                    .map(|(child, _)| *child).collect();
+                stack.push(Step::Exit(at, term));
+                stack.extend(children.into_iter().map(Step::Enter));
+            }
+            Step::Exit(at, term) => {
+                let key = ivm_ir::term_key(&term, &mut |child| memo.get(&child).cloned().unwrap_or_else(|| ivm_ir::atom_key(child)));
+                memo.insert(at, key);
+            }
+        }
     }
-    Ok(())
+    Ok(memo.get(&id).cloned().unwrap_or_else(|| ivm_ir::atom_key(id)))
 }
 
-/// Stored sort key of `id`; ids that are not dictionary terms are atoms.
-fn stored_key(db: &Connection, id: i64) -> rusqlite::Result<Vec<u8>> {
-    TERM_LOOKUPS.fetch_add(1, Relaxed);
-    let key: Option<Vec<u8>> = db.prepare_cached("SELECT key FROM ivm_term_sortkey WHERE id=?1")?
-        .query_row([id], |r| r.get(0)).optional()?;
-    Ok(key.unwrap_or_else(|| ivm_ir::atom_key(id)))
-}
-
-/// SQL value of the sort key of the Id cell `value`: one primary-key read of the key stored at mint.
-/// `value` names an outer column (`cN`, `alias.cN`); a bare `id` or `key` would bind to the key table.
+/// SQL value of the sort key of the Id cell `value`, built on read.
 pub(crate) fn sort_key_sql(value: &str) -> String {
-    format!("coalesce((SELECT ivm_sk.key FROM ivm_term_sortkey ivm_sk WHERE ivm_sk.id={value}),ivm_atom_key({value}))")
-}
-
-/// Statement that stores the sort keys of the constructor terms `name` minted since the last fill.
-/// Children are older terms, so their keys are stored; `ivm_ctor_sortkey` assembles the key in Rust.
-pub(crate) fn ctor_keys_sql(name: &str, types: &[Ty]) -> String {
-    let codes: String = types.iter().map(|ty| ty_code(*ty).to_string()).collect();
-    let args: String = types.iter().enumerate().map(|(i, ty)| match ty {
-        Ty::Id | Ty::Text => format!(",{}", sort_key_sql(&format!("k.c{}", i + 1))),
-        _ => format!(",k.c{}", i + 1),
-    }).collect();
-    format!(
-        "INSERT INTO ivm_term_sortkey(id,key) SELECT k.c0, ivm_ctor_sortkey('{}','{codes}'{args}) FROM {} k WHERE k.c0>(SELECT coalesce(max(id),0) FROM ivm_term_sortkey)",
-        name.replace('\'', "''"), crate::catalog::quote(ctor_table(name)),
-    )
-}
-
-/// Statement that stores the sort keys of the texts minted since the last fill.
-const TEXT_KEYS_SQL: &str = "INSERT INTO ivm_term_sortkey(id,key) SELECT id, ivm_text_sortkey(text) FROM ivm_text WHERE id>(SELECT coalesce(max(id),0) FROM ivm_term_sortkey)";
-
-fn text_key(text: &str) -> Vec<u8> {
-    ivm_ir::term_key(&Term { functor: Arc::from(""), args: vec![], types: vec![], text: Some(Arc::from(text)) }, &mut |_| vec![])
+    format!("ivm_term_key({value})")
 }
 
 /// Aux-data code shared by the dictionary functions of one prepared statement. A negative code
@@ -157,6 +132,7 @@ const DICT_AUX: std::os::raw::c_int = -0x4956;
 struct Dict {
     db: Connection,
     ctors: Ctors,
+    keys: HashMap<i64, Vec<u8>>,
     calls: u64,
     lookups: u64,
 }
@@ -178,7 +154,7 @@ fn with_dict<T>(ctx: &Context<'_>, f: impl FnOnce(&mut Dict) -> rusqlite::Result
         None => {
             // SAFETY: the view never closes the handle and is dropped with the statement's aux data.
             let db = unsafe { Connection::from_handle(ctx.get_connection()?.handle())? };
-            ctx.set_aux(DICT_AUX, Mutex::new(Dict { db, ctors: Ctors::new(), calls: 0, lookups: TERM_LOOKUPS.load(Relaxed) }))?
+            ctx.set_aux(DICT_AUX, Mutex::new(Dict { db, ctors: Ctors::new(), keys: HashMap::new(), calls: 0, lookups: TERM_LOOKUPS.load(Relaxed) }))?
         }
     };
     let mut dict: std::sync::MutexGuard<'_, Dict> = dict.lock().map_err(|_| rusqlite::Error::InvalidQuery)?;
@@ -236,28 +212,13 @@ pub(crate) fn register(db: &Connection) -> rusqlite::Result<()> {
     })?;
     db.create_scalar_function("ivm_term_key", 1, FunctionFlags::SQLITE_UTF8, |ctx| {
         let id: i64 = ctx.get(0)?;
-        with_dict(ctx, |dict| stored_key(&dict.db, id))
+        with_dict(ctx, |dict| {
+            let Dict { db, ctors, keys, .. } = dict;
+            term_key_of(db, ctors, keys, id)
+        })
     })?;
     let pure = FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC;
     db.create_scalar_function("ivm_atom_key", 1, pure, |ctx| Ok(ivm_ir::atom_key(ctx.get(0)?)))?;
-    db.create_scalar_function("ivm_text_sortkey", 1, pure, |ctx| Ok(text_key(&ctx.get::<String>(0)?)))?;
-    // (functor, type codes, then per argument: its value, or the child's sort key for Id/Text).
-    db.create_scalar_function("ivm_ctor_sortkey", -1, pure, |ctx| {
-        let functor: String = ctx.get(0)?;
-        let types = ctx.get::<String>(1)?.bytes().map(|code| ty_from_code((code - b'0') as i64)).collect::<rusqlite::Result<Vec<_>>>()?;
-        if ctx.len() != 2 + types.len() { return Err(rusqlite::Error::InvalidQuery); }
-        let mut args = Vec::with_capacity(types.len());
-        let mut children = Vec::new();
-        for (at, ty) in types.iter().enumerate() {
-            match ty {
-                Ty::Id | Ty::Text => { args.push(0); children.push(ctx.get::<Vec<u8>>(2 + at)?); }
-                _ => args.push(ctx.get::<i64>(2 + at)?),
-            }
-        }
-        let mut children = children.into_iter();
-        let term = Term { functor: Arc::from(functor), args, types, text: None };
-        Ok(ivm_ir::term_key(&term, &mut |_| children.next().unwrap_or_default()))
-    })?;
     db.create_scalar_function("ivm_text_id", 1, FunctionFlags::SQLITE_UTF8, |ctx| {
         let value: String = ctx.get(0)?;
         with_dict(ctx, |dict| text_id(&dict.db, &value)?.ok_or(rusqlite::Error::InvalidQuery))
@@ -374,11 +335,10 @@ pub(crate) fn text(db: &Connection, id: i64) -> rusqlite::Result<Option<String>>
 /// SQL statements that mint every `text` of `source` (a query yielding column `text`) missing from
 /// `ivm_text`: ids are allocated above the current `ivm_term` maximum, then the new ids get their
 /// `ivm_term` rows and stored sort keys. `source` is a CTE-free select.
-pub(crate) fn mint_texts_sql(source: &str) -> [String; 3] {
+pub(crate) fn mint_texts_sql(source: &str) -> [String; 2] {
     [
         format!("INSERT INTO ivm_text(id,text) SELECT (SELECT coalesce(max(id),0) FROM ivm_term)+row_number() OVER (ORDER BY text), text FROM (SELECT DISTINCT text FROM ({source}) WHERE text NOT IN (SELECT text FROM ivm_text))"),
         format!("{AFTER_MINT}INSERT INTO ivm_term(id,functor_id) SELECT id, (SELECT id FROM ivm_functor WHERE name='{STR_FUNCTOR}') FROM ivm_text WHERE id>(SELECT coalesce(max(id),0) FROM ivm_term)"),
-        format!("{AFTER_MINT}{TEXT_KEYS_SQL}"),
     ]
 }
 
@@ -388,7 +348,7 @@ pub(crate) const AFTER_MINT: &str = "/*after mint*/ ";
 
 /// Interns `name(args)` as a Mint of that row would: an existing row keeps its id, a new one
 /// takes the next `ivm_term` id and gets its `ivm_term` and sort-key rows.
-pub(crate) fn intern_term(db: &Connection, name: &str, types: &[Ty], args: &[i64]) -> rusqlite::Result<i64> {
+pub(crate) fn intern_term(db: &Connection, name: &str, args: &[i64]) -> rusqlite::Result<i64> {
     let table = crate::catalog::quote(ctor_table(name));
     let lookup = if args.is_empty() {
         format!("SELECT c0 FROM {table} LIMIT 1")
@@ -407,7 +367,6 @@ pub(crate) fn intern_term(db: &Connection, name: &str, types: &[Ty], args: &[i64
         (2..=args.len() + 1).map(|i| format!(",?{i}")).collect::<String>(),
     );
     db.prepare_cached(&insert)?.execute(rusqlite::params_from_iter(std::iter::once(&id).chain(args)))?;
-    db.prepare_cached(&ctor_keys_sql(name, types))?.execute([])?;
     Ok(id)
 }
 
@@ -419,7 +378,6 @@ pub(crate) fn intern_text(db: &Connection, value: &str) -> rusqlite::Result<i64>
         "INSERT INTO ivm_term(id,functor_id) SELECT coalesce(max(id),0)+1, (SELECT id FROM ivm_functor WHERE name=?1) FROM ivm_term RETURNING id")?
         .query_row([STR_FUNCTOR], |r| r.get(0))?;
     db.prepare_cached("INSERT INTO ivm_text(id,text) VALUES (?1,?2)")?.execute((id, value))?;
-    db.prepare_cached("INSERT INTO ivm_term_sortkey(id,key) VALUES (?1,?2)")?.execute((id, text_key(value)))?;
     Ok(id)
 }
 
@@ -462,9 +420,6 @@ pub(crate) fn snapshot(db: &Connection, ir: &Program, functor: RelId) -> rusqlit
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
-
-    static STATEMENTS: AtomicUsize = AtomicUsize::new(0);
-    fn count(_: rusqlite::trace::TraceEvent<'_>) { STATEMENTS.fetch_add(1, Relaxed); }
 
     static PREPARED_TEXT_READS: AtomicUsize = AtomicUsize::new(0);
     extern "C" fn authorize(
@@ -515,10 +470,10 @@ mod tests {
     /// Named budget: chains minted.
     const CHAINS: i64 = 6;
 
-    /// Keys stored at mint equal the recursive `sort_key`, and ordering every term reads them in one
-    /// statement: no per-term statements, no recursion through the dictionary.
+    /// Mint stores no key; the key an ordering reads equals the recursive `sort_key`, and every
+    /// term orders by it.
     #[test]
-    fn stored_keys_equal_recursive_keys_and_order_in_one_statement() {
+    fn keys_read_on_order_equal_recursive_keys() {
         let db = Connection::open_in_memory().unwrap();
         let wrap = vec![Ty::Id, Ty::Id, Ty::Text, Ty::Int];
         let ir = Program {
@@ -529,7 +484,6 @@ mod tests {
         install(&db, &ir).unwrap();
         let ctor = crate::catalog::quote(ctor_table("wrap"));
         let fid: i64 = db.query_row("SELECT id FROM ivm_functor WHERE name='wrap'", [], |r| r.get(0)).unwrap();
-        let keys_sql = ctor_keys_sql("wrap", &wrap[1..]);
         let label = |chain: i64| text_id(&db, if chain % 2 == 0 { "a" } else { "b" }).unwrap().unwrap();
         for chain in 0..CHAINS {
             let mut prev = -1 - chain;
@@ -537,27 +491,24 @@ mod tests {
                 let id: i64 = db.query_row("SELECT coalesce(max(id),0)+1 FROM ivm_term", [], |r| r.get(0)).unwrap();
                 db.execute(&format!("INSERT INTO {ctor}(c0,c1,c2,c3) VALUES (?1,?2,?3,?4)"), (id, prev, label(chain), level % 3)).unwrap();
                 db.execute("INSERT INTO ivm_term(id,functor_id) VALUES (?1,?2)", (id, fid)).unwrap();
-                db.execute(&keys_sql, []).unwrap();
                 prev = id;
             }
         }
-        let stored: Vec<(i64, Vec<u8>)> = db.prepare("SELECT id, key FROM ivm_term_sortkey ORDER BY id").unwrap()
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(Result::unwrap).collect();
-        let recursive: Vec<(i64, Vec<u8>)> = stored.iter()
-            .map(|(id, _)| (*id, ivm_ir::sort_key(*id, &mut |child| lookup(&db, &mut Ctors::new(), child).unwrap())))
+        let ids: Vec<i64> = db.prepare("SELECT id FROM ivm_term ORDER BY id").unwrap()
+            .query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
+        let recursive: Vec<(i64, Vec<u8>)> = ids.iter()
+            .map(|id| (*id, ivm_ir::sort_key(*id, &mut |child| lookup(&db, &mut Ctors::new(), child).unwrap())))
             .collect();
-        let terms: i64 = db.query_row("SELECT count(*) FROM ivm_term", [], |r| r.get(0)).unwrap();
-        db.trace_v2(rusqlite::trace::TraceEventCodes::SQLITE_TRACE_PROFILE, Some(count));
-        STATEMENTS.store(0, Relaxed);
+        let read: Vec<(i64, Vec<u8>)> = db.prepare(&format!("SELECT t.id, {} FROM ivm_term t ORDER BY t.id", sort_key_sql("t.id"))).unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap().map(Result::unwrap).collect();
         let ordered: Vec<i64> = db.prepare(&format!("SELECT t.id FROM ivm_term t ORDER BY {}", sort_key_sql("t.id"))).unwrap()
             .query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect();
-        let statements = STATEMENTS.load(Relaxed);
-        db.trace_v2(rusqlite::trace::TraceEventCodes::empty(), None);
+        let stored_tables: i64 = db.query_row("SELECT count(*) FROM sqlite_schema WHERE name='ivm_term_sortkey'", [], |r| r.get(0)).unwrap();
         let mut expected = recursive.clone();
         expected.sort_by(|a, b| a.1.cmp(&b.1));
         assert_eq!(
-            (stored.len() as i64, stored == recursive, statements, ordered),
-            (terms, true, 1, expected.into_iter().map(|(id, _)| id).collect::<Vec<_>>()),
+            (read == recursive, stored_tables, ordered),
+            (true, 0, expected.into_iter().map(|(id, _)| id).collect::<Vec<_>>()),
         );
     }
 }

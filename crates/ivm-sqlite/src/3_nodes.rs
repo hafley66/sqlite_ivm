@@ -461,8 +461,7 @@ impl Rel for SqlRel {
             "{}INSERT INTO ivm_term(id,functor_id) SELECT c0, {fid} FROM {ctor} WHERE c0>(SELECT coalesce(max(id),0) FROM ivm_term)",
             crate::terms::AFTER_MINT,
         );
-        let insert_keys = format!("{}{}", crate::terms::AFTER_MINT, crate::terms::ctor_keys_sql(&name, &types));
-        self.nodes[next.node].fill.splice(0..0, [insert_ctor, insert_term, insert_keys]);
+        self.nodes[next.node].fill.splice(0..0, [insert_ctor, insert_term]);
         Ok(next)
     }
 

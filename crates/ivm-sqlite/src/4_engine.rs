@@ -551,7 +551,7 @@ impl Engine for Sqlite {
             if args.len() + 1 != rel.cols.len() {
                 return Err(EngineError::new(Stage::Settle, Some(*functor), ErrorKind::Arity { expected: rel.cols.len() - 1, actual: args.len() }));
             }
-            crate::terms::intern_term(db, &rel.name, &rel.cols[1..], args).map_err(|e| error(Stage::Settle, e))
+            crate::terms::intern_term(db, &rel.name, args).map_err(|e| error(Stage::Settle, e))
         }).collect()
     }
     fn intern_text(&mut self, value: &str, host: &mut impl Host) -> Result<i64, EngineError> {
