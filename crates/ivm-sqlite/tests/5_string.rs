@@ -115,3 +115,97 @@ fn nul_string_dd() { nul_roundtrip::<Dd>(); }
 
 #[test]
 fn nul_string_sqlite() { nul_roundtrip::<Sqlite>(); }
+
+/// Named budget: bytes of the minted text.
+const MEGABYTE: usize = 1 << 20;
+/// Named budget: wall time of one megabyte mint and decode.
+const MINT_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
+/// Named budget: stack of the calling thread, far below what per-character recursion needs.
+const SMALL_STACK: usize = 256 << 10;
+
+/// One megabyte of text mints as one entry: no per-suffix or per-character work, no stack growth.
+fn megabyte_mint<E: Engine + 'static>() -> (bool, bool) {
+    std::thread::Builder::new().stack_size(SMALL_STACK).spawn(|| {
+        let program: Program = serde_json::from_str(include_str!("../../ivm-dd/oracle/16_string.program.json")).unwrap();
+        let db = Connection::open_in_memory().unwrap();
+        let mut engine = E::install(&program, &mut Raw::with_connection(&db)).unwrap();
+        let text = "ab😀é".repeat(MEGABYTE / 8);
+        let started = std::time::Instant::now();
+        let id = engine.intern_text(&text, &mut Raw::with_connection(&db)).unwrap();
+        let back = engine.text(id, &mut Raw::with_connection(&db)).unwrap();
+        let elapsed = started.elapsed();
+        assert!(elapsed < MINT_BUDGET, "{elapsed:?}");
+        let suffix = engine.text(id, &mut Raw::with_connection(&db)).unwrap().map(|whole| whole[1..].to_owned()).unwrap();
+        let unminted = engine.intern_text(&suffix, &mut Raw::with_connection(&db)).unwrap() > id;
+        (back.as_deref() == Some(text.as_str()), unminted)
+    }).unwrap().join().unwrap()
+}
+
+#[test]
+fn megabyte_mint_dd() { assert_eq!(megabyte_mint::<Dd>(), (true, true)); }
+
+#[test]
+fn megabyte_mint_sqlite() { assert_eq!(megabyte_mint::<Sqlite>(), (true, true)); }
+
+/// Named budget: characters walked off the front of the long string.
+const WALK: i64 = 100;
+/// Named budget: characters of the long string.
+const LONG: usize = 20_000;
+
+/// `walk(w, 0) :- word(w). walk(r, i+1) :- walk(w, i), i < WALK-1, decompose(w, h, r).`
+/// `head(i, h) :- walk(w, i), decompose(w, h, _).`
+fn walk_program() -> Program {
+    use ivm_ir::{Expr, Func, LetRec, Op, RelKind, Relation, StrMode, Stratum, Ty};
+    let rel = |id, name: &str, cols: Vec<Ty>, kind| Relation { id, name: name.into(), cols, kind };
+    Program {
+        texts: vec![],
+        rels: vec![
+            rel(0, "word", vec![Ty::Id], RelKind::Source),
+            rel(1, "walk", vec![Ty::Id, Ty::Int], RelKind::Derived),
+            rel(2, "head", vec![Ty::Int, Ty::Id], RelKind::Derived),
+        ],
+        nodes: vec![
+            Op::Get(0),
+            Op::Mfp { input: 0, filter: vec![], map: vec![Expr::Lit(0)], project: vec![] },
+            Op::Get(1),
+            Op::Mfp { input: 2, filter: vec![Expr::Call(Func::Lt, vec![Expr::Col(1), Expr::Lit(WALK - 1)])], map: vec![], project: vec![] },
+            Op::StrCons { input: 3, mode: StrMode::Decompose { whole: 0 } },
+            Op::Mfp { input: 4, filter: vec![], map: vec![Expr::Call(Func::Add, vec![Expr::Col(1), Expr::Lit(1)])], project: vec![3, 4] },
+            Op::Union(vec![1, 5]),
+            Op::Get(1),
+            Op::StrCons { input: 7, mode: StrMode::Decompose { whole: 0 } },
+            Op::Mfp { input: 8, filter: vec![], map: vec![], project: vec![1, 2] },
+        ],
+        strata: vec![
+            Stratum::LetRec(LetRec { ids: vec![1], bodies: vec![6], limit: None }),
+            Stratum::Let { id: 2, body: 9 },
+        ],
+        outputs: vec![2],
+    }
+}
+
+/// Decoded `head` rows after inserting then retracting the long string, on one engine.
+fn walk<E: Engine>(text: &str) -> (Vec<(i64, String)>, usize) {
+    let db = Connection::open_in_memory().unwrap();
+    let mut engine = E::install(&walk_program(), &mut Raw::with_connection(&db)).unwrap();
+    let id = engine.intern_text(text, &mut Raw::with_connection(&db)).unwrap();
+    engine.settle(Frontier { changes: vec![SourceChange { rel: 0, row: vec![id], w: 1 }] }, &mut Raw::with_connection(&db)).unwrap();
+    let mut heads = engine.snapshot(2, &mut Raw::with_connection(&db)).unwrap().into_iter().map(|(row, w)| {
+        assert_eq!(w, 1);
+        (row[0], engine.text(row[1], &mut Raw::with_connection(&db)).unwrap().unwrap())
+    }).collect::<Vec<_>>();
+    heads.sort();
+    engine.settle(Frontier { changes: vec![SourceChange { rel: 0, row: vec![id], w: -1 }] }, &mut Raw::with_connection(&db)).unwrap();
+    (heads, engine.snapshot(2, &mut Raw::with_connection(&db)).unwrap().len())
+}
+
+#[test]
+fn decompose_walks_the_head_of_a_long_string_on_both_engines() {
+    let alphabet: Vec<char> = "aé😀b\0z".chars().collect();
+    let mut rng = rng::Rng(7);
+    let text: String = (0..LONG).map(|_| alphabet[rng.below(alphabet.len())]).collect();
+    let expected = text.chars().take(WALK as usize).enumerate().map(|(i, c)| (i as i64, c.to_string())).collect::<Vec<_>>();
+    let dd = walk::<Dd>(&text);
+    assert_eq!(dd, (expected, 0));
+    assert_eq!(walk::<Sqlite>(&text), dd);
+}

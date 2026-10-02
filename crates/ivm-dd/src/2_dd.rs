@@ -196,8 +196,15 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
                     row.push(interner.borrow_mut().mint_text(&joined));
                 }
                 StrMode::Decompose { whole } => {
-                    let (head, rest) = interner.borrow().split(row[whole as usize])?;
-                    row.extend([head, rest]);
+                    // Head and rest are minted here, when a row reads them; the empty string emits no row.
+                    let (head, rest) = {
+                        let dict = interner.borrow();
+                        let text = dict.text(row[whole as usize])?;
+                        let at = text.chars().next()?.len_utf8();
+                        (text[..at].to_owned(), text[at..].to_owned())
+                    };
+                    let mut dict = interner.borrow_mut();
+                    row.extend([dict.mint_text(&head), dict.mint_text(&rest)]);
                 }
             }
             Some(row)
