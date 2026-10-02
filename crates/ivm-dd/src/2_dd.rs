@@ -190,7 +190,7 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
         Ok(c.flat_map(move |mut row| {
             let id = *row.get(col as usize)?;
             let dict = interner.borrow();
-            let term = dict.get(id).filter(|term| term.functor == name)?;
+            let term = dict.get(id).filter(|term| *term.functor == *name)?;
             row.push(id);
             row.extend_from_slice(&term.args);
             Some(row)
@@ -932,7 +932,7 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                     }
                     // Terms interned since the last settle enter with the frontier.
                     for (name, row) in interner.borrow_mut().drain_pending() {
-                        if let Some(id) = constructors.iter().find(|(_, (functor, _))| functor == &name).map(|(id, _)| *id) {
+                        if let Some(id) = constructors.iter().find(|(_, (functor, _))| functor.as_str() == &*name).map(|(id, _)| *id) {
                             built.constructor_inputs.get_mut(&id).unwrap().update(row, 1);
                         }
                     }
@@ -954,7 +954,7 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                         let pending = interner.borrow_mut().drain_pending();
                         if pending.is_empty() { break; }
                         for (name, row) in pending {
-                            let id = constructors.iter().find(|(_, (functor, _))| functor == &name).map(|(id, _)| id).copied();
+                            let id = constructors.iter().find(|(_, (functor, _))| functor.as_str() == &*name).map(|(id, _)| id).copied();
                             if let Some(id) = id {
                                 built.constructor_inputs.get_mut(&id).unwrap().update(row, 1);
                             }

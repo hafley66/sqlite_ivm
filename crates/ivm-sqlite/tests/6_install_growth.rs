@@ -155,7 +155,7 @@ fn pure_delta_chain_has_fixed_create_count() {
     let db = Connection::open_in_memory().unwrap();
     let (mut engine, creates) = counted_install(&program, &db);
     eprintln!("pure chain creates={creates}");
-    assert_eq!(creates, 22); // includes the ivm_term_sortkey dictionary table
+    assert_eq!(creates, 21); // includes the dictionary tables
     let mut host = Raw::with_connection(&db);
     assert_eq!(engine.settle(Frontier { changes: vec![SourceChange { rel: 0, row: vec![2], w: 1 }] }, &mut host).unwrap().changes,
         vec![(1, vec![3], 1)]);

@@ -1,41 +1,53 @@
 use crate::{AnyValue, Cell, Row, Ty};
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
+/// `functor` and `text` are shared: the interner's maps and every copy of a
+/// term point at one allocation per distinct string.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Term {
-    pub functor: String,
+    pub functor: Arc<str>,
     pub args: Row,
     pub types: Vec<Ty>,
-    pub text: Option<String>,
+    pub text: Option<Arc<str>>,
 }
 
 #[derive(Default)]
 pub struct Interner {
-    by_key: BTreeMap<(String, Row), Cell>,
+    functors: BTreeSet<Arc<str>>,
+    by_key: BTreeMap<(Arc<str>, Row), Cell>,
     by_id: BTreeMap<Cell, Term>,
-    by_text: BTreeMap<String, Cell>,
+    by_text: BTreeMap<Arc<str>, Cell>,
     by_any: BTreeMap<AnyValue, Cell>,
     any_by_id: BTreeMap<Cell, AnyValue>,
     next: Cell,
-    pending: Vec<(String, Row)>,
+    pending: Vec<(Arc<str>, Row)>,
 }
 
 impl Interner {
     pub fn len(&self) -> usize { self.by_id.len() + self.any_by_id.len() }
 
     pub fn mint(&mut self, functor: &str, args: &[Cell], types: &[Ty]) -> Cell {
-        let key = (functor.to_owned(), args.to_vec());
+        let functor = match self.functors.get(functor) {
+            Some(shared) => shared.clone(),
+            None => {
+                let shared: Arc<str> = Arc::from(functor);
+                self.functors.insert(shared.clone());
+                shared
+            }
+        };
+        let key = (functor.clone(), args.to_vec());
         if let Some(id) = self.by_key.get(&key) {
             return *id;
         }
         let id = self.next.checked_add(1).expect("term ID space exhausted");
         self.next = id;
         self.by_key.insert(key, id);
-        self.by_id.insert(id, Term { functor: functor.to_owned(), args: args.to_vec(), types: types.to_vec(), text: None });
+        self.by_id.insert(id, Term { functor: functor.clone(), args: args.to_vec(), types: types.to_vec(), text: None });
         let mut row = vec![id];
         row.extend_from_slice(args);
-        self.pending.push((functor.to_owned(), row));
+        self.pending.push((functor, row));
         id
     }
 
@@ -44,8 +56,9 @@ impl Interner {
         if let Some(id) = self.by_text.get(text) { return *id; }
         let id = self.next.checked_add(1).expect("term ID space exhausted");
         self.next = id;
-        self.by_text.insert(text.to_owned(), id);
-        self.by_id.insert(id, Term { functor: String::new(), args: vec![], types: vec![], text: Some(text.to_owned()) });
+        let shared: Arc<str> = Arc::from(text);
+        self.by_text.insert(shared.clone(), id);
+        self.by_id.insert(id, Term { functor: Arc::from(""), args: vec![], types: vec![], text: Some(shared) });
         id
     }
 
@@ -88,7 +101,7 @@ impl Interner {
         } else { Some(id) }
     }
 
-    pub fn drain_pending(&mut self) -> Vec<(String, Row)> {
+    pub fn drain_pending(&mut self) -> Vec<(Arc<str>, Row)> {
         std::mem::take(&mut self.pending)
     }
 
@@ -97,7 +110,7 @@ impl Interner {
     }
 
     pub fn snapshot(&self, functor: &str) -> Vec<(Row, i64)> {
-        self.by_id.iter().filter(|(_, term)| term.functor == functor).map(|(id, term)| {
+        self.by_id.iter().filter(|(_, term)| &*term.functor == functor).map(|(id, term)| {
             let mut row = vec![*id];
             row.extend(&term.args);
             (row, 1)
