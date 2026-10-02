@@ -1,7 +1,6 @@
 //! The operator algebra each engine implements, and the one lowering written against it.
 
 use ivm_ir::*;
-use crate::Host;
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,32 +85,21 @@ impl Counters {
 }
 
 /// Lifecycle every engine implements; the oracle harness is written against this trait only.
+/// Each engine opens and owns its storage in `install`.
 pub trait Engine: Sized {
-    fn install(program: &Program, host: &mut impl Host) -> Result<Self, EngineError>;
-    fn settle(&mut self, frontier: Frontier, host: &mut impl Host) -> Result<Delta, EngineError>;
+    fn install(program: &Program) -> Result<Self, EngineError>;
+    fn settle(&mut self, frontier: Frontier) -> Result<Delta, EngineError>;
     fn counters(&self) -> Counters;
-    fn snapshot(&self, rel: RelId, host: &mut impl Host) -> Result<Vec<(Row, W)>, EngineError>;
-    fn intern_snapshot(&self, _functor: RelId, _host: &mut impl Host) -> Result<Vec<(Row, W)>, EngineError> {
-        Err(EngineError::new(Stage::Snapshot, None, ErrorKind::Unsupported("intern_snapshot")))
-    }
-    fn intern_text(&mut self, _text: &str, _host: &mut impl Host) -> Result<Cell, EngineError> {
-        Err(EngineError::new(Stage::Settle, None, ErrorKind::Unsupported("intern_text")))
-    }
+    fn snapshot(&self, rel: RelId) -> Result<Vec<(Row, W)>, EngineError>;
+    fn intern_snapshot(&self, functor: RelId) -> Result<Vec<(Row, W)>, EngineError>;
+    fn intern_text(&mut self, text: &str) -> Result<Cell, EngineError>;
     /// Interns constructor terms `functor(args)` in order and returns their ids, as a Mint of
     /// the same row would. Each argument is an interned term, a text cell or a raw value.
     /// The constructor's rows hold the new terms from the next settle on.
-    fn intern_terms(&mut self, _terms: &[(RelId, Row)], _host: &mut impl Host) -> Result<Vec<Cell>, EngineError> {
-        Err(EngineError::new(Stage::Settle, None, ErrorKind::Unsupported("intern_terms")))
-    }
-    fn text(&self, _id: Cell, _host: &mut impl Host) -> Result<Option<String>, EngineError> {
-        Err(EngineError::new(Stage::Snapshot, None, ErrorKind::Unsupported("text")))
-    }
-    fn intern_any(&mut self, _value: &ivm_ir::AnyValue, _host: &mut impl Host) -> Result<Cell, EngineError> {
-        Err(EngineError::new(Stage::Settle, None, ErrorKind::Unsupported("intern_any")))
-    }
-    fn any_value(&self, _id: Cell, _host: &mut impl Host) -> Result<ivm_ir::AnyValue, EngineError> {
-        Err(EngineError::new(Stage::Snapshot, None, ErrorKind::Unsupported("any_value")))
-    }
+    fn intern_terms(&mut self, terms: &[(RelId, Row)]) -> Result<Vec<Cell>, EngineError>;
+    fn text(&self, id: Cell) -> Result<Option<String>, EngineError>;
+    fn intern_any(&mut self, value: &ivm_ir::AnyValue) -> Result<Cell, EngineError>;
+    fn any_value(&self, id: Cell) -> Result<ivm_ir::AnyValue, EngineError>;
 }
 
 pub trait Rel {
@@ -134,16 +122,10 @@ pub trait Rel {
     fn antijoin(&mut self, l: Self::C, r: Self::C, lk: &[ColId], rk: &[ColId]) -> Self::C;
     fn reduce(&mut self, c: Self::C, key: &[ColId], aggs: &[Agg], input_types: &[Ty]) -> Self::C;
     fn threshold(&mut self, c: Self::C) -> Self::C;
-    fn topk(&mut self, _c: Self::C, _key: &[ColId], _order: &[Order], _limit: u32, _input_types: &[Ty]) -> Result<Self::C, EngineError> {
-        Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("TopK")))
-    }
-    fn window(&mut self, _c: Self::C, _partition: &[ColId], _order: &[Order], _func: &WinFn, _input_types: &[Ty]) -> Result<Self::C, EngineError> {
-        Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Window")))
-    }
+    fn topk(&mut self, c: Self::C, key: &[ColId], order: &[Order], limit: u32, input_types: &[Ty]) -> Result<Self::C, EngineError>;
+    fn window(&mut self, c: Self::C, partition: &[ColId], order: &[Order], func: &WinFn, input_types: &[Ty]) -> Result<Self::C, EngineError>;
     /// Engine-owned fixpoint: returns one collection per `rec.ids`, built with `lower_node` on the engine's inner algebra.
-    fn letrec(&mut self, _p: &Program, _rec: &LetRec, _defined: &[(RelId, Self::C)]) -> Result<Vec<Self::C>, EngineError> {
-        Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("LetRec")))
-    }
+    fn letrec(&mut self, p: &Program, rec: &LetRec, defined: &[(RelId, Self::C)]) -> Result<Vec<Self::C>, EngineError>;
     fn output(&mut self, rel: RelId, c: Self::C);
     /// Called by `lower_node` on every node it builds, before memoizing; traced engines tap `c` here.
     fn observe(&mut self, _id: NodeId, c: Self::C) -> Self::C {

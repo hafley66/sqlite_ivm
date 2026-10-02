@@ -5,9 +5,8 @@
 #[path = "../../ivm-dd/tests/support/mod.rs"]
 mod support;
 
-use ivm_dd::{Engine, Frontier, Raw, SourceChange};
+use ivm_dd::{Engine, Frontier, SourceChange};
 use ivm_sqlite::Sqlite;
-use rusqlite::Connection;
 use std::sync::Arc;
 
 /// Span names opened and `name=value` fields recorded while a recursive program settles.
@@ -37,9 +36,8 @@ fn settle_spans_statements_fixpoints_rounds_and_dictionary_counts() {
     let program = support::program("7_reach");
     let edges = (0..4).map(|n| SourceChange { rel: 0, row: vec![n, n + 1], w: 1 }).collect();
     tracing::subscriber::with_default(tracing_subscriber::registry().with(capture.clone()), || {
-        let db = Connection::open_in_memory().unwrap();
-        let mut sql = Sqlite::install(&program, &mut Raw::with_connection(&db)).unwrap();
-        sql.settle(Frontier { changes: edges }, &mut Raw::with_connection(&db)).unwrap();
+        let mut sql = Sqlite::install(&program).unwrap();
+        sql.settle(Frontier { changes: edges }).unwrap();
     });
     let seen = capture.0.lock().unwrap();
     let count = |name: &str| seen.iter().filter(|s| s.as_str() == name || s.starts_with(&format!("{name}="))).count();

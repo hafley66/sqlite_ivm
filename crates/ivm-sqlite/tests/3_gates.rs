@@ -3,9 +3,8 @@
 #[path = "../../ivm-dd/tests/support/mod.rs"]
 mod support;
 
-use ivm_dd::{Engine, Frontier, Program, Raw, SourceChange};
+use ivm_dd::{Engine, Frontier, Program, SourceChange};
 use ivm_sqlite::Sqlite;
-use rusqlite::Connection;
 use std::sync::{atomic::{AtomicU64, Ordering}, Arc};
 
 extern "C" fn tick(counter: *mut std::ffi::c_void) -> std::ffi::c_int {
@@ -14,14 +13,13 @@ extern "C" fn tick(counter: *mut std::ffi::c_void) -> std::ffi::c_int {
 }
 
 fn steps_of_one_change(program: &Program, load: Vec<SourceChange>, change: SourceChange) -> u64 {
-    let db = Connection::open_in_memory().unwrap();
-    let mut sql = Sqlite::install(program, &mut Raw::with_connection(&db)).unwrap();
-    sql.settle(Frontier { changes: load }, &mut Raw::with_connection(&db)).unwrap();
+    let mut sql = Sqlite::install(program).unwrap();
+    sql.settle(Frontier { changes: load }).unwrap();
     let steps = Arc::new(AtomicU64::new(0));
     let counter = Arc::as_ptr(&steps) as *mut std::ffi::c_void;
-    unsafe { rusqlite::ffi::sqlite3_progress_handler(db.handle(), 1, Some(tick), counter); }
-    sql.settle(Frontier { changes: vec![change] }, &mut Raw::with_connection(&db)).unwrap();
-    unsafe { rusqlite::ffi::sqlite3_progress_handler(db.handle(), 0, None, std::ptr::null_mut()); }
+    unsafe { rusqlite::ffi::sqlite3_progress_handler(sql.db.handle(), 1, Some(tick), counter); }
+    sql.settle(Frontier { changes: vec![change] }).unwrap();
+    unsafe { rusqlite::ffi::sqlite3_progress_handler(sql.db.handle(), 0, None, std::ptr::null_mut()); }
     steps.load(Ordering::Relaxed)
 }
 
@@ -53,10 +51,9 @@ fn k1_sqlite_one_row_change_work_is_independent_of_loaded_size() {
 fn k1_sqlite_no_scan_of_integrated_tables() {
     let mut scans = Vec::new();
     for name in ["0_access", "1_team_cost", "4_antijoin", "5_self_join", "6_topk", "7_reach"] {
-        let db = Connection::open_in_memory().unwrap();
-        let sql = Sqlite::install(&support::program(name), &mut Raw::with_connection(&db)).unwrap();
+        let sql = Sqlite::install(&support::program(name)).unwrap();
         for stmt in sql.statements() {
-            let mut eqp = db.prepare(&format!("EXPLAIN QUERY PLAN {stmt}")).unwrap();
+            let mut eqp = sql.db.prepare(&format!("EXPLAIN QUERY PLAN {stmt}")).unwrap();
             let zeros = vec![0i64; eqp.parameter_count()];
             let details: Vec<String> = eqp.query_map(rusqlite::params_from_iter(zeros), |r| r.get(3)).unwrap().map(Result::unwrap).collect();
             let one_row = stmt.contains("x_i ON 1)");
@@ -90,12 +87,11 @@ fn id_join_probes_the_key_index_without_dictionary_functions() {
         "strata": [{"Let": {"id": 2, "body": 3}}],
         "outputs": [2]
     }"#).unwrap();
-    let db = Connection::open_in_memory().unwrap();
-    let sql = Sqlite::install(&program, &mut Raw::with_connection(&db)).unwrap();
+    let sql = Sqlite::install(&program).unwrap();
     let statements = sql.statements();
     let udf = statements.iter().filter(|s| ["ivm_term_key(", "ivm_text_value(", "ivm_any_value("].iter().any(|f| s.contains(f))).count();
     let join = statements.iter().find(|s| s.contains("CROSS JOIN") && s.contains("l_i") && s.contains("r_d")).unwrap();
-    let mut eqp = db.prepare(&format!("EXPLAIN QUERY PLAN {join}")).unwrap();
+    let mut eqp = sql.db.prepare(&format!("EXPLAIN QUERY PLAN {join}")).unwrap();
     let plan: Vec<String> = eqp.query_map([], |r| r.get::<_, String>(3)).unwrap().map(Result::unwrap)
         .filter(|detail| detail.contains("_i "))
         .collect();
@@ -132,14 +128,12 @@ fn identical_joins_share_one_plan_node() {
         SourceChange { rel: 0, row: vec![3, 2], w: 1 },
         SourceChange { rel: 1, row: vec![2, 7], w: 1 },
     ];
-    let db = Connection::open_in_memory().unwrap();
-    let mut sql = Sqlite::install(&program, &mut Raw::with_connection(&db)).unwrap();
+    let mut sql = Sqlite::install(&program).unwrap();
     let joins = sql.statements().iter().filter(|s| s.contains("CROSS JOIN") && s.contains("r_d")).count();
-    let mut rows = sql.settle(Frontier { changes: load.clone() }, &mut Raw::with_connection(&db)).unwrap().changes;
+    let mut rows = sql.settle(Frontier { changes: load.clone() }).unwrap().changes;
     rows.sort();
-    let dd_db = Connection::open_in_memory().unwrap();
     let mut dd = ivm_dd::Dd::install(&program).unwrap();
-    let mut expected = dd.settle(Frontier { changes: load }, &mut Raw::with_connection(&dd_db)).unwrap().changes;
+    let mut expected = dd.settle(Frontier { changes: load }).unwrap().changes;
     expected.sort();
     assert_eq!((joins, &rows), (1, &expected));
 }

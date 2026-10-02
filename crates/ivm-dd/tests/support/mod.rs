@@ -236,8 +236,7 @@ pub fn run<E: Engine + 'static>(name: &str) -> String {
 pub fn expect_install_error<E: Engine>(name: &str) {
     let script = script(name);
     let kind = script.setup.lines().find_map(|line| line.strip_prefix("-- expect-error: ")).expect("missing install error expectation");
-    let db = Connection::open_in_memory().unwrap();
-    match E::install(&script.program, &mut ivm_dd::Raw::with_connection(&db)) {
+    match E::install(&script.program) {
         Ok(_) => panic!("{name}: expected install error {kind}"),
         Err(e) => assert!(format!("{:?}", e.kind).starts_with(kind), "{name}: expected {kind}, got {e}"),
     }
@@ -249,13 +248,11 @@ fn run_steps<E: Engine>(name: &str) -> String {
     assert!(!script.steps.is_empty(), "{name}: no steps");
     let (_conn, steps) = oracle(&script);
 
-    let engine_db = Connection::open_in_memory().unwrap();
-    let mut host = ivm_dd::Raw::with_connection(&engine_db);
-    let mut engine = E::install(program, &mut host).unwrap();
+    let mut engine = E::install(program).unwrap();
     let mut marbles = String::from("step\ttick\trel\trow\tw\n");
     for step in steps {
         let at = format!("{name}/{}", step.caption);
-        let settled = engine.settle(step.frontier, &mut host);
+        let settled = engine.settle(step.frontier);
         match (&step.expect_error, step.oracle, settled) {
             (Some(kind), Err(_), Err(e)) => {
                 assert!(format!("{:?}", e.kind).starts_with(kind.as_str()), "{at}: expected {kind}, got {e}");
@@ -276,7 +273,7 @@ fn run_steps<E: Engine>(name: &str) -> String {
             }
         }
         for (i, rel) in program.outputs.iter().enumerate() {
-            let mut got = engine.snapshot(*rel, &mut host).unwrap();
+            let mut got = engine.snapshot(*rel).unwrap();
             got.sort();
             let want: Vec<(Row, W)> = step.after[i].clone().into_iter().collect();
             assert_eq!(got, want, "{at}: snapshot of rel {rel}\n{marbles}");

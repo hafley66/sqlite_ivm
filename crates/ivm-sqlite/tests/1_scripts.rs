@@ -2,8 +2,7 @@
 mod support;
 
 use ivm_sqlite::Sqlite;
-use ivm_dd::{Dd, Engine, Frontier, Raw, SourceChange};
-use rusqlite::Connection;
+use ivm_dd::{Dd, Engine, Frontier, SourceChange};
 
 #[test]
 fn access_script_through_promoted_sqlite_engine() {
@@ -82,10 +81,8 @@ script_case!(recursive_mint_input, "15_recursive_mint");
 #[test]
 fn dred_self_supporting_cycle_matches_dd() {
     let program = support::program("7_reach");
-    let dd_db = Connection::open_in_memory().unwrap();
-    let sql_db = Connection::open_in_memory().unwrap();
-    let mut dd = <Dd as Engine>::install(&program, &mut Raw::with_connection(&dd_db)).unwrap();
-    let mut sql = Sqlite::install(&program, &mut Raw::with_connection(&sql_db)).unwrap();
+    let mut dd = <Dd as Engine>::install(&program).unwrap();
+    let mut sql = Sqlite::install(&program).unwrap();
     let edge = |x, y, w| SourceChange { rel: 0, row: vec![x, y], w };
     let steps = [
         vec![edge(1, 2, 1), edge(2, 1, 1), edge(3, 1, 1)],
@@ -95,9 +92,9 @@ fn dred_self_supporting_cycle_matches_dd() {
     ];
     for changes in steps {
         let frontier = Frontier { changes };
-        assert_eq!(sql.settle(frontier.clone(), &mut Raw::with_connection(&sql_db)).unwrap(),
-            dd.settle(frontier, &mut Raw::with_connection(&dd_db)).unwrap());
-        assert_eq!(sql.snapshot(2, &mut Raw::with_connection(&sql_db)).unwrap(),
-            dd.snapshot(2, &mut Raw::with_connection(&dd_db)).unwrap());
+        assert_eq!(sql.settle(frontier.clone()).unwrap(),
+            dd.settle(frontier).unwrap());
+        assert_eq!(sql.snapshot(2).unwrap(),
+            dd.snapshot(2).unwrap());
     }
 }

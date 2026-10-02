@@ -1,5 +1,5 @@
 use ivm_dd::Dd;
-use ivm_engine::{Engine, Raw};
+use ivm_engine::Engine;
 use ivm_ir::{AnyValue, Frontier, Op, Program, RelKind, Relation, SourceChange, Stratum, Ty};
 use ivm_sqlite::Sqlite;
 use ivm_sqlite::Frontier as _;
@@ -26,16 +26,14 @@ fn check_blob<E: Engine>() {
     let oracle = Connection::open_in_memory().unwrap();
     oracle.execute_batch("CREATE TABLE src(k, n INTEGER); INSERT INTO src VALUES (x'01',1),('z',2),(x'00ff',3),(4,4),(x'00',5);").unwrap();
     let want = sqlite_rows(&oracle, "SELECT k,n FROM src ORDER BY k,n LIMIT 4");
-    let db = Connection::open_in_memory().unwrap();
-    let mut host = Raw::with_connection(&db);
-    let mut engine = E::install(&blob_ir(), &mut host).unwrap();
+    let mut engine = E::install(&blob_ir()).unwrap();
     let values = [AnyValue::Blob(vec![1]), AnyValue::Text("z".into()), AnyValue::Blob(vec![0, 255]), AnyValue::Integer(4), AnyValue::Blob(vec![0])];
     let changes = values.iter().enumerate().map(|(i, v)| SourceChange {
-        rel: 0, row: vec![engine.intern_any(v, &mut host).unwrap(), i as i64 + 1], w: 1,
+        rel: 0, row: vec![engine.intern_any(v).unwrap(), i as i64 + 1], w: 1,
     }).collect();
-    engine.settle(Frontier { changes }, &mut host).unwrap();
-    let mut got = engine.snapshot(1, &mut host).unwrap().into_iter().map(|(row, _)| {
-        let value = match engine.any_value(row[0], &mut host).unwrap() {
+    engine.settle(Frontier { changes }).unwrap();
+    let mut got = engine.snapshot(1).unwrap().into_iter().map(|(row, _)| {
+        let value = match engine.any_value(row[0]).unwrap() {
             AnyValue::Null => Value::Null,
             AnyValue::Integer(v) => Value::Integer(v),
             AnyValue::Real(bits) => Value::Real(f64::from_bits(bits)),

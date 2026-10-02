@@ -1,7 +1,7 @@
 mod support;
 
 use hafley_observe::{assert_growth_sized, Growth, SpanCounts};
-use ivm_dd::{Counters, Dd, Engine, Frontier, Op, Program, Raw, RelKind, Relation, SourceChange, Stratum, Ty};
+use ivm_dd::{Counters, Dd, Engine, Frontier, Op, Program, RelKind, Relation, SourceChange, Stratum, Ty};
 use ivm_sqlite::{Cell as SqlCell, Program as SqlProgram, SourceChange as SqlChange, Sqlite};
 use rusqlite::Connection;
 use std::collections::BTreeMap;
@@ -15,22 +15,18 @@ fn change(rel: u32, row: Vec<i64>) -> SourceChange {
 }
 
 fn run<E: Engine>(program: &Program, changes: Vec<SourceChange>) -> Counters {
-    let db = Connection::open_in_memory().unwrap();
-    let mut host = Raw::with_connection(&db);
-    let mut engine = E::install(program, &mut host).unwrap();
-    engine.settle(Frontier { changes }, &mut host).unwrap();
+    let mut engine = E::install(program).unwrap();
+    engine.settle(Frontier { changes }).unwrap();
     engine.counters()
 }
 
 fn join_work<E: Engine>(loaded: usize) -> u64 {
     let program = support::program("0_access");
-    let db = Connection::open_in_memory().unwrap();
-    let mut host = Raw::with_connection(&db);
-    let mut engine = E::install(&program, &mut host).unwrap();
+    let mut engine = E::install(&program).unwrap();
     let mut load: Vec<_> = (0..loaded).map(|i| change(0, vec![i as i64, i as i64])).collect();
     load.push(change(1, vec![100_000, 7]));
-    engine.settle(Frontier { changes: load }, &mut host).unwrap();
-    engine.settle(Frontier { changes: vec![change(0, vec![100_000, 100_000])] }, &mut host).unwrap();
+    engine.settle(Frontier { changes: load }).unwrap();
+    engine.settle(Frontier { changes: vec![change(0, vec![100_000, 100_000])] }).unwrap();
     engine.counters().delta_rows.join.unwrap()
 }
 

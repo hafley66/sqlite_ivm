@@ -1,9 +1,8 @@
 //! Paired timing and RSS: `cargo run -p ivm-sqlite --release --example 0_paired -- <engine> <workload> <n>`.
 //! One engine and one workload per process so RSS is not shared; prints one TSV row.
 
-use ivm_dd::{Dd, Engine, Frontier, Program, Raw, SourceChange};
+use ivm_dd::{Dd, Engine, Frontier, Program, SourceChange};
 use ivm_sqlite::Sqlite;
-use rusqlite::Connection;
 use std::time::{Duration, Instant};
 
 fn program(name: &str) -> Program {
@@ -61,19 +60,17 @@ fn rss_kib() -> u64 {
 
 fn run<E: Engine>(engine: &str, name: &str, n: i64) {
     let (program, load, churn) = workload(name, n);
-    let db = Connection::open_in_memory().unwrap();
-    let mut host = Raw::with_connection(&db);
     let t0 = Instant::now();
-    let mut e = E::install(&program, &mut host).unwrap();
+    let mut e = E::install(&program).unwrap();
     let installed = t0.elapsed();
     let t1 = Instant::now();
-    let loaded_rows = e.settle(load, &mut host).unwrap().changes.len();
+    let loaded_rows = e.settle(load).unwrap().changes.len();
     let load_time = t1.elapsed();
     let mut times: Vec<Duration> = churn
         .into_iter()
         .map(|f| {
             let t = Instant::now();
-            e.settle(f, &mut host).unwrap();
+            e.settle(f).unwrap();
             t.elapsed()
         })
         .collect();
