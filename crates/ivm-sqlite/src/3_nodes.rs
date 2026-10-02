@@ -165,67 +165,80 @@ fn unsupported(what: &'static str) -> EngineError {
     EngineError::new(Stage::Install, None, ErrorKind::Unsupported(what))
 }
 
-/// Expr as SQL text; comparisons and logic yield 0/1, Add/Sub wrap like `eval`.
+/// Expr as SQL text; comparisons and logic yield 0/1, Add/Sub wrap like `eval`. Renders the tree
+/// in post-order with an explicit stack: each call reads its arguments' rendered text.
 fn render(e: &Expr, arity: usize, maps: &[String], texts: &[String], types: &[Ty]) -> Result<String, EngineError> {
-    Ok(match e {
-        Expr::Col(c) if (*c as usize) < arity => format!("c{c}"),
-        Expr::Col(c) => maps
-            .get(*c as usize - arity)
-            .cloned()
-            .ok_or_else(|| unsupported("Mfp column out of range"))?,
-        Expr::Lit(v) if *v == i64::MIN => I64_MIN.into(),
-        Expr::Lit(v) => format!("({v})"),
-        Expr::Text(index) => {
-            let value = texts.get(*index as usize).ok_or_else(|| unsupported("Text index out of range"))?;
-            format!("ivm_text_id('{}')", value.replace('\'', "''"))
-        }
-        Expr::Call(func, args) => {
-            let a = |i: usize| -> Result<String, EngineError> {
-                let arg = args.get(i).ok_or_else(|| unsupported("Func arity"))?;
-                render(arg, arity, maps, texts, types)
-            };
-            let ty = |i: usize| expr_type(&args[i], types).ok_or_else(|| unsupported("expression type"));
-            let bin = |op: &str| -> Result<String, EngineError> {
-                let left = ordered(ty(0)?, a(0)?);
-                let right = ordered(ty(1)?, a(1)?);
-                Ok(format!("({left} {op} {right})"))
-            };
-            match func {
-                Func::Eq => format!("({})", equal("=", ty(0)?, a(0)?, ty(1)?, a(1)?)),
-                Func::Ne => format!("({})", equal("<>", ty(0)?, a(0)?, ty(1)?, a(1)?)),
-                Func::Lt => bin("<")?,
-                Func::Le => bin("<=")?,
-                Func::Gt => bin(">")?,
-                Func::Ge => bin(">=")?,
-                Func::Add | Func::Sub if expr_type(e, types) == Some(Ty::Real) => {
-                    let left = if expr_type(&args[0], types) == Some(Ty::Real) { format!("ivm_real_value({})", a(0)?) } else { a(0)? };
-                    let right = if expr_type(&args[1], types) == Some(Ty::Real) { format!("ivm_real_value({})", a(1)?) } else { a(1)? };
-                    format!("ivm_real_bits({left} {} {right})", if *func == Func::Add { "+" } else { "-" })
-                }
-                Func::Add => {
-                    let (x, y) = (a(0)?, a(1)?);
-                    format!(
-                        "(CASE WHEN {y} > 0 AND {x} > {I64_MAX} - {y} THEN ({x} + {I64_MIN}) + ({y} + {I64_MIN}) \
-                         WHEN {y} < 0 AND {x} < {I64_MIN} - {y} THEN ({x} - {I64_MIN}) + ({y} - {I64_MIN}) \
-                         ELSE {x} + {y} END)"
-                    )
-                }
-                Func::Sub => {
-                    let (x, y) = (a(0)?, a(1)?);
-                    format!(
-                        "(CASE WHEN {y} < 0 AND {x} > {I64_MAX} + {y} THEN ({x} + {I64_MIN}) - ({y} - {I64_MIN}) \
-                         WHEN {y} > 0 AND {x} < {I64_MIN} + {y} THEN ({x} - {I64_MIN}) - ({y} + {I64_MIN}) \
-                         ELSE {x} - {y} END)"
-                    )
-                }
-                Func::And => format!("((({}) <> 0) AND (({}) <> 0))", a(0)?, a(1)?),
-                Func::Or => format!("((({}) <> 0) OR (({}) <> 0))", a(0)?, a(1)?),
-                Func::Not => format!("(({}) = 0)", a(0)?),
-                Func::TermLt => format!("ivm_term_lt({}, {})", a(0)?, a(1)?),
-                Func::StrNil => "ivm_text_id('')".into(),
+    // Pre-order with the last argument first; reversed, every argument precedes its call, left to right.
+    let mut order = Vec::new();
+    let mut walk = vec![e];
+    while let Some(next) = walk.pop() {
+        order.push(next);
+        if let Expr::Call(_, args) = next { walk.extend(args.iter()); }
+    }
+    let mut done: Vec<String> = Vec::new();
+    for e in order.into_iter().rev() {
+        let sql = match e {
+            Expr::Col(c) if (*c as usize) < arity => format!("c{c}"),
+            Expr::Col(c) => maps
+                .get(*c as usize - arity)
+                .cloned()
+                .ok_or_else(|| unsupported("Mfp column out of range"))?,
+            Expr::Lit(v) if *v == i64::MIN => I64_MIN.into(),
+            Expr::Lit(v) => format!("({v})"),
+            Expr::Text(index) => {
+                let value = texts.get(*index as usize).ok_or_else(|| unsupported("Text index out of range"))?;
+                format!("ivm_text_id('{}')", value.replace('\'', "''"))
             }
-        }
-    })
+            Expr::Call(func, args) => {
+                let rendered = done.split_off(done.len() - args.len());
+                let a = |i: usize| -> Result<String, EngineError> {
+                    rendered.get(i).cloned().ok_or_else(|| unsupported("Func arity"))
+                };
+                let ty = |i: usize| expr_type(&args[i], types).ok_or_else(|| unsupported("expression type"));
+                let bin = |op: &str| -> Result<String, EngineError> {
+                    let left = ordered(ty(0)?, a(0)?);
+                    let right = ordered(ty(1)?, a(1)?);
+                    Ok(format!("({left} {op} {right})"))
+                };
+                match func {
+                    Func::Eq => format!("({})", equal("=", ty(0)?, a(0)?, ty(1)?, a(1)?)),
+                    Func::Ne => format!("({})", equal("<>", ty(0)?, a(0)?, ty(1)?, a(1)?)),
+                    Func::Lt => bin("<")?,
+                    Func::Le => bin("<=")?,
+                    Func::Gt => bin(">")?,
+                    Func::Ge => bin(">=")?,
+                    Func::Add | Func::Sub if expr_type(e, types) == Some(Ty::Real) => {
+                        let left = if expr_type(&args[0], types) == Some(Ty::Real) { format!("ivm_real_value({})", a(0)?) } else { a(0)? };
+                        let right = if expr_type(&args[1], types) == Some(Ty::Real) { format!("ivm_real_value({})", a(1)?) } else { a(1)? };
+                        format!("ivm_real_bits({left} {} {right})", if *func == Func::Add { "+" } else { "-" })
+                    }
+                    Func::Add => {
+                        let (x, y) = (a(0)?, a(1)?);
+                        format!(
+                            "(CASE WHEN {y} > 0 AND {x} > {I64_MAX} - {y} THEN ({x} + {I64_MIN}) + ({y} + {I64_MIN}) \
+                             WHEN {y} < 0 AND {x} < {I64_MIN} - {y} THEN ({x} - {I64_MIN}) + ({y} - {I64_MIN}) \
+                             ELSE {x} + {y} END)"
+                        )
+                    }
+                    Func::Sub => {
+                        let (x, y) = (a(0)?, a(1)?);
+                        format!(
+                            "(CASE WHEN {y} < 0 AND {x} > {I64_MAX} + {y} THEN ({x} + {I64_MIN}) - ({y} - {I64_MIN}) \
+                             WHEN {y} > 0 AND {x} < {I64_MIN} + {y} THEN ({x} - {I64_MIN}) - ({y} + {I64_MIN}) \
+                             ELSE {x} - {y} END)"
+                        )
+                    }
+                    Func::And => format!("((({}) <> 0) AND (({}) <> 0))", a(0)?, a(1)?),
+                    Func::Or => format!("((({}) <> 0) OR (({}) <> 0))", a(0)?, a(1)?),
+                    Func::Not => format!("(({}) = 0)", a(0)?),
+                    Func::TermLt => format!("ivm_term_lt({}, {})", a(0)?, a(1)?),
+                    Func::StrNil => "ivm_text_id('')".into(),
+                }
+            }
+        };
+        done.push(sql);
+    }
+    done.pop().ok_or_else(|| unsupported("empty expression"))
 }
 
 /// Distinct key values of `c`'s delta as `c0..`; one row or none for an empty key.
@@ -390,15 +403,6 @@ impl SqlRel {
     }
 }
 
-/// Fill statements that mint every suffix and head character of the strings from `source`
-/// (a select yielding column `text`) into `ivm_text`/`ivm_term`.
-fn suffix_texts_sql(source: &str) -> [String; 3] {
-    crate::terms::mint_texts_sql(
-        &format!("WITH RECURSIVE parts(text) AS ({source} UNION SELECT ivm_str_rest_text(text) FROM parts WHERE text<>''), all_texts(text) AS (SELECT text FROM parts UNION SELECT ivm_str_head_text(text) FROM parts WHERE text<>'')"),
-        "SELECT text FROM all_texts",
-    )
-}
-
 impl Rel for SqlRel {
     type C = SqlC;
 
@@ -470,20 +474,23 @@ impl Rel for SqlRel {
                     "SELECT {}, dict.id AS c{old}, d.w FROM {} d JOIN ivm_text h ON h.id=d.c{head} JOIN ivm_text r ON r.id=d.c{rest} JOIN ivm_text dict ON dict.text=h.text||r.text",
                     (0..old).map(|i| format!("d.c{i} AS c{i}")).collect::<Vec<_>>().join(","), c.d,
                 )));
-                self.nodes[next.node].fill.splice(0..0, suffix_texts_sql(&source));
+                self.nodes[next.node].fill.splice(0..0, crate::terms::mint_texts_sql(&source));
                 next
             }
             StrMode::Decompose { whole } => {
                 if *whole as usize >= old { return Err(unsupported("StrCons column out of range")); }
-                self.push(old + 2, c.rec, |_| Some(format!(
+                // Head and rest texts are minted by this frontier, for every row it reads.
+                let parts = ["ivm_str_head_text", "ivm_str_rest_text"].map(|part| format!(
+                    "SELECT {part}(w.text) AS text FROM {} d JOIN ivm_text w ON w.id=d.c{whole} WHERE w.text<>''", c.d,
+                ));
+                let next = self.push(old + 2, c.rec, |_| Some(format!(
                     "SELECT {}, h.id AS c{old}, r.id AS c{}, d.w FROM {} d JOIN ivm_text w ON w.id=d.c{whole} AND w.text<>'' JOIN ivm_text h ON h.text=ivm_str_head_text(w.text) JOIN ivm_text r ON r.text=ivm_str_rest_text(w.text)",
                     (0..old).map(|i| format!("d.c{i} AS c{i}")).collect::<Vec<_>>().join(","), old + 1, c.d,
-                )))
+                )));
+                self.nodes[next.node].fill.splice(0..0, crate::terms::mint_texts_sql(&parts.join(" UNION ALL ")));
+                next
             }
         };
-        if matches!(mode, StrMode::Decompose { .. }) {
-            self.nodes[next.node].inline = true;
-        }
         Ok(next)
     }
 
@@ -518,7 +525,7 @@ impl Rel for SqlRel {
                 let next = self.push(old + 1, c.rec, |_| Some(format!(
                     "SELECT {carried}, dict.id AS c{old}, d.w FROM {} d{joins} JOIN ivm_text dict ON dict.text={call}", c.d,
                 )));
-                self.nodes[next.node].fill.splice(0..0, suffix_texts_sql(&source));
+                self.nodes[next.node].fill.splice(0..0, crate::terms::mint_texts_sql(&source));
                 next
             }
             Some(StrKind::Int) => {

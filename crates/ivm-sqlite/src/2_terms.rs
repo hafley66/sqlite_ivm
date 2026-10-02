@@ -142,7 +142,7 @@ pub(crate) fn ctor_keys_sql(name: &str, types: &[Ty]) -> String {
 const TEXT_KEYS_SQL: &str = "INSERT INTO ivm_term_sortkey(id,key) SELECT id, ivm_text_sortkey(text) FROM ivm_text WHERE id>(SELECT coalesce(max(id),0) FROM ivm_term_sortkey)";
 
 fn text_key(text: &str) -> Vec<u8> {
-    ivm_ir::term_key(&Term { functor: String::new(), args: vec![], types: vec![], text: Some(text.to_owned()), split: None }, &mut |_| vec![])
+    ivm_ir::term_key(&Term { functor: String::new(), args: vec![], types: vec![], text: Some(text.to_owned()) }, &mut |_| vec![])
 }
 
 /// Aux-data code shared by the dictionary functions of one prepared statement. A negative code
@@ -255,7 +255,7 @@ pub(crate) fn register(db: &Connection) -> rusqlite::Result<()> {
             }
         }
         let mut children = children.into_iter();
-        let term = Term { functor, args, types, text: None, split: None };
+        let term = Term { functor, args, types, text: None };
         Ok(ivm_ir::term_key(&term, &mut |_| children.next().unwrap_or_default()))
     })?;
     db.create_scalar_function("ivm_text_id", 1, FunctionFlags::SQLITE_UTF8, |ctx| {
@@ -373,22 +373,19 @@ pub(crate) fn text(db: &Connection, id: i64) -> rusqlite::Result<Option<String>>
 
 /// SQL statements that mint every `text` of `source` (a query yielding column `text`) missing from
 /// `ivm_text`: ids are allocated above the current `ivm_term` maximum, then the new ids get their
-/// `ivm_term` rows and stored sort keys. `source` is a CTE-free select; `with` is an optional `WITH ...` prefix.
-pub(crate) fn mint_texts_sql(with: &str, source: &str) -> [String; 3] {
+/// `ivm_term` rows and stored sort keys. `source` is a CTE-free select.
+pub(crate) fn mint_texts_sql(source: &str) -> [String; 3] {
     [
-        format!("{with} INSERT INTO ivm_text(id,text) SELECT (SELECT coalesce(max(id),0) FROM ivm_term)+row_number() OVER (ORDER BY text), text FROM (SELECT DISTINCT text FROM ({source}) WHERE text NOT IN (SELECT text FROM ivm_text))"),
+        format!("INSERT INTO ivm_text(id,text) SELECT (SELECT coalesce(max(id),0) FROM ivm_term)+row_number() OVER (ORDER BY text), text FROM (SELECT DISTINCT text FROM ({source}) WHERE text NOT IN (SELECT text FROM ivm_text))"),
         format!("INSERT INTO ivm_term(id,functor_id) SELECT id, (SELECT id FROM ivm_functor WHERE name='{STR_FUNCTOR}') FROM ivm_text WHERE id>(SELECT coalesce(max(id),0) FROM ivm_term)"),
         TEXT_KEYS_SQL.to_owned(),
     ]
 }
 
+/// Interns `value` whole: one `ivm_term`, `ivm_text` and sort-key row. Decompose mints the head and
+/// rest of a string in the frontier that reads it.
 pub(crate) fn intern_text(db: &Connection, value: &str) -> rusqlite::Result<i64> {
     if let Some(id) = text_id(db, value)? { return Ok(id); }
-    if let Some(first) = value.chars().next() {
-        let (head, rest) = value.split_at(first.len_utf8());
-        intern_text(db, rest)?;
-        if !rest.is_empty() { intern_text(db, head)?; }
-    }
     let id: i64 = db.prepare_cached(
         "INSERT INTO ivm_term(id,functor_id) SELECT coalesce(max(id),0)+1, (SELECT id FROM ivm_functor WHERE name=?1) FROM ivm_term RETURNING id")?
         .query_row([STR_FUNCTOR], |r| r.get(0))?;
@@ -406,7 +403,7 @@ fn lookup(db: &Connection, ctors: &mut Ctors, id: i64) -> rusqlite::Result<Optio
         .query_row([id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
     let Some((fid, functor, text)) = row else { return Ok(None); };
     if text.is_some() {
-        return Ok(Some(Term { functor: String::new(), args: vec![], types: vec![], text, split: None }));
+        return Ok(Some(Term { functor: String::new(), args: vec![], types: vec![], text }));
     }
     if !ctors.contains_key(&fid) {
         let types: Vec<Ty> = db.prepare_cached("SELECT ty FROM ivm_functor_col WHERE functor_id=?1 ORDER BY pos")?
@@ -420,7 +417,7 @@ fn lookup(db: &Connection, ctors: &mut Ctors, id: i64) -> rusqlite::Result<Optio
         db.prepare_cached(select)?
             .query_row([id], |r| (0..types.len()).map(|i| r.get(i)).collect::<rusqlite::Result<Row>>())?
     };
-    Ok(Some(Term { functor, args, types: types.clone(), text: None, split: None }))
+    Ok(Some(Term { functor, args, types: types.clone(), text: None }))
 }
 
 pub(crate) fn snapshot(db: &Connection, ir: &Program, functor: RelId) -> rusqlite::Result<Vec<(Row, W)>> {

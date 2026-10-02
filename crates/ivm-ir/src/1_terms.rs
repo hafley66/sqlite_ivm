@@ -8,7 +8,6 @@ pub struct Term {
     pub args: Row,
     pub types: Vec<Ty>,
     pub text: Option<String>,
-    pub split: Option<(Cell, Cell)>,
 }
 
 #[derive(Default)]
@@ -33,27 +32,20 @@ impl Interner {
         let id = self.next.checked_add(1).expect("term ID space exhausted");
         self.next = id;
         self.by_key.insert(key, id);
-        self.by_id.insert(id, Term { functor: functor.to_owned(), args: args.to_vec(), types: types.to_vec(), text: None, split: None });
+        self.by_id.insert(id, Term { functor: functor.to_owned(), args: args.to_vec(), types: types.to_vec(), text: None });
         let mut row = vec![id];
         row.extend_from_slice(args);
         self.pending.push((functor.to_owned(), row));
         id
     }
 
+    /// Interns `text` whole. Decompose mints the head and rest of a string when it reads it.
     pub fn mint_text(&mut self, text: &str) -> Cell {
         if let Some(id) = self.by_text.get(text) { return *id; }
-        let split = if let Some(first) = text.chars().next() {
-            let (_, rest) = text.split_at(first.len_utf8());
-            let rest_id = self.mint_text(rest);
-            if rest.is_empty() { Some((0, rest_id)) } else {
-                Some((self.mint_text(&text[..first.len_utf8()]), rest_id))
-            }
-        } else { None };
         let id = self.next.checked_add(1).expect("term ID space exhausted");
         self.next = id;
-        let split = split.map(|(head, rest)| (if head == 0 { id } else { head }, rest));
         self.by_text.insert(text.to_owned(), id);
-        self.by_id.insert(id, Term { functor: String::new(), args: vec![], types: vec![], text: Some(text.to_owned()), split });
+        self.by_id.insert(id, Term { functor: String::new(), args: vec![], types: vec![], text: Some(text.to_owned()) });
         id
     }
 
@@ -61,21 +53,28 @@ impl Interner {
 
     pub fn text_id(&self, text: &str) -> Option<Cell> { self.by_text.get(text).copied() }
 
+    /// NaN interns as Null. An integral Real also interns its Integer, which `any_key` reads.
     pub fn mint_any(&mut self, value: &AnyValue) -> Cell {
-        if let AnyValue::Real(bits) = value {
-            if f64::from_bits(*bits).is_nan() { return self.mint_any(&AnyValue::Null); }
-        }
+        let value = match value {
+            AnyValue::Real(bits) if f64::from_bits(*bits).is_nan() => &AnyValue::Null,
+            value => value,
+        };
         if let Some(id) = self.by_any.get(value) { return *id; }
         if let AnyValue::Real(bits) = value {
             let n = f64::from_bits(*bits);
             if n.is_finite() && n >= i64::MIN as f64 && n < 9223372036854775808.0 && (n as i64) as f64 == n {
-                self.mint_any(&AnyValue::Integer(n as i64));
+                let integer = AnyValue::Integer(n as i64);
+                if !self.by_any.contains_key(&integer) { self.insert_any(integer); }
             }
         }
+        self.insert_any(value.clone())
+    }
+
+    fn insert_any(&mut self, value: AnyValue) -> Cell {
         let id = self.next.checked_add(1).expect("cell ID space exhausted");
         self.next = id;
         self.by_any.insert(value.clone(), id);
-        self.any_by_id.insert(id, value.clone());
+        self.any_by_id.insert(id, value);
         id
     }
 
@@ -88,8 +87,6 @@ impl Interner {
             self.by_any.get(&AnyValue::Integer(n as i64)).copied()
         } else { Some(id) }
     }
-
-    pub fn split(&self, id: Cell) -> Option<(Cell, Cell)> { self.by_id.get(&id)?.split }
 
     pub fn drain_pending(&mut self) -> Vec<(String, Row)> {
         std::mem::take(&mut self.pending)
@@ -112,33 +109,44 @@ impl Interner {
     }
 }
 
-/// Non-dictionary IDs are atomic symbols ordered by their integer value.
+/// Non-dictionary IDs are atomic symbols ordered by their integer value. Walks both terms with an
+/// explicit stack in argument order; the first unequal comparison decides.
 pub fn compare(a: Cell, b: Cell, resolve: &mut impl FnMut(Cell) -> Option<Term>) -> Ordering {
-    if a == b { return Ordering::Equal; }
-    match (resolve(a), resolve(b)) {
-        (None, None) => a.cmp(&b),
-        (None, Some(_)) => Ordering::Less,
-        (Some(_), None) => Ordering::Greater,
-        (Some(x), Some(y)) if x.text.is_some() || y.text.is_some() => match (x.text, y.text) {
-            (Some(a), Some(b)) => a.cmp(&b),
-            (Some(_), None) => Ordering::Less,
-            (None, Some(_)) => Ordering::Greater,
-            _ => unreachable!(),
-        },
-        (Some(x), Some(y)) => x.args.len().cmp(&y.args.len())
-            .then_with(|| x.functor.cmp(&y.functor))
-            .then_with(|| {
-                for ((a, ta), (b, tb)) in x.args.iter().zip(&x.types).zip(y.args.iter().zip(&y.types)) {
-                    let order = match (ta, tb) {
-                        (Ty::Id | Ty::Text, Ty::Id | Ty::Text) => compare(*a, *b, resolve),
-                        (Ty::Real, Ty::Real) => f64::from_bits(*a as u64).partial_cmp(&f64::from_bits(*b as u64)).unwrap_or(Ordering::Equal),
-                        _ => (*ta as u8).cmp(&(*tb as u8)).then_with(|| a.cmp(b)),
-                    };
-                    if order != Ordering::Equal { return order; }
-                }
-                Ordering::Equal
-            }),
+    enum Step { Terms(Cell, Cell), Done(Ordering) }
+    let mut stack = vec![Step::Terms(a, b)];
+    while let Some(step) = stack.pop() {
+        let (a, b) = match step {
+            Step::Done(Ordering::Equal) => continue,
+            Step::Done(order) => return order,
+            Step::Terms(a, b) => (a, b),
+        };
+        if a == b { continue; }
+        let (x, y) = match (resolve(a), resolve(b)) {
+            (None, None) => { stack.push(Step::Done(a.cmp(&b))); continue; }
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(x), Some(y)) => (x, y),
+        };
+        if x.text.is_some() || y.text.is_some() {
+            stack.push(Step::Done(match (&x.text, &y.text) {
+                (Some(a), Some(b)) => a.cmp(b),
+                (Some(_), None) => Ordering::Less,
+                (None, Some(_)) => Ordering::Greater,
+                _ => unreachable!(),
+            }));
+            continue;
+        }
+        let head = x.args.len().cmp(&y.args.len()).then_with(|| x.functor.cmp(&y.functor));
+        if head != Ordering::Equal { return head; }
+        let pairs = x.args.iter().zip(&x.types).zip(y.args.iter().zip(&y.types));
+        let steps: Vec<Step> = pairs.map(|((a, ta), (b, tb))| match (ta, tb) {
+            (Ty::Id | Ty::Text, Ty::Id | Ty::Text) => Step::Terms(*a, *b),
+            (Ty::Real, Ty::Real) => Step::Done(f64::from_bits(*a as u64).partial_cmp(&f64::from_bits(*b as u64)).unwrap_or(Ordering::Equal)),
+            _ => Step::Done((*ta as u8).cmp(&(*tb as u8)).then_with(|| a.cmp(b))),
+        }).collect();
+        stack.extend(steps.into_iter().rev());
     }
+    Ordering::Equal
 }
 
 fn key_number(out: &mut Vec<u8>, value: Cell) {
@@ -185,15 +193,33 @@ pub fn term_key(term: &Term, child_key: &mut impl FnMut(Cell) -> Vec<u8>) -> Vec
     out
 }
 
-/// A byte key whose lexical order matches `compare` for acyclic terms. Recomputes from `resolve`;
-/// the SQLite engine stores `term_key` at mint instead.
+/// Nesting depth past which `sort_key` keys a child as an atom.
+const SORT_KEY_DEPTH: usize = 128;
+
+/// A byte key whose lexical order matches `compare` for acyclic terms. Recomputes from `resolve`
+/// with an explicit stack; the SQLite engine stores `term_key` at mint instead.
 pub fn sort_key(id: Cell, resolve: &mut impl FnMut(Cell) -> Option<Term>) -> Vec<u8> {
-    fn key(id: Cell, resolve: &mut impl FnMut(Cell) -> Option<Term>, depth: usize) -> Vec<u8> {
-        if depth >= 128 { return atom_key(id); }
-        let Some(term) = resolve(id) else { return atom_key(id); };
-        term_key(&term, &mut |child| key(child, resolve, depth + 1))
+    enum Step { Enter(Cell, usize), Exit(Term, usize) }
+    let mut stack = vec![Step::Enter(id, 0)];
+    let mut keys: Vec<Vec<u8>> = Vec::new();
+    while let Some(step) = stack.pop() {
+        match step {
+            Step::Enter(id, depth) => {
+                let term = if depth >= SORT_KEY_DEPTH { None } else { resolve(id) };
+                let Some(term) = term else { keys.push(atom_key(id)); continue; };
+                let children: Vec<Cell> = term.args.iter().zip(&term.types)
+                    .filter(|(_, ty)| matches!(ty, Ty::Id | Ty::Text)).map(|(arg, _)| *arg).collect();
+                stack.push(Step::Exit(term, children.len()));
+                stack.extend(children.into_iter().rev().map(|child| Step::Enter(child, depth + 1)));
+            }
+            Step::Exit(term, children) => {
+                let mut child_keys = keys.split_off(keys.len() - children).into_iter();
+                let key = term_key(&term, &mut |_| child_keys.next().unwrap_or_default());
+                keys.push(key);
+            }
+        }
     }
-    key(id, resolve, 0)
+    keys.pop().unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -214,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn strings_share_ids_with_constructors_and_split_without_writes() {
+    fn strings_share_ids_with_constructors_and_store_only_the_whole_text() {
         let mut terms = Interner::default();
         let compound = terms.mint("token", &[7], &[Ty::Int]);
         let later = terms.mint_text("écho");
@@ -222,10 +248,43 @@ mod tests {
         assert_eq!(terms.mint_text("écho"), later);
         assert_ne!(compound, later);
         assert_eq!(terms.compare(earlier, later), Ordering::Less);
-        let count = terms.by_id.len();
-        let (head, rest) = terms.split(later).unwrap();
-        assert_eq!((terms.text(head), terms.text(rest)), (Some("é"), Some("cho")));
-        assert_eq!(terms.by_id.len(), count);
-        assert!(terms.split(terms.text_id("").unwrap()).is_none());
+        assert_eq!((terms.text_id("é"), terms.text_id("cho"), terms.by_id.len()), (None, None, 3));
+    }
+
+    /// Named budget: bytes of the minted text.
+    const MEGABYTE: usize = 1 << 20;
+    /// Named budget: stack of the minting thread, far below what per-character recursion needs.
+    const SMALL_STACK: usize = 64 << 10;
+
+    #[test]
+    fn megabyte_text_mints_on_a_small_stack_as_one_entry() {
+        let text: String = "ab😀".repeat(MEGABYTE / 6);
+        let (count, back) = std::thread::Builder::new().stack_size(SMALL_STACK).spawn(move || {
+            let mut terms = Interner::default();
+            let id = terms.mint_text(&text);
+            (terms.by_id.len(), terms.text(id) == Some(text.as_str()))
+        }).unwrap().join().unwrap();
+        assert_eq!((count, back), (1, true));
+    }
+
+    /// Named budget: nesting depth of the chain, past `SORT_KEY_DEPTH`.
+    const CHAIN: usize = 10_000;
+
+    #[test]
+    fn deep_terms_compare_and_key_on_a_small_stack() {
+        let out = std::thread::Builder::new().stack_size(SMALL_STACK).spawn(|| {
+            let mut terms = Interner::default();
+            let (mut a, mut b) = (terms.mint_text("a"), terms.mint_text("b"));
+            for _ in 0..CHAIN {
+                a = terms.mint("wrap", &[a, 0], &[Ty::Id, Ty::Int]);
+                b = terms.mint("wrap", &[b, 0], &[Ty::Id, Ty::Int]);
+            }
+            let low = terms.mint("wrap", &[a, 0], &[Ty::Id, Ty::Int]);
+            let high = terms.mint("wrap", &[a, 1], &[Ty::Id, Ty::Int]);
+            let mut resolve = |id| terms.get(id).cloned();
+            let (low_key, high_key) = (sort_key(low, &mut resolve), sort_key(high, &mut resolve));
+            (terms.compare(a, b), terms.compare(b, a), terms.compare(low, high), low_key < high_key)
+        }).unwrap().join().unwrap();
+        assert_eq!(out, (Ordering::Less, Ordering::Greater, Ordering::Less, true));
     }
 }
