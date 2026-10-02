@@ -80,7 +80,7 @@ fn node_source(program: &Program, id: usize, op: &Op) -> Result<String, String> 
         Op::StrCons { input, mode } => {
             let action = match mode {
                 StrMode::Construct { head, rest } => format!("const head = terms.byId[row[{head}]]?.text; const rest = terms.byId[row[{rest}]]?.text; if (head !== undefined && rest !== undefined) put(delta, [...row, mintText(terms, head + rest)], w);"),
-                StrMode::Decompose { whole } => format!("const split = terms.byId[row[{whole}]]?.split; if (split) put(delta, [...row, ...split], w);"),
+                StrMode::Decompose { whole } => format!("const split = splitText(terms, row[{whole}]); if (split) put(delta, [...row, ...split], w);"),
             };
             render("n@INPUT@.pipe(map(b => { const delta = empty(); for (const { row, w } of b) { @ACTION@ } return pack(@ID@, @OLD@, delta, b); }), @CACHE@);",
                 &[("INPUT", input.to_string()), ("ACTION", action), ("ID", id.to_string()), ("OLD", old), ("CACHE", cached().into())])
