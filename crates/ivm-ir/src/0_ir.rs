@@ -4,6 +4,7 @@
 use crate::{StrKind, StrOp};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
 
 pub type RelId = u32;
 pub type NodeId = u32;
@@ -25,6 +26,17 @@ pub enum AnyValue {
     Blob(Vec<u8>),
 }
 
+fn int_real(integer: i64, real: f64) -> Ordering {
+    if real.is_nan() { return Ordering::Greater; }
+    if real >= 9223372036854775808.0 { return Ordering::Less; }
+    if real < i64::MIN as f64 { return Ordering::Greater; }
+    integer.cmp(&(real.trunc() as i64)).then_with(|| {
+        if real.fract() > 0.0 { Ordering::Less }
+        else if real.fract() < 0.0 { Ordering::Greater }
+        else { Ordering::Equal }
+    })
+}
+
 impl AnyValue {
     pub fn sqlite_cmp(&self, other: &Self) -> Ordering {
         fn class(value: &AnyValue) -> u8 {
@@ -34,16 +46,6 @@ impl AnyValue {
                 AnyValue::Text(_) => 2,
                 AnyValue::Blob(_) => 3,
             }
-        }
-        fn int_real(integer: i64, real: f64) -> Ordering {
-            if real.is_nan() { return Ordering::Greater; }
-            if real >= 9223372036854775808.0 { return Ordering::Less; }
-            if real < i64::MIN as f64 { return Ordering::Greater; }
-            integer.cmp(&(real.trunc() as i64)).then_with(|| {
-                if real.fract() > 0.0 { Ordering::Less }
-                else if real.fract() < 0.0 { Ordering::Greater }
-                else { Ordering::Equal }
-            })
         }
         class(self).cmp(&class(other)).then_with(|| match (self, other) {
             (AnyValue::Null, AnyValue::Null) => Ordering::Equal,
@@ -207,6 +209,20 @@ pub enum Op {
     Delay(NodeId),
 }
 
+impl Op {
+    /// The inputs whose column types `Program::node_types` reads for this node.
+    pub fn type_inputs(&self) -> &[NodeId] {
+        match self {
+            Op::Get(_) => &[],
+            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Mfp { input, .. }
+            | Op::Negate(input) | Op::Threshold(input) | Op::Delay(input) | Op::Reduce { input, .. }
+            | Op::TopK { input, .. } | Op::Window { input, .. } | Op::Antijoin { l: input, .. } => std::slice::from_ref(input),
+            Op::Union(inputs) => &inputs[..inputs.len().min(1)],
+            Op::Join { inputs, .. } => inputs,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LetRec {
     pub ids: Vec<RelId>,
@@ -230,18 +246,23 @@ pub struct Program {
     pub outputs: Vec<RelId>,
 }
 
+fn reads_strings(e: &Expr) -> bool {
+    let mut walk = vec![e];
+    while let Some(next) = walk.pop() {
+        match next {
+            Expr::Text(_) | Expr::Call(Func::StrNil, _) => return true,
+            Expr::Call(_, args) => walk.extend(args.iter()),
+            _ => {}
+        }
+    }
+    false
+}
+
 impl Program {
     pub fn uses_strings(&self) -> bool {
-        fn expr(e: &Expr) -> bool {
-            match e {
-                Expr::Text(_) | Expr::Call(Func::StrNil, _) => true,
-                Expr::Call(_, args) => args.iter().any(expr),
-                _ => false,
-            }
-        }
         !self.texts.is_empty() || self.nodes.iter().any(|op| match op {
             Op::StrCons { .. } | Op::Str { .. } => true,
-            Op::Mfp { filter, map, .. } => filter.iter().chain(map).any(expr),
+            Op::Mfp { filter, map, .. } => filter.iter().chain(map).any(reads_strings),
             _ => false,
         })
     }
@@ -250,40 +271,64 @@ impl Program {
         self.rels.iter().find(|rel| rel.id == id)
     }
 
+    /// Explicit stack, post-order over type inputs; a node reached again while its inputs are
+    /// pending is a cycle and has no types.
     pub fn node_types(&self, id: NodeId) -> Option<Vec<Ty>> {
-        let op = self.nodes.get(id as usize)?;
+        let mut done: HashMap<NodeId, Option<Vec<Ty>>> = HashMap::new();
+        let mut entered: HashSet<NodeId> = HashSet::new();
+        let mut stack = vec![(id, false)];
+        while let Some((node, ready)) = stack.pop() {
+            if done.contains_key(&node) { continue; }
+            let Some(op) = self.nodes.get(node as usize) else {
+                done.insert(node, None);
+                continue;
+            };
+            if ready {
+                let types = self.op_types(op, |n| done.get(&n).cloned().flatten());
+                done.insert(node, types);
+                continue;
+            }
+            if !entered.insert(node) { return None; }
+            stack.push((node, true));
+            stack.extend(op.type_inputs().iter().rev().filter(|n| !done.contains_key(n)).map(|n| (*n, false)));
+        }
+        done.remove(&id).flatten()
+    }
+
+    /// One node's column types from its type inputs' types, `types_of(n)`.
+    fn op_types(&self, op: &Op, types_of: impl Fn(NodeId) -> Option<Vec<Ty>>) -> Option<Vec<Ty>> {
         Some(match op {
             Op::Get(rel) => self.rel(*rel)?.cols.clone(),
             Op::Mint { input, .. } => {
-                let mut cols = self.node_types(*input)?;
+                let mut cols = types_of(*input)?;
                 cols.push(Ty::Id);
                 cols
             }
             Op::StrCons { input, mode } => {
-                let mut cols = self.node_types(*input)?;
+                let mut cols = types_of(*input)?;
                 cols.extend(std::iter::repeat(Ty::Id).take(match mode { StrMode::Construct { .. } => 1, StrMode::Decompose { .. } => 2 }));
                 cols
             }
             Op::Str { input, op, .. } => {
-                let mut cols = self.node_types(*input)?;
+                let mut cols = types_of(*input)?;
                 match op.out() { Some(StrKind::Text) => cols.push(Ty::Id), Some(StrKind::Int) => cols.push(Ty::Int), None => {} }
                 cols
             }
             Op::Mfp { input, map, project, .. } => {
-                let mut cols = self.node_types(*input)?;
+                let mut cols = types_of(*input)?;
                 for expr in map { cols.push(expr_type(expr, &cols)?); }
                 if project.is_empty() { cols } else { project.iter().map(|c| cols.get(*c as usize).copied()).collect::<Option<Vec<_>>>()? }
             }
-            Op::Union(inputs) => self.node_types(*inputs.first()?)?,
-            Op::Negate(input) | Op::Threshold(input) | Op::Delay(input) => self.node_types(*input)?,
+            Op::Union(inputs) => types_of(*inputs.first()?)?,
+            Op::Negate(input) | Op::Threshold(input) | Op::Delay(input) => types_of(*input)?,
             Op::Join { inputs, .. } => {
                 let mut cols = Vec::new();
-                for input in inputs { cols.extend(self.node_types(*input)?); }
+                for input in inputs { cols.extend(types_of(*input)?); }
                 cols
             }
-            Op::Antijoin { l, .. } => self.node_types(*l)?,
+            Op::Antijoin { l, .. } => types_of(*l)?,
             Op::Reduce { input, key, aggs } => {
-                let cols = self.node_types(*input)?;
+                let cols = types_of(*input)?;
                 let mut out = key.iter().map(|c| cols.get(*c as usize).copied()).collect::<Option<Vec<_>>>()?;
                 out.extend(aggs.iter().map(|agg| match agg {
                     Agg::Min(c) | Agg::Max(c) => cols.get(*c as usize).copied(),
@@ -292,9 +337,9 @@ impl Program {
                 }).collect::<Option<Vec<_>>>()?);
                 out
             }
-            Op::TopK { input, .. } => self.node_types(*input)?,
+            Op::TopK { input, .. } => types_of(*input)?,
             Op::Window { input, func, order, .. } => {
-                let mut cols = self.node_types(*input)?;
+                let mut cols = types_of(*input)?;
                 let value = order.first().map_or(0, |o| o.col);
                 cols.push(match func {
                     WinFn::Sum(c) => cols.get(*c as usize).copied()?,
@@ -307,18 +352,47 @@ impl Program {
     }
 }
 
-pub fn expr_type(expr: &Expr, cols: &[Ty]) -> Option<Ty> {
+/// The type of one node whose `Add`/`Sub` operand types are `operands`.
+fn expr_node_type(expr: &Expr, cols: &[Ty], operands: &[Option<Ty>]) -> Option<Ty> {
     match expr {
         Expr::Col(c) => cols.get(*c as usize).copied(),
         Expr::Text(_) | Expr::Call(Func::StrNil, _) => Some(Ty::Text),
         Expr::Lit(_) => Some(Ty::Int),
-        Expr::Call(Func::Add | Func::Sub, args) => {
-            let left = expr_type(args.first()?, cols)?;
-            let right = expr_type(args.get(1)?, cols)?;
-            Some(if left == Ty::Real || right == Ty::Real { Ty::Real } else { Ty::Int })
-        }
+        Expr::Call(Func::Add | Func::Sub, _) => match operands {
+            [Some(left), Some(right)] => Some(if *left == Ty::Real || *right == Ty::Real { Ty::Real } else { Ty::Int }),
+            _ => None,
+        },
         Expr::Call(_, _) => Some(Ty::Int),
     }
+}
+
+fn type_operands(e: &Expr) -> &[Expr] {
+    match e {
+        Expr::Call(Func::Add | Func::Sub, args) => &args[..args.len().min(2)],
+        _ => &[],
+    }
+}
+
+/// Only `Add`/`Sub` read their first two operands' types; post-order over those with an
+/// explicit stack.
+pub fn expr_type(expr: &Expr, cols: &[Ty]) -> Option<Ty> {
+    if type_operands(expr).is_empty() {
+        return expr_node_type(expr, cols, &[]);
+    }
+    let mut order = Vec::new();
+    let mut walk = vec![expr];
+    while let Some(next) = walk.pop() {
+        order.push(next);
+        walk.extend(type_operands(next));
+    }
+    let mut done: Vec<Option<Ty>> = Vec::with_capacity(order.len());
+    for e in order.into_iter().rev() {
+        let base = done.len() - type_operands(e).len();
+        let ty = expr_node_type(e, cols, &done[base..]);
+        done.truncate(base);
+        done.push(ty);
+    }
+    done.pop().flatten()
 }
 
 /// One signed change to one source row. `w` is +1 or -1 at the raw API.

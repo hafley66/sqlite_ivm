@@ -34,14 +34,40 @@ fn reachable(program: &Program, roots: &[NodeId]) -> Vec<usize> {
     seen.iter().enumerate().filter_map(|(id, used)| used.then_some(id)).collect()
 }
 
+/// The first two operands of a call; the rest never render.
+fn operands(expr: &Expr) -> &[Expr] {
+    match expr {
+        Expr::Call(_, args) => &args[..args.len().min(2)],
+        _ => &[],
+    }
+}
+
+/// Post-order with an explicit stack: pre-order with the last operand first, reversed, puts
+/// every operand before its call, left to right.
 fn expression(expr: &Expr, row: &str) -> String {
+    let mut order = Vec::new();
+    let mut walk = vec![expr];
+    while let Some(next) = walk.pop() {
+        order.push(next);
+        walk.extend(operands(next));
+    }
+    let mut done: Vec<String> = Vec::with_capacity(order.len());
+    for e in order.into_iter().rev() {
+        let rendered = done.split_off(done.len() - operands(e).len());
+        done.push(expression_node(e, row, rendered));
+    }
+    done.pop().unwrap_or_default()
+}
+
+fn expression_node(expr: &Expr, row: &str, rendered: Vec<String>) -> String {
     match expr {
         Expr::Col(col) => format!("{row}[{col}]"),
         Expr::Lit(value) => value.to_string(),
         Expr::Text(index) => format!("terms.literals[{index}]"),
-        Expr::Call(func, args) => {
-            let a = args.first().map(|e| expression(e, row)).unwrap_or_default();
-            let b = args.get(1).map(|e| expression(e, row)).unwrap_or_default();
+        Expr::Call(func, _) => {
+            let mut rendered = rendered.into_iter();
+            let a = rendered.next().unwrap_or_default();
+            let b = rendered.next().unwrap_or_default();
             match func {
                 Func::Eq => format!("+( Number({a}) === Number({b}) )"),
                 Func::Ne => format!("+( Number({a}) !== Number({b}) )"),

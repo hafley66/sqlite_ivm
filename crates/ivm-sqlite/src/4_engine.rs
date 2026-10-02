@@ -51,46 +51,51 @@ fn row_of(row: &rusqlite::Row<'_>, width: usize) -> rusqlite::Result<Row> {
     (0..width).map(|i| row.get(i)).collect()
 }
 
-/// Each catalog program owns one output. Retain the strata that define that
-/// output and the relations its bodies read, in their original order.
-fn output_program(ir: &Program, output: RelId) -> Program {
-    fn text_refs(expr: &Expr, used: &mut BTreeSet<u32>) {
-        match expr {
+fn text_refs(expr: &Expr, used: &mut BTreeSet<u32>) {
+    let mut walk = vec![expr];
+    while let Some(next) = walk.pop() {
+        match next {
             Expr::Text(id) => { used.insert(*id); }
-            Expr::Call(_, args) => args.iter().for_each(|arg| text_refs(arg, used)),
+            Expr::Call(_, args) => walk.extend(args.iter()),
             _ => {}
         }
     }
-    fn remap_text(expr: &mut Expr, ids: &[u32]) {
-        match expr {
+}
+
+fn remap_text(expr: &mut Expr, ids: &[u32]) {
+    let mut walk = vec![expr];
+    while let Some(next) = walk.pop() {
+        match next {
             Expr::Text(id) => {
                 if let Ok(mapped) = ids.binary_search(id) { *id = mapped as u32; }
             }
-            Expr::Call(_, args) => args.iter_mut().for_each(|arg| remap_text(arg, ids)),
+            Expr::Call(_, args) => walk.extend(args.iter_mut()),
             _ => {}
         }
     }
-    fn visit_node(ir: &Program, node: NodeId, seen: &mut [bool], relations: &mut Vec<RelId>) {
-        let Some(slot) = seen.get_mut(node as usize) else { return };
-        if *slot { return; }
+}
+
+/// Depth-first in input order with an explicit stack; `relations` keeps the visit order.
+fn visit_node(ir: &Program, node: NodeId, seen: &mut [bool], relations: &mut Vec<RelId>) {
+    let mut walk = vec![node];
+    while let Some(node) = walk.pop() {
+        let Some(slot) = seen.get_mut(node as usize) else { continue };
+        if *slot { continue; }
         *slot = true;
         match &ir.nodes[node as usize] {
             Op::Get(id) => relations.push(*id),
             Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Mfp { input, .. }
             | Op::Negate(input) | Op::Reduce { input, .. } | Op::Threshold(input)
-            | Op::TopK { input, .. } | Op::Window { input, .. } | Op::Delay(input) => {
-                visit_node(ir, *input, seen, relations);
-            }
-            Op::Union(inputs) | Op::Join { inputs, .. } => {
-                for &input in inputs { visit_node(ir, input, seen, relations); }
-            }
-            Op::Antijoin { l, r, .. } => {
-                visit_node(ir, *l, seen, relations);
-                visit_node(ir, *r, seen, relations);
-            }
+            | Op::TopK { input, .. } | Op::Window { input, .. } | Op::Delay(input) => walk.push(*input),
+            Op::Union(inputs) | Op::Join { inputs, .. } => walk.extend(inputs.iter().rev()),
+            Op::Antijoin { l, r, .. } => walk.extend([*r, *l]),
         }
     }
+}
 
+/// Each catalog program owns one output. Retain the strata that define that
+/// output and the relations its bodies read, in their original order.
+fn output_program(ir: &Program, output: RelId) -> Program {
     let mut needed = vec![false; ir.strata.len()];
     let mut pending = vec![output];
     while let Some(id) = pending.pop() {

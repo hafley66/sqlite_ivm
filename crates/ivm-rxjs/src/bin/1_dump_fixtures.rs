@@ -13,12 +13,19 @@ mod rng;
 #[path = "../../../ivm-dd/tests/random/1_gen.rs"]
 mod gen;
 
+/// Depth-first in `read_dir` order with an explicit stack of directory iterators.
 fn names(dir: &Path, prefix: &str, out: &mut Vec<String>) {
-    for entry in fs::read_dir(dir).unwrap() {
+    let mut stack = vec![(fs::read_dir(dir).unwrap(), prefix.to_string())];
+    while let Some((entries, prefix)) = stack.last_mut() {
+        let Some(entry) = entries.next() else {
+            stack.pop();
+            continue;
+        };
         let entry = entry.unwrap();
         let path = entry.path();
         if path.is_dir() {
-            names(&path, &format!("{}{}/", prefix, entry.file_name().to_string_lossy()), out);
+            let inner = format!("{}{}/", prefix, entry.file_name().to_string_lossy());
+            stack.push((fs::read_dir(&path).unwrap(), inner));
         } else if path.extension().is_some_and(|e| e == "sql") {
             out.push(format!("{}{}", prefix, path.file_stem().unwrap().to_string_lossy()));
         }

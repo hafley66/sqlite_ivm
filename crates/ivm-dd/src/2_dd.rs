@@ -487,27 +487,28 @@ fn numeric_prefix(bytes: &[u8]) -> f64 {
     std::str::from_utf8(&bytes[..end]).ok().and_then(|text| text.trim().parse::<f64>().ok()).unwrap_or(0.0)
 }
 
+fn sum_add(sum: &mut f64, error: &mut f64, value: f64) {
+    let old = *sum;
+    let next = old + value;
+    if old.abs() > value.abs() { *error += (old - next) + value; }
+    else { *error += (value - next) + old; }
+    *sum = next;
+}
+fn sum_add_integer(sum: &mut f64, error: &mut f64, value: i64) {
+    if !(-4503599627370495..=4503599627370495).contains(&value) {
+        let small = value % 16384;
+        sum_add(sum, error, (value - small) as f64);
+        sum_add(sum, error, small as f64);
+    } else { sum_add(sum, error, value as f64); }
+}
+fn sum_init(integer: i64) -> (f64, f64) {
+    if !(-4503599627370495..=4503599627370495).contains(&integer) {
+        let small = integer % 16384;
+        ((integer - small) as f64, small as f64)
+    } else { (integer as f64, 0.0) }
+}
+
 fn sqlite_sum_any(values: &[(AnyValue, W)]) -> Result<AnyValue, &'static str> {
-    fn add(sum: &mut f64, error: &mut f64, value: f64) {
-        let old = *sum;
-        let next = old + value;
-        if old.abs() > value.abs() { *error += (old - next) + value; }
-        else { *error += (value - next) + old; }
-        *sum = next;
-    }
-    fn add_integer(sum: &mut f64, error: &mut f64, value: i64) {
-        if !(-4503599627370495..=4503599627370495).contains(&value) {
-            let small = value % 16384;
-            add(sum, error, (value - small) as f64);
-            add(sum, error, small as f64);
-        } else { add(sum, error, value as f64); }
-    }
-    fn init(integer: i64) -> (f64, f64) {
-        if !(-4503599627370495..=4503599627370495).contains(&integer) {
-            let small = integer % 16384;
-            ((integer - small) as f64, small as f64)
-        } else { (integer as f64, 0.0) }
-    }
     let (mut integer, mut real, mut error, mut approximate, mut overflow, mut seen) = (0i64, 0.0f64, 0.0f64, false, false, false);
     for (value, weight) in values {
         for _ in 0..(*weight).max(0) {
@@ -523,16 +524,16 @@ fn sqlite_sum_any(values: &[(AnyValue, W)]) -> Result<AnyValue, &'static str> {
                     if let Some(next) = integer.checked_add(value) { integer = next; }
                     else {
                         overflow = true;
-                        (real, error) = init(integer);
+                        (real, error) = sum_init(integer);
                         approximate = true;
-                        add_integer(&mut real, &mut error, value);
+                        sum_add_integer(&mut real, &mut error, value);
                     }
                 }
-                Ok(value) => add_integer(&mut real, &mut error, value),
+                Ok(value) => sum_add_integer(&mut real, &mut error, value),
                 Err(value) => {
-                    if !approximate { (real, error) = init(integer); approximate = true; }
+                    if !approximate { (real, error) = sum_init(integer); approximate = true; }
                     overflow = false;
-                    add(&mut real, &mut error, value);
+                    sum_add(&mut real, &mut error, value);
                 }
             }
             seen = true;

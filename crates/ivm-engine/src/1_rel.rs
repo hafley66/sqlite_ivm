@@ -1,6 +1,7 @@
 //! The operator algebra each engine implements, and the one lowering written against it.
 
 use ivm_ir::*;
+use smallvec::{smallvec, SmallVec};
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -142,32 +143,59 @@ pub fn eval_with(expr: &Expr, row: &[Cell], term_lt: &dyn Fn(Cell, Cell) -> bool
     eval_with_text(expr, row, term_lt, &|_| panic!("Text requires a dictionary"), &|| panic!("StrNil requires a dictionary"))
 }
 
-pub fn eval_with_text(expr: &Expr, row: &[Cell], term_lt: &dyn Fn(Cell, Cell) -> bool, text: &dyn Fn(u32) -> Cell, nil: &dyn Fn() -> Cell) -> Cell {
-    match expr {
-        Expr::Col(c) => row[*c as usize],
-        Expr::Lit(v) => *v,
-        Expr::Text(index) => text(*index),
-        Expr::Call(func, args) => {
-            let a = |i: usize| eval_with_text(&args[i], row, term_lt, text, nil);
-            match func {
-                Func::Eq => (a(0) == a(1)) as Cell,
-                Func::Ne => (a(0) != a(1)) as Cell,
-                Func::Lt => (a(0) < a(1)) as Cell,
-                Func::Le => (a(0) <= a(1)) as Cell,
-                Func::Gt => (a(0) > a(1)) as Cell,
-                Func::Ge => (a(0) >= a(1)) as Cell,
-                Func::Add => a(0).wrapping_add(a(1)),
-                Func::Sub => a(0).wrapping_sub(a(1)),
-                Func::And => (a(0) != 0 && a(1) != 0) as Cell,
-                Func::Or => (a(0) != 0 || a(1) != 0) as Cell,
-                Func::Not => (a(0) == 0) as Cell,
-                Func::TermLt => term_lt(a(0), a(1)) as Cell,
-                Func::StrNil => nil(),
+enum ExprStep<'e> {
+    Enter(&'e Expr),
+    Apply(&'e Func, usize),
+}
+
+/// Post-order over `expr` with explicit stacks: `leaf` values a column, literal, text or
+/// `StrNil`; `apply` values a call from its operands' values, left to right.
+fn walk_expr<V: Copy>(expr: &Expr, leaf: impl Fn(&Expr) -> V, apply: impl Fn(&Func, &[V]) -> V) -> V {
+    let mut steps: SmallVec<[ExprStep; 16]> = smallvec![ExprStep::Enter(expr)];
+    let mut values: SmallVec<[V; 16]> = SmallVec::new();
+    while let Some(step) = steps.pop() {
+        match step {
+            ExprStep::Enter(Expr::Call(func, args)) if *func != Func::StrNil => {
+                steps.push(ExprStep::Apply(func, args.len()));
+                steps.extend(args.iter().rev().map(ExprStep::Enter));
+            }
+            ExprStep::Enter(e) => values.push(leaf(e)),
+            ExprStep::Apply(func, arity) => {
+                let base = values.len() - arity;
+                let value = apply(func, &values[base..]);
+                values.truncate(base);
+                values.push(value);
             }
         }
     }
+    values[0]
 }
 
+pub fn eval_with_text(expr: &Expr, row: &[Cell], term_lt: &dyn Fn(Cell, Cell) -> bool, text: &dyn Fn(u32) -> Cell, nil: &dyn Fn() -> Cell) -> Cell {
+    let leaf = |e: &Expr| match e {
+        Expr::Col(c) => row[*c as usize],
+        Expr::Lit(v) => *v,
+        Expr::Text(index) => text(*index),
+        Expr::Call(..) => nil(),
+    };
+    walk_expr(expr, leaf, |func, a: &[Cell]| match func {
+        Func::Eq => (a[0] == a[1]) as Cell,
+        Func::Ne => (a[0] != a[1]) as Cell,
+        Func::Lt => (a[0] < a[1]) as Cell,
+        Func::Le => (a[0] <= a[1]) as Cell,
+        Func::Gt => (a[0] > a[1]) as Cell,
+        Func::Ge => (a[0] >= a[1]) as Cell,
+        Func::Add => a[0].wrapping_add(a[1]),
+        Func::Sub => a[0].wrapping_sub(a[1]),
+        Func::And => (a[0] != 0 && a[1] != 0) as Cell,
+        Func::Or => (a[0] != 0 || a[1] != 0) as Cell,
+        Func::Not => (a[0] == 0) as Cell,
+        Func::TermLt => term_lt(a[0], a[1]) as Cell,
+        Func::StrNil => unreachable!(),
+    })
+}
+
+/// Each value carries its `expr_type`, computed bottom-up in the same walk.
 pub fn eval_typed_with_text(
     expr: &Expr, row: &[Cell], types: &[Ty],
     term_lt: &dyn Fn(Cell, Cell) -> bool,
@@ -175,37 +203,45 @@ pub fn eval_typed_with_text(
     compare: &dyn Fn(Ty, Cell, Ty, Cell) -> std::cmp::Ordering,
 ) -> Cell {
     use std::cmp::Ordering;
-    match expr {
-        Expr::Col(c) => row[*c as usize],
-        Expr::Lit(v) => *v,
-        Expr::Text(index) => text(*index),
-        Expr::Call(Func::StrNil, _) => nil(),
-        Expr::Call(func, args) => {
-            let a = |i: usize| eval_typed_with_text(&args[i], row, types, term_lt, text, nil, compare);
-            let cmp = || compare(expr_type(&args[0], types).unwrap(), a(0), expr_type(&args[1], types).unwrap(), a(1));
-            match func {
-                Func::Eq => (cmp() == Ordering::Equal) as Cell,
-                Func::Ne => (cmp() != Ordering::Equal) as Cell,
-                Func::Lt => (cmp() == Ordering::Less) as Cell,
-                Func::Le => (cmp() != Ordering::Greater) as Cell,
-                Func::Gt => (cmp() == Ordering::Greater) as Cell,
-                Func::Ge => (cmp() != Ordering::Less) as Cell,
-                Func::Add | Func::Sub if expr_type(expr, types) == Some(Ty::Real) => {
-                    let number = |i: usize| if expr_type(&args[i], types) == Some(Ty::Real) {
-                        f64::from_bits(a(i) as u64)
-                    } else { a(i) as f64 };
-                    (if *func == Func::Add { number(0) + number(1) } else { number(0) - number(1) }).to_bits() as i64
-                }
-                Func::Add => a(0).wrapping_add(a(1)),
-                Func::Sub => a(0).wrapping_sub(a(1)),
-                Func::And => (a(0) != 0 && a(1) != 0) as Cell,
-                Func::Or => (a(0) != 0 || a(1) != 0) as Cell,
-                Func::Not => (a(0) == 0) as Cell,
-                Func::TermLt => term_lt(a(0), a(1)) as Cell,
-                Func::StrNil => unreachable!(),
+    let leaf = |e: &Expr| match e {
+        Expr::Col(c) => (row[*c as usize], types.get(*c as usize).copied()),
+        Expr::Lit(v) => (*v, Some(Ty::Int)),
+        Expr::Text(index) => (text(*index), Some(Ty::Text)),
+        Expr::Call(..) => (nil(), Some(Ty::Text)),
+    };
+    let apply = |func: &Func, a: &[(Cell, Option<Ty>)]| {
+        let cmp = || compare(a[0].1.unwrap(), a[0].0, a[1].1.unwrap(), a[1].0);
+        let ty = match (func, a) {
+            (Func::Add | Func::Sub, [(_, Some(left)), (_, Some(right)), ..]) => {
+                Some(if *left == Ty::Real || *right == Ty::Real { Ty::Real } else { Ty::Int })
             }
-        }
-    }
+            (Func::Add | Func::Sub, _) => None,
+            _ => Some(Ty::Int),
+        };
+        let value = match func {
+            Func::Eq => (cmp() == Ordering::Equal) as Cell,
+            Func::Ne => (cmp() != Ordering::Equal) as Cell,
+            Func::Lt => (cmp() == Ordering::Less) as Cell,
+            Func::Le => (cmp() != Ordering::Greater) as Cell,
+            Func::Gt => (cmp() == Ordering::Greater) as Cell,
+            Func::Ge => (cmp() != Ordering::Less) as Cell,
+            Func::Add | Func::Sub if ty == Some(Ty::Real) => {
+                let number = |i: usize| if a[i].1 == Some(Ty::Real) {
+                    f64::from_bits(a[i].0 as u64)
+                } else { a[i].0 as f64 };
+                (if *func == Func::Add { number(0) + number(1) } else { number(0) - number(1) }).to_bits() as i64
+            }
+            Func::Add => a[0].0.wrapping_add(a[1].0),
+            Func::Sub => a[0].0.wrapping_sub(a[1].0),
+            Func::And => (a[0].0 != 0 && a[1].0 != 0) as Cell,
+            Func::Or => (a[0].0 != 0 || a[1].0 != 0) as Cell,
+            Func::Not => (a[0].0 == 0) as Cell,
+            Func::TermLt => term_lt(a[0].0, a[1].0) as Cell,
+            Func::StrNil => unreachable!(),
+        };
+        (value, ty)
+    };
+    walk_expr(expr, leaf, apply).0
 }
 
 pub fn lower<A: Rel>(p: &Program, a: &mut A) -> Result<(), EngineError> {
@@ -248,6 +284,30 @@ fn decoded<C>(p: &Program, defined: &[(RelId, C)], inputs: &[NodeId], equivalenc
     })
 }
 
+fn op_at(p: &Program, id: NodeId) -> Result<&Op, EngineError> {
+    p.nodes
+        .get(id as usize)
+        .ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::UnknownNode(id)))
+}
+
+/// The inputs `build_node` reads for `op`, in the order they are lowered.
+fn lowered_inputs<C>(p: &Program, defined: &[(RelId, C)], op: &Op) -> Vec<NodeId> {
+    match op {
+        Op::Get(_) | Op::Delay(_) => Vec::new(),
+        Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Mfp { input, .. }
+        | Op::Negate(input) | Op::Reduce { input, .. } | Op::Threshold(input)
+        | Op::TopK { input, .. } | Op::Window { input, .. } => vec![*input],
+        Op::Join { inputs, equivalences } => match decoded(p, defined, inputs, equivalences) {
+            Some((side, ..)) => vec![inputs[1 - side]],
+            None => inputs.clone(),
+        },
+        Op::Union(inputs) => inputs.clone(),
+        Op::Antijoin { l, r, .. } => vec![*l, *r],
+    }
+}
+
+/// Lowers every node `id` reaches, inputs first, with an explicit stack; each node is built
+/// once and memoized in `nodes`. A node reached again while its inputs are pending is a cycle.
 pub fn lower_node<A: Rel>(
     p: &Program,
     a: &mut A,
@@ -258,48 +318,61 @@ pub fn lower_node<A: Rel>(
     if let Some(Some(c)) = nodes.get(id as usize) {
         return Ok(c.clone());
     }
-    let op = p
-        .nodes
-        .get(id as usize)
-        .ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::UnknownNode(id)))?;
-    let mut sub = |n: NodeId, a: &mut A| lower_node(p, a, nodes, defined, n);
-    let c = match op {
+    let mut stack = vec![(id, lowered_inputs(p, defined, op_at(p, id)?), 0usize)];
+    while let Some(top) = stack.len().checked_sub(1) {
+        let (_, inputs, next) = &mut stack[top];
+        if let Some(&input) = inputs.get(*next) {
+            *next += 1;
+            if let Some(Some(_)) = nodes.get(input as usize) {
+                continue;
+            }
+            if stack.iter().any(|(node, ..)| *node == input) {
+                return Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("node cycle")));
+            }
+            stack.push((input, lowered_inputs(p, defined, op_at(p, input)?), 0));
+            continue;
+        }
+        let (node, inputs, _) = stack.pop().expect("a frame on the stack");
+        let built: Vec<A::C> = inputs.iter().map(|n| nodes[*n as usize].clone().expect("input lowered first")).collect();
+        let c = build_node(p, a, defined, op_at(p, node)?, &built)?;
+        let c = a.observe(node, c);
+        nodes[node as usize] = Some(c.clone());
+        if stack.is_empty() {
+            return Ok(c);
+        }
+    }
+    unreachable!("the root frame returns")
+}
+
+/// One node from its lowered inputs, `built`, in `lowered_inputs` order.
+fn build_node<A: Rel>(
+    p: &Program,
+    a: &mut A,
+    defined: &[(RelId, A::C)],
+    op: &Op,
+    built: &[A::C],
+) -> Result<A::C, EngineError> {
+    let first = || built[0].clone();
+    Ok(match op {
         Op::Get(rel) => match defined.iter().find(|(d, _)| d == rel) {
             Some((_, c)) => c.clone(),
             None => a.get(*rel)?,
         },
-        Op::Mint { input, functor, args } => {
-            let c = sub(*input, a)?;
-            a.mint(c, *functor, args)?
-        }
-        Op::StrCons { input, mode } => {
-            let c = sub(*input, a)?;
-            a.str_cons(c, mode)?
-        }
-        Op::Str { input, op, args } => {
-            let c = sub(*input, a)?;
-            a.str_op(c, *op, args)?
-        }
+        Op::Mint { functor, args, .. } => a.mint(first(), *functor, args)?,
+        Op::StrCons { mode, .. } => a.str_cons(first(), mode)?,
+        Op::Str { op, args, .. } => a.str_op(first(), *op, args)?,
         Op::Mfp { input, filter, map, project } => {
-            let c = sub(*input, a)?;
             let types = p.node_types(*input).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Mfp input types")))?;
-            a.mfp(c, filter, map, project, &types)
+            a.mfp(first(), filter, map, project, &types)
         }
-        Op::Union(inputs) => {
-            let cs = inputs.iter().map(|n| sub(*n, a)).collect::<Result<Vec<_>, _>>()?;
-            a.union(cs)
-        }
-        Op::Negate(input) => {
-            let c = sub(*input, a)?;
-            a.negate(c)
-        }
+        Op::Union(_) => a.union(built.to_vec()),
+        Op::Negate(_) => a.negate(first()),
         Op::Join { inputs, equivalences } if decoded(p, defined, inputs, equivalences).is_some() => {
             let (side, col, functor) = decoded(p, defined, inputs, equivalences).unwrap();
             let other = inputs[1 - side];
             let types = [other, inputs[side]].map(|n| p.node_types(n).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Join input types"))));
             let types = [types[0].clone()?, types[1].clone()?];
-            let c = sub(other, a)?;
-            let c = a.decode(c, functor, col, &types)?;
+            let c = a.decode(first(), functor, col, &types)?;
             if side == 1 {
                 c
             } else {
@@ -312,37 +385,23 @@ pub fn lower_node<A: Rel>(
             }
         }
         Op::Join { inputs, equivalences } => {
-            let cs = inputs.iter().map(|n| sub(*n, a)).collect::<Result<Vec<_>, _>>()?;
             let types = inputs.iter().map(|n| p.node_types(*n).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Join input types")))).collect::<Result<Vec<_>, _>>()?;
-            a.join(cs, equivalences, &types)?
+            a.join(built.to_vec(), equivalences, &types)?
         }
-        Op::Antijoin { l, r, lk, rk } => {
-            let l = sub(*l, a)?;
-            let r = sub(*r, a)?;
-            a.antijoin(l, r, lk, rk)
-        }
+        Op::Antijoin { lk, rk, .. } => a.antijoin(built[0].clone(), built[1].clone(), lk, rk),
         Op::Reduce { input, key, aggs } => {
-            let c = sub(*input, a)?;
             let types = p.node_types(*input).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Reduce input types")))?;
-            a.reduce(c, key, aggs, &types)
+            a.reduce(first(), key, aggs, &types)
         }
-        Op::Threshold(input) => {
-            let c = sub(*input, a)?;
-            a.threshold(c)
-        }
+        Op::Threshold(_) => a.threshold(first()),
         Op::TopK { input, key, order, limit } => {
-            let c = sub(*input, a)?;
             let types = p.node_types(*input).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("TopK input types")))?;
-            a.topk(c, key, order, *limit, &types)?
+            a.topk(first(), key, order, *limit, &types)?
         }
         Op::Window { input, partition, order, func } => {
-            let c = sub(*input, a)?;
             let types = p.node_types(*input).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Window input types")))?;
-            a.window(c, partition, order, func, &types)?
+            a.window(first(), partition, order, func, &types)?
         }
         Op::Delay(_) => return Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Delay"))),
-    };
-    let c = a.observe(id, c);
-    nodes[id as usize] = Some(c.clone());
-    Ok(c)
+    })
 }

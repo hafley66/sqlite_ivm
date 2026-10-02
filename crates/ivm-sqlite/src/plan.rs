@@ -560,46 +560,48 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    fn scan(&mut self, name: &String, alias: &Option<String>) -> Result<ScanRef, EngineError> {
+        if !self.sources.iter().any(|t| t == name) {
+            self.sources.push(name.clone());
+        }
+        let Some(columns) = (self.schema)(name) else {
+            return Err(EngineError::new(
+                Stage::Plan,
+                name.clone(),
+                ErrorKind::UnknownRelation(name.clone()),
+            ));
+        };
+        let index = self.scans.len();
+        self.scans.push(ScanSpec {
+            table: name.clone(),
+            columns,
+            needed: Vec::new(),
+            stage: String::new(),
+        });
+        Ok(ScanRef {
+            scan: index,
+            alias: alias.clone().unwrap_or_else(|| name.clone()),
+        })
+    }
+
+    /// A join input must be a source table.
+    fn join_side(&mut self, side: &AstFrom) -> Result<ScanRef, EngineError> {
+        match side {
+            AstFrom::Table { name, alias } => self.scan(name, alias),
+            AstFrom::Join { .. } => Err(EngineError::unsupported(
+                Stage::Plan,
+                self.program,
+                "a join input must be a source table",
+            )),
+        }
+    }
+
     fn from(&mut self, from: &AstFrom) -> Result<Branch, EngineError> {
         match from {
-            AstFrom::Table { name, alias } => {
-                if !self.sources.iter().any(|t| t == name) {
-                    self.sources.push(name.clone());
-                }
-                let Some(columns) = (self.schema)(name) else {
-                    return Err(EngineError::new(
-                        Stage::Plan,
-                        name.clone(),
-                        ErrorKind::UnknownRelation(name.clone()),
-                    ));
-                };
-                let index = self.scans.len();
-                self.scans.push(ScanSpec {
-                    table: name.clone(),
-                    columns,
-                    needed: Vec::new(),
-                    stage: String::new(),
-                });
-                Ok(Branch::Table(ScanRef {
-                    scan: index,
-                    alias: alias.clone().unwrap_or_else(|| name.clone()),
-                }))
-            }
+            AstFrom::Table { name, alias } => Ok(Branch::Table(self.scan(name, alias)?)),
             AstFrom::Join { left, right, on } => {
-                let Branch::Table(l) = self.from(left)? else {
-                    return Err(EngineError::unsupported(
-                        Stage::Plan,
-                        self.program,
-                        "a join input must be a source table",
-                    ));
-                };
-                let Branch::Table(r) = self.from(right)? else {
-                    return Err(EngineError::unsupported(
-                        Stage::Plan,
-                        self.program,
-                        "a join input must be a source table",
-                    ));
-                };
+                let l = self.join_side(left)?;
+                let r = self.join_side(right)?;
                 let mut left_key = Vec::new();
                 let mut right_key = Vec::new();
                 for (a, b) in on {

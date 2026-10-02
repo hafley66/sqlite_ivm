@@ -665,6 +665,7 @@ name = "ivm-engine"
 version = "0.1.0"
 dependencies = [
  "ivm-ir",
+ "smallvec",
 ]
 
 [[package]]
