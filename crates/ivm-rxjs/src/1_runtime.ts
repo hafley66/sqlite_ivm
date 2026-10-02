@@ -4,7 +4,7 @@ type Change = { rel: number; row: Row; w: number };
 type Frontier = { changes: Change[] };
 type Bag = Map<string, { row: Row; w: number }>;
 type Ty = 'Int' | 'Id';
-type Term = { functor: string; args: Row; types: Ty[]; text?: string; split?: [number, number] };
+type Term = { functor: string; args: Row; types: Ty[]; text?: string };
 type Terms = { next: number; byId: Record<number, Term>; byKey: Record<string, number>; byText: Record<string, number>; literals: number[] };
 type Frame = { rels: Map<number, Bag>; nodes: Map<number, Bag>; terms: Terms };
 type State = Frame & { outputs: Map<number, Bag>; changes: Change[] };
@@ -99,21 +99,20 @@ function mint(terms: Terms, functor: string, args: Row, types: Ty[]): number {
   terms.byId[id] = { functor, args, types };
   return id;
 }
+// Interns `value` whole, as `ivm_ir::Interner::mint_text` does; `splitText` decomposes on demand.
 function mintText(terms: Terms, value: string): number {
   const old = terms.byText[value];
   if (old !== undefined) return old;
-  let split: [number, number] | undefined;
-  if (value.length) {
-    const first = [...value][0];
-    const rest = value.slice(first.length);
-    const restId = mintText(terms, rest);
-    split = rest.length ? [mintText(terms, first), restId] : [0, restId];
-  }
   const id = ++terms.next;
-  if (split?.[0] === 0) split[0] = id;
   terms.byText[value] = id;
-  terms.byId[id] = { functor: '', args: [], types: [], text: value, split };
+  terms.byId[id] = { functor: '', args: [], types: [], text: value };
   return id;
+}
+function splitText(terms: Terms, id: number): [number, number] | undefined {
+  const value = terms.byId[id]?.text;
+  if (!value) return undefined;
+  const first = [...value][0];
+  return [mintText(terms, first), mintText(terms, value.slice(first.length))];
 }
 function constructorBag(terms: Terms, functor: string): Bag {
   const out = empty();
