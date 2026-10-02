@@ -346,7 +346,7 @@ fn c15_shaped_ir_installs_one_shared_plan() {
         program.strata.len(),
         program.outputs.len()
     );
-    assert_eq!(creates, 5538); // ivm_term_sortkey included; identical joins share one node
+    assert_eq!(creates, 4499); // identical joins share one node; sort keys built on demand (7f5cf3a)
     assert!(
         objects < 8_000,
         "c15-shaped install created {objects} schema objects"
