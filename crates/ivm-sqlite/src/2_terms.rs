@@ -2,7 +2,7 @@ use ivm_ir::{self, AnyValue, RelKind, Program, RelId, Row, Term, Ty, W};
 use sqlite_ext::rusqlite::{self, Connection, OptionalExtension, functions::{Context, FunctionFlags}, types::Value};
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
 /// Process-wide counts of dictionary work: calls of the dictionary UDFs, and term or key lookups
@@ -142,7 +142,7 @@ pub(crate) fn ctor_keys_sql(name: &str, types: &[Ty]) -> String {
 const TEXT_KEYS_SQL: &str = "INSERT INTO ivm_term_sortkey(id,key) SELECT id, ivm_text_sortkey(text) FROM ivm_text WHERE id>(SELECT coalesce(max(id),0) FROM ivm_term_sortkey)";
 
 fn text_key(text: &str) -> Vec<u8> {
-    ivm_ir::term_key(&Term { functor: String::new(), args: vec![], types: vec![], text: Some(text.to_owned()) }, &mut |_| vec![])
+    ivm_ir::term_key(&Term { functor: Arc::from(""), args: vec![], types: vec![], text: Some(Arc::from(text)) }, &mut |_| vec![])
 }
 
 /// Aux-data code shared by the dictionary functions of one prepared statement. A negative code
@@ -255,7 +255,7 @@ pub(crate) fn register(db: &Connection) -> rusqlite::Result<()> {
             }
         }
         let mut children = children.into_iter();
-        let term = Term { functor, args, types, text: None };
+        let term = Term { functor: Arc::from(functor), args, types, text: None };
         Ok(ivm_ir::term_key(&term, &mut |_| children.next().unwrap_or_default()))
     })?;
     db.create_scalar_function("ivm_text_id", 1, FunctionFlags::SQLITE_UTF8, |ctx| {
@@ -432,7 +432,7 @@ fn lookup(db: &Connection, ctors: &mut Ctors, id: i64) -> rusqlite::Result<Optio
         .query_row([id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional()?;
     let Some((fid, functor, text)) = row else { return Ok(None); };
     if text.is_some() {
-        return Ok(Some(Term { functor: String::new(), args: vec![], types: vec![], text }));
+        return Ok(Some(Term { functor: Arc::from(""), args: vec![], types: vec![], text: text.map(Arc::from) }));
     }
     if !ctors.contains_key(&fid) {
         let types: Vec<Ty> = db.prepare_cached("SELECT ty FROM ivm_functor_col WHERE functor_id=?1 ORDER BY pos")?
@@ -446,7 +446,7 @@ fn lookup(db: &Connection, ctors: &mut Ctors, id: i64) -> rusqlite::Result<Optio
         db.prepare_cached(select)?
             .query_row([id], |r| (0..types.len()).map(|i| r.get(i)).collect::<rusqlite::Result<Row>>())?
     };
-    Ok(Some(Term { functor, args, types: types.clone(), text: None }))
+    Ok(Some(Term { functor: Arc::from(functor), args, types: types.clone(), text: None }))
 }
 
 pub(crate) fn snapshot(db: &Connection, ir: &Program, functor: RelId) -> rusqlite::Result<Vec<(Row, W)>> {
