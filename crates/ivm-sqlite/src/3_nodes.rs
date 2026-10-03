@@ -88,10 +88,35 @@ impl WorkKind {
     }
 }
 
+/// Physical images one view may read: nested views flatten into the reader's join (SQLite joins at
+/// most 64 tables), and the bound keeps each reader's plan small.
+const VIEW_TABLES: usize = 6;
+
+/// Statements that may each regroup one source's delta from the stage; a source read by more
+/// keeps a `_d` table filled once.
+const SOURCE_READS: usize = 16;
+
+/// A node's image computed from its inputs' images: `body` reads `ivm_nX_i` of each input; `pass`
+/// names, per output column, the input node and column it copies.
+struct View {
+    body: String,
+    inputs: Vec<usize>,
+    pass: Vec<Option<(usize, usize)>>,
+    tables: usize,
+}
+
 struct Node {
     c: SqlC,
     body: Option<String>,
     inline: bool,
+    /// Join nodes may turn their delta into a CTE when one statement reads it.
+    join: bool,
+    union: bool,
+    /// A source delta is a CTE over the stage.
+    source: bool,
+    image: Option<View>,
+    /// A join term read `image` in place of a stored `_i`.
+    viewed: bool,
     fill: Vec<String>,
     delete_fill: Vec<String>,
     insert_fill: Vec<String>,
@@ -300,6 +325,7 @@ impl SqlRel {
         for r in p.rels.iter().filter(|r| r.kind == RelKind::Source) {
             let c = rel.push(r.cols.len(), false, |_| None);
             rel.integrate(&c, (0..c.arity).collect());
+            rel.nodes[c.node].source = true;
             rel.sources.push((r.id, c));
         }
         rel.mark = rel.nodes.len();
@@ -345,6 +371,11 @@ impl SqlRel {
             c: c.clone(),
             body,
             inline: false,
+            join: false,
+            union: false,
+            source: false,
+            image: None,
+            viewed: false,
             fill,
             delete_fill: Vec::new(),
             insert_fill: Vec::new(),
@@ -359,11 +390,60 @@ impl SqlRel {
     }
 
     fn integrate(&mut self, c: &SqlC, index: Vec<usize>) {
-        let node = &mut self.nodes[c.node];
+        self.integrate_at(c.node, index);
+    }
+
+    /// Equality probes read the index; column order is immaterial, so keys are kept sorted.
+    fn integrate_at(&mut self, at: usize, mut index: Vec<usize>) {
+        index.sort_unstable();
+        index.dedup();
+        let node = &mut self.nodes[at];
         node.integrated = true;
         if !index.is_empty() && !node.indexes.contains(&index) {
             node.indexes.push(index);
         }
+    }
+
+    /// A join term reads `c`'s image probed on `key`. A view keeps no `_i`; the key moves to the
+    /// stored image under each passthrough column. Node ids fall along input edges, so the walk ends.
+    fn image(&mut self, c: &SqlC, key: Vec<usize>) {
+        let mut pending = vec![(c.node, key)];
+        while let Some((at, key)) = pending.pop() {
+            let node = &self.nodes[at];
+            let parts = node.image.as_ref().filter(|_| !node.integrated).and_then(|view| {
+                let mut parts: Vec<(usize, Vec<usize>)> = view.inputs.iter().map(|input| (*input, Vec::new())).collect();
+                for col in &key {
+                    let (input, x) = view.pass.get(*col).copied().flatten()?;
+                    parts.iter_mut().find(|(node, _)| *node == input)?.1.push(x);
+                }
+                Some(parts)
+            });
+            match parts {
+                Some(parts) => {
+                    self.nodes[at].viewed = true;
+                    pending.extend(parts);
+                }
+                None => self.integrate_at(at, key),
+            }
+        }
+    }
+
+    /// `out`'s image as `body` over `c`'s image; `pass` names the `c` column each output column
+    /// copies, `extra` the stored tables `body` joins besides `c`.
+    fn view(&mut self, out: &SqlC, c: &SqlC, body: String, pass: Vec<Option<usize>>, extra: usize) {
+        let tables = self.view_tables(&[c.node]) + extra;
+        if c.rec || self.err.is_some() || tables > VIEW_TABLES { return; }
+        self.nodes[out.node].image = Some(View {
+            body,
+            inputs: vec![c.node],
+            pass: pass.into_iter().map(|x| x.map(|x| (c.node, x))).collect(),
+            tables,
+        });
+    }
+
+    /// Physical images a view over `inputs` reads, counting nested views.
+    fn view_tables(&self, inputs: &[usize]) -> usize {
+        inputs.iter().map(|input| self.nodes[*input].image.as_ref().map_or(1, |view| view.tables)).sum()
     }
 
     /// Outer input of a recursive node, replaced by an SCC-owned copy so the loop controls its delta.
@@ -393,6 +473,94 @@ impl SqlRel {
         cs.into_iter()
             .map(|c| if c.rec { c } else { self.copy(c) })
             .collect()
+    }
+
+    /// A union read twice is stored when that lets two or more join deltas under it inline.
+    fn inline_joins(&mut self) {
+        let inline: Vec<bool> = self.nodes.iter().map(|node| node.inline).collect();
+        let statement = self.place(&|_| true);
+        let mut gain = vec![0usize; self.nodes.len()];
+        for node in &self.nodes {
+            if node.join && node.inline {
+                if let Some(at) = statement[node.c.node] { gain[at] += 1; }
+            }
+        }
+        for (node, inline) in self.nodes.iter_mut().zip(inline) { node.inline = inline; }
+        self.place(&|at| gain[at] >= 2);
+    }
+
+    /// Join deltas read by at most one settle statement become its CTEs (per-round statements count
+    /// twice); returns per node the physical node whose statement read it last. Readers have larger ids.
+    fn place(&mut self, store_union: &dyn Fn(usize) -> bool) -> Vec<Option<usize>> {
+        let by_name: std::collections::HashMap<String, usize> =
+            self.nodes.iter().map(|node| (node.c.d.clone(), node.c.node)).collect();
+        let named = |sql: &str| {
+            let mut found = delta_names(sql).filter_map(|name| by_name.get(name).copied()).collect::<Vec<_>>();
+            found.sort_unstable();
+            found.dedup();
+            found
+        };
+        let mut reads = vec![0usize; self.nodes.len()];
+        let mut statement = vec![None; self.nodes.len()];
+        for (_, c) in &self.outputs { reads[c.node] += 1; }
+        for at in (0..self.nodes.len()).rev() {
+            let node = &self.nodes[at];
+            if node.integrated { reads[at] += 2; }
+            let counted_by_reader = statement[at].is_some_and(|reader: usize| {
+                let fill = &self.nodes[reader].fill;
+                fill.len() == 1 && fill[0].contains(FILL_ANCHOR)
+            });
+            if node.join && !node.inline && node.owner == Owner::Settle && !node.c.rec && !node.integrated
+                && reads[at] == 1 && counted_by_reader && node.fill.len() == 1 && node.body.is_some() && node.ddl.is_empty()
+                && node.delete_fill.is_empty() && node.insert_fill.is_empty()
+                && node.delete_seed.is_empty() && node.insert_seed.is_empty() {
+                self.nodes[at].inline = true;
+            }
+            let node = &self.nodes[at];
+            if node.union && node.inline && node.owner == Owner::Settle && !node.c.rec && reads[at] > 1 && store_union(at) {
+                self.nodes[at].inline = false;
+            }
+            if self.nodes[at].source {
+                self.nodes[at].inline = reads[at] <= SOURCE_READS;
+            }
+            let node = &self.nodes[at];
+            let (own, reader) = (reads[at], if node.inline { statement[at] } else { Some(at) });
+            let mut add = |sql: &str, weight: usize| for input in named(sql) {
+                if input != at {
+                    reads[input] += weight;
+                    statement[input] = reader;
+                }
+            };
+            if node.inline {
+                add(node.body.as_deref().unwrap_or(""), own);
+            } else {
+                let weight = if matches!(node.owner, Owner::Loop(_)) { 2 } else { 1 };
+                for sql in node.fill.iter().chain(&node.delete_fill).chain(&node.insert_fill)
+                    .chain(&node.delete_seed).chain(&node.insert_seed) {
+                    add(sql, weight);
+                }
+            }
+        }
+        statement
+    }
+
+    /// Each `ivm_nK_i` of a viewed node without a stored image becomes its view, inputs expanded
+    /// first (ascending ids), in every statement and CTE body.
+    fn substitute_views(&mut self) {
+        let mut views: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        for node in &self.nodes {
+            if let Some(view) = node.image.as_ref().filter(|_| node.viewed && !node.integrated) {
+                let body = with_views(&view.body, &views);
+                views.insert(node.c.i.clone(), format!("({body})"));
+            }
+        }
+        if views.is_empty() { return; }
+        for node in &mut self.nodes {
+            for sql in node.body.iter_mut().chain(&mut node.fill).chain(&mut node.delete_fill)
+                .chain(&mut node.insert_fill).chain(&mut node.delete_seed).chain(&mut node.insert_seed) {
+                *sql = with_views(sql, &views);
+            }
+        }
     }
 
     /// Non-monotone ops over a LetRec variable are outside the round loop's DRed contract.
@@ -473,13 +641,15 @@ impl Rel for SqlRel {
         }
         let ctor = crate::catalog::quote(crate::terms::ctor_table(&name));
         let old = c.arity;
-        let next = self.push(old + 1 + types.len(), c.rec, |_| Some(format!(
-            "SELECT {}, {}, d.w FROM {} d JOIN {ctor} k ON k.c0 = d.c{col}",
+        let body = |input: &str| format!(
+            "SELECT {}, {}, d.w FROM {input} d JOIN {ctor} k ON k.c0 = d.c{col}",
             (0..old).map(|i| format!("d.c{i} AS c{i}")).collect::<Vec<_>>().join(","),
             (0..=types.len()).map(|i| format!("k.c{i} AS c{}", old + i)).collect::<Vec<_>>().join(","),
-            c.d,
-        )));
+        );
+        let next = self.push(old + 1 + types.len(), c.rec, |_| Some(body(&c.d)));
         self.nodes[next.node].inline = true;
+        let pass = (0..old).map(Some).chain([Some(col as usize)]).chain((0..types.len()).map(|_| None)).collect();
+        self.view(&next, &c, body(&c.i), pass, 1);
         Ok(next)
     }
 
@@ -531,12 +701,13 @@ impl Rel for SqlRel {
         }
         let call = format!("ivm_str_op({})", values.join(","));
         let carried = (0..old).map(|i| format!("d.c{i} AS c{i}")).collect::<Vec<_>>().join(",");
+        let texts = op.args().iter().filter(|kind| matches!(kind, StrKind::Text)).count();
         let next = match op.out() {
             None => {
-                let next = self.push(old, c.rec, |_| Some(format!(
-                    "SELECT {carried}, d.w FROM {} d{joins} WHERE {call} IS NOT NULL", c.d,
-                )));
+                let body = |input: &str| format!("SELECT {carried}, d.w FROM {input} d{joins} WHERE {call} IS NOT NULL");
+                let next = self.push(old, c.rec, |_| Some(body(&c.d)));
                 self.nodes[next.node].inline = true;
+                self.view(&next, &c, body(&c.i), (0..old).map(Some).collect(), texts);
                 next
             }
             Some(StrKind::Text) => {
@@ -548,10 +719,10 @@ impl Rel for SqlRel {
                 next
             }
             Some(StrKind::Int) => {
-                let next = self.push(old + 1, c.rec, |_| Some(format!(
-                    "SELECT {carried}, {call} AS c{old}, d.w FROM {} d{joins} WHERE {call} IS NOT NULL", c.d,
-                )));
+                let body = |input: &str| format!("SELECT {carried}, {call} AS c{old}, d.w FROM {input} d{joins} WHERE {call} IS NOT NULL");
+                let next = self.push(old + 1, c.rec, |_| Some(body(&c.d)));
                 self.nodes[next.node].inline = true;
+                self.view(&next, &c, body(&c.i), (0..old).map(Some).chain([None]).collect(), texts);
                 next
             }
         };
@@ -592,21 +763,32 @@ impl Rel for SqlRel {
             self.fail(e);
             (Vec::new(), vec!["0".into()])
         });
+        let select = cols
+            .iter()
+            .enumerate()
+            .map(|(i, s)| format!("{s} AS c{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let wheres = if wheres.is_empty() {
+            "1".into()
+        } else {
+            wheres.join(" AND ")
+        };
         let out = self.push(cols.len(), c.rec, |_| {
-            let select = cols
-                .iter()
-                .enumerate()
-                .map(|(i, s)| format!("{s} AS c{i}"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let wheres = if wheres.is_empty() {
-                "1".into()
-            } else {
-                wheres.join(" AND ")
-            };
             Some(format!("SELECT {select}, w FROM {} WHERE {wheres}", c.d))
         });
         self.nodes[out.node].inline = true;
+        let all: Vec<ColId> = (0..(c.arity + map.len()) as ColId).collect();
+        let proj = if project.is_empty() { &all[..] } else { project };
+        let pass = proj.iter().map(|p| {
+            let p = *p as usize;
+            if p < c.arity { return Some(p); }
+            match map.get(p - c.arity) {
+                Some(Expr::Col(x)) if (*x as usize) < c.arity => Some(*x as usize),
+                _ => None,
+            }
+        }).collect();
+        self.view(&out, &c, format!("SELECT {select}, w FROM {} WHERE {wheres}", c.i), pass, 0);
         out
     }
 
@@ -628,6 +810,7 @@ impl Rel for SqlRel {
             )
         });
         self.nodes[out.node].inline = true;
+        self.nodes[out.node].union = true;
         out
     }
 
@@ -669,8 +852,8 @@ impl Rel for SqlRel {
         if let Some(out) = self.joins.get(&shared) {
             return Ok(out.clone());
         }
-        self.integrate(&a, lk.clone());
-        self.integrate(&b, rk.clone());
+        self.image(&a, lk.clone());
+        self.image(&b, rk.clone());
         let term = |l: &str, r: &str, l_first: bool| {
             let (la, ra) = (
                 if l.ends_with("_i") { "l_i" } else { "l_d" },
@@ -701,6 +884,23 @@ impl Rel for SqlRel {
         ];
         let body = terms.join(" UNION ALL ");
         let out = self.push(a.arity + b.arity, a.rec || b.rec, |_| Some(body));
+        self.nodes[out.node].join = true;
+        let tables = self.view_tables(&[a.node, b.node]);
+        if !a.rec && !b.rec && tables <= VIEW_TABLES {
+            let (la, ra) = ("vl_i", "vr_i");
+            self.nodes[out.node].image = Some(View {
+                body: format!(
+                    "SELECT {}, {}, {la}.w * {ra}.w AS w FROM {} {la} JOIN {} {ra} ON {}",
+                    (0..a.arity).map(|i| format!("{la}.c{i} AS c{i}")).collect::<Vec<_>>().join(", "),
+                    (0..b.arity).map(|i| format!("{ra}.c{i} AS c{}", a.arity + i)).collect::<Vec<_>>().join(", "),
+                    a.i, b.i,
+                    if predicates.is_empty() { "1".to_string() } else { predicates.join(" AND ").replace("{la}", la).replace("{ra}", ra) },
+                ),
+                inputs: vec![a.node, b.node],
+                pass: (0..a.arity).map(|i| Some((a.node, i))).chain((0..b.arity).map(|i| Some((b.node, i)))).collect(),
+                tables,
+            });
+        }
         if self.traced {
             let cols = list("", 0..out.arity);
             let terms = terms
@@ -728,7 +928,7 @@ impl Rel for SqlRel {
                 self.mfp(r, &[], &[], rk, &[])
             };
             let keys = self.threshold(keys);
-            self.integrate(&keys, (0..keys.arity).collect());
+            self.image(&keys, (0..keys.arity).collect());
             self.integrate(&l, lk.iter().map(|x| *x as usize).collect());
             let out = self.push(l.arity, true, |_| None);
             let all = list("l_d", 0..l.arity);
@@ -962,6 +1162,13 @@ impl Rel for SqlRel {
             ))
         });
         self.nodes[out.node].inline = true;
+        // The input image is stored and consolidated: one row per value.
+        self.nodes[out.node].image = Some(View {
+            body: format!("SELECT {}, 1 AS w FROM {} WHERE w > 0", list("", 0..c.arity), c.i),
+            inputs: vec![c.node],
+            pass: n.iter().map(|x| Some((c.node, *x))).collect(),
+            tables: 1,
+        });
         out
     }
 
@@ -1182,13 +1389,14 @@ struct SccSql {
 pub(crate) struct NodesPlan {
     pub ddl: Vec<String>,
     pub objects: Vec<(String, String)>,
-    source_fills: Vec<String>,
-    source_writes: Vec<Option<usize>>,
-    /// Source relation each source fill reads from the stage.
+    /// Each source's delta CTE name; the stage holds its rows.
+    source_deltas: Vec<String>,
+    source_ids: Vec<Option<usize>>,
+    /// Source relation of each `source_deltas` entry.
     source_tables: Vec<String>,
     /// Distinct relations in the stage.
     staged_sql: String,
-    /// Physical (non-inline) node count: the index space of `active`.
+    /// Physical nodes and sources: the index space of `active`.
     node_count: usize,
     steps: Vec<Step>,
     step_reads: Vec<Vec<usize>>,
@@ -1200,17 +1408,54 @@ pub(crate) struct NodesPlan {
     integrate_reads: Vec<Vec<usize>>,
     clears: Vec<String>,
     clear_targets: Vec<Option<usize>>,
-    work_ids: Vec<Option<usize>>,
+    work_reads: Vec<Vec<usize>>,
     pub output_delta: String,
     pub output_snapshot: String,
     /// `output_snapshot` restricted to rows whose first column is `?1`.
     pub member_snapshot: String,
     pub output_arity: usize,
     work: Vec<(Owner, String, WorkKind, usize)>,
-    /// `count_work`'s statement per `work` entry, built once after `prefix`.
+    /// Per `work` entry, the slot of an inline join in `work_rows`.
+    work_slots: Vec<Option<u64>>,
+    /// Rows of each inline join delta this settle pass, written by `work_function` as the one
+    /// statement that reads the delta materializes it.
+    work_rows: std::sync::Arc<std::sync::Mutex<Vec<u64>>>,
+    work_function: String,
+    /// `count_work`'s statement per `work` entry without a slot, built once after `prefix`.
     work_sql: Vec<String>,
     filter_measured: bool,
     mint_measured: bool,
+}
+
+/// Every whole `ivm_n...` identifier in `sql`, with its byte offset.
+fn node_names(sql: &str) -> impl Iterator<Item = (usize, &str)> {
+    let bytes = sql.as_bytes();
+    sql.match_indices("ivm_n").filter_map(move |(at, _)| {
+        if at > 0 && (bytes[at - 1].is_ascii_alphanumeric() || bytes[at - 1] == b'_') {
+            return None;
+        }
+        let end = bytes[at..].iter().position(|byte| !byte.is_ascii_alphanumeric() && *byte != b'_')
+            .map(|len| at + len).unwrap_or(bytes.len());
+        Some((at, &sql[at..end]))
+    })
+}
+
+fn delta_names(sql: &str) -> impl Iterator<Item = &str> {
+    node_names(sql).map(|(_, name)| name).filter(|name| name.ends_with("_d"))
+}
+
+fn with_views(sql: &str, views: &std::collections::HashMap<String, String>) -> String {
+    let mut out = String::with_capacity(sql.len());
+    let mut last = 0;
+    for (at, name) in node_names(sql) {
+        if let Some(view) = views.get(name) {
+            out.push_str(&sql[last..at]);
+            out.push_str(view);
+            last = at + name.len();
+        }
+    }
+    out.push_str(&sql[last..]);
+    out
 }
 
 fn delta_refs(sql: &str, by_name: &std::collections::HashMap<&str, usize>) -> Vec<usize> {
@@ -1225,8 +1470,17 @@ fn delta_refs(sql: &str, by_name: &std::collections::HashMap<&str, usize>) -> Ve
     }).collect()
 }
 
+/// `program`'s SQL function `(slot, rows)` that records an inline join's delta row count.
+fn work_function(program: &str) -> String {
+    format!("frontier_{program}_work")
+}
+
+/// The fill anchor of the one statement that reads an inline join (`push`'s fill shape).
+const FILL_ANCHOR: &str = ", SUM(w) FROM (";
+
 fn with_inline_deltas(sql: &str, definitions: &[(String, String)],
-    by_name: &std::collections::HashMap<&str, usize>, deps: &[Vec<usize>]) -> String {
+    by_name: &std::collections::HashMap<&str, usize>, deps: &[Vec<usize>],
+    counted: &std::collections::HashMap<String, String>) -> String {
     let mut needed = vec![false; definitions.len()];
     let mut pending = delta_refs(sql, by_name);
     while let Some(i) = pending.pop() {
@@ -1235,10 +1489,19 @@ fn with_inline_deltas(sql: &str, definitions: &[(String, String)],
             pending.extend(deps[i].iter().copied());
         }
     }
+    // A one-row aggregate leads the fill's FROM: it runs once per execution, before the body, so
+    // each counted CTE is materialized and counted even when the body reads none of its rows.
+    let counts = definitions.iter().zip(&needed).filter(|(_, needed)| **needed)
+        .filter_map(|((name, _), _)| counted.get(name).map(|call| format!("(SELECT {call} FROM {name}) CROSS JOIN ")))
+        .collect::<String>();
+    let sql = match sql.find(FILL_ANCHOR) {
+        Some(at) if !counts.is_empty() => format!("{}, SUM(w) FROM {counts}({}", &sql[..at], &sql[at + FILL_ANCHOR.len()..]),
+        _ => sql.to_owned(),
+    };
     let ctes = definitions.iter().zip(needed).filter_map(|((name, body), needed)| {
         needed.then(|| format!("{name} AS MATERIALIZED ({body})"))
     }).collect::<Vec<_>>().join(", ");
-    if ctes.is_empty() { return sql.to_owned(); }
+    if ctes.is_empty() { return sql; }
     if let Some(rest) = sql.strip_prefix("WITH RECURSIVE ") {
         format!("WITH RECURSIVE {ctes}, {rest}")
     } else if let Some(rest) = sql.strip_prefix("WITH ") {
@@ -1251,7 +1514,7 @@ fn with_inline_deltas(sql: &str, definitions: &[(String, String)],
 impl NodesPlan {
     /// Statements issued during settle, excluding snapshot reads.
     pub fn statements(&self) -> Vec<&str> {
-        let mut all: Vec<&str> = self.source_fills.iter().map(String::as_str).collect();
+        let mut all: Vec<&str> = Vec::new();
         all.extend(self.steps.iter().filter_map(|step| match step {
             Step::Fill(sql) => Some(sql.as_str()),
             Step::Loop(_) => None,
@@ -1278,6 +1541,22 @@ impl NodesPlan {
         if let Some(error) = rel.err {
             return Err(error);
         }
+        let stage = crate::catalog::quote(crate::catalog::stage(name));
+        for (id, c) in &rel.sources {
+            let source = program.rel(*id).ok_or_else(|| {
+                EngineError::new(Stage::Install, Some(*id), ErrorKind::UnknownRel(*id))
+            })?;
+            let node = &mut rel.nodes[c.node];
+            node.body = Some(format!("SELECT {}, __sign AS w FROM {stage} WHERE __table='{}'",
+                (0..c.arity).map(|i| format!("v{i} AS c{i}")).collect::<Vec<_>>().join(", "),
+                source.name.replace('\'', "''")));
+            node.inline = true;
+            let cols = list("", 0..c.arity);
+            node.fill = vec![format!("INSERT INTO {} ({cols}, w) SELECT {cols}, SUM(w) FROM ({}) WHERE true GROUP BY {cols} HAVING SUM(w) <> 0",
+                c.d, node.body.as_deref().unwrap_or(""))];
+        }
+        rel.inline_joins();
+        rel.substitute_views();
         let filter_measured = !rel.work_nodes.iter().any(|(id, node)| {
             matches!(program.nodes.get(*id as usize), Some(Op::Mfp { .. }))
                 && rel.nodes.get(*node).is_some_and(|built| built.inline)
@@ -1286,13 +1565,16 @@ impl NodesPlan {
             matches!(program.nodes.get(*id as usize), Some(Op::Mint { .. } | Op::StrCons { .. } | Op::Str { .. }))
                 && rel.nodes.get(*node).is_some_and(|built| built.inline)
         });
-        let work = rel.work_nodes.iter().filter_map(|(id, node)| {
+        // An inline join's delta rows are counted as its one reading statement materializes them.
+        let slots: std::collections::HashMap<usize, u64> = rel.nodes.iter().filter(|node| node.inline && node.join)
+            .enumerate().map(|(slot, node)| (node.c.node, slot as u64)).collect();
+        let (work, work_slots): (Vec<_>, Vec<_>) = rel.work_nodes.iter().filter_map(|(id, node)| {
             let kind = WorkKind::of(program.nodes.get(*id as usize)?)?;
             let built = rel.nodes.get(*node)?;
-            if built.inline || (kind == WorkKind::Filter && !filter_measured)
+            if (built.inline && !built.join) || (kind == WorkKind::Filter && !filter_measured)
                 || (kind == WorkKind::Mint && !mint_measured) { return None; }
-            Some((built.owner, built.c.d.clone(), kind, built.c.arity))
-        }).collect();
+            Some(((built.owner, built.c.d.clone(), kind, built.c.arity), slots.get(node).copied()))
+        }).unzip();
         let inline_deltas = rel.nodes.iter().filter(|node| node.inline).map(|node| {
             let cols = list("", 0..node.c.arity);
             let body = node.body.as_ref().expect("inline node has a body");
@@ -1302,10 +1584,14 @@ impl NodesPlan {
         }).collect::<Vec<_>>();
         let mut ddl = Vec::new();
         let mut objects = Vec::new();
-        let mut source_fills = Vec::new();
+        let mut source_deltas = Vec::new();
         let mut source_tables = Vec::new();
         let (mut steps, mut integrates, mut clears) = (Vec::new(), Vec::new(), Vec::new());
         let mut sccs: Vec<SccSql> = rel.sccs.iter().map(|_| SccSql::default()).collect();
+        let mut hold_width = vec![0usize; rel.sccs.len()];
+        for node in &rel.nodes {
+            if let Owner::Copy(s) = node.owner { hold_width[s] = hold_width[s].max(node.c.arity); }
+        }
         for node in &rel.nodes {
             let SqlC {
                 node: k,
@@ -1345,20 +1631,21 @@ impl NodesPlan {
                 _ => {}
             }
             if let Owner::Copy(s) = node.owner {
-                let hold = format!("ivm_n{k}_hold");
-                ddl.push(format!(
-                    "CREATE TABLE {hold} ({}, w INTEGER NOT NULL)",
-                    decl(*arity)
-                ));
-                objects.push(("TABLE".into(), hold.clone()));
+                // One hold table per SCC: `k` names the copy, columns past its arity hold 0.
+                let hold = format!("ivm_n{}_hold", rel.sccs[s].at);
+                if sccs[s].stash.is_empty() {
+                    ddl.push(format!(
+                        "CREATE TABLE {hold} (k INTEGER NOT NULL, {}, w INTEGER NOT NULL)",
+                        decl(hold_width[s])
+                    ));
+                    objects.push(("TABLE".into(), hold.clone()));
+                }
+                let pad = (*arity..hold_width[s]).map(|_| ", 0").collect::<String>();
                 sccs[s].stash.extend([
-                    format!("INSERT INTO {hold} SELECT * FROM {d} WHERE w > 0"),
+                    format!("INSERT INTO {hold} SELECT {k}, {cols}{pad}, w FROM {d} WHERE w > 0"),
                     format!("DELETE FROM {d} WHERE w > 0"),
                 ]);
-                sccs[s].restore.extend([
-                    format!("INSERT INTO {d} SELECT * FROM {hold}"),
-                    format!("DELETE FROM {hold}"),
-                ]);
+                sccs[s].restore.push(format!("INSERT INTO {d} SELECT {cols}, w FROM {hold} WHERE k = {k}"));
             }
             let (ints, clrs) = match node.owner {
                 Owner::Settle => (&mut integrates, &mut clears),
@@ -1374,7 +1661,10 @@ impl NodesPlan {
                     decl(*arity)
                 ));
                 objects.push(("TABLE".into(), i.clone()));
-                for (j, index) in node.indexes.iter().enumerate() {
+                let pk: Vec<usize> = (0..*arity).collect();
+                let served = |index: &Vec<usize>| pk.starts_with(index)
+                    || node.indexes.iter().any(|other| other.len() > index.len() && other.starts_with(index));
+                for (j, index) in node.indexes.iter().enumerate().filter(|(_, index)| !served(index)) {
                     let ix = format!("ivm_n{k}_x{j}");
                     ddl.push(format!(
                         "CREATE INDEX {ix} ON {i} ({})",
@@ -1390,21 +1680,29 @@ impl NodesPlan {
             }
         }
         for (plan, scc) in rel.sccs.iter().zip(&mut sccs) {
-            for (v, b, r) in &plan.vars {
-                let n = v.arity;
-                let (cols, all) = (list("", 0..n), (0..n).collect::<Vec<_>>());
-                let (nx, del, acc) = (
-                    format!("ivm_n{}_nx", v.node),
-                    format!("ivm_n{}_del", v.node),
-                    format!("ivm_n{}_acc", r.node),
-                );
+            if !scc.restore.is_empty() {
+                scc.restore.push(format!("DELETE FROM ivm_n{}_hold", plan.at));
+            }
+            // One `nx`, `del` and `acc` per SCC: `k` names the variable, columns past its arity hold 0.
+            let width = plan.vars.iter().map(|(v, _, _)| v.arity).max().unwrap_or(0);
+            let (nx, del, acc) = (
+                format!("ivm_n{}_nx", plan.at),
+                format!("ivm_n{}_del", plan.at),
+                format!("ivm_n{}_acc", plan.at),
+            );
+            if !plan.vars.is_empty() {
                 for t in [&nx, &del, &acc] {
                     ddl.push(format!(
-                        "CREATE TABLE {t} ({}, w INTEGER NOT NULL)",
-                        decl(n)
+                        "CREATE TABLE {t} (k INTEGER NOT NULL, {}, w INTEGER NOT NULL)",
+                        decl(width)
                     ));
                     objects.push(("TABLE".into(), t.clone()));
                 }
+            }
+            for (k, (v, b, r)) in plan.vars.iter().enumerate() {
+                let n = v.arity;
+                let (cols, all) = (list("", 0..n), (0..n).collect::<Vec<_>>());
+                let pad = (n..width).map(|_| ", 0").collect::<String>();
                 let live = |alias: &str, table: &str| {
                     format!(
                         "EXISTS (SELECT 1 FROM {table} x_i WHERE {} AND x_i.w > 0)",
@@ -1412,17 +1710,17 @@ impl NodesPlan {
                     )
                 };
                 scc.vars.push(VarSql {
-                    over_delete: format!("INSERT INTO {nx} SELECT {cols}, -1 FROM (SELECT DISTINCT {cols} FROM {bd} WHERE w < 0) t WHERE {}", live("t", &v.i), bd=b.d),
-                    rederive: format!("INSERT INTO {nx} SELECT {cols}, 1 FROM {del} t WHERE {}", live("t", &b.i)),
-                    insert: format!("INSERT INTO {nx} SELECT {cols}, 1 FROM (SELECT DISTINCT {cols} FROM {bd} WHERE w > 0) t WHERE {} AND NOT {}", live("t", &b.i), live("t", &v.i), bd=b.d),
-                    to_delta: format!("INSERT INTO {} SELECT * FROM {nx}", v.d),
-                    to_acc: format!("INSERT INTO {acc} SELECT * FROM {nx}"),
-                    to_del: format!("INSERT INTO {del} SELECT * FROM {nx}"),
-                    clear_nx: format!("DELETE FROM {nx}"),
-                    clear_del: format!("DELETE FROM {del}"),
+                    over_delete: format!("INSERT INTO {nx} SELECT {k}, {cols}{pad}, -1 FROM (SELECT DISTINCT {cols} FROM {bd} WHERE w < 0) t WHERE {}", live("t", &v.i), bd=b.d),
+                    rederive: format!("INSERT INTO {nx} SELECT {k}, {cols}{pad}, 1 FROM {del} t WHERE t.k = {k} AND {}", live("t", &b.i)),
+                    insert: format!("INSERT INTO {nx} SELECT {k}, {cols}{pad}, 1 FROM (SELECT DISTINCT {cols} FROM {bd} WHERE w > 0) t WHERE {} AND NOT {}", live("t", &b.i), live("t", &v.i), bd=b.d),
+                    to_delta: format!("INSERT INTO {} SELECT {cols}, w FROM {nx} WHERE k = {k}", v.d),
+                    to_acc: format!("INSERT INTO {acc} SELECT * FROM {nx} WHERE k = {k}"),
+                    to_del: format!("INSERT INTO {del} SELECT * FROM {nx} WHERE k = {k}"),
+                    clear_nx: format!("DELETE FROM {nx} WHERE k = {k}"),
+                    clear_del: format!("DELETE FROM {del} WHERE k = {k}"),
                     any: format!("SELECT EXISTS (SELECT 1 FROM {})", v.d),
-                    finish: format!("INSERT INTO {} SELECT {cols}, SUM(w) FROM {acc} GROUP BY {cols} HAVING SUM(w) <> 0", r.d),
-                    clear_acc: format!("DELETE FROM {acc}"),
+                    finish: format!("INSERT INTO {} SELECT {cols}, SUM(w) FROM {acc} WHERE k = {k} GROUP BY {cols} HAVING SUM(w) <> 0", r.d),
+                    clear_acc: format!("DELETE FROM {acc} WHERE k = {k}"),
                 });
             }
         }
@@ -1430,13 +1728,7 @@ impl NodesPlan {
             let source = program.rel(*id).ok_or_else(|| {
                 EngineError::new(Stage::Install, Some(*id), ErrorKind::UnknownRel(*id))
             })?;
-            let cols = list("", 0..c.arity);
-            let vals = (0..c.arity)
-                .map(|i| format!("v{i}"))
-                .collect::<Vec<_>>()
-                .join(",");
-            source_fills.push(format!("INSERT INTO {} ({cols},w) SELECT {vals},SUM(__sign) FROM {} WHERE __table='{}' GROUP BY {vals} HAVING SUM(__sign)<>0",
-                c.d, crate::catalog::quote(crate::catalog::stage(name)), source.name.replace('\'', "''")));
+            source_deltas.push(c.d.clone());
             source_tables.push(source.name.clone());
         }
         // A pure delta can read an input's pre-frontier image. Integrate consumers
@@ -1456,8 +1748,8 @@ impl NodesPlan {
         let mut plan = Self {
             ddl,
             objects,
-            source_fills,
-            source_writes: Vec::new(),
+            source_deltas,
+            source_ids: Vec::new(),
             source_tables,
             staged_sql: format!("SELECT DISTINCT __table FROM {}", crate::catalog::quote(crate::catalog::stage(name))),
             node_count: 0,
@@ -1471,7 +1763,7 @@ impl NodesPlan {
             integrate_reads: Vec::new(),
             clears,
             clear_targets: Vec::new(),
-            work_ids: Vec::new(),
+            work_reads: Vec::new(),
             output_delta: if set_output { format!(
                 "SELECT {out_cols}, CASE WHEN COALESCE(i_i.w,0)>0 THEN -1 ELSE 1 END \
                  FROM (SELECT {cols},SUM(w) AS dw FROM {delta} GROUP BY {cols} HAVING SUM(w)<>0) d \
@@ -1495,22 +1787,27 @@ impl NodesPlan {
             ),
             output_arity: output.arity,
             work,
+            work_slots,
+            work_rows: std::sync::Arc::new(std::sync::Mutex::new(vec![0; slots.len()])),
+            work_function: work_function(name),
             work_sql: Vec::new(),
             filter_measured,
             mint_measured,
         };
-        plan.inline_statements(&inline_deltas);
-        plan.prefix(name);
-        plan.work_sql = plan.work.iter().map(|(_, table, _, arity)| {
+        plan.work_sql = plan.work.iter().zip(&plan.work_slots).map(|((_, table, _, arity), slot)| {
             let cols = list("", 0..*arity);
+            if slot.is_some() { return String::new(); }
             format!("SELECT count(*) FROM (SELECT {cols} FROM {table} GROUP BY {cols} HAVING sum(w)<>0)")
         }).collect();
+        let counted = slots.iter().map(|(node, slot)| (rel.nodes[*node].c.d.clone(), format!("{}({slot}, count(*))", work_function(name)))).collect();
+        plan.inline_statements(&inline_deltas, &counted);
+        plan.prefix(name);
         plan.index_delta_dependencies(&rel.nodes, name);
         Ok(plan)
     }
 
     fn index_delta_dependencies(&mut self, nodes: &[Node], program: &str) {
-        let names = nodes.iter().filter(|node| !node.inline)
+        let names = nodes.iter().filter(|node| !node.inline || node.source)
             .map(|node| node.c.d.replace("ivm_n", &format!("frontier_{program}_n")))
             .collect::<Vec<_>>();
         let by_name = names.iter().enumerate().map(|(i, name)| (name.as_str(), i))
@@ -1534,12 +1831,12 @@ impl NodesPlan {
             found.dedup();
             found
         };
-        self.source_writes = self.source_fills.iter().map(|sql| write(sql)).collect();
+        self.source_ids = self.source_deltas.iter().map(|name| by_name.get(name.as_str()).copied()).collect();
         self.integrate_reads = self.integrates.iter().map(|sql| reads(sql)).collect();
         self.clear_targets = self.clears.iter().map(|sql| sql.strip_prefix("DELETE FROM ")
             .and_then(|tail| tail.split_whitespace().next())
             .and_then(|name| by_name.get(name).copied())).collect();
-        self.work_ids = self.work.iter().map(|(_, table, _, _)| by_name.get(table.as_str()).copied()).collect();
+        self.work_reads = self.work_sql.iter().map(|sql| reads(sql)).collect();
         for step in &self.steps {
             match step {
                 Step::Fill(sql) => {
@@ -1582,12 +1879,12 @@ impl NodesPlan {
         }
     }
 
-    fn inline_statements(&mut self, inline_deltas: &[(String, String)]) {
+    fn inline_statements(&mut self, inline_deltas: &[(String, String)], counted: &std::collections::HashMap<String, String>) {
         let by_name = inline_deltas.iter().enumerate().map(|(i, (name, _))| (name.as_str(), i))
             .collect::<std::collections::HashMap<_, _>>();
         let deps = inline_deltas.iter().map(|(_, body)| delta_refs(body, &by_name)).collect::<Vec<_>>();
-        let expand = |sql: &mut String| *sql = with_inline_deltas(sql, inline_deltas, &by_name, &deps);
-        self.source_fills.iter_mut().for_each(&expand);
+        let expand = |sql: &mut String| *sql = with_inline_deltas(sql, inline_deltas, &by_name, &deps, counted);
+
         for step in &mut self.steps {
             if let Step::Fill(sql) = step { expand(sql); }
         }
@@ -1604,7 +1901,7 @@ impl NodesPlan {
                 }
             }
         }
-        self.integrates.iter_mut().chain(&mut self.clears).for_each(&expand);
+        self.integrates.iter_mut().chain(&mut self.clears).chain(&mut self.work_sql).for_each(&expand);
         expand(&mut self.output_delta);
     }
 
@@ -1615,7 +1912,7 @@ impl NodesPlan {
         for (_, name) in &mut self.objects {
             fix(name);
         }
-        self.source_fills.iter_mut().for_each(&fix);
+        self.source_deltas.iter_mut().for_each(&fix);
         for step in &mut self.steps {
             if let Step::Fill(sql) = step {
                 fix(sql);
@@ -1654,6 +1951,7 @@ impl NodesPlan {
         fix(&mut self.output_snapshot);
         fix(&mut self.member_snapshot);
         for (_, table, _, _) in &mut self.work { fix(table); }
+        self.work_sql.iter_mut().for_each(&fix);
     }
 
     /// One settle statement under its own `stmt` span (object: the table it writes).
@@ -1688,7 +1986,12 @@ impl NodesPlan {
                 (Owner::Loop(a), Owner::Loop(b)) => a == b,
                 _ => false,
             };
-            if matches && active.is_none_or(|active| self.work_ids[i].is_none_or(|id| active.get(id) == Some(&true))) {
+            if let (true, Some(slot)) = (matches, self.work_slots[i]) {
+                let rows = self.work_rows.lock().map_err(|_| rusqlite::Error::InvalidQuery)?[slot as usize];
+                kind.add(counters, rows);
+                continue;
+            }
+            if matches && active.is_none_or(|active| self.work_reads[i].is_empty() || self.work_reads[i].iter().any(|id| active.get(*id) == Some(&true))) {
                 let sql = &self.work_sql[i];
                 let rows: i64 = db.prepare_cached(sql)?.query_row([], |r| r.get(0))?;
                 *counters.statements.as_mut().unwrap() += 1;
@@ -1786,18 +2089,29 @@ impl NodesPlan {
         Ok(results)
     }
 
+    /// Registers `work_function` on the connection that settles this plan.
+    pub(crate) fn register_work(&self, db: &Connection) -> rusqlite::Result<()> {
+        let rows = self.work_rows.clone();
+        db.create_scalar_function(self.work_function.as_str(), 2, rusqlite::functions::FunctionFlags::SQLITE_UTF8, move |ctx| {
+            let (slot, count) = (ctx.get::<i64>(0)? as usize, ctx.get::<i64>(1)? as u64);
+            let mut rows = rows.lock().map_err(|_| rusqlite::Error::InvalidQuery)?;
+            *rows.get_mut(slot).ok_or(rusqlite::Error::InvalidQuery)? += count;
+            Ok(true)
+        })
+    }
+
     pub fn run(&self, db: &Connection, counters: &mut Counters) -> rusqlite::Result<Vec<(Row, W)>> {
         if !self.filter_measured { counters.delta_rows.filter = None; }
         if !self.mint_measured { counters.delta_rows.mint = None; }
+        self.work_rows.lock().map_err(|_| rusqlite::Error::InvalidQuery)?.iter_mut().for_each(|rows| *rows = 0);
         let mut active = vec![false; self.node_count];
-        let staged = if self.source_fills.is_empty() { Vec::new() } else {
+        let staged = if self.source_tables.is_empty() { Vec::new() } else {
             *counters.statements.as_mut().unwrap() += 1;
             db.prepare_cached(&self.staged_sql)?.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?
         };
-        for ((sql, written), table) in self.source_fills.iter().zip(&self.source_writes).zip(&self.source_tables) {
-            if !staged.contains(table) { continue; }
-            let rows = Self::exec(db, sql, counters)?;
-            if let Some(id) = written { active[*id] |= rows > 0; }
+        // A staged source is read as changed; rows that net to zero leave its CTE empty.
+        for (id, table) in self.source_ids.iter().zip(&self.source_tables) {
+            if let Some(id) = id { active[*id] |= staged.contains(table); }
         }
         let mut minted = false;
         for (at, step) in self.steps.iter().enumerate() {

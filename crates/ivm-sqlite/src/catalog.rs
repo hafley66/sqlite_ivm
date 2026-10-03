@@ -595,7 +595,12 @@ fn compile_ir(
             .ok()
             .filter(|cols| !cols.is_empty())
     };
-    plan::compile_ir(name, program, output, &columns, typed_ir)
+    let compiled = plan::compile_ir(name, program, output, &columns, typed_ir)?;
+    if let Root::Nodes(nodes) = &compiled.root {
+        nodes.register_work(conn)
+            .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
+    }
+    Ok(compiled)
 }
 
 fn catalog_row(
@@ -799,6 +804,12 @@ fn push_program_ddl(inst: &Installed, sql: &mut String) {
         v = stage_cols.join(","),
     ));
     if let Root::Nodes(nodes) = &plan.root {
+        // Each source delta is a CTE over its own stage rows.
+        sql.push_str(&format!(
+            "CREATE INDEX IF NOT EXISTS {} ON {}(__table);",
+            quote(format!("{}_table", stage(p))),
+            quote(stage(p)),
+        ));
         for ddl in &nodes.ddl {
             sql.push_str(ddl);
             sql.push(';');

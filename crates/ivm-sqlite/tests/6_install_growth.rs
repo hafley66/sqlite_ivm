@@ -154,7 +154,7 @@ fn pure_delta_chain_has_fixed_create_count() {
     };
     let (mut engine, creates) = counted_install(&program);
     eprintln!("pure chain creates={creates}");
-    assert_eq!(creates, 21); // includes the dictionary tables
+    assert_eq!(creates, 19); // includes the dictionary tables
     assert_eq!(engine.settle(Frontier { changes: vec![SourceChange { rel: 0, row: vec![2], w: 1 }] }).unwrap().changes,
         vec![(1, vec![3], 1)]);
     assert_eq!(engine.snapshot(1).unwrap(), vec![(vec![3], 1)]);
@@ -346,7 +346,7 @@ fn c15_shaped_ir_installs_one_shared_plan() {
         program.strata.len(),
         program.outputs.len()
     );
-    assert_eq!(creates, 4499); // identical joins share one node; sort keys built on demand (7f5cf3a)
+    assert_eq!(creates, 2232); // join-read images are views; one-reader join and few-reader source deltas are CTEs
     assert!(
         objects < 8_000,
         "c15-shaped install created {objects} schema objects"
