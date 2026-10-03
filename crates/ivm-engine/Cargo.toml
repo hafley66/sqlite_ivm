@@ -6,3 +6,4 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 ivm-ir = { path = "../ivm-ir" }
+smallvec = "1"
