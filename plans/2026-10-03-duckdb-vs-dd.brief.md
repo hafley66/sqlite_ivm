@@ -43,7 +43,7 @@ that stratum (report it; no silent drop).
 
 - One heavy build at a time on the machine (`uptime`, `pgrep -f 'cargo|rustc|ninja|make'`); the
   OpenIVM C++ build is heavy: run it alone, `-j` at most 8.
-- No edits to Rust sources in sqlite_ivm or sprefa. Commit only the new engine scripts, results,
+- No edits to Rust product sources (dl8 `src/`, sqlite_ivm `crates/`); the sqlite_ivm `bench/` crate may gain an arm that shells out to the `duckdb` CLI (no duckdb crate). Commit only the new engine scripts and arms, results,
   the inventory rows, and a findings file `plans/2026-10-03-duckdb-vs-dd.findings.md`.
   No merge, no push. End commit messages with
   `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`.
