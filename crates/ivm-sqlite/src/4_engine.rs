@@ -239,17 +239,21 @@ impl Sqlite {
                 .map(|i| format!("c{i} INTEGER NOT NULL"))
                 .collect::<Vec<_>>()
                 .join(",");
-            db.execute_batch(&format!(
-                "CREATE TABLE IF NOT EXISTS {}({columns})",
-                catalog::quote(&source.name)
-            ))
-            .map_err(|e| error(Stage::Install, e))?;
             let keys = (0..source.cols.len()).map(|i| format!("c{i}")).collect::<Vec<_>>().join(",");
-            db.execute_batch(&format!(
+            let present: bool = db.query_row(
+                "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+                [&source.name], |row| row.get(0),
+            ).map_err(|e| error(Stage::Install, e))?;
+            // A new host table is its own set: the key rejects a present insert.
+            let sql = if present { format!(
                 "CREATE UNIQUE INDEX IF NOT EXISTS {} ON {}({keys})",
                 catalog::quote(format!("ivm_host_{}_set", source.name)),
                 catalog::quote(&source.name),
-            )).map_err(|e| error(Stage::Install, e))?;
+            ) } else { format!(
+                "CREATE TABLE {}({columns}, PRIMARY KEY ({keys})) WITHOUT ROWID",
+                catalog::quote(&source.name)
+            ) };
+            db.execute_batch(&sql).map_err(|e| error(Stage::Install, e))?;
         }
         let mut programs = Vec::new();
         if ir.outputs.len() > 1 {
