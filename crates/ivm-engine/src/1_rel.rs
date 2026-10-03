@@ -89,6 +89,11 @@ impl Counters {
 /// Each engine opens and owns its storage in `install`.
 pub trait Engine: Sized {
     fn install(program: &Program) -> Result<Self, EngineError>;
+    /// `install` for a caller that never reads per-operator work: `counters()` may report
+    /// `None` for `delta_rows` and `rounds`. Engines whose counters cost nothing keep this default.
+    fn install_unmeasured(program: &Program) -> Result<Self, EngineError> {
+        Self::install(program)
+    }
     fn settle(&mut self, frontier: Frontier) -> Result<Delta, EngineError>;
     fn counters(&self) -> Counters;
     fn snapshot(&self, rel: RelId) -> Result<Vec<(Row, W)>, EngineError>;
@@ -312,7 +317,7 @@ fn op_at(p: &Program, id: NodeId) -> Result<&Op, EngineError> {
 }
 
 /// The inputs `build_node` reads for `op`, in the order they are lowered.
-fn lowered_inputs<C>(p: &Program, defined: &[(RelId, C)], op: &Op) -> SmallVec<[NodeId; 2]> {
+pub fn lowered_inputs<C>(p: &Program, defined: &[(RelId, C)], op: &Op) -> SmallVec<[NodeId; 2]> {
     match op {
         Op::Get(_) | Op::Delay(_) => SmallVec::new(),
         Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Mfp { input, .. }
