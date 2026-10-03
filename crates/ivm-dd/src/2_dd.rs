@@ -3,14 +3,13 @@
 use ivm_ir::*;
 use ivm_engine::*;
 use differential_dataflow::input::{Input, InputSession};
-use differential_dataflow::operators::arrange::TraceAgent;
-use differential_dataflow::trace::cursor::Cursor;
-use differential_dataflow::trace::implementations::KeySpine;
-use differential_dataflow::trace::TraceReader;
+use differential_dataflow::operators::arrange::{Arranged, TraceAgent};
+use differential_dataflow::trace::implementations::ValSpine;
 use differential_dataflow::lattice::Lattice;
 use differential_dataflow::operators::iterate::Variable;
-use differential_dataflow::VecCollection;
+use differential_dataflow::{AsCollection, VecCollection};
 use std::hash::{DefaultHasher, Hash, Hasher};
+use timely::dataflow::operators::vec::Partition;
 use timely::dataflow::Scope;
 use timely::order::Product;
 use timely::progress::Timestamp;
@@ -21,13 +20,13 @@ use std::rc::Rc;
 use std::sync::mpsc;
 use std::thread::{self, JoinHandle};
 use timely::dataflow::operators::probe::Handle as ProbeHandle;
-use timely::progress::frontier::AntichainRef;
 use std::time::Duration;
 
 type Time = u64;
 type Coll<'s, T = Time> = VecCollection<'s, T, Row, W>;
-type Trace = TraceAgent<KeySpine<Row, Time, W>>;
 type Inner = Product<Time, u64>;
+/// A collection keyed on some of its columns: `(key, row)`.
+type Keyed<'s, T> = Arranged<'s, TraceAgent<ValSpine<Row, Row, T, W>>>;
 /// Rows supplied by an arrangement to a hierarchical reduce closure.
 pub type ReduceReadEventBuilder = timely::container::CapacityContainerBuilder<Vec<(Duration, usize)>>;
 type ReduceReadLogger = timely::logging_core::Logger<ReduceReadEventBuilder>;
@@ -51,6 +50,35 @@ fn rec_inputs(p: &Program, rec: &LetRec) -> BTreeSet<RelId> {
         }
     }
     inputs
+}
+
+/// The nodes a LetRec's loop reads that depend on none of its relations: every body that reads
+/// no recursive relation, and every such input of a node that does. Each is the root of a
+/// subtree the loop can read as one entered collection.
+fn independent_inputs<C>(p: &Program, rec: &LetRec, defined: &[(RelId, C)]) -> BTreeSet<NodeId> {
+    // Post-order over the nodes the bodies reach, inputs first, with an explicit stack.
+    let mut dependent: Vec<Option<bool>> = vec![None; p.nodes.len()];
+    let mut stack: Vec<(NodeId, bool)> = rec.bodies.iter().map(|body| (*body, false)).collect();
+    while let Some((id, expanded)) = stack.pop() {
+        if dependent[id as usize].is_some() { continue; }
+        let op = &p.nodes[id as usize];
+        let inputs = lowered_inputs(p, defined, op);
+        if expanded {
+            let reads_rec = matches!(op, Op::Get(rel) if rec.ids.contains(rel));
+            let value = reads_rec || inputs.iter().any(|input| dependent[*input as usize] == Some(true));
+            dependent[id as usize] = Some(value);
+            continue;
+        }
+        stack.push((id, true));
+        stack.extend(inputs.iter().filter(|input| dependent[**input as usize].is_none()).map(|input| (*input, false)));
+    }
+    let mut roots: BTreeSet<NodeId> = rec.bodies.iter().copied().filter(|body| dependent[*body as usize] == Some(false)).collect();
+    for (id, value) in dependent.iter().enumerate() {
+        if *value == Some(true) {
+            roots.extend(lowered_inputs(p, defined, &p.nodes[id]).into_iter().filter(|input| dependent[*input as usize] == Some(false)));
+        }
+    }
+    roots
 }
 
 /// Timestamps the algebra runs at. Only the top level may open a LetRec scope; this bounds monomorphization.
@@ -88,12 +116,21 @@ impl Nest for Time {
                 Ok(rel.threshold(c))
             }).collect();
         }
+        // Nodes of the bodies that read no recursive relation are lowered once in the outer scope
+        // and entered; the loop then iterates only over the nodes that depend on its variables.
+        let hoisted: Vec<(NodeId, Coll<'s>)> = {
+            let mut outer_nodes = vec![None; p.nodes.len()];
+            independent_inputs(p, rec, defined)
+                .into_iter()
+                .map(|id| Ok((id, lower_node(p, rel, &mut outer_nodes, defined, id)?)))
+                .collect::<Result<_, EngineError>>()?
+        };
         let outer = rel.scope;
         outer.scoped::<Inner, _, _>("LetRec", |sub| {
             let mut inner = DdRel {
                 scope: sub,
                 rec: rec.ids.first().copied(),
-                sources: rel.sources.iter().filter(|(id, _)| used.contains(id)).map(|(id, c)| (*id, c.clone().enter(sub))).collect(),
+                sources: BTreeMap::new(),
                 outputs: Vec::new(),
                 taps: rel.taps.clone(),
                 reduce_reads: rel.reduce_reads.clone(),
@@ -101,27 +138,50 @@ impl Nest for Time {
                 interner: rel.interner.clone(),
                 sum_error: rel.sum_error.clone(),
                 texts: rel.texts.clone(),
+                keyed: BTreeMap::new(),
             };
-            let mut scope_defined: Vec<(RelId, Coll<'_, Inner>)> =
-                defined.iter().filter(|(id, _)| used.contains(id)).map(|(id, c)| (*id, c.clone().enter(sub))).collect();
+            let mut nodes = vec![None; p.nodes.len()];
+            for (id, c) in hoisted {
+                nodes[id as usize] = Some(c.enter(sub));
+            }
+            let mut scope_defined: Vec<(RelId, Coll<'_, Inner>)> = Vec::new();
             let mut variables = Vec::new();
             for id in &rec.ids {
                 let (variable, current) = Variable::new(sub, Product::new(Default::default(), 1));
                 variables.push(variable);
                 scope_defined.push((*id, current));
             }
-            let mut nodes = vec![None; p.nodes.len()];
             let mut results = Vec::new();
             for body in &rec.bodies {
                 let c = lower_node(p, &mut inner, &mut nodes, &scope_defined, *body)?;
                 results.push(inner.threshold(c));
             }
-            let mut left = Vec::new();
-            for (variable, result) in variables.into_iter().zip(results) {
+            for (variable, result) in variables.into_iter().zip(&results) {
                 variable.set(result.clone());
-                left.push(result.leave(outer));
             }
-            Ok(left)
+            if results.len() == 1 {
+                return Ok(results.into_iter().map(|result| result.leave(outer)).collect());
+            }
+            // One scope output for the whole fixpoint: timely summarizes reachability from every
+            // location in the scope to every scope output, so each extra output multiplies the
+            // install and progress-tracking cost of the scope.
+            let parts = results.len() as u64;
+            let tagged = results.into_iter().enumerate().map(|(index, result)| {
+                result.map(move |mut row| {
+                    row.push(index as Cell);
+                    row
+                })
+            });
+            let left = differential_dataflow::collection::concatenate(sub, tagged).leave(outer);
+            Ok(left
+                .inner
+                .partition(parts, |(mut row, time, w): (Row, Time, W)| {
+                    let index = row.pop().expect("tagged row") as u64;
+                    (index, (row, time, w))
+                })
+                .into_iter()
+                .map(|stream| stream.as_collection())
+                .collect())
         })
     }
 }
@@ -138,6 +198,35 @@ pub struct DdRel<'s, T: Nest = Time> {
     interner: Rc<RefCell<Interner>>,
     sum_error: Rc<RefCell<Option<String>>>,
     texts: Vec<Cell>,
+    /// Join inputs arranged once per `(stream, key columns)`; every join reading the same
+    /// stream on the same key shares the arrangement.
+    keyed: BTreeMap<(usize, usize, Vec<ColId>), Keyed<'s, T>>,
+}
+
+impl<'s, T: Nest> DdRel<'s, T> {
+    fn keyed(&mut self, c: Coll<'s, T>, key: Vec<ColId>, any: Vec<bool>) -> Keyed<'s, T> {
+        let source = *c.inner.name();
+        let id = (source.node, source.port, key.clone());
+        if let Some(arranged) = self.keyed.get(&id) {
+            return arranged.clone();
+        }
+        let interner = self.interner.clone();
+        let arranged = c
+            .flat_map(move |row| {
+                let mut cells = cols(&row, &key);
+                for (cell, any) in cells.iter_mut().zip(&any) {
+                    if *any {
+                        let dict = interner.borrow();
+                        if matches!(dict.any_value(*cell), Some(AnyValue::Null)) { return None; }
+                        *cell = dict.any_key(*cell)?;
+                    }
+                }
+                Some((cells, row))
+            })
+            .arrange_by_key();
+        self.keyed.insert(id, arranged.clone());
+        arranged
+    }
 }
 
 /// One record seen on an IR node's output collection in traced mode.
@@ -289,7 +378,7 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
     fn union(&mut self, cs: Vec<Self::C>) -> Self::C {
         let mut cs = cs.into_iter();
         let first = cs.next().expect("check rejects an empty Union");
-        cs.fold(first, |acc, c| acc.concat(c))
+        first.concatenate(cs)
     }
 
     fn negate(&mut self, c: Self::C) -> Self::C {
@@ -308,33 +397,15 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
         let (lk, rk) = (side(0), side(1));
         let l_any = lk.iter().map(|c| types[0][*c as usize] == Ty::Any).collect::<Vec<_>>();
         let r_any = rk.iter().map(|c| types[1][*c as usize] == Ty::Any).collect::<Vec<_>>();
-        let li = self.interner.clone();
-        let ri = self.interner.clone();
         let mut cs = cs.into_iter();
         let (l, r) = (cs.next().unwrap(), cs.next().unwrap());
-        let l = l.flat_map(move |row| {
-            let mut key = cols(&row, &lk);
-            for (cell, any) in key.iter_mut().zip(&l_any) {
-                if *any {
-                    if matches!(li.borrow().any_value(*cell), Some(AnyValue::Null)) { return None; }
-                    *cell = li.borrow().any_key(*cell)?;
-                }
-            }
-            Some((key, row))
-        });
-        let r = r.flat_map(move |row| {
-            let mut key = cols(&row, &rk);
-            for (cell, any) in key.iter_mut().zip(&r_any) {
-                if *any {
-                    if matches!(ri.borrow().any_value(*cell), Some(AnyValue::Null)) { return None; }
-                    *cell = ri.borrow().any_key(*cell)?;
-                }
-            }
-            Some((key, row))
-        });
-        Ok(l.join(r).map(|(_, (mut a, b))| {
-            a.extend(b);
-            a
+        let l = self.keyed(l, lk, l_any);
+        let r = self.keyed(r, rk, r_any);
+        Ok(l.join_core(r, |_, a: &Row, b: &Row| {
+            let mut row = Vec::with_capacity(a.len() + b.len());
+            row.extend_from_slice(a);
+            row.extend_from_slice(b);
+            Some(row)
         }))
     }
 
@@ -742,21 +813,30 @@ pub struct Dd {
     counters: Counters,
 }
 
+/// What the worker records per settle. `Measured` and `Traced` tap every IR node's output to
+/// fill `Counters::delta_rows` and `Counters::rounds`; `Traced` also returns the taps.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Mode {
+    Unmeasured,
+    Measured,
+    Traced,
+}
+
 /// Runs on the worker before the dataflow is built; tests register timely/differential loggers here.
 pub type Hook = Box<dyn FnOnce(&mut timely::worker::Worker) + Send>;
 
 impl Dd {
     pub fn install(program: &Program) -> Result<Self, EngineError> {
-        Self::start(program, None, false)
+        Self::start(program, None, Mode::Measured)
     }
 
     pub fn install_observed(program: &Program, hook: Hook) -> Result<Self, EngineError> {
-        Self::start(program, Some(hook), false)
+        Self::start(program, Some(hook), Mode::Measured)
     }
 
     /// Every IR node's output collection gets an `inspect`; `settle_traced` returns what they saw.
     pub fn install_traced(program: &Program) -> Result<Self, EngineError> {
-        Self::start(program, None, true)
+        Self::start(program, None, Mode::Traced)
     }
 
     /// `settle` plus the node records of this step, consolidated per `(node, tick, round, row)`.
@@ -769,11 +849,11 @@ impl Dd {
         Ok((delta, taps))
     }
 
-    fn start(program: &Program, hook: Option<Hook>, traced: bool) -> Result<Self, EngineError> {
+    fn start(program: &Program, hook: Option<Hook>, mode: Mode) -> Result<Self, EngineError> {
         let (tx, rx) = mpsc::channel();
         let (ready_tx, ready_rx) = mpsc::channel();
         let program = program.clone();
-        let thread = thread::spawn(move || worker(program, hook, traced, rx, ready_tx));
+        let thread = thread::spawn(move || worker(program, hook, mode, rx, ready_tx));
         let worker_gone = |_| EngineError::new(Stage::Install, None, ErrorKind::Worker("worker exited".into()));
         ready_rx.recv().map_err(worker_gone)??;
         Ok(Self { tx, thread: Some(thread), counters: Counters::default() })
@@ -782,7 +862,12 @@ impl Dd {
 
 impl Engine for Dd {
     fn install(program: &Program) -> Result<Self, EngineError> {
-        Self::start(program, None, false)
+        Self::start(program, None, Mode::Measured)
+    }
+
+    /// No node taps: every IR node's output is not inspected, cloned and consolidated per settle.
+    fn install_unmeasured(program: &Program) -> Result<Self, EngineError> {
+        Self::start(program, None, Mode::Unmeasured)
     }
 
     fn settle(&mut self, frontier: Frontier) -> Result<Delta, EngineError> {
@@ -846,10 +931,11 @@ impl Drop for Dd {
 struct Built {
     inputs: BTreeMap<RelId, InputSession<Time, Row, W>>,
     constructor_inputs: BTreeMap<RelId, InputSession<Time, Row, W>>,
-    outputs: BTreeMap<RelId, Trace>,
+    /// Each output's rows, accumulated from the settled deltas; `Snapshot` reads them.
+    outputs: BTreeMap<RelId, BTreeMap<Row, W>>,
 }
 
-fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver<Command>, ready: mpsc::Sender<Result<(), EngineError>>) {
+fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<Command>, ready: mpsc::Sender<Result<(), EngineError>>) {
     let rx = std::sync::Mutex::new(rx);
     let hook = std::sync::Mutex::new(hook);
     timely::execute_directly(move |worker| {
@@ -859,7 +945,7 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
         let reduce_reads = worker.log_register().and_then(|registry| registry.get::<ReduceReadEventBuilder>("lab/reduce_reads"));
         let mut probe = ProbeHandle::new();
         let captured: Rc<RefCell<Vec<(RelId, Row, Time, W)>>> = Rc::default();
-        let taps: Option<Rc<RefCell<Vec<DdTap>>>> = Some(Rc::default());
+        let taps: Option<Rc<RefCell<Vec<DdTap>>>> = (mode != Mode::Unmeasured).then(Rc::default);
         let interner = Rc::new(RefCell::new(Interner::default()));
         let sum_error = Rc::new(RefCell::new(None));
         let texts = {
@@ -871,6 +957,7 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
             .filter(|r| r.kind == RelKind::Constructor)
             .map(|r| (r.id, (r.name.clone(), r.cols.iter().skip(1).copied().collect())))
             .collect();
+        let build_start = std::time::Instant::now();
         let built = worker.dataflow::<Time, _, _>(|scope| -> Result<Built, EngineError> {
             let mut inputs = BTreeMap::new();
             let mut constructor_inputs = BTreeMap::new();
@@ -886,21 +973,18 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                 constructor_inputs.insert(rel.id, input);
                 sources.insert(rel.id, c);
             }
-            let mut rel = DdRel { scope, rec: None, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone(), constructors: constructors.clone(), interner: interner.clone(), sum_error: sum_error.clone(), texts: texts.clone() };
+            let mut rel = DdRel { scope, rec: None, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone(), constructors: constructors.clone(), interner: interner.clone(), sum_error: sum_error.clone(), texts: texts.clone(), keyed: BTreeMap::new() };
             lower(&program, &mut rel)?;
             let mut outputs = BTreeMap::new();
             for (id, c) in rel.outputs {
-                let arranged = c.arrange_by_self();
                 let sink = Rc::clone(&captured);
-                arranged
-                    .clone()
-                    .as_collection(|row: &Row, _| row.clone())
-                    .inspect(move |(row, t, w)| sink.borrow_mut().push((id, row.clone(), *t, *w)))
+                c.inspect(move |(row, t, w)| sink.borrow_mut().push((id, row.clone(), *t, *w)))
                     .probe_with(&mut probe);
-                outputs.insert(id, arranged.trace);
+                outputs.insert(id, BTreeMap::new());
             }
             Ok(Built { inputs, constructor_inputs, outputs })
         });
+        tracing::debug!(target: "ivm_dd", operators = worker.peek_identifier(), nodes = program.nodes.len(), build_ns = build_start.elapsed().as_nanos() as u64, "dd install");
         let mut built = match built {
             Ok(built) => {
                 let _ = ready.send(Ok(()));
@@ -920,6 +1004,9 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
             let Ok(command) = rx.lock().unwrap().recv() else { break };
             match command {
                 Command::Settle(frontier, reply) => {
+                    let settle_start = std::time::Instant::now();
+                    let (epoch_before, mut steps) = (epoch, 0u64);
+                    let changes_in = frontier.changes.len();
                     let interned_before = interner.borrow().len();
                     let accepted = match guard(&program, &mut source_rows, epoch, &frontier) {
                         Ok(accepted) => accepted,
@@ -946,7 +1033,10 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                         input.advance_to(epoch);
                         input.flush();
                     }
-                    worker.step_while(|| probe.less_than(&epoch));
+                    worker.step_while(|| {
+                        steps += 1;
+                        probe.less_than(&epoch)
+                    });
                     if let Some(message) = sum_error.borrow_mut().take() {
                         let _ = reply.send(Err(EngineError::new(Stage::Settle, None, ErrorKind::Worker(message))));
                         break;
@@ -969,13 +1059,12 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                             input.advance_to(epoch);
                             input.flush();
                         }
-                        worker.step_while(|| probe.less_than(&epoch));
+                        worker.step_while(|| {
+                            steps += 1;
+                            probe.less_than(&epoch)
+                        });
                     }
                     if let Some(logger) = &reduce_reads { logger.flush(); }
-                    for trace in built.outputs.values_mut() {
-                        trace.set_logical_compaction(AntichainRef::new(&[epoch]));
-                        trace.set_physical_compaction(AntichainRef::new(&[epoch]));
-                    }
                     let mut net: BTreeMap<(RelId, Row), W> = BTreeMap::new();
                     for (rel, row, _, w) in captured.borrow_mut().drain(..) {
                         *net.entry((rel, row)).or_default() += w;
@@ -984,6 +1073,14 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                         .filter(|(_, w)| *w != 0)
                         .map(|((rel, row), w)| (rel, row, w))
                         .collect();
+                    for (rel, row, w) in &changes {
+                        let rows = built.outputs.get_mut(rel).expect("captured rows name an output");
+                        let total = rows.entry(row.clone()).or_default();
+                        *total += w;
+                        if *total == 0 {
+                            rows.remove(row);
+                        }
+                    }
                     let mut seen: BTreeMap<(NodeId, u64, Option<RelId>, Option<u64>, Row), W> = BTreeMap::new();
                     for tap in taps.iter().flat_map(|t| t.borrow_mut().drain(..).collect::<Vec<_>>()) {
                         *seen.entry((tap.node, frontier_tick, tap.rec, tap.round, tap.row)).or_default() += tap.w;
@@ -993,7 +1090,7 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                         .filter(|(_, w)| *w != 0)
                         .map(|((node, tick, rec, round, row), w)| DdTap { node, tick, rec, round, row, w })
                         .collect();
-                    let mut counters = Counters::measured();
+                    let mut counters = if taps.is_some() { Counters::measured() } else { Counters::default() };
                     counters.statements = None;
                     counters.rows_written = changes.len() as u64;
                     counters.interned = Some((interner.borrow().len() - interned_before) as u64);
@@ -1012,15 +1109,18 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
                         };
                         *field.as_mut().unwrap() += 1;
                     }
-                    counters.rounds = Some(rounds.into_iter().filter(|(_, round)| *round > 0).count() as u64);
-                    let _ = reply.send(Ok((Delta { tick: frontier_tick, changes }, if traced { seen } else { Vec::new() }, counters)));
+                    if taps.is_some() {
+                        counters.rounds = Some(rounds.into_iter().filter(|(_, round)| *round > 0).count() as u64);
+                    }
+                    tracing::debug!(target: "ivm_dd", changes_in, changes_out = changes.len(), epochs = epoch - epoch_before, steps, settle_ns = settle_start.elapsed().as_nanos() as u64, "dd settle");
+                    let _ = reply.send(Ok((Delta { tick: frontier_tick, changes }, if mode == Mode::Traced { seen } else { Vec::new() }, counters)));
                     frontier_tick += 1;
                 }
                 Command::Snapshot(rel, reply) => {
                     let answer = built
                         .outputs
-                        .get_mut(&rel)
-                        .map(read_trace)
+                        .get(&rel)
+                        .map(|rows| rows.iter().map(|(row, w)| (row.clone(), *w)).collect())
                         .ok_or_else(|| EngineError::new(Stage::Snapshot, Some(rel), ErrorKind::UnknownRel(rel)));
                     let _ = reply.send(answer);
                 }
@@ -1049,21 +1149,6 @@ fn worker(program: Program, hook: Option<Hook>, traced: bool, rx: mpsc::Receiver
             }
         }
     });
-}
-
-fn read_trace(trace: &mut Trace) -> Vec<(Row, W)> {
-    let (mut cursor, storage) = trace.cursor();
-    let mut rows = Vec::new();
-    while let Some(row) = cursor.get_key(&storage) {
-        let row = row.clone();
-        let mut n: W = 0;
-        cursor.map_times(&storage, |_, w| n += *w);
-        if n != 0 {
-            rows.push((row, n));
-        }
-        cursor.step_key(&storage);
-    }
-    rows
 }
 
 /// Source relations are sets. Insert of a present row rejects the frontier; delete of an
