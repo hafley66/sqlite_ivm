@@ -5,13 +5,16 @@ rust binaries".
 
 ## Rules
 
-- No DuckDB in any Rust crate or Cargo.toml. The harness is Python + the `duckdb` CLI
-  (`/opt/homebrew/bin/duckdb`, v1.5.5) or the `duckdb` Python package in a venv under the bench
-  dir, plus the OpenIVM extension file built from `~/projects/openivm`
+- No DuckDB in any Rust crate or Cargo.toml. No Python (user, 2026-10-03). Use the existing
+  harnesses: sprefa `v6/sprefa-store/bench/run.sh` (engine = `bench/engines/<n>_<name>.sh`, shared
+  CSV schema, gnuplot report) and sqlite_ivm `bench/` (`frontier-stress`, `scale`; an
+  external-process arm the way `pg_ivm`/`pg_query` arms run). DuckDB runs through the `duckdb` CLI
+  (`/opt/homebrew/bin/duckdb`, v1.5.5) with SQL files; scripts are shell or `.mjs`. Plus the OpenIVM extension file built from `~/projects/openivm`
   (`build/release/extension/openivm/openivm.duckdb_extension`). The DuckDB version that loads the
   extension must match the version OpenIVM pins (its `duckdb` submodule); use that build's own
   `build/release/duckdb` binary if the Homebrew one does not match.
-- Lives in `sqlite_ivm/bench/duckdb/`, numbered files. Results in `bench/results/duckdb-*`.
+- New files: engine scripts in the two harnesses, numbered; results where each harness writes them.
+- Inventory of existing benches: `sqlite_ivm/plans/costs/0_benchmark_inventory.md`; add the new arms there.
 - Every DuckDB result is checked against dd's rows for the same input; a mismatch fails the run.
 
 ## Part A: incremental (OpenIVM)
@@ -28,7 +31,7 @@ existing harness on the same stream. Also a DuckDB full-recompute arm (no OpenIV
 Workloads: the c15 IR (`crates/ivm-sqlite/tests/corpus/8_c15_program.json`) and the IR of the dl8
 `registry.rs` build (dump it from dl8 if a dump flag exists; else from `_9a_ir_lower.rs` output via
 a debug env var already in the code; do not add Rust code without stopping to report). Write a
-Python exporter: IR JSON -> DuckDB SQL, one table per relation, strata in order, `WITH RECURSIVE`
+`.mjs` exporter: IR JSON -> DuckDB SQL, one table per relation, strata in order, `WITH RECURSIVE`
 (or DuckDB `USING KEY`) for LetRec strata, plain `INSERT ... SELECT` otherwise. Term constructors
 (Mint) become dictionary tables with integer ids. Compare total time and RSS against ir:dd and
 ir:sqlite on the same program; rows must match.
@@ -40,8 +43,8 @@ that stratum (report it; no silent drop).
 
 - One heavy build at a time on the machine (`uptime`, `pgrep -f 'cargo|rustc|ninja|make'`); the
   OpenIVM C++ build is heavy: run it alone, `-j` at most 8.
-- No edits to Rust sources in sqlite_ivm or sprefa. Commit only under `bench/duckdb/`,
-  `bench/results/duckdb-*`, and a findings file `plans/2026-10-03-duckdb-vs-dd.findings.md`.
+- No edits to Rust sources in sqlite_ivm or sprefa. Commit only the new engine scripts, results,
+  the inventory rows, and a findings file `plans/2026-10-03-duckdb-vs-dd.findings.md`.
   No merge, no push. End commit messages with
   `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`.
 
