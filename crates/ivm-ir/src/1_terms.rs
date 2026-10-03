@@ -1,6 +1,6 @@
 use crate::{AnyValue, Cell, Row, Ty};
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 /// `functor` and `text` are shared: the interner's maps and every copy of a
@@ -15,10 +15,10 @@ pub struct Term {
 
 #[derive(Default)]
 pub struct Interner {
-    functors: BTreeSet<Arc<str>>,
-    by_key: BTreeMap<(Arc<str>, Row), Cell>,
+    functors: HashSet<Arc<str>>,
+    by_key: HashMap<(Arc<str>, Row), Cell>,
     by_id: BTreeMap<Cell, Term>,
-    by_text: BTreeMap<Arc<str>, Cell>,
+    by_text: HashMap<Arc<str>, Cell>,
     by_any: BTreeMap<AnyValue, Cell>,
     any_by_id: BTreeMap<Cell, AnyValue>,
     next: Cell,
@@ -115,6 +115,24 @@ impl Interner {
             row.extend(&term.args);
             (row, 1)
         }).collect()
+    }
+
+    /// `snapshot` of each functor, in one pass over the dictionary.
+    pub fn snapshots(&self, functors: &[&str]) -> Vec<Vec<(Row, i64)>> {
+        let mut slots: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
+        for (index, functor) in functors.iter().enumerate() {
+            slots.entry(functor).or_default().push(index);
+        }
+        let mut out = vec![Vec::new(); functors.len()];
+        for (id, term) in &self.by_id {
+            let Some(indices) = slots.get(&*term.functor) else { continue };
+            let mut row = vec![*id];
+            row.extend(&term.args);
+            for index in indices {
+                out[*index].push((row.clone(), 1));
+            }
+        }
+        out
     }
 
     pub fn compare(&self, a: Cell, b: Cell) -> Ordering {

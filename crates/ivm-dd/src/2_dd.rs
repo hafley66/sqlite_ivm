@@ -139,6 +139,8 @@ impl Nest for Time {
                 sum_error: rel.sum_error.clone(),
                 texts: rel.texts.clone(),
                 keyed: BTreeMap::new(),
+                read: BTreeSet::new(),
+                types: rel.types.clone(),
             };
             let mut nodes = vec![None; p.nodes.len()];
             for (id, c) in hoisted {
@@ -201,6 +203,10 @@ pub struct DdRel<'s, T: Nest = Time> {
     /// Join inputs arranged once per `(stream, key columns)`; every join reading the same
     /// stream on the same key shares the arrangement.
     keyed: BTreeMap<(usize, usize, Vec<ColId>), Keyed<'s, T>>,
+    /// Relations `get` handed a collection for.
+    read: BTreeSet<RelId>,
+    /// `Program::node_types_memo` answers, shared by every scope of one install.
+    types: Rc<RefCell<Vec<Option<Option<Vec<Ty>>>>>>,
 }
 
 impl<'s, T: Nest> DdRel<'s, T> {
@@ -250,6 +256,7 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
     type C = Coll<'s, T>;
 
     fn get(&mut self, rel: RelId) -> Result<Self::C, EngineError> {
+        self.read.insert(rel);
         self.sources
             .get(&rel)
             .cloned()
@@ -518,6 +525,10 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
 
     fn letrec(&mut self, p: &Program, rec: &LetRec, defined: &[(RelId, Self::C)]) -> Result<Vec<Self::C>, EngineError> {
         T::letrec(self, p, rec, defined)
+    }
+
+    fn node_types(&mut self, p: &Program, id: NodeId) -> Option<Vec<Ty>> {
+        p.node_types_memo(id, &mut self.types.borrow_mut())
     }
 
     fn output(&mut self, rel: RelId, c: Self::C) {
@@ -799,6 +810,7 @@ enum Command {
     Settle(Frontier, mpsc::Sender<Result<(Delta, Vec<DdTap>, Counters), EngineError>>),
     Snapshot(RelId, mpsc::Sender<Result<Vec<(Row, W)>, EngineError>>),
     InternSnapshot(RelId, mpsc::Sender<Result<Vec<(Row, W)>, EngineError>>),
+    InternSnapshots(Vec<RelId>, mpsc::Sender<Result<Vec<Vec<(Row, W)>>, EngineError>>),
     InternTerms(Vec<(RelId, Row)>, mpsc::Sender<Result<Vec<Cell>, EngineError>>),
     InternText(String, mpsc::Sender<Cell>),
     Text(Cell, mpsc::Sender<Option<String>>),
@@ -811,6 +823,8 @@ pub struct Dd {
     tx: mpsc::Sender<Command>,
     thread: Option<JoinHandle<()>>,
     counters: Counters,
+    /// Unmeasured: `drop` does not wait for the worker to free the dataflow.
+    detach: bool,
 }
 
 /// What the worker records per settle. `Measured` and `Traced` tap every IR node's output to
@@ -856,7 +870,7 @@ impl Dd {
         let thread = thread::spawn(move || worker(program, hook, mode, rx, ready_tx));
         let worker_gone = |_| EngineError::new(Stage::Install, None, ErrorKind::Worker("worker exited".into()));
         ready_rx.recv().map_err(worker_gone)??;
-        Ok(Self { tx, thread: Some(thread), counters: Counters::default() })
+        Ok(Self { tx, thread: Some(thread), counters: Counters::default(), detach: mode == Mode::Unmeasured })
     }
 }
 
@@ -885,6 +899,12 @@ impl Engine for Dd {
     fn intern_snapshot(&self, functor: RelId) -> Result<Vec<(Row, W)>, EngineError> {
         let (reply, answer) = mpsc::channel();
         self.tx.send(Command::InternSnapshot(functor, reply)).map_err(|e| worker_error(Stage::Snapshot, e))?;
+        answer.recv().map_err(|e| worker_error(Stage::Snapshot, e))?
+    }
+    /// One worker round trip and one pass over the dictionary for every functor.
+    fn intern_snapshots(&self, functors: &[RelId]) -> Result<Vec<Vec<(Row, W)>>, EngineError> {
+        let (reply, answer) = mpsc::channel();
+        self.tx.send(Command::InternSnapshots(functors.to_vec(), reply)).map_err(|e| worker_error(Stage::Snapshot, e))?;
         answer.recv().map_err(|e| worker_error(Stage::Snapshot, e))?
     }
     fn intern_terms(&mut self, terms: &[(RelId, Row)]) -> Result<Vec<Cell>, EngineError> {
@@ -923,7 +943,9 @@ impl Drop for Dd {
     fn drop(&mut self) {
         let _ = self.tx.send(Command::Stop);
         if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+            if !self.detach {
+                let _ = thread.join();
+            }
         }
     }
 }
@@ -957,6 +979,10 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
             .filter(|r| r.kind == RelKind::Constructor)
             .map(|r| (r.id, (r.name.clone(), r.cols.iter().skip(1).copied().collect())))
             .collect();
+        let mut constructor_ids: std::collections::HashMap<String, RelId> = std::collections::HashMap::new();
+        for (id, (name, _)) in &constructors {
+            constructor_ids.entry(name.clone()).or_insert(*id);
+        }
         let build_start = std::time::Instant::now();
         let built = worker.dataflow::<Time, _, _>(|scope| -> Result<Built, EngineError> {
             let mut inputs = BTreeMap::new();
@@ -973,8 +999,10 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
                 constructor_inputs.insert(rel.id, input);
                 sources.insert(rel.id, c);
             }
-            let mut rel = DdRel { scope, rec: None, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone(), constructors: constructors.clone(), interner: interner.clone(), sum_error: sum_error.clone(), texts: texts.clone(), keyed: BTreeMap::new() };
+            let mut rel = DdRel { scope, rec: None, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone(), constructors: constructors.clone(), interner: interner.clone(), sum_error: sum_error.clone(), texts: texts.clone(), keyed: BTreeMap::new(), read: BTreeSet::new(), types: Rc::default() };
             lower(&program, &mut rel)?;
+            // A constructor no operator reads gets no rows: its terms would cost an epoch and drive nothing.
+            constructor_inputs.retain(|id, _| rel.read.contains(id));
             let mut outputs = BTreeMap::new();
             for (id, c) in rel.outputs {
                 let sink = Rc::clone(&captured);
@@ -1020,8 +1048,8 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
                     }
                     // Terms interned since the last settle enter with the frontier.
                     for (name, row) in interner.borrow_mut().drain_pending() {
-                        if let Some(id) = constructors.iter().find(|(_, (functor, _))| functor.as_str() == &*name).map(|(id, _)| *id) {
-                            built.constructor_inputs.get_mut(&id).unwrap().update(row, 1);
+                        if let Some(input) = constructor_ids.get(&*name).and_then(|id| built.constructor_inputs.get_mut(id)) {
+                            input.update(row, 1);
                         }
                     }
                     epoch += 1;
@@ -1042,14 +1070,14 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
                         break;
                     }
                     loop {
-                        let pending = interner.borrow_mut().drain_pending();
-                        if pending.is_empty() { break; }
-                        for (name, row) in pending {
-                            let id = constructors.iter().find(|(_, (functor, _))| functor.as_str() == &*name).map(|(id, _)| id).copied();
-                            if let Some(id) = id {
-                                built.constructor_inputs.get_mut(&id).unwrap().update(row, 1);
+                        let mut fed = false;
+                        for (name, row) in interner.borrow_mut().drain_pending() {
+                            if let Some(input) = constructor_ids.get(&*name).and_then(|id| built.constructor_inputs.get_mut(id)) {
+                                input.update(row, 1);
+                                fed = true;
                             }
                         }
+                        if !fed { break; }
                         epoch += 1;
                         for input in built.inputs.values_mut() {
                             input.advance_to(epoch);
@@ -1130,6 +1158,14 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
                         .ok_or_else(|| EngineError::new(Stage::Snapshot, Some(rel), ErrorKind::UnknownRel(rel)));
                     let _ = reply.send(answer);
                 }
+                Command::InternSnapshots(rels, reply) => {
+                    let answer = rels.iter()
+                        .map(|rel| constructors.get(rel).map(|(name, _)| name.as_str())
+                            .ok_or_else(|| EngineError::new(Stage::Snapshot, Some(*rel), ErrorKind::UnknownRel(*rel))))
+                        .collect::<Result<Vec<_>, _>>()
+                        .map(|names| interner.borrow().snapshots(&names));
+                    let _ = reply.send(answer);
+                }
                 Command::InternTerms(terms, reply) => {
                     let answer = terms.iter().map(|(functor, args)| {
                         let (name, types) = constructors.get(functor)
@@ -1146,6 +1182,13 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
                 Command::InternAny(value, reply) => { let _ = reply.send(interner.borrow_mut().mint_any(&value)); }
                 Command::AnyValue(id, reply) => { let _ = reply.send(interner.borrow().any_value(id).cloned()); }
                 Command::Stop => break,
+            }
+        }
+        if mode == Mode::Unmeasured {
+            // Nothing reads the dataflow again: free it without stepping it to completion.
+            drop(built);
+            for dataflow in worker.installed_dataflows() {
+                worker.drop_dataflow(dataflow);
             }
         }
     });

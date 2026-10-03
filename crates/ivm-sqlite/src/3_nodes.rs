@@ -160,6 +160,8 @@ pub struct SqlRel {
     /// Join SQL node per (left node, right node, predicates): rules that join the same inputs on the
     /// same keys share one plan node.
     joins: std::collections::HashMap<(usize, usize, Vec<String>), SqlC>,
+    /// `Program::node_types_memo` answers for the one program this plan lowers.
+    types: Vec<Option<Option<Vec<Ty>>>>,
 }
 
 fn list(alias: &str, cols: impl IntoIterator<Item = usize>) -> String {
@@ -321,6 +323,7 @@ impl SqlRel {
                 .map(|r| (r.id, (r.name.clone(), r.cols.iter().skip(1).copied().collect()))).collect(),
             texts: p.texts.clone(),
             joins: std::collections::HashMap::new(),
+            types: Vec::new(),
         };
         for r in p.rels.iter().filter(|r| r.kind == RelKind::Source) {
             let c = rel.push(r.cols.len(), false, |_| None);
@@ -1328,6 +1331,10 @@ impl Rel for SqlRel {
     fn output(&mut self, rel: RelId, c: Self::C) {
         self.integrate(&c, Vec::new());
         self.outputs.push((rel, c));
+    }
+
+    fn node_types(&mut self, p: &Program, id: NodeId) -> Option<Vec<Ty>> {
+        p.node_types_memo(id, &mut self.types)
     }
 
     /// The returned SQL node is the IR node's own delta; SQL nodes pushed since the previous observe are its internals.

@@ -98,6 +98,10 @@ pub trait Engine: Sized {
     fn counters(&self) -> Counters;
     fn snapshot(&self, rel: RelId) -> Result<Vec<(Row, W)>, EngineError>;
     fn intern_snapshot(&self, functor: RelId) -> Result<Vec<(Row, W)>, EngineError>;
+    /// `intern_snapshot` of each functor, in order.
+    fn intern_snapshots(&self, functors: &[RelId]) -> Result<Vec<Vec<(Row, W)>>, EngineError> {
+        functors.iter().map(|functor| self.intern_snapshot(*functor)).collect()
+    }
     fn intern_text(&mut self, text: &str) -> Result<Cell, EngineError>;
     /// Interns constructor terms `functor(args)` in order and returns their ids, as a Mint of
     /// the same row would. Each argument is an interned term, a text cell or a raw value.
@@ -133,6 +137,10 @@ pub trait Rel {
     /// Engine-owned fixpoint: returns one collection per `rec.ids`, built with `lower_node` on the engine's inner algebra.
     fn letrec(&mut self, p: &Program, rec: &LetRec, defined: &[(RelId, Self::C)]) -> Result<Vec<Self::C>, EngineError>;
     fn output(&mut self, rel: RelId, c: Self::C);
+    /// `p.node_types(id)`; an engine that lowers many nodes may memoize it.
+    fn node_types(&mut self, p: &Program, id: NodeId) -> Option<Vec<Ty>> {
+        p.node_types(id)
+    }
     /// Called by `lower_node` on every node it builds, before memoizing; traced engines tap `c` here.
     fn observe(&mut self, _id: NodeId, c: Self::C) -> Self::C {
         c
@@ -388,7 +396,7 @@ fn build_node<A: Rel>(
         Op::StrCons { mode, .. } => a.str_cons(first(), mode)?,
         Op::Str { op, args, .. } => a.str_op(first(), *op, args)?,
         Op::Mfp { input, filter, map, project } => {
-            let types = p.node_types(*input).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Mfp input types")))?;
+            let types = a.node_types(p, *input).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Mfp input types")))?;
             a.mfp(first(), filter, map, project, &types)
         }
         Op::Union(_) => a.union(built.to_vec()),
@@ -396,7 +404,7 @@ fn build_node<A: Rel>(
         Op::Join { inputs, equivalences } if decoded(p, defined, inputs, equivalences).is_some() => {
             let (side, col, functor) = decoded(p, defined, inputs, equivalences).unwrap();
             let other = inputs[1 - side];
-            let types = [other, inputs[side]].map(|n| p.node_types(n).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Join input types"))));
+            let types = [other, inputs[side]].map(|n| a.node_types(p, n).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Join input types"))));
             let types = [types[0].clone()?, types[1].clone()?];
             let c = a.decode(first(), functor, col, &types)?;
             if side == 1 {
@@ -411,21 +419,21 @@ fn build_node<A: Rel>(
             }
         }
         Op::Join { inputs, equivalences } => {
-            let types = inputs.iter().map(|n| p.node_types(*n).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Join input types")))).collect::<Result<Vec<_>, _>>()?;
+            let types = inputs.iter().map(|n| a.node_types(p, *n).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Join input types")))).collect::<Result<Vec<_>, _>>()?;
             a.join(built.to_vec(), equivalences, &types)?
         }
         Op::Antijoin { lk, rk, .. } => a.antijoin(built[0].clone(), built[1].clone(), lk, rk),
         Op::Reduce { input, key, aggs } => {
-            let types = p.node_types(*input).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Reduce input types")))?;
+            let types = a.node_types(p, *input).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Reduce input types")))?;
             a.reduce(first(), key, aggs, &types)
         }
         Op::Threshold(_) => a.threshold(first()),
         Op::TopK { input, key, order, limit } => {
-            let types = p.node_types(*input).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("TopK input types")))?;
+            let types = a.node_types(p, *input).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("TopK input types")))?;
             a.topk(first(), key, order, *limit, &types)?
         }
         Op::Window { input, partition, order, func } => {
-            let types = p.node_types(*input).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Window input types")))?;
+            let types = a.node_types(p, *input).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Window input types")))?;
             a.window(first(), partition, order, func, &types)?
         }
         Op::Delay(_) => return Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Delay"))),
