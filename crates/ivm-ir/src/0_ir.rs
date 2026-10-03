@@ -4,7 +4,6 @@
 use crate::{StrKind, StrOp};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
 
 pub type RelId = u32;
 pub type NodeId = u32;
@@ -271,28 +270,34 @@ impl Program {
         self.rels.iter().find(|rel| rel.id == id)
     }
 
-    /// Explicit stack, post-order over type inputs; a node reached again while its inputs are
-    /// pending is a cycle and has no types.
+    /// Explicit stack, post-order over type inputs. A path longer than the node count repeats a
+    /// node: that cycle has no types.
     pub fn node_types(&self, id: NodeId) -> Option<Vec<Ty>> {
-        let mut done: HashMap<NodeId, Option<Vec<Ty>>> = HashMap::new();
-        let mut entered: HashSet<NodeId> = HashSet::new();
-        let mut stack = vec![(id, false)];
-        while let Some((node, ready)) = stack.pop() {
-            if done.contains_key(&node) { continue; }
-            let Some(op) = self.nodes.get(node as usize) else {
-                done.insert(node, None);
-                continue;
-            };
-            if ready {
-                let types = self.op_types(op, |n| done.get(&n).cloned().flatten());
-                done.insert(node, types);
-                continue;
+        enum Step { Enter(NodeId, usize), Build(NodeId) }
+        let mut steps = vec![Step::Enter(id, 0)];
+        let mut done: Vec<Option<Vec<Ty>>> = Vec::new();
+        while let Some(step) = steps.pop() {
+            match step {
+                Step::Enter(node, depth) => {
+                    if depth > self.nodes.len() { return None; }
+                    let Some(op) = self.nodes.get(node as usize) else {
+                        done.push(None);
+                        continue;
+                    };
+                    steps.push(Step::Build(node));
+                    steps.extend(op.type_inputs().iter().rev().map(|n| Step::Enter(*n, depth + 1)));
+                }
+                Step::Build(node) => {
+                    let op = &self.nodes[node as usize];
+                    let inputs = op.type_inputs();
+                    let base = done.len() - inputs.len();
+                    let types = self.op_types(op, |n| done[base + inputs.iter().position(|x| *x == n)?].clone());
+                    done.truncate(base);
+                    done.push(types);
+                }
             }
-            if !entered.insert(node) { return None; }
-            stack.push((node, true));
-            stack.extend(op.type_inputs().iter().rev().filter(|n| !done.contains_key(n)).map(|n| (*n, false)));
         }
-        done.remove(&id).flatten()
+        done.pop().flatten()
     }
 
     /// One node's column types from its type inputs' types, `types_of(n)`.
@@ -376,8 +381,10 @@ fn type_operands(e: &Expr) -> &[Expr] {
 /// Only `Add`/`Sub` read their first two operands' types; post-order over those with an
 /// explicit stack.
 pub fn expr_type(expr: &Expr, cols: &[Ty]) -> Option<Ty> {
-    if type_operands(expr).is_empty() {
-        return expr_node_type(expr, cols, &[]);
+    let operands = type_operands(expr);
+    if operands.iter().all(|e| type_operands(e).is_empty()) {
+        let leaves = [0, 1].map(|i| operands.get(i).and_then(|e| expr_node_type(e, cols, &[])));
+        return expr_node_type(expr, cols, &leaves[..operands.len()]);
     }
     let mut order = Vec::new();
     let mut walk = vec![expr];

@@ -151,6 +151,27 @@ enum ExprStep<'e> {
 /// Post-order over `expr` with explicit stacks: `leaf` values a column, literal, text or
 /// `StrNil`; `apply` values a call from its operands' values, left to right.
 fn walk_expr<V: Copy>(expr: &Expr, leaf: impl Fn(&Expr) -> V, apply: impl Fn(&Func, &[V]) -> V) -> V {
+    // Trees two calls deep, the common filter and map shapes, skip the stacks.
+    let is_leaf = |e: &Expr| !matches!(e, Expr::Call(func, _) if *func != Func::StrNil);
+    let is_flat = |e: &Expr| match e {
+        Expr::Call(func, args) if *func != Func::StrNil => args.len() <= 2 && args.iter().all(is_leaf),
+        _ => true,
+    };
+    let flat = |e: &Expr| match e {
+        Expr::Call(func, args) if *func != Func::StrNil => {
+            let values: SmallVec<[V; 2]> = args.iter().map(&leaf).collect();
+            apply(func, &values)
+        }
+        e => leaf(e),
+    };
+    match expr {
+        e if is_flat(e) => return flat(e),
+        Expr::Call(func, args) if args.len() <= 2 && args.iter().all(is_flat) => {
+            let values: SmallVec<[V; 2]> = args.iter().map(flat).collect();
+            return apply(func, &values);
+        }
+        _ => {}
+    }
     let mut steps: SmallVec<[ExprStep; 16]> = smallvec![ExprStep::Enter(expr)];
     let mut values: SmallVec<[V; 16]> = SmallVec::new();
     while let Some(step) = steps.pop() {
@@ -291,18 +312,18 @@ fn op_at(p: &Program, id: NodeId) -> Result<&Op, EngineError> {
 }
 
 /// The inputs `build_node` reads for `op`, in the order they are lowered.
-fn lowered_inputs<C>(p: &Program, defined: &[(RelId, C)], op: &Op) -> Vec<NodeId> {
+fn lowered_inputs<C>(p: &Program, defined: &[(RelId, C)], op: &Op) -> SmallVec<[NodeId; 2]> {
     match op {
-        Op::Get(_) | Op::Delay(_) => Vec::new(),
+        Op::Get(_) | Op::Delay(_) => SmallVec::new(),
         Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Mfp { input, .. }
         | Op::Negate(input) | Op::Reduce { input, .. } | Op::Threshold(input)
-        | Op::TopK { input, .. } | Op::Window { input, .. } => vec![*input],
+        | Op::TopK { input, .. } | Op::Window { input, .. } => smallvec![*input],
         Op::Join { inputs, equivalences } => match decoded(p, defined, inputs, equivalences) {
-            Some((side, ..)) => vec![inputs[1 - side]],
-            None => inputs.clone(),
+            Some((side, ..)) => smallvec![inputs[1 - side]],
+            None => SmallVec::from_slice(inputs),
         },
-        Op::Union(inputs) => inputs.clone(),
-        Op::Antijoin { l, r, .. } => vec![*l, *r],
+        Op::Union(inputs) => SmallVec::from_slice(inputs),
+        Op::Antijoin { l, r, .. } => smallvec![*l, *r],
     }
 }
 
@@ -333,7 +354,7 @@ pub fn lower_node<A: Rel>(
             continue;
         }
         let (node, inputs, _) = stack.pop().expect("a frame on the stack");
-        let built: Vec<A::C> = inputs.iter().map(|n| nodes[*n as usize].clone().expect("input lowered first")).collect();
+        let built: SmallVec<[A::C; 2]> = inputs.iter().map(|n| nodes[*n as usize].clone().expect("input lowered first")).collect();
         let c = build_node(p, a, defined, op_at(p, node)?, &built)?;
         let c = a.observe(node, c);
         nodes[node as usize] = Some(c.clone());
