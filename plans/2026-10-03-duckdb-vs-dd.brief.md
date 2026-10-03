@@ -1,4 +1,4 @@
-# Brief: DuckDB (+ OpenIVM) against dd and sqlite_ivm
+# Brief: DuckDB (+ OpenIVM) and DBSP against dd, sqlite_ivm and pg_ivm
 
 User (2026-10-03): "we want both bc now we are competing duck with dd". "dont link duckdb into my
 rust binaries".
@@ -17,14 +17,26 @@ rust binaries".
 - Inventory of existing benches: `sqlite_ivm/plans/costs/0_benchmark_inventory.md`; add the new arms there.
 - Every DuckDB result is checked against dd's rows for the same input; a mismatch fails the run.
 
-## Part A: incremental (OpenIVM)
+## Arms
+
+Existing (reuse, do not rebuild): `dd`, `sqlite-ivm`, `pg_ivm` (`bench/src/arms/pg_ivm.rs`; v6
+`run.sh` `native-postgres-pg_ivm`), `direct-sqlite`, `pg_query`. sqlite_ivm came out of this
+dd / sqlite / pg_ivm shootout; keep its harness and CSV schema.
+
+New:
+- `duckdb` (batch recompute) and `duckdb-openivm` (incremental), through the `duckdb` CLI.
+- `dbsp` (Feldera's `dbsp` crate): a Rust arm in the sqlite_ivm `bench/` crate only (never in
+  `crates/` or dl8). Same circuits: join, group (COUNT/SUM), distinct, reach (recursive), on the
+  same frontier streams. Pin the crate version; record it.
+
+## Part A: incremental (OpenIVM, DBSP)
 
 Workloads: the `frontier-stress` access (join under set UNION) and group (COUNT/SUM) shapes
 (`bench/README.md`, `bench/frontier`). Export each generated frontier stream to SQL/CSV once; DuckDB
 arm: base tables + `CREATE MATERIALIZED VIEW ... AS <shape>`; per frontier: apply inserts/deletes,
 `PRAGMA refresh('<view>')`, read the view. Measure write+refresh time per frontier, read time, peak
-RSS, same sizes as the existing arms. Compare with `sqlite-ivm`, `dd`, `direct-sqlite` from the
-existing harness on the same stream. Also a DuckDB full-recompute arm (no OpenIVM).
+RSS, same sizes as the existing arms. Compare with `sqlite-ivm`, `dd`, `pg_ivm`, `dbsp`, `direct-sqlite` on the same stream; `reach`
+(recursive) for dd, sqlite-ivm, dbsp (OpenIVM and pg_ivm have no recursion: list them as n/a). Also a DuckDB full-recompute arm (no OpenIVM).
 
 ## Part B: recursive batch (dl8 comptime programs)
 
@@ -34,7 +46,7 @@ a debug env var already in the code; do not add Rust code without stopping to re
 `.mjs` exporter: IR JSON -> DuckDB SQL, one table per relation, strata in order, `WITH RECURSIVE`
 (or DuckDB `USING KEY`) for LetRec strata, plain `INSERT ... SELECT` otherwise. Term constructors
 (Mint) become dictionary tables with integer ids. Compare total time and RSS against ir:dd and
-ir:sqlite on the same program; rows must match.
+ir:sqlite on the same program (DBSP for Part B only if the exporter targets it cheaply; else n/a); rows must match.
 
 If a construct cannot be expressed in DuckDB SQL, list it with the count of nodes affected and skip
 that stratum (report it; no silent drop).
@@ -43,7 +55,7 @@ that stratum (report it; no silent drop).
 
 - One heavy build at a time on the machine (`uptime`, `pgrep -f 'cargo|rustc|ninja|make'`); the
   OpenIVM C++ build is heavy: run it alone, `-j` at most 8.
-- No edits to Rust product sources (dl8 `src/`, sqlite_ivm `crates/`); the sqlite_ivm `bench/` crate may gain an arm that shells out to the `duckdb` CLI (no duckdb crate). Commit only the new engine scripts and arms, results,
+- No edits to Rust product sources (dl8 `src/`, sqlite_ivm `crates/`); the sqlite_ivm `bench/` crate may gain a `duckdb` arm that shells out to the CLI (no duckdb crate) and a `dbsp` arm (dbsp crate in `bench/Cargo.toml` only). Commit only the new engine scripts and arms, results,
   the inventory rows, and a findings file `plans/2026-10-03-duckdb-vs-dd.findings.md`.
   No merge, no push. End commit messages with
   `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`.
