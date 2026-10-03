@@ -300,6 +300,37 @@ impl Program {
         done.pop().flatten()
     }
 
+    /// `node_types` for a caller that asks about many nodes of one program: `memo[n]` holds node
+    /// `n`'s answer once computed, so shared inputs are typed once across calls.
+    pub fn node_types_memo(&self, id: NodeId, memo: &mut Vec<Option<Option<Vec<Ty>>>>) -> Option<Vec<Ty>> {
+        if memo.len() < self.nodes.len() {
+            memo.resize(self.nodes.len(), None);
+        }
+        let mut open: Vec<bool> = Vec::new();
+        let mut stack = vec![(id, false)];
+        while let Some((node, expanded)) = stack.pop() {
+            let index = node as usize;
+            let op = self.nodes.get(index)?;
+            if memo[index].is_some() {
+                continue;
+            }
+            if expanded {
+                let types = self.op_types(op, |n| memo.get(n as usize)?.clone()?);
+                memo[index] = Some(types);
+                continue;
+            }
+            if open.len() < self.nodes.len() {
+                open.resize(self.nodes.len(), false);
+            }
+            if std::mem::replace(&mut open[index], true) {
+                return None;
+            }
+            stack.push((node, true));
+            stack.extend(op.type_inputs().iter().filter(|n| memo.get(**n as usize).is_some_and(Option::is_none)).map(|n| (*n, false)));
+        }
+        memo.get(id as usize)?.clone()?
+    }
+
     /// One node's column types from its type inputs' types, `types_of(n)`.
     fn op_types(&self, op: &Op, types_of: impl Fn(NodeId) -> Option<Vec<Ty>>) -> Option<Vec<Ty>> {
         Some(match op {
