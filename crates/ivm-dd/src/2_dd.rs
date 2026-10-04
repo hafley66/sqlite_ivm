@@ -55,14 +55,14 @@ fn rec_inputs(p: &Program, rec: &LetRec) -> BTreeSet<RelId> {
 /// The nodes a LetRec's loop reads that depend on none of its relations: every body that reads
 /// no recursive relation, and every such input of a node that does. Each is the root of a
 /// subtree the loop can read as one entered collection.
-fn independent_inputs<C>(p: &Program, rec: &LetRec, defined: &[(RelId, C)]) -> BTreeSet<NodeId> {
+fn independent_inputs<C>(p: &Program, rec: &LetRec, defined: &[(RelId, C)], fuse: bool) -> BTreeSet<NodeId> {
     // Post-order over the nodes the bodies reach, inputs first, with an explicit stack.
     let mut dependent: Vec<Option<bool>> = vec![None; p.nodes.len()];
     let mut stack: Vec<(NodeId, bool)> = rec.bodies.iter().map(|body| (*body, false)).collect();
     while let Some((id, expanded)) = stack.pop() {
         if dependent[id as usize].is_some() { continue; }
         let op = &p.nodes[id as usize];
-        let inputs = lowered_inputs(p, defined, op);
+        let inputs = lowered_inputs(p, defined, op, fuse);
         if expanded {
             let reads_rec = matches!(op, Op::Get(rel) if rec.ids.contains(rel));
             let value = reads_rec || inputs.iter().any(|input| dependent[*input as usize] == Some(true));
@@ -75,7 +75,7 @@ fn independent_inputs<C>(p: &Program, rec: &LetRec, defined: &[(RelId, C)]) -> B
     let mut roots: BTreeSet<NodeId> = rec.bodies.iter().copied().filter(|body| dependent[*body as usize] == Some(false)).collect();
     for (id, value) in dependent.iter().enumerate() {
         if *value == Some(true) {
-            roots.extend(lowered_inputs(p, defined, &p.nodes[id]).into_iter().filter(|input| dependent[*input as usize] == Some(false)));
+            roots.extend(lowered_inputs(p, defined, &p.nodes[id], fuse).into_iter().filter(|input| dependent[*input as usize] == Some(false)));
         }
     }
     roots
@@ -120,7 +120,7 @@ impl Nest for Time {
         // and entered; the loop then iterates only over the nodes that depend on its variables.
         let hoisted: Vec<(NodeId, Coll<'s>)> = {
             let mut outer_nodes = vec![None; p.nodes.len()];
-            independent_inputs(p, rec, defined)
+            independent_inputs(p, rec, defined, rel.fuses_join_project())
                 .into_iter()
                 .map(|id| Ok((id, lower_node(p, rel, &mut outer_nodes, defined, id)?)))
                 .collect::<Result<_, EngineError>>()?
@@ -141,6 +141,7 @@ impl Nest for Time {
                 keyed: BTreeMap::new(),
                 read: BTreeSet::new(),
                 types: rel.types.clone(),
+                arranged: rel.arranged.clone(),
             };
             let mut nodes = vec![None; p.nodes.len()];
             for (id, c) in hoisted {
@@ -207,6 +208,16 @@ pub struct DdRel<'s, T: Nest = Time> {
     read: BTreeSet<RelId>,
     /// `Program::node_types_memo` answers, shared by every scope of one install.
     types: Rc<RefCell<Vec<Option<Option<Vec<Ty>>>>>>,
+    /// Join arrangements built and cells sent into them, shared by every scope of one install.
+    arranged: Rc<RefCell<ArrangeStats>>,
+}
+
+/// `dd install` / `dd settle` debug fields: join arrangements built at install, and cells (key
+/// plus row columns, one per record update) sent into them since install.
+#[derive(Default)]
+struct ArrangeStats {
+    arrangements: u64,
+    cells: u64,
 }
 
 impl<'s, T: Nest> DdRel<'s, T> {
@@ -217,8 +228,11 @@ impl<'s, T: Nest> DdRel<'s, T> {
             return arranged.clone();
         }
         let interner = self.interner.clone();
+        self.arranged.borrow_mut().arrangements += 1;
+        let stats = self.arranged.clone();
         let arranged = c
             .flat_map(move |row| {
+                stats.borrow_mut().cells += (key.len() + row.len()) as u64;
                 let mut cells = cols(&row, &key);
                 for (cell, any) in cells.iter_mut().zip(&any) {
                     if *any {
@@ -232,6 +246,40 @@ impl<'s, T: Nest> DdRel<'s, T> {
             .arrange_by_key();
         self.keyed.insert(id, arranged.clone());
         arranged
+    }
+
+    /// Two-input join; `project` names the columns of the concatenated row to emit, `None` all.
+    fn join_rows(&mut self, cs: Vec<Coll<'s, T>>, eq: &[Vec<(u8, ColId)>], types: &[Vec<Ty>], project: Option<Vec<ColId>>) -> Result<Coll<'s, T>, EngineError> {
+        if cs.len() != 2 {
+            return Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Join arity != 2")));
+        }
+        let side = |input: u8| -> Vec<ColId> {
+            eq.iter()
+                .map(|class| class.iter().find(|(i, _)| *i == input).map(|(_, c)| *c).expect("check: class spans both inputs"))
+                .collect()
+        };
+        let (lk, rk) = (side(0), side(1));
+        let l_any = lk.iter().map(|c| types[0][*c as usize] == Ty::Any).collect::<Vec<_>>();
+        let r_any = rk.iter().map(|c| types[1][*c as usize] == Ty::Any).collect::<Vec<_>>();
+        let mut cs = cs.into_iter();
+        let (l, r) = (cs.next().unwrap(), cs.next().unwrap());
+        let l = self.keyed(l, lk, l_any);
+        let r = self.keyed(r, rk, r_any);
+        let left = types[0].len();
+        Ok(l.join_core(r, move |_, a: &Row, b: &Row| {
+            Some(match &project {
+                None => {
+                    let mut row = Vec::with_capacity(a.len() + b.len());
+                    row.extend_from_slice(a);
+                    row.extend_from_slice(b);
+                    row
+                }
+                Some(project) => project.iter().map(|c| {
+                    let c = *c as usize;
+                    if c < left { a[c] } else { b[c - left] }
+                }).collect(),
+            })
+        }))
     }
 }
 
@@ -393,27 +441,16 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
     }
 
     fn join(&mut self, cs: Vec<Self::C>, eq: &[Vec<(u8, ColId)>], types: &[Vec<Ty>]) -> Result<Self::C, EngineError> {
-        if cs.len() != 2 {
-            return Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Join arity != 2")));
-        }
-        let side = |input: u8| -> Vec<ColId> {
-            eq.iter()
-                .map(|class| class.iter().find(|(i, _)| *i == input).map(|(_, c)| *c).expect("check: class spans both inputs"))
-                .collect()
-        };
-        let (lk, rk) = (side(0), side(1));
-        let l_any = lk.iter().map(|c| types[0][*c as usize] == Ty::Any).collect::<Vec<_>>();
-        let r_any = rk.iter().map(|c| types[1][*c as usize] == Ty::Any).collect::<Vec<_>>();
-        let mut cs = cs.into_iter();
-        let (l, r) = (cs.next().unwrap(), cs.next().unwrap());
-        let l = self.keyed(l, lk, l_any);
-        let r = self.keyed(r, rk, r_any);
-        Ok(l.join_core(r, |_, a: &Row, b: &Row| {
-            let mut row = Vec::with_capacity(a.len() + b.len());
-            row.extend_from_slice(a);
-            row.extend_from_slice(b);
-            Some(row)
-        }))
+        self.join_rows(cs, eq, types, None)
+    }
+
+    /// Unmeasured installs only: a measured install taps every IR node, the join included.
+    fn fuses_join_project(&self) -> bool {
+        self.taps.is_none()
+    }
+
+    fn join_project(&mut self, cs: Vec<Self::C>, eq: &[Vec<(u8, ColId)>], types: &[Vec<Ty>], project: &[ColId]) -> Result<Self::C, EngineError> {
+        self.join_rows(cs, eq, types, Some(project.to_vec()))
     }
 
     fn antijoin(&mut self, l: Self::C, r: Self::C, lk: &[ColId], rk: &[ColId]) -> Self::C {
@@ -984,6 +1021,7 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
             constructor_ids.entry(name.clone()).or_insert(*id);
         }
         let build_start = std::time::Instant::now();
+        let arranged: Rc<RefCell<ArrangeStats>> = Rc::default();
         let built = worker.dataflow::<Time, _, _>(|scope| -> Result<Built, EngineError> {
             let mut inputs = BTreeMap::new();
             let mut constructor_inputs = BTreeMap::new();
@@ -999,7 +1037,7 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
                 constructor_inputs.insert(rel.id, input);
                 sources.insert(rel.id, c);
             }
-            let mut rel = DdRel { scope, rec: None, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone(), constructors: constructors.clone(), interner: interner.clone(), sum_error: sum_error.clone(), texts: texts.clone(), keyed: BTreeMap::new(), read: BTreeSet::new(), types: Rc::default() };
+            let mut rel = DdRel { scope, rec: None, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone(), constructors: constructors.clone(), interner: interner.clone(), sum_error: sum_error.clone(), texts: texts.clone(), keyed: BTreeMap::new(), read: BTreeSet::new(), types: Rc::default(), arranged: arranged.clone() };
             lower(&program, &mut rel)?;
             // A constructor no operator reads gets no rows: its terms would cost an epoch and drive nothing.
             constructor_inputs.retain(|id, _| rel.read.contains(id));
@@ -1012,7 +1050,7 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
             }
             Ok(Built { inputs, constructor_inputs, outputs })
         });
-        tracing::debug!(target: "ivm_dd", operators = worker.peek_identifier(), nodes = program.nodes.len(), build_ns = build_start.elapsed().as_nanos() as u64, "dd install");
+        tracing::debug!(target: "ivm_dd", operators = worker.peek_identifier(), nodes = program.nodes.len(), build_ns = build_start.elapsed().as_nanos() as u64, arrangements = arranged.borrow().arrangements, "dd install");
         let mut built = match built {
             Ok(built) => {
                 let _ = ready.send(Ok(()));
@@ -1140,7 +1178,7 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
                     if taps.is_some() {
                         counters.rounds = Some(rounds.into_iter().filter(|(_, round)| *round > 0).count() as u64);
                     }
-                    tracing::debug!(target: "ivm_dd", changes_in, changes_out = changes.len(), epochs = epoch - epoch_before, steps, settle_ns = settle_start.elapsed().as_nanos() as u64, "dd settle");
+                    tracing::debug!(target: "ivm_dd", changes_in, changes_out = changes.len(), epochs = epoch - epoch_before, steps, settle_ns = settle_start.elapsed().as_nanos() as u64, arranged_cells = arranged.borrow().cells, "dd settle");
                     let _ = reply.send(Ok((Delta { tick: frontier_tick, changes }, if mode == Mode::Traced { seen } else { Vec::new() }, counters)));
                     frontier_tick += 1;
                 }

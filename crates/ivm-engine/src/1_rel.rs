@@ -122,6 +122,17 @@ pub trait Rel {
     fn union(&mut self, cs: Vec<Self::C>) -> Self::C;
     fn negate(&mut self, c: Self::C) -> Self::C;
     fn join(&mut self, cs: Vec<Self::C>, eq: &[Vec<(u8, ColId)>], types: &[Vec<Ty>]) -> Result<Self::C, EngineError>;
+    /// True: `lower_node` builds an `Mfp` that only projects a two-input `Join` as one
+    /// `join_project`, and never builds that join's full-width output for it.
+    fn fuses_join_project(&self) -> bool {
+        false
+    }
+    /// `join` whose output rows hold only the `project` columns of the concatenated row.
+    fn join_project(&mut self, cs: Vec<Self::C>, eq: &[Vec<(u8, ColId)>], types: &[Vec<Ty>], project: &[ColId]) -> Result<Self::C, EngineError> {
+        let c = self.join(cs, eq, types)?;
+        let all: Vec<Ty> = types.iter().flatten().copied().collect();
+        Ok(self.mfp(c, &[], &[], project, &all))
+    }
     /// `c ⋈ functor` on `c.col = functor.c0`: each row extended by the constructor row of the term
     /// its `col` names. A row names only terms minted before it, so the engine reads the
     /// constructor's current rows and no constructor change ever drives the result.
@@ -318,14 +329,27 @@ fn decoded<C>(p: &Program, defined: &[(RelId, C)], inputs: &[NodeId], equivalenc
     })
 }
 
+/// `Mfp { project }` with no filter or map over a two-input `Join` that is no constructor
+/// decode: `(join inputs, equivalences, project)`.
+pub fn projected_join<'p, C>(p: &'p Program, defined: &[(RelId, C)], op: &'p Op) -> Option<(&'p [NodeId], &'p [Vec<(u8, ColId)>], &'p [ColId])> {
+    let Op::Mfp { input, filter, map, project } = op else { return None };
+    if !filter.is_empty() || !map.is_empty() || project.is_empty() { return None; }
+    let Op::Join { inputs, equivalences } = p.nodes.get(*input as usize)? else { return None };
+    (inputs.len() == 2 && decoded(p, defined, inputs, equivalences).is_none()).then_some((inputs.as_slice(), equivalences.as_slice(), project.as_slice()))
+}
+
 fn op_at(p: &Program, id: NodeId) -> Result<&Op, EngineError> {
     p.nodes
         .get(id as usize)
         .ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::UnknownNode(id)))
 }
 
-/// The inputs `build_node` reads for `op`, in the order they are lowered.
-pub fn lowered_inputs<C>(p: &Program, defined: &[(RelId, C)], op: &Op) -> SmallVec<[NodeId; 2]> {
+/// The inputs `build_node` reads for `op`, in the order they are lowered. `fuse`: the engine's
+/// `fuses_join_project`; a projected join reads the join's inputs.
+pub fn lowered_inputs<C>(p: &Program, defined: &[(RelId, C)], op: &Op, fuse: bool) -> SmallVec<[NodeId; 2]> {
+    if let Some((inputs, ..)) = projected_join(p, defined, op).filter(|_| fuse) {
+        return SmallVec::from_slice(inputs);
+    }
     match op {
         Op::Get(_) | Op::Delay(_) => SmallVec::new(),
         Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Mfp { input, .. }
@@ -352,7 +376,8 @@ pub fn lower_node<A: Rel>(
     if let Some(Some(c)) = nodes.get(id as usize) {
         return Ok(c.clone());
     }
-    let mut stack = vec![(id, lowered_inputs(p, defined, op_at(p, id)?), 0usize)];
+    let fuse = a.fuses_join_project();
+    let mut stack = vec![(id, lowered_inputs(p, defined, op_at(p, id)?, fuse), 0usize)];
     while let Some(top) = stack.len().checked_sub(1) {
         let (_, inputs, next) = &mut stack[top];
         if let Some(&input) = inputs.get(*next) {
@@ -363,12 +388,12 @@ pub fn lower_node<A: Rel>(
             if stack.iter().any(|(node, ..)| *node == input) {
                 return Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("node cycle")));
             }
-            stack.push((input, lowered_inputs(p, defined, op_at(p, input)?), 0));
+            stack.push((input, lowered_inputs(p, defined, op_at(p, input)?, fuse), 0));
             continue;
         }
         let (node, inputs, _) = stack.pop().expect("a frame on the stack");
         let built: SmallVec<[A::C; 2]> = inputs.iter().map(|n| nodes[*n as usize].clone().expect("input lowered first")).collect();
-        let c = build_node(p, a, defined, op_at(p, node)?, &built)?;
+        let c = build_node(p, a, defined, op_at(p, node)?, &built, fuse)?;
         let c = a.observe(node, c);
         nodes[node as usize] = Some(c.clone());
         if stack.is_empty() {
@@ -385,8 +410,13 @@ fn build_node<A: Rel>(
     defined: &[(RelId, A::C)],
     op: &Op,
     built: &[A::C],
+    fuse: bool,
 ) -> Result<A::C, EngineError> {
     let first = || built[0].clone();
+    if let Some((inputs, equivalences, project)) = projected_join(p, defined, op).filter(|_| fuse) {
+        let types = inputs.iter().map(|n| a.node_types(p, *n).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Join input types")))).collect::<Result<Vec<_>, _>>()?;
+        return a.join_project(built.to_vec(), equivalences, &types, project);
+    }
     Ok(match op {
         Op::Get(rel) => match defined.iter().find(|(d, _)| d == rel) {
             Some((_, c)) => c.clone(),
