@@ -301,7 +301,12 @@ impl Sqlite {
             "SELECT (SELECT count(*) FROM sqlite_master WHERE sql LIKE 'CREATE %') + (SELECT count(*) FROM sqlite_temp_master WHERE sql LIKE 'CREATE %')",
             [], |row| row.get::<_, i64>(0),
         ) {
-            tracing::info!(target: "ivm_sqlite", sqlite_create_count = creates, "ir schema");
+            // Columns of every table and view the install created: what projection narrows.
+            let columns = engine.db.query_row(
+                "SELECT (SELECT count(*) FROM sqlite_master m JOIN pragma_table_info(m.name, 'main') WHERE m.type IN ('table', 'view')) + (SELECT count(*) FROM sqlite_temp_master m JOIN pragma_table_info(m.name, 'temp') WHERE m.type IN ('table', 'view'))",
+                [], |row| row.get::<_, i64>(0),
+            ).unwrap_or(-1);
+            tracing::info!(target: "ivm_sqlite", sqlite_columns = columns, sqlite_create_count = creates, "ir schema");
         }
         Ok(engine)
     }
