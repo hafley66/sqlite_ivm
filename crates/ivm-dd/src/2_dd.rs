@@ -231,11 +231,12 @@ pub struct DdRel<'s, T: Nest = Time> {
     limits: Vec<(Option<RelId>, u32, Coll<'s, T>)>,
 }
 
-/// `dd install` / `dd settle` debug fields: join arrangements built at install, and cells (key
-/// plus row columns, one per record update) sent into them since install.
+/// `dd install` / `dd settle` debug fields: join arrangements built at install, record updates
+/// sent into them (`dd settle` logs those of the settle), and cells (key plus row) since install.
 #[derive(Default)]
 struct ArrangeStats {
     arrangements: u64,
+    records: u64,
     cells: u64,
 }
 
@@ -251,7 +252,10 @@ impl<'s, T: Nest> DdRel<'s, T> {
         let stats = self.arranged.clone();
         let arranged = c
             .flat_map(move |row| {
-                stats.borrow_mut().cells += (key.len() + row.len()) as u64;
+                let mut stats = stats.borrow_mut();
+                stats.records += 1;
+                stats.cells += (key.len() + row.len()) as u64;
+                drop(stats);
                 let mut cells = cols(&row, &key);
                 for (cell, any) in cells.iter_mut().zip(&any) {
                     if *any {
@@ -1097,6 +1101,7 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
             match command {
                 Command::Settle(frontier, reply) => {
                     let settle_start = std::time::Instant::now();
+                    let records_before = arranged.borrow().records;
                     let (epoch_before, mut steps) = (epoch, 0u64);
                     let changes_in = frontier.changes.len();
                     let interned_before = interner.borrow().len();
@@ -1208,7 +1213,7 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
                     if taps.is_some() {
                         counters.rounds = Some(rounds.into_iter().filter(|(_, round)| *round > 0).count() as u64);
                     }
-                    tracing::debug!(target: "ivm_dd", changes_in, changes_out = changes.len(), epochs = epoch - epoch_before, steps, settle_ns = settle_start.elapsed().as_nanos() as u64, arranged_cells = arranged.borrow().cells, "dd settle");
+                    tracing::debug!(target: "ivm_dd", changes_in, changes_out = changes.len(), epochs = epoch - epoch_before, steps, settle_ns = settle_start.elapsed().as_nanos() as u64, arranged_records = arranged.borrow().records - records_before, arranged_cells = arranged.borrow().cells, "dd settle");
                     let _ = reply.send(Ok((Delta { tick: frontier_tick, changes }, if mode == Mode::Traced { seen } else { Vec::new() }, counters)));
                     frontier_tick += 1;
                 }

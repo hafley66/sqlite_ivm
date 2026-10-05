@@ -9,6 +9,9 @@ use sqlite_ext::rusqlite::{self, Connection};
 use std::collections::{BTreeSet, HashSet};
 
 pub struct Sqlite {
+    /// Work counting on `db` (`Engine::install` with `ivm_sqlite::work` enabled, or
+    /// `install_counted`); declared first so it unregisters before `db` closes.
+    work: Option<crate::work::WorkTrace>,
     /// The database every installed program, term and source table lives in.
     pub db: Connection,
     programs: Vec<OutputProgram>,
@@ -237,6 +240,22 @@ impl Sqlite {
     /// `shards` > 0 attaches that many in-memory schemas and places node tables in them; the
     /// database then holds those tables only while this connection lives.
     pub fn install_on_with(owned: Connection, ir: &Program, shards: usize) -> Result<Self, EngineError> {
+        Self::install_traced(owned, ir, shards, None)
+    }
+
+    /// `Engine::install` with work counting on: `work()` reads the counts.
+    pub fn install_counted(ir: &Program) -> Result<Self, EngineError> {
+        let db = Connection::open_in_memory().map_err(|e| error(Stage::Install, e))?;
+        let work = crate::work::WorkTrace::start(&db).map_err(|e| error(Stage::Install, e))?;
+        Self::install_traced(db, ir, SHARDS, Some(work))
+    }
+
+    /// Counts since install, when counting.
+    pub fn work(&self) -> Option<crate::work::Work> {
+        self.work.as_ref().map(|work| work.work())
+    }
+
+    fn install_traced(owned: Connection, ir: &Program, shards: usize, mut work: Option<crate::work::WorkTrace>) -> Result<Self, EngineError> {
         let db = &owned;
         for shard in 0..shards {
             db.execute_batch(&format!("ATTACH DATABASE ':memory:' AS {}", catalog::shard_schema(shard)))
@@ -315,7 +334,9 @@ impl Sqlite {
                 });
             }
         }
+        if let Some(work) = &mut work { work.report("install"); }
         let engine = Self {
+            work,
             db: owned,
             programs,
             ir: ir.clone(),
@@ -350,10 +371,14 @@ impl Sqlite {
 impl Engine for Sqlite {
     fn install(ir: &Program) -> Result<Self, EngineError> {
         let db = Connection::open_in_memory().map_err(|e| error(Stage::Install, e))?;
-        Self::install_on_with(db, ir, SHARDS)
+        let work = if crate::work::WorkTrace::wanted() {
+            Some(crate::work::WorkTrace::start(&db).map_err(|e| error(Stage::Install, e))?)
+        } else { None };
+        Self::install_traced(db, ir, SHARDS, work)
     }
 
     fn settle(&mut self, frontier: Frontier) -> Result<Delta, EngineError> {
+        if let Some(work) = &mut self.work { work.report("between"); }
         let db = &self.db;
         let before: i64 = db.query_row("SELECT count(*) FROM ivm_term", [], |r| r.get(0))
             .map_err(|e| error(Stage::Settle, e))?;
@@ -554,11 +579,13 @@ impl Engine for Sqlite {
                 self.counters = counters;
                 let tick = self.tick;
                 self.tick += 1;
+                if let Some(work) = &mut self.work { work.report("settle"); }
                 Ok(Delta { tick, changes })
             }
             Err(e) => {
                 let _ = db
                     .execute_batch("ROLLBACK TO ivm_engine_frontier; RELEASE ivm_engine_frontier;");
+                if let Some(work) = &mut self.work { work.report("settle"); }
                 Err(e)
             }
         }
