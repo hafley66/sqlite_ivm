@@ -478,23 +478,13 @@ impl SqlRel {
             .collect()
     }
 
-    /// A union read twice is stored when that lets two or more join deltas under it inline.
+    /// Join deltas read by one settle statement become its CTEs (per-round statements count
+    /// twice), and only where that statement expands the CTE once: SQLite copies a CTE's select
+    /// tree at every reference while it prepares, and a join delta reads each input delta twice,
+    /// so a chain of CTE joins would be walked 2^depth times. A union read by more than one
+    /// statement is stored: inline, every reader would hold, prepare and materialize all of its
+    /// inputs. Readers have larger ids.
     fn inline_joins(&mut self) {
-        let inline: Vec<bool> = self.nodes.iter().map(|node| node.inline).collect();
-        let statement = self.place(&|_| true);
-        let mut gain = vec![0usize; self.nodes.len()];
-        for node in &self.nodes {
-            if node.join && node.inline {
-                if let Some(at) = statement[node.c.node] { gain[at] += 1; }
-            }
-        }
-        for (node, inline) in self.nodes.iter_mut().zip(inline) { node.inline = inline; }
-        self.place(&|at| gain[at] >= 2);
-    }
-
-    /// Join deltas read by at most one settle statement become its CTEs (per-round statements count
-    /// twice); returns per node the physical node whose statement read it last. Readers have larger ids.
-    fn place(&mut self, store_union: &dyn Fn(usize) -> bool) -> Vec<Option<usize>> {
         let by_name: std::collections::HashMap<String, usize> =
             self.nodes.iter().map(|node| (node.c.d.clone(), node.c.node)).collect();
         let named = |sql: &str| {
@@ -505,10 +495,12 @@ impl SqlRel {
         };
         let mut reads = vec![0usize; self.nodes.len()];
         let mut statement = vec![None; self.nodes.len()];
-        for (_, c) in &self.outputs { reads[c.node] += 1; }
+        // References SQLite expands per node's delta, over every statement that holds it.
+        let mut expansions = vec![0usize; self.nodes.len()];
+        for (_, c) in &self.outputs { reads[c.node] += 1; expansions[c.node] += 1; }
         for at in (0..self.nodes.len()).rev() {
             let node = &self.nodes[at];
-            if node.integrated { reads[at] += 2; }
+            if node.integrated { reads[at] += 2; expansions[at] += 2; }
             let counted_by_reader = statement[at].is_some_and(|reader: usize| {
                 let fill = &self.nodes[reader].fill;
                 fill.len() == 1 && fill[0].contains(FILL_ANCHOR)
@@ -516,11 +508,11 @@ impl SqlRel {
             if node.join && !node.inline && node.owner == Owner::Settle && !node.c.rec && !node.integrated
                 && reads[at] == 1 && counted_by_reader && node.fill.len() == 1 && node.body.is_some() && node.ddl.is_empty()
                 && node.delete_fill.is_empty() && node.insert_fill.is_empty()
-                && node.delete_seed.is_empty() && node.insert_seed.is_empty() {
+                && node.delete_seed.is_empty() && node.insert_seed.is_empty() && expansions[at] <= 1 {
                 self.nodes[at].inline = true;
             }
             let node = &self.nodes[at];
-            if node.union && node.inline && node.owner == Owner::Settle && !node.c.rec && reads[at] > 1 && store_union(at) {
+            if node.union && node.inline && node.owner == Owner::Settle && !node.c.rec && reads[at] > 1 {
                 self.nodes[at].inline = false;
             }
             if self.nodes[at].source {
@@ -528,10 +520,16 @@ impl SqlRel {
             }
             let node = &self.nodes[at];
             let (own, reader) = (reads[at], if node.inline { statement[at] } else { Some(at) });
-            let mut add = |sql: &str, weight: usize| for input in named(sql) {
-                if input != at {
-                    reads[input] += weight;
-                    statement[input] = reader;
+            let times = if node.inline { expansions[at] } else { 1 };
+            let mut add = |sql: &str, weight: usize| {
+                for input in named(sql) {
+                    if input != at {
+                        reads[input] += weight;
+                        statement[input] = reader;
+                    }
+                }
+                for input in delta_names(sql).filter_map(|name| by_name.get(name).copied()) {
+                    if input != at { expansions[input] += times; }
                 }
             };
             if node.inline {
@@ -544,7 +542,6 @@ impl SqlRel {
                 }
             }
         }
-        statement
     }
 
     /// Each `ivm_nK_i` of a viewed node without a stored image becomes its view, inputs expanded
