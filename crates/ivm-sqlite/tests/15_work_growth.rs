@@ -1,4 +1,4 @@
-//! Work of a generated program family at sizes n and 4n (rules, relations and nodes all scale with
+//! Work of a generated program family at sizes n and 4n for n = 4, 16, 64 (rules, relations and nodes all scale with
 //! n): every pinned count grows Linear or slower on both engines. SQLite counts are read from the
 //! `ivm_sqlite::work` events through `oh::CountRecorder`; DD counts from `counters()`.
 #![cfg(not(feature = "image"))]
@@ -16,7 +16,7 @@ use tracing_subscriber::{filter::Targets, layer::SubscriberExt, Layer as _};
 oh::counting_allocator!();
 
 /// Small sizes n; each runs against 4n.
-const SIZES: [usize; 2] = [4, 16];
+const SIZES: [usize; 3] = [4, 16, 64];
 const RATIO: usize = 4;
 const EDGES: i64 = 8;
 

@@ -238,8 +238,16 @@ fn bundled_program(ir: &Program) -> Result<(Program, Vec<(RelId, usize)>), Engin
     Ok((bundle, members))
 }
 
-/// Attached in-memory schemas `Engine::install` spreads node tables over (SQLite allows 10).
-pub const SHARDS: usize = 8;
+/// Most attached in-memory schemas `Engine::install` fills with node tables, `SHARD_OBJECTS` each:
+/// SQLite's compile-time ceiling `SQLITE_MAX_ATTACHED` (default 10, at most 125); the
+/// connection's `SQLITE_LIMIT_ATTACHED` lowers it.
+pub const SHARDS: usize = 125;
+
+/// `shards`, lowered to the attached schemas the connection allows.
+fn attach_limit(db: &Connection, shards: usize) -> usize {
+    let limit = unsafe { rusqlite::ffi::sqlite3_limit(db.handle(), rusqlite::ffi::SQLITE_LIMIT_ATTACHED, -1) };
+    shards.min(limit.max(0) as usize)
+}
 
 impl Sqlite {
     /// Installs `ir` into `db` and takes ownership of it. `Engine::install` opens an in-memory one.
@@ -247,8 +255,8 @@ impl Sqlite {
         Self::install_on_with(owned, ir, 0)
     }
 
-    /// `shards` > 0 attaches that many in-memory schemas and places node tables in them; the
-    /// database then holds those tables only while this connection lives.
+    /// `shards` > 0 attaches up to that many in-memory schemas, as the node tables need, and places
+    /// node tables in them; the database then holds those tables only while this connection lives.
     pub fn install_on_with(owned: Connection, ir: &Program, shards: usize) -> Result<Self, EngineError> {
         Self::install_traced(owned, ir, shards, None)
     }
@@ -267,10 +275,7 @@ impl Sqlite {
 
     fn install_traced(owned: Connection, ir: &Program, shards: usize, mut work: Option<crate::work::WorkLog>) -> Result<Self, EngineError> {
         let db = &owned;
-        for shard in 0..shards {
-            db.execute_batch(&format!("ATTACH DATABASE ':memory:' AS {}", catalog::shard_schema(shard)))
-                .map_err(|e| error(Stage::Install, e))?;
-        }
+        let shards = attach_limit(db, shards);
         if ir.outputs.is_empty() {
             return Err(EngineError::new(
                 Stage::Install,
@@ -361,8 +366,9 @@ impl Sqlite {
         if !tracing::enabled!(target: "ivm_sqlite", tracing::Level::INFO) {
             return Ok(engine);
         }
-        let schemas = ["main".to_owned(), "temp".to_owned()].into_iter()
-            .chain((0..shards).map(catalog::shard_schema)).collect::<Vec<_>>();
+        let schemas: Vec<String> = engine.db.prepare("SELECT name FROM pragma_database_list")
+            .and_then(|mut list| list.query_map([], |row| row.get(0))?.collect())
+            .unwrap_or_default();
         let creates_sql = schemas.iter()
             .map(|s| format!("(SELECT count(*) FROM {s}.sqlite_master WHERE sql LIKE 'CREATE %')"))
             .collect::<Vec<_>>().join(" + ");

@@ -148,18 +148,27 @@ fn deserialize(conn: &Connection, schema: &str, bytes: &[u8]) -> rusqlite::Resul
     Ok(())
 }
 
+/// Attaches `ivm_s0..ivm_s{shards}` as empty in-memory schemas.
+fn attach(conn: &Connection, shards: usize) -> rusqlite::Result<()> {
+    (0..shards).try_for_each(|shard| {
+        conn.execute_batch(&format!("ATTACH DATABASE ':memory:' AS {}", crate::catalog::shard_schema(shard)))
+    })
+}
+
 /// Without the `image` feature every install runs its shard DDL.
 #[cfg(not(feature = "image"))]
-pub(crate) fn install_shards(conn: &Connection, _shards: usize, ddl: &str, meter: &mut Meter) -> rusqlite::Result<()> {
+pub(crate) fn install_shards(conn: &Connection, shards: usize, ddl: &str, meter: &mut Meter) -> rusqlite::Result<()> {
+    attach(conn, shards)?;
     meter.exec_text(conn, "install", "shards", ddl)
 }
 
 #[cfg(not(feature = "image"))]
 pub fn clear_memory() {}
 
-/// Fills the attached shard schemas `ivm_s0..ivm_s{shards}` with the objects `ddl` creates.
+/// Attaches the shard schemas `ivm_s0..ivm_s{shards}` and fills them with the objects `ddl` creates.
 #[cfg(feature = "image")]
 pub(crate) fn install_shards(conn: &Connection, shards: usize, ddl: &str, meter: &mut Meter) -> rusqlite::Result<()> {
+    attach(conn, shards)?;
     let key = key(shards, ddl);
     let cached = memory().lock().unwrap().get(&key).filter(|image| image.ddl == ddl).cloned();
     let (cached, layer) = match cached {

@@ -34,7 +34,7 @@ use crate::plan::{self, Compiled, Root, ScanSpec};
 use crate::OutputColumn;
 use ivm_ir::{Program as IrProgram, Ty};
 use sqlite_ext::rusqlite::{types::Value, Connection};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 pub(crate) struct Installed {
@@ -264,7 +264,7 @@ pub(crate) enum Watch {
 pub(crate) struct CreatedSources {
     pub(crate) ddl: String,
     pub(crate) columns: HashMap<String, Vec<String>>,
-    /// Attached schemas `ivm_s0..` the node tables spread over; 0 keeps every table in `main`.
+    /// Most attached schemas `ivm_s0..` the node tables may fill; 0 keeps every table in `main`.
     pub(crate) shards: usize,
 }
 
@@ -346,7 +346,7 @@ fn install_program(
     sql.push_str(&created.ddl);
     push_catalog_ddl(&mut sql);
     let mut shard_sql = String::new();
-    push_program_ddl(&installed, &mut sql, created.shards, &mut shard_sql);
+    let shards = push_program_ddl(&installed, &mut sql, created.shards, &mut shard_sql);
     // Persist the typed program; SQL text is only an install-time input.
     let program_json = serde_json::to_string(&program)
         .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::State(e.to_string())))?;
@@ -369,7 +369,7 @@ fn install_program(
     // Ahead of the savepoint: a schema inside a transaction cannot be deserialized. Only
     // `Engine::install` shards, on a fresh connection it drops when the install fails.
     if !shard_sql.is_empty() {
-        crate::image::install_shards(conn, created.shards, &shard_sql, &mut meter)
+        crate::image::install_shards(conn, shards, &shard_sql, &mut meter)
             .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
     }
     meter
@@ -829,32 +829,37 @@ fn push_catalog_ddl(sql: &mut String) {
 }
 
 /// The schema `ivm_s{n}` a node table lives in. SQLite reparses its schema table (a full scan)
-/// after every CREATE, so one schema of N objects costs O(N^2); `shards` schemas divide it.
+/// after every CREATE, so a schema of N objects costs O(N^2) to fill.
 pub(crate) fn shard_schema(n: usize) -> String {
     format!("ivm_s{n}")
 }
 
-/// `CREATE TABLE t ..` / `CREATE INDEX [IF NOT EXISTS] x ON t ..` with the object placed in its
-/// table's shard. Tables the output views read stay in `main`: a view reads only its own schema.
-fn sharded_ddl(ddl: &str, shards: usize, main_only: &str, placed: &mut HashMap<String, usize>) -> Option<String> {
+/// Shards every sharded install opens at least; tables go round-robin over them.
+pub(crate) const MIN_SHARDS: usize = 8;
+
+/// Objects per shard above which an install opens more shards (up to its allowed count), so each
+/// CREATE reparses at most about this many rows of its shard's schema table.
+pub(crate) const SHARD_OBJECTS: usize = 32;
+
+/// `CREATE TABLE t ..` / `CREATE INDEX [IF NOT EXISTS] x ON t ..` split into its head, the rest,
+/// and the table; `None` for other DDL and for tables the output views read, which stay in
+/// `main` (a view reads only its own schema).
+fn shardable<'a>(ddl: &'a str, main_only: &str) -> Option<(&'static str, &'a str, &'a str)> {
     let in_main = |table: &str| main_only.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).any(|word| word == table);
     let (head, rest) = ["CREATE TABLE ", "CREATE INDEX IF NOT EXISTS ", "CREATE INDEX "].iter()
-        .find_map(|head| ddl.strip_prefix(head).map(|rest| (*head, rest)))
-        .unwrap_or(("", ddl));
+        .find_map(|head| ddl.strip_prefix(head).map(|rest| (*head, rest)))?;
     let words = rest.split_whitespace().collect::<Vec<_>>();
     let table = match (head, words.as_slice()) {
         ("CREATE TABLE ", [name, ..]) => *name,
         ("CREATE INDEX IF NOT EXISTS " | "CREATE INDEX ", [_, "ON", table, ..]) => *table,
         _ => return None,
     };
-    if in_main(table) { return None; }
-    let next = placed.len() % shards;
-    let shard = *placed.entry(table.to_owned()).or_insert(next);
-    Some(format!("{head}{}.{rest}", shard_schema(shard)))
+    (!in_main(table)).then_some((head, rest, table))
 }
 
-/// `shard_sql` takes the statements placed in shard schemas (none when `shards` is 0).
-fn push_program_ddl(inst: &Installed, sql: &mut String, shards: usize, shard_sql: &mut String) {
+/// `shard_sql` takes the statements placed in shard schemas (none when `shards` is 0); returns
+/// the shards they fill.
+fn push_program_ddl(inst: &Installed, sql: &mut String, shards: usize, shard_sql: &mut String) -> usize {
     let p = &inst.name;
     let plan = &inst.plan;
     let width = plan.stage_width.max(1);
@@ -873,10 +878,22 @@ fn push_program_ddl(inst: &Installed, sql: &mut String, shards: usize, shard_sql
             quote(format!("{}_table", stage(p))),
             quote(stage(p)),
         ));
-        let mut placed = HashMap::new();
+        let shardable_ddl = nodes.ddl.iter().filter_map(|ddl| shardable(ddl, &nodes.output_snapshot));
+        let (objects, tables) = shardable_ddl.fold((0usize, HashSet::new()), |(objects, mut tables), (_, _, table)| {
+            tables.insert(table);
+            (objects + 1, tables)
+        });
+        let open = shards.min(MIN_SHARDS.max(objects.div_ceil(SHARD_OBJECTS)));
+        // Consecutive tables share a shard: a statement over neighbouring nodes opens fewer schemas.
+        let per_shard = tables.len().div_ceil(open.max(1)).max(1);
+        let mut placed: HashMap<&str, usize> = HashMap::new();
         for ddl in &nodes.ddl {
-            match (shards > 0).then(|| sharded_ddl(ddl, shards, &nodes.output_snapshot, &mut placed)).flatten() {
-                Some(sharded) => { shard_sql.push_str(&sharded); shard_sql.push(';'); }
+            match shardable(ddl, &nodes.output_snapshot).filter(|_| open > 0) {
+                Some((head, rest, table)) => {
+                    let next = placed.len() / per_shard;
+                    let shard = *placed.entry(table).or_insert(next);
+                    shard_sql.push_str(&format!("{head}{}.{rest};", shard_schema(shard)));
+                }
                 None => { sql.push_str(ddl); sql.push(';'); }
             }
         }
@@ -909,9 +926,9 @@ fn push_program_ddl(inst: &Installed, sql: &mut String, shards: usize, shard_sql
             "CREATE VIEW IF NOT EXISTS {v} AS SELECT {support},w AS __weight FROM ({snapshot});",
             v = quote(root(p)), snapshot = nodes.output_snapshot
         ));
-        return;
+        return if shard_sql.is_empty() { 0 } else { open };
     }
-
+    0
 }
 
 fn build_settle_sql(p: &str, plan: &Compiled) -> SettleSql {
