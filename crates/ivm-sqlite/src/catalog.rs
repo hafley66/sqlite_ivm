@@ -264,6 +264,8 @@ pub(crate) enum Watch {
 pub(crate) struct CreatedSources {
     pub(crate) ddl: String,
     pub(crate) columns: HashMap<String, Vec<String>>,
+    /// Attached schemas `ivm_s0..` the node tables spread over; 0 keeps every table in `main`.
+    pub(crate) shards: usize,
 }
 
 pub(crate) fn install(
@@ -343,7 +345,7 @@ fn install_program(
     push_savepoint(&mut sql, "frontier_sp_install");
     sql.push_str(&created.ddl);
     push_catalog_ddl(&mut sql);
-    push_program_ddl(&installed, &mut sql);
+    push_program_ddl(&installed, &mut sql, created.shards);
     // Persist the typed program; SQL text is only an install-time input.
     let program_json = serde_json::to_string(&program)
         .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::State(e.to_string())))?;
@@ -819,7 +821,32 @@ fn push_catalog_ddl(sql: &mut String) {
     ));
 }
 
-fn push_program_ddl(inst: &Installed, sql: &mut String) {
+/// The schema `ivm_s{n}` a node table lives in. SQLite reparses its schema table (a full scan)
+/// after every CREATE, so one schema of N objects costs O(N^2); `shards` schemas divide it.
+pub(crate) fn shard_schema(n: usize) -> String {
+    format!("ivm_s{n}")
+}
+
+/// `CREATE TABLE t ..` / `CREATE INDEX [IF NOT EXISTS] x ON t ..` with the object placed in its
+/// table's shard. Tables the output views read stay in `main`: a view reads only its own schema.
+fn sharded_ddl(ddl: &str, shards: usize, main_only: &str, placed: &mut HashMap<String, usize>) -> String {
+    let in_main = |table: &str| main_only.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).any(|word| word == table);
+    let (head, rest) = ["CREATE TABLE ", "CREATE INDEX IF NOT EXISTS ", "CREATE INDEX "].iter()
+        .find_map(|head| ddl.strip_prefix(head).map(|rest| (*head, rest)))
+        .unwrap_or(("", ddl));
+    let words = rest.split_whitespace().collect::<Vec<_>>();
+    let table = match (head, words.as_slice()) {
+        ("CREATE TABLE ", [name, ..]) => *name,
+        ("CREATE INDEX IF NOT EXISTS " | "CREATE INDEX ", [_, "ON", table, ..]) => *table,
+        _ => return ddl.to_owned(),
+    };
+    if in_main(table) { return ddl.to_owned(); }
+    let next = placed.len() % shards;
+    let shard = *placed.entry(table.to_owned()).or_insert(next);
+    format!("{head}{}.{rest}", shard_schema(shard))
+}
+
+fn push_program_ddl(inst: &Installed, sql: &mut String, shards: usize) {
     let p = &inst.name;
     let plan = &inst.plan;
     let width = plan.stage_width.max(1);
@@ -838,8 +865,13 @@ fn push_program_ddl(inst: &Installed, sql: &mut String) {
             quote(format!("{}_table", stage(p))),
             quote(stage(p)),
         ));
+        let mut placed = HashMap::new();
         for ddl in &nodes.ddl {
-            sql.push_str(ddl);
+            if shards == 0 {
+                sql.push_str(ddl);
+            } else {
+                sql.push_str(&sharded_ddl(ddl, shards, &nodes.output_snapshot, &mut placed));
+            }
             sql.push(';');
         }
         let names = plan

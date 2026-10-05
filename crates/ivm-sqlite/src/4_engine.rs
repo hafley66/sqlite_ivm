@@ -225,10 +225,23 @@ fn bundled_program(ir: &Program) -> Result<(Program, Vec<(RelId, usize)>), Engin
     Ok((bundle, members))
 }
 
+/// Attached in-memory schemas `Engine::install` spreads node tables over (SQLite allows 10).
+pub const SHARDS: usize = 8;
+
 impl Sqlite {
     /// Installs `ir` into `db` and takes ownership of it. `Engine::install` opens an in-memory one.
     pub fn install_on(owned: Connection, ir: &Program) -> Result<Self, EngineError> {
+        Self::install_on_with(owned, ir, 0)
+    }
+
+    /// `shards` > 0 attaches that many in-memory schemas and places node tables in them; the
+    /// database then holds those tables only while this connection lives.
+    pub fn install_on_with(owned: Connection, ir: &Program, shards: usize) -> Result<Self, EngineError> {
         let db = &owned;
+        for shard in 0..shards {
+            db.execute_batch(&format!("ATTACH DATABASE ':memory:' AS {}", catalog::shard_schema(shard)))
+                .map_err(|e| error(Stage::Install, e))?;
+        }
         if ir.outputs.is_empty() {
             return Err(EngineError::new(
                 Stage::Install,
@@ -245,7 +258,7 @@ impl Sqlite {
                 statement.query_map([], |row| row.get::<_, String>(0))?.collect()
             })
             .map_err(|e| error(Stage::Install, e))?;
-        let mut created = catalog::CreatedSources::default();
+        let mut created = catalog::CreatedSources { shards, ..Default::default() };
         for source in ir.rels.iter().filter(|r| r.kind == RelKind::Source) {
             let columns = (0..source.cols.len())
                 .map(|i| format!("c{i} INTEGER NOT NULL"))
@@ -291,7 +304,7 @@ impl Sqlite {
                     SqlProgram::install_ir_unwatched_terms_ready(db, &name, &single, &created)
                         .map_err(plan_error)?;
                 // The first install created the sources.
-                created = catalog::CreatedSources::default();
+                created = catalog::CreatedSources { shards, ..Default::default() };
                 let threshold = matches!(ir.strata.as_slice(), [Stratum::Let { id, body }]
                     if *id == output && matches!(ir.nodes.get(*body as usize), Some(Op::Threshold(_))));
                 programs.push(OutputProgram {
@@ -317,15 +330,17 @@ impl Sqlite {
         if !tracing::enabled!(target: "ivm_sqlite", tracing::Level::INFO) {
             return Ok(engine);
         }
-        if let Ok(creates @ 1..) = engine.db.query_row(
-            "SELECT (SELECT count(*) FROM sqlite_master WHERE sql LIKE 'CREATE %') + (SELECT count(*) FROM sqlite_temp_master WHERE sql LIKE 'CREATE %')",
-            [], |row| row.get::<_, i64>(0),
-        ) {
+        let schemas = ["main".to_owned(), "temp".to_owned()].into_iter()
+            .chain((0..shards).map(catalog::shard_schema)).collect::<Vec<_>>();
+        let creates_sql = schemas.iter()
+            .map(|s| format!("(SELECT count(*) FROM {s}.sqlite_master WHERE sql LIKE 'CREATE %')"))
+            .collect::<Vec<_>>().join(" + ");
+        if let Ok(creates @ 1..) = engine.db.query_row(&format!("SELECT {creates_sql}"), [], |row| row.get::<_, i64>(0)) {
             // Columns of every table and view the install created: what projection narrows.
-            let columns = engine.db.query_row(
-                "SELECT (SELECT count(*) FROM sqlite_master m JOIN pragma_table_info(m.name, 'main') WHERE m.type IN ('table', 'view')) + (SELECT count(*) FROM sqlite_temp_master m JOIN pragma_table_info(m.name, 'temp') WHERE m.type IN ('table', 'view'))",
-                [], |row| row.get::<_, i64>(0),
-            ).unwrap_or(-1);
+            let columns_sql = schemas.iter()
+                .map(|s| format!("(SELECT count(*) FROM {s}.sqlite_master m JOIN pragma_table_info(m.name, '{s}') WHERE m.type IN ('table', 'view'))"))
+                .collect::<Vec<_>>().join(" + ");
+            let columns = engine.db.query_row(&format!("SELECT {columns_sql}"), [], |row| row.get::<_, i64>(0)).unwrap_or(-1);
             tracing::info!(target: "ivm_sqlite", sqlite_columns = columns, sqlite_create_count = creates, "ir schema");
         }
         Ok(engine)
@@ -335,7 +350,7 @@ impl Sqlite {
 impl Engine for Sqlite {
     fn install(ir: &Program) -> Result<Self, EngineError> {
         let db = Connection::open_in_memory().map_err(|e| error(Stage::Install, e))?;
-        Self::install_on(db, ir)
+        Self::install_on_with(db, ir, SHARDS)
     }
 
     fn settle(&mut self, frontier: Frontier) -> Result<Delta, EngineError> {

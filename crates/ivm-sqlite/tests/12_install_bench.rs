@@ -8,7 +8,8 @@
 //! prepare of every settle statement the install leaves behind.
 //!
 //! Knobs: `IVM_BENCH_RUNS` (default 5), `IVM_BENCH_PRAGMAS` (SQL run on the connection before the
-//! install), `IVM_BENCH_FILE=1` (a file database in `TMPDIR` instead of `:memory:`).
+//! install), `IVM_BENCH_FILE=1` (a file database in `TMPDIR` instead of `:memory:`),
+//! `IVM_BENCH_SHARDS` (attached schemas for node tables, default `ivm_sqlite::SHARDS`).
 
 use std::{ffi::{c_int, c_void, CStr}, time::Instant};
 
@@ -73,7 +74,8 @@ fn run(program: &Program) -> Run {
     assert_eq!(unsafe { rusqlite::ffi::sqlite3_trace_v2(handle, mask, Some(trace),
         (&mut *traced as *mut Trace).cast()) }, rusqlite::ffi::SQLITE_OK);
     let start = Instant::now();
-    let mut engine = Sqlite::install_on(db, program).unwrap();
+    let shards = std::env::var("IVM_BENCH_SHARDS").ok().and_then(|v| v.parse().ok()).unwrap_or(ivm_sqlite::SHARDS);
+    let mut engine = Sqlite::install_on_with(db, program, shards).unwrap();
     let install_ms = start.elapsed().as_secs_f64() * 1e3;
     unsafe { rusqlite::ffi::sqlite3_trace_v2(handle, 0, None, std::ptr::null_mut()); }
     let statements = engine.statements().into_iter().map(str::to_owned).collect::<Vec<_>>();

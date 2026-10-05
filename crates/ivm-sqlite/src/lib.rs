@@ -159,7 +159,7 @@ pub struct Program {
 
 #[path = "4_engine.rs"]
 mod trait_engine;
-pub use trait_engine::Sqlite;
+pub use trait_engine::{Sqlite, SHARDS};
 
 impl std::fmt::Debug for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
