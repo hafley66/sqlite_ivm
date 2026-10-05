@@ -20,6 +20,9 @@ pub enum ErrorKind {
     Arity { expected: usize, actual: usize },
     PresentInsert(Row),
     Worker(String),
+    /// A LetRec with `limit = n` still changed a variable in body evaluation `n + 1`; `rel` names
+    /// the LetRec's first id.
+    LetRecLimit(u32),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

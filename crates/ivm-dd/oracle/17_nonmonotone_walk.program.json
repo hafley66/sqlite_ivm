@@ -1,0 +1,24 @@
+{
+  "rels": [
+    {"id": 0, "name": "start", "cols": ["Int"], "kind": "Source"},
+    {"id": 1, "name": "stop", "cols": ["Int"], "kind": "Source"},
+    {"id": 2, "name": "cur", "cols": ["Int"], "kind": "Derived"},
+    {"id": 3, "name": "size", "cols": ["Int"], "kind": "Derived"}
+  ],
+  "nodes": [
+    {"Get": 0},
+    {"Get": 1},
+    {"Get": 2},
+    {"Antijoin": {"l": 0, "r": 2, "lk": [], "rk": []}},
+    {"Join": {"inputs": [2, 1], "equivalences": [[[0, 0], [1, 0]]]}},
+    {"Mfp": {"input": 4, "project": [0]}},
+    {"Negate": 5},
+    {"Union": [2, 6]},
+    {"Threshold": 7},
+    {"Mfp": {"input": 8, "map": [{"Call": ["Add", [{"Col": 0}, {"Lit": 1}]]}], "project": [1]}},
+    {"Union": [3, 5, 9]},
+    {"Reduce": {"input": 2, "key": [], "aggs": ["Count"]}}
+  ],
+  "strata": [{"LetRec": {"ids": [2, 3], "bodies": [10, 11], "limit": 8}}],
+  "outputs": [2, 3]
+}

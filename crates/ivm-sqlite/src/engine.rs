@@ -227,7 +227,13 @@ fn settle_inner(
         if inst.sql_text { catalog::encode_stage(conn, inst)?; }
         let changes = nodes
             .run(conn, counters)
-            .map_err(|e| fail("node settle", &inst.name, e))?;
+            .map_err(|e| match &e {
+                rusqlite::Error::UserFunctionError(inner) => match inner.downcast_ref::<crate::nodes::LetRecLimitHit>() {
+                    Some(hit) => EngineError::new(Stage::Settle, &inst.name, ErrorKind::LetRecLimit { rel: hit.rel, limit: hit.limit }),
+                    None => fail("node settle", &inst.name, e),
+                },
+                _ => fail("node settle", &inst.name, e),
+            })?;
         let cols = inst
             .output
             .iter()

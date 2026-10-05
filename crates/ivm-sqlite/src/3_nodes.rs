@@ -133,11 +133,55 @@ struct Node {
 struct SccPlan {
     vars: Vec<(SqlC, SqlC, SqlC)>,
     at: usize,
+    /// Recomputed from empty variables at every settle that changes an input; see `Sql::recompute`.
+    nonmonotone: bool,
+    limit: Option<u32>,
+    first: Option<RelId>,
 }
 
 struct Active {
     scc: usize,
     copies: Vec<(usize, SqlC)>,
+    nonmonotone: bool,
+}
+
+/// A LetRec whose body may negate, aggregate or retract a variable, or that carries a limit.
+/// Such a body is outside the DRed contract (a deleted row's support can come back through a
+/// negation), so the LetRec takes the recompute path. Post-order over the nodes the bodies reach.
+fn nonmonotone(p: &Program, rec: &LetRec) -> bool {
+    if rec.limit.is_some() { return true; }
+    let inputs = |op: &Op| -> Vec<NodeId> {
+        match op {
+            Op::Get(_) | Op::Delay(_) => Vec::new(),
+            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Mfp { input, .. }
+            | Op::Negate(input) | Op::Reduce { input, .. } | Op::Threshold(input)
+            | Op::TopK { input, .. } | Op::Window { input, .. } => vec![*input],
+            Op::Union(inputs) | Op::Join { inputs, .. } => inputs.clone(),
+            Op::Antijoin { l, r, .. } => vec![*l, *r],
+        }
+    };
+    let mut dependent: Vec<Option<bool>> = vec![None; p.nodes.len()];
+    let mut stack: Vec<(NodeId, bool)> = rec.bodies.iter().map(|body| (*body, false)).collect();
+    while let Some((id, expanded)) = stack.pop() {
+        let Some(op) = p.nodes.get(id as usize) else { continue };
+        if dependent[id as usize].is_some() { continue; }
+        let ins = inputs(op);
+        if !expanded {
+            stack.push((id, true));
+            stack.extend(ins.iter().filter(|n| dependent.get(**n as usize).is_some_and(Option::is_none)).map(|n| (*n, false)));
+            continue;
+        }
+        let dep = |n: &NodeId| dependent.get(*n as usize).copied().flatten() == Some(true);
+        let reads_rec = matches!(op, Op::Get(rel) if rec.ids.contains(rel));
+        let negative = match op {
+            Op::Negate(input) | Op::Threshold(input) | Op::Reduce { input, .. } => dep(input),
+            Op::Antijoin { r, .. } => dep(r),
+            _ => false,
+        };
+        if negative { return true; }
+        dependent[id as usize] = Some(reads_rec || ins.iter().any(dep));
+    }
+    false
 }
 
 pub struct SqlRel {
@@ -563,9 +607,10 @@ impl SqlRel {
         }
     }
 
-    /// Non-monotone ops over a LetRec variable are outside the round loop's DRed contract.
+    /// Non-monotone ops over a LetRec variable are outside the round loop's DRed contract; a
+    /// LetRec on the recompute path takes them.
     fn flat(&mut self, c: &SqlC, what: &'static str) {
-        if c.rec {
+        if c.rec && !self.active.as_ref().is_some_and(|a| a.nonmonotone) {
             self.fail(unsupported(what));
         }
     }
@@ -816,7 +861,7 @@ impl Rel for SqlRel {
 
     fn negate(&mut self, c: Self::C) -> Self::C {
         self.flat(&c, "Negate over a LetRec variable");
-        let out = self.push(c.arity, false, |_| {
+        let out = self.push(c.arity, c.rec, |_| {
             Some(format!(
                 "SELECT {}, -w AS w FROM {}",
                 list("", 0..c.arity),
@@ -916,7 +961,8 @@ impl Rel for SqlRel {
     /// Recursive left inputs read the right key's phase image and seed the SCC from key changes.
     /// Other inputs use `l - l⋉threshold(π_rk r)`.
     fn antijoin(&mut self, l: Self::C, r: Self::C, lk: &[ColId], rk: &[ColId]) -> Self::C {
-        if l.rec {
+        let recompute = self.active.as_ref().is_some_and(|a| a.nonmonotone);
+        if l.rec && !recompute {
             if r.rec {
                 self.fail(unsupported("Antijoin recursive right input"));
                 return l;
@@ -998,7 +1044,7 @@ impl Rel for SqlRel {
             self.integrate(&c, key.clone());
         }
         let arity = key.len() + aggs.len();
-        let out = self.push(arity, false, |_| None);
+        let out = self.push(arity, c.rec, |_| None);
         let k = out.node;
         let (g, arr) = (format!("ivm_n{k}_g"), format!("ivm_n{k}_in"));
         let gk: Vec<usize> = (0..key.len().max(1)).collect();
@@ -1149,7 +1195,7 @@ impl Rel for SqlRel {
         self.flat(&c, "Threshold over a LetRec variable");
         self.integrate(&c, Vec::new());
         let n: Vec<usize> = (0..c.arity).collect();
-        let out = self.push(c.arity, false, |_| {
+        let out = self.push(c.arity, c.rec, |_| {
             Some(format!(
                 "SELECT {dc}, CASE WHEN COALESCE(i_i.w, 0) + d.w > 0 THEN 1 ELSE -1 END AS w \
                  FROM (SELECT {all}, SUM(w) AS w FROM {d} GROUP BY {all}) d LEFT JOIN {i} i_i ON {cond} \
@@ -1278,13 +1324,15 @@ impl Rel for SqlRel {
         if self.active.is_some() {
             return Err(unsupported("LetRec nested in LetRec"));
         }
-        if rec.limit.is_some() {
-            return Err(unsupported("LetRec limit"));
+        if rec.limit == Some(0) {
+            return Err(unsupported("LetRec limit 0"));
         }
         let scc = self.sccs.len();
+        let nonmonotone = nonmonotone(p, rec);
         self.active = Some(Active {
             scc,
             copies: Vec::new(),
+            nonmonotone,
         });
         let mut scope: Vec<(RelId, SqlC)> = defined.to_vec();
         let mut vs = Vec::new();
@@ -1321,7 +1369,7 @@ impl Rel for SqlRel {
             vars.push((v, b, r.clone()));
         }
         let rs = vars.iter().map(|(_, _, r)| r.clone()).collect();
-        self.sccs.push(SccPlan { vars, at });
+        self.sccs.push(SccPlan { vars, at, nonmonotone, limit: rec.limit, first: rec.ids.first().copied() });
         self.mark = self.nodes.len();
         Ok(rs)
     }
@@ -1366,7 +1414,15 @@ struct VarSql {
     any: String,
     finish: String,
     clear_acc: String,
+    /// Recompute path: the old value into `acc` at -1, before `reset` empties the variable.
+    capture: String,
+    /// Recompute path: the variable's change this round, from the body rows that changed:
+    /// +1 where the body holds a row the variable lacks, -1 the other way.
+    step: String,
 }
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Phase { Delete, Insert, Recompute }
 
 #[derive(Default)]
 struct SccSql {
@@ -1389,6 +1445,14 @@ struct SccSql {
     insert_seed_writes: Vec<Option<usize>>,
     /// Physical delta of each variable, in `vars` order.
     var_ids: Vec<usize>,
+    nonmonotone: bool,
+    limit: Option<u32>,
+    first: Option<RelId>,
+    /// Recompute path: empties every loop-owned image and private table, and turns each copy's
+    /// delta into its input's whole post-frontier image.
+    reset: Vec<String>,
+    /// Physical id of each copy, marked changed for the first recompute round.
+    copy_ids: Vec<usize>,
 }
 
 pub(crate) struct NodesPlan {
@@ -1527,12 +1591,14 @@ impl NodesPlan {
         for scc in &self.sccs {
             all.extend(scc.delete_fills.iter().chain(&scc.insert_fills)
                 .chain(&scc.delete_seeds).chain(&scc.insert_seeds)
-                .chain(&scc.integrates).chain(&scc.clears).chain(&scc.stash).chain(&scc.restore).map(String::as_str));
+                .chain(&scc.integrates).chain(&scc.clears).chain(&scc.stash).chain(&scc.restore)
+                .chain(&scc.reset).map(String::as_str));
             for v in &scc.vars {
                 all.extend([
                     &v.over_delete, &v.rederive, &v.insert, &v.to_delta, &v.to_acc,
                     &v.to_del, &v.clear_nx, &v.clear_del, &v.any, &v.finish, &v.clear_acc,
                 ].into_iter().map(String::as_str));
+                if scc.nonmonotone { all.extend([v.capture.as_str(), v.step.as_str()]); }
             }
         }
         all.extend(self.integrates.iter().chain(&self.clears).map(String::as_str));
@@ -1652,6 +1718,25 @@ impl NodesPlan {
                 ]);
                 sccs[s].restore.push(format!("INSERT INTO {d} SELECT {cols}, w FROM {hold} WHERE k = {k}"));
             }
+            match node.owner {
+                Owner::Loop(s) if rel.sccs[s].nonmonotone => {
+                    if node.integrated { sccs[s].reset.push(format!("DELETE FROM {i}")); }
+                    if !node.inline { sccs[s].reset.push(format!("DELETE FROM {d}")); }
+                    for extra in &node.ddl {
+                        if let Some((kind, name)) = ddl_object(extra) {
+                            if kind == "TABLE" { sccs[s].reset.push(format!("DELETE FROM {name}")); }
+                        }
+                    }
+                }
+                Owner::Copy(s) if rel.sccs[s].nonmonotone => sccs[s].reset.extend([
+                    format!("INSERT INTO {i} ({cols}, w) SELECT {cols}, SUM(w) FROM {d} WHERE true GROUP BY {cols} \
+                        ON CONFLICT ({cols}) DO UPDATE SET w = w + excluded.w"),
+                    format!("DELETE FROM {d}"),
+                    format!("INSERT INTO {d} ({cols}, w) SELECT {cols}, w FROM {i} WHERE w <> 0"),
+                    format!("DELETE FROM {i}"),
+                ]),
+                _ => {}
+            }
             let (ints, clrs) = match node.owner {
                 Owner::Settle => (&mut integrates, &mut clears),
                 Owner::Loop(s) | Owner::Copy(s) => {
@@ -1685,6 +1770,7 @@ impl NodesPlan {
             }
         }
         for (plan, scc) in rel.sccs.iter().zip(&mut sccs) {
+            (scc.nonmonotone, scc.limit, scc.first) = (plan.nonmonotone, plan.limit, plan.first);
             if !scc.restore.is_empty() {
                 scc.restore.push(format!("DELETE FROM ivm_n{}_hold", plan.at));
             }
@@ -1726,6 +1812,12 @@ impl NodesPlan {
                     any: format!("SELECT EXISTS (SELECT 1 FROM {})", v.d),
                     finish: format!("INSERT INTO {} SELECT {cols}, SUM(w) FROM {acc} WHERE k = {k} GROUP BY {cols} HAVING SUM(w) <> 0", r.d),
                     clear_acc: format!("DELETE FROM {acc} WHERE k = {k}"),
+                    capture: format!("INSERT INTO {acc} SELECT {k}, {cols}{pad}, -1 FROM {} WHERE w > 0", v.i),
+                    step: format!(
+                        "INSERT INTO {nx} SELECT {k}, {cols}{pad}, CASE WHEN {body} THEN 1 ELSE -1 END \
+                         FROM (SELECT DISTINCT {cols} FROM {bd}) t WHERE {body} <> {var}",
+                        body = live("t", &b.i), var = live("t", &v.i), bd = b.d,
+                    ),
                 });
             }
         }
@@ -1867,6 +1959,11 @@ impl NodesPlan {
             scc.insert_seed_writes = scc.insert_seeds.iter().map(|sql| write(sql)).collect();
             scc.var_ids = scc.vars.iter().map(|v| write(&v.to_delta).expect("a variable's delta is physical")).collect();
         }
+        for (scc_id, scc) in self.sccs.iter_mut().enumerate() {
+            scc.copy_ids = nodes.iter().filter(|node| node.owner == Owner::Copy(scc_id))
+                .filter_map(|node| by_name.get(node.c.d.replace("ivm_n", &format!("frontier_{program}_n")).as_str()).copied())
+                .collect();
+        }
         for (scc_id, scc) in self.sccs.iter().enumerate() {
             let internal = nodes.iter().filter(|node| node.owner == Owner::Loop(scc_id))
                 .filter_map(|node| by_name.get(node.c.d.replace("ivm_n", &format!("frontier_{program}_n")).as_str()).copied())
@@ -1897,11 +1994,12 @@ impl NodesPlan {
             scc.delete_fills.iter_mut().chain(&mut scc.insert_fills)
                 .chain(&mut scc.delete_seeds).chain(&mut scc.insert_seeds)
                 .chain(&mut scc.integrates).chain(&mut scc.clears)
-                .chain(&mut scc.stash).chain(&mut scc.restore).for_each(&expand);
+                .chain(&mut scc.stash).chain(&mut scc.restore).chain(&mut scc.reset).for_each(&expand);
             for var in &mut scc.vars {
                 for sql in [&mut var.over_delete, &mut var.rederive, &mut var.insert,
                     &mut var.to_delta, &mut var.to_acc, &mut var.to_del, &mut var.clear_nx,
-                    &mut var.clear_del, &mut var.any, &mut var.finish, &mut var.clear_acc] {
+                    &mut var.clear_del, &mut var.any, &mut var.finish, &mut var.clear_acc,
+                    &mut var.capture, &mut var.step] {
                     expand(sql);
                 }
             }
@@ -1932,6 +2030,7 @@ impl NodesPlan {
             scc.clears.iter_mut().for_each(&fix);
             scc.stash.iter_mut().for_each(&fix);
             scc.restore.iter_mut().for_each(&fix);
+            scc.reset.iter_mut().for_each(&fix);
             for var in &mut scc.vars {
                 for sql in [
                     &mut var.over_delete,
@@ -1945,6 +2044,8 @@ impl NodesPlan {
                     &mut var.any,
                     &mut var.finish,
                     &mut var.clear_acc,
+                    &mut var.capture,
+                    &mut var.step,
                 ] {
                     fix(sql);
                 }
@@ -2009,7 +2110,8 @@ impl NodesPlan {
     /// One DRed round over the deltas `active` marks nonempty: a fill, integration or clear
     /// whose deltas are all empty is skipped. The round leaves the SCC's own deltas cleared
     /// and marks the variable deltas the next round reads.
-    fn round(&self, db: &Connection, scc_id: usize, deleting: bool, active: &mut [bool], counters: &mut Counters) -> rusqlite::Result<bool> {
+    fn round(&self, db: &Connection, scc_id: usize, phase: Phase, active: &mut [bool], counters: &mut Counters) -> rusqlite::Result<bool> {
+        let deleting = phase == Phase::Delete;
         let _round = tracing::debug_span!(target: crate::observe::TARGET, "frontier_round", scc = scc_id, deleting).entered();
         let scc = &self.sccs[scc_id];
         let (phase_fills, phase_io) = if deleting { (&scc.delete_fills, &scc.delete_io) } else { (&scc.insert_fills, &scc.insert_io) };
@@ -2032,9 +2134,11 @@ impl NodesPlan {
         self.count_work(db, Owner::Loop(scc_id), Some(&*active), counters)?;
         Self::exec_all(
             db,
-            scc.vars
-                .iter()
-                .map(|v| if deleting { &v.over_delete } else { &v.insert }),
+            scc.vars.iter().map(|v| match phase {
+                Phase::Delete => &v.over_delete,
+                Phase::Insert => &v.insert,
+                Phase::Recompute => &v.step,
+            }),
             counters,
         )?;
         for (sql, target) in scc.clears.iter().zip(&scc.clear_targets) {
@@ -2057,6 +2161,40 @@ impl NodesPlan {
         Ok(more)
     }
 
+    /// The recompute path: Materialize `WITH MUTUALLY RECURSIVE` evaluation from empty variables.
+    /// The old value goes into `acc` at -1; every loop-owned image and private table empties; each
+    /// copy's delta becomes its input's whole image. Each round fills the loop from the changed
+    /// deltas, integrates, and sets each variable to the support of its body's image (`step`); the
+    /// result delta is `acc`, new value minus old. Evaluation `limit + 1` that still changes a
+    /// variable stops the settle with `LetRecLimitHit`.
+    fn recompute(&self, db: &Connection, scc_id: usize, outer: &[bool], counters: &mut Counters) -> rusqlite::Result<Vec<bool>> {
+        let span = tracing::debug_span!(target: crate::observe::TARGET, "frontier_recompute", scc = scc_id,
+            rounds = tracing::field::Empty);
+        let _recompute = span.enter();
+        let scc = &self.sccs[scc_id];
+        let mut active = outer.to_vec();
+        Self::exec_all(db, scc.vars.iter().map(|v| &v.capture), counters)?;
+        Self::exec_all(db, &scc.reset, counters)?;
+        for id in &scc.copy_ids { active[*id] = true; }
+        for id in &scc.var_ids { active[*id] = false; }
+        let mut evaluation = 0u32;
+        while self.round(db, scc_id, Phase::Recompute, &mut active, counters)? {
+            evaluation += 1;
+            if scc.limit.is_some_and(|limit| evaluation > limit) {
+                span.record("rounds", evaluation);
+                return Err(rusqlite::Error::UserFunctionError(Box::new(LetRecLimitHit { rel: scc.first, limit: scc.limit.unwrap_or(0) })));
+            }
+        }
+        span.record("rounds", evaluation + 1);
+        tracing::debug!(target: crate::observe::TARGET, scc = scc_id, evaluations = evaluation + 1, "LetRec recomputed");
+        let mut results = Vec::with_capacity(scc.vars.len());
+        for v in &scc.vars {
+            results.push(Self::exec(db, &v.finish, counters)? > 0);
+            Self::exec(db, &v.clear_acc, counters)?;
+        }
+        Ok(results)
+    }
+
     /// `outer` marks the settle's nonempty deltas; inside the SCC only copies of them are read.
     fn fixpoint(&self, db: &Connection, scc_id: usize, outer: &[bool], counters: &mut Counters) -> rusqlite::Result<Vec<bool>> {
         let span = tracing::debug_span!(target: crate::observe::TARGET, "frontier_fixpoint", scc = scc_id,
@@ -2070,7 +2208,7 @@ impl NodesPlan {
             if let Some(id) = write { active[*id] |= rows > 0; }
         }
         let mut rounds = 1u64;
-        while self.round(db, scc_id, true, &mut active, counters)? { rounds += 1; }
+        while self.round(db, scc_id, Phase::Delete, &mut active, counters)? { rounds += 1; }
         span.record("delete_rounds", rounds);
         for (v, id) in scc.vars.iter().zip(&scc.var_ids) {
             Self::exec_all(db, [&v.rederive, &v.clear_del], counters)?;
@@ -2084,7 +2222,7 @@ impl NodesPlan {
             if let Some(id) = write { active[*id] |= rows > 0; }
         }
         let mut rounds = 1u64;
-        while self.round(db, scc_id, false, &mut active, counters)? { rounds += 1; }
+        while self.round(db, scc_id, Phase::Insert, &mut active, counters)? { rounds += 1; }
         span.record("insert_rounds", rounds);
         let mut results = Vec::with_capacity(scc.vars.len());
         for v in &scc.vars {
@@ -2135,7 +2273,11 @@ impl NodesPlan {
                 Step::Loop(s) => {
                     let reads = &self.scc_reads[*s];
                     if !reads.is_empty() && !reads.iter().any(|id| active.get(*id) == Some(&true)) { continue; }
-                    let results = self.fixpoint(db, *s, &active, counters)?;
+                    let results = if self.sccs[*s].nonmonotone {
+                        self.recompute(db, *s, &active, counters)?
+                    } else {
+                        self.fixpoint(db, *s, &active, counters)?
+                    };
                     for (id, nonempty) in self.scc_results[*s].iter().zip(results) {
                         active[*id] |= nonempty;
                     }
@@ -2172,6 +2314,22 @@ impl NodesPlan {
         Ok(changes)
     }
 }
+
+/// A recompute-path LetRec still changed a variable in body evaluation `limit + 1`; `rel` is the
+/// LetRec's first id. Travels inside `rusqlite::Error::UserFunctionError` out of `NodesPlan::run`.
+#[derive(Debug)]
+pub(crate) struct LetRecLimitHit {
+    pub rel: Option<RelId>,
+    pub limit: u32,
+}
+
+impl std::fmt::Display for LetRecLimitHit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "LetRec limit {} reached (rel {:?})", self.limit, self.rel)
+    }
+}
+
+impl std::error::Error for LetRecLimitHit {}
 
 /// Table a settle statement writes (`INSERT INTO t`, `DELETE FROM t`) or reads (`FROM t`), for its span.
 fn object_of(sql: &str) -> &str {

@@ -55,6 +55,11 @@ fn recursive_antijoin_left_input() {
 }
 
 #[test]
+fn nonmonotone_letrec_walk() {
+    println!("{}", support::run::<Dd>("17_nonmonotone_walk"));
+}
+
+#[test]
 fn recursive_mint_input() {
     println!("{}", support::run::<Dd>("15_recursive_mint"));
 }
