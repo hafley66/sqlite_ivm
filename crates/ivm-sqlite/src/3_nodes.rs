@@ -124,6 +124,9 @@ struct Node {
     insert_seed: Vec<String>,
     /// Private state tables of the node (Reduce group accumulators, Min/Max arrangement).
     ddl: Vec<String>,
+    /// An Mfp whose filter holds `input.cX = K` as integer equality: `(input, X, K)`. Its delta
+    /// is empty when no row of the input delta has `cX = K`.
+    eq: Option<(usize, usize, i64)>,
     integrated: bool,
     indexes: Vec<Vec<usize>>,
     owner: Owner,
@@ -429,6 +432,7 @@ impl SqlRel {
             delete_seed: Vec::new(),
             insert_seed: Vec::new(),
             ddl: Vec::new(),
+            eq: None,
             integrated: false,
             indexes: Vec::new(),
             owner,
@@ -823,6 +827,15 @@ impl Rel for SqlRel {
             Some(format!("SELECT {select}, w FROM {} WHERE {wheres}", c.d))
         });
         self.nodes[out.node].inline = true;
+        self.nodes[out.node].eq = filter.iter().find_map(|e| {
+            let Expr::Call(Func::Eq, args) = e else { return None };
+            let (col, k) = match args.as_slice() {
+                [Expr::Col(x), Expr::Lit(k)] | [Expr::Lit(k), Expr::Col(x)] => (*x as usize, *k),
+                _ => return None,
+            };
+            // `equal` renders plain `=` only for equal Int types; other pairs compare sort keys.
+            (col < c.arity && input_types.get(col) == Some(&Ty::Int)).then_some((c.node, col, k))
+        });
         let all: Vec<ColId> = (0..(c.arity + map.len()) as ColId).collect();
         let proj = if project.is_empty() { &all[..] } else { project };
         let pass = proj.iter().map(|p| {
@@ -1457,6 +1470,18 @@ struct SccSql {
     copy_ids: Vec<usize>,
 }
 
+/// A condition under which a settle fill can write rows: a physical delta is nonempty, or it
+/// holds a row whose column equals a constant.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Gate {
+    Active(usize),
+    Key(usize, usize, i64),
+}
+
+/// Fills gated on one `(delta, column)` key set before the set is read: one `DISTINCT` read per
+/// settle replaces that many scans of the delta.
+const KEY_READERS: usize = 4;
+
 pub(crate) struct NodesPlan {
     pub ddl: Vec<String>,
     pub objects: Vec<(String, String)>,
@@ -1472,6 +1497,13 @@ pub(crate) struct NodesPlan {
     steps: Vec<Step>,
     step_reads: Vec<Vec<usize>>,
     step_writes: Vec<Option<usize>>,
+    /// Per step, the node it fills and the nodes whose deltas its own SQL names.
+    step_nodes: Vec<Option<(usize, Vec<usize>)>>,
+    /// Per step, its fill's input conditions when one is a key test: the fill runs only when
+    /// one holds. `None` keeps the `step_reads` gate.
+    step_gates: Vec<Option<Vec<Gate>>>,
+    /// Distinct values of one column of one physical delta, per `(delta, column)`.
+    key_sql: std::collections::HashMap<(usize, usize), String>,
     scc_reads: Vec<Vec<usize>>,
     scc_results: Vec<Vec<usize>>,
     sccs: Vec<SccSql>,
@@ -1604,6 +1636,7 @@ impl NodesPlan {
             }
         }
         all.extend(self.integrates.iter().chain(&self.clears).map(String::as_str));
+        all.extend(self.key_sql.values().map(String::as_str));
         all.push(&self.output_delta);
         all
     }
@@ -1660,6 +1693,8 @@ impl NodesPlan {
         let mut source_deltas = Vec::new();
         let mut source_tables = Vec::new();
         let (mut steps, mut integrates, mut clears) = (Vec::new(), Vec::new(), Vec::new());
+        let mut step_nodes = Vec::new();
+        let node_of = |name: &str| name.strip_prefix("ivm_n").and_then(|n| n.strip_suffix("_d")).and_then(|n| n.parse::<usize>().ok());
         let mut sccs: Vec<SccSql> = rel.sccs.iter().map(|_| SccSql::default()).collect();
         let mut hold_width = vec![0usize; rel.sccs.len()];
         for node in &rel.nodes {
@@ -1687,6 +1722,7 @@ impl NodesPlan {
             for (s, plan) in rel.sccs.iter().enumerate() {
                 if plan.at == *k {
                     steps.push(Step::Loop(s));
+                    step_nodes.push(None);
                 }
             }
             match node.owner {
@@ -1700,7 +1736,10 @@ impl NodesPlan {
                     sccs[s].delete_seeds.extend(node.delete_seed.iter().cloned());
                     sccs[s].insert_seeds.extend(node.insert_seed.iter().cloned());
                 }
-                _ if !node.inline => steps.extend(node.fill.iter().cloned().map(Step::Fill)),
+                _ if !node.inline => {
+                    steps.extend(node.fill.iter().cloned().map(Step::Fill));
+                    step_nodes.extend(node.fill.iter().map(|sql| Some((*k, delta_names(sql).filter_map(node_of).collect()))));
+                }
                 _ => {}
             }
             if let Owner::Copy(s) = node.owner {
@@ -1856,6 +1895,9 @@ impl NodesPlan {
             steps,
             step_reads: Vec::new(),
             step_writes: Vec::new(),
+            step_nodes,
+            step_gates: Vec::new(),
+            key_sql: std::collections::HashMap::new(),
             scc_reads: Vec::new(),
             scc_results: Vec::new(),
             sccs,
@@ -1950,6 +1992,7 @@ impl NodesPlan {
             }
         }
         self.node_count = names.len();
+        self.gates(nodes, &names);
         let target = |sql: &str| sql.strip_prefix("DELETE FROM ")
             .and_then(|tail| tail.split_whitespace().next())
             .and_then(|name| by_name.get(name).copied());
@@ -1983,6 +2026,66 @@ impl NodesPlan {
             self.scc_results.push(scc.vars.iter().map(|v| write(&v.finish)
                 .expect("SCC finish writes a physical delta")).collect());
         }
+    }
+
+    /// `step_gates` and `key_sql`. Each node's delta is nonempty only if one of its gates holds:
+    /// a physical delta is its own gate; an inline Mfp with an equality over a physical input is
+    /// that input's key test; any other inline node holds when one of its input deltas does.
+    /// Node ids ascend along input edges, so one ascending pass sees every input first.
+    fn gates(&mut self, nodes: &[Node], names: &[String]) {
+        let mut physical = vec![None; nodes.len()];
+        for (at, node) in nodes.iter().enumerate().filter(|(_, node)| !node.inline || node.source).enumerate() {
+            physical[node.0] = Some(at);
+        }
+        let node_of = |name: &str| name.strip_prefix("ivm_n").and_then(|n| n.strip_suffix("_d")).and_then(|n| n.parse::<usize>().ok());
+        // `None`: a node whose inputs could not be read off; steps reading it keep `step_reads`.
+        let mut leaves: Vec<Option<Vec<Gate>>> = Vec::with_capacity(nodes.len());
+        for (at, node) in nodes.iter().enumerate() {
+            let own = if let Some(id) = physical[at] {
+                Some(vec![Gate::Active(id)])
+            } else if let Some((Some(id), col, k)) = node.eq.map(|(input, col, k)| (physical[input].filter(|_| !nodes[input].inline), col, k)) {
+                Some(vec![Gate::Key(id, col, k)])
+            } else {
+                let mut gates = Some(Vec::new());
+                for input in delta_names(node.body.as_deref().unwrap_or("")).filter_map(node_of).filter(|input| *input != at) {
+                    match (gates.as_mut(), leaves.get(input).and_then(Option::as_ref)) {
+                        (Some(gates), Some(more)) if input < at => gates.extend(more.iter().copied()),
+                        _ => gates = None,
+                    }
+                }
+                gates.map(|mut gates| { gates.sort_unstable(); gates.dedup(); gates })
+            };
+            leaves.push(own);
+        }
+        let mut gates: Vec<Option<Vec<Gate>>> = self.step_nodes.iter().map(|step| {
+            let (at, inputs) = step.as_ref()?;
+            let mut gates = Vec::new();
+            for input in inputs.iter().filter(|input| *input != at) {
+                gates.extend(leaves.get(*input)?.as_ref()?.iter().copied());
+            }
+            gates.sort_unstable();
+            gates.dedup();
+            gates.iter().any(|gate| matches!(gate, Gate::Key(..))).then_some(gates)
+        }).collect();
+        let mut readers: std::collections::HashMap<(usize, usize), usize> = std::collections::HashMap::new();
+        for gate in gates.iter().flatten().flatten() {
+            if let Gate::Key(id, col, _) = gate { *readers.entry((*id, *col)).or_default() += 1; }
+        }
+        for step in gates.iter_mut() {
+            let Some(list) = step else { continue };
+            for gate in list.iter_mut() {
+                if let Gate::Key(id, col, _) = *gate {
+                    if readers[&(id, col)] < KEY_READERS { *gate = Gate::Active(id); }
+                }
+            }
+            list.sort_unstable();
+            list.dedup();
+            if !list.iter().any(|gate| matches!(gate, Gate::Key(..))) { *step = None; }
+        }
+        self.key_sql = readers.into_iter().filter(|(_, n)| *n >= KEY_READERS)
+            .map(|((id, col), _)| ((id, col), format!("SELECT DISTINCT c{col} FROM {}", names[id])))
+            .collect();
+        self.step_gates = gates;
     }
 
     fn inline_statements(&mut self, inline_deltas: &[(String, String)], counted: &std::collections::HashMap<String, String>) {
@@ -2257,6 +2360,28 @@ impl NodesPlan {
         Ok(results)
     }
 
+    /// Whether one of `gates` holds; a key test reads its delta's distinct column values once.
+    fn open(&self, db: &Connection, gates: &[Gate], active: &[bool],
+        keys: &mut std::collections::HashMap<(usize, usize), std::collections::HashSet<i64>>, counters: &mut Counters) -> rusqlite::Result<bool> {
+        for gate in gates {
+            match *gate {
+                Gate::Active(id) => if active.get(id) == Some(&true) { return Ok(true); },
+                Gate::Key(id, col, k) => {
+                    if active.get(id) != Some(&true) { continue; }
+                    if !keys.contains_key(&(id, col)) {
+                        let sql = &self.key_sql[&(id, col)];
+                        let values = db.prepare_cached(sql)?.query_map([], |r| r.get::<_, i64>(0))?
+                            .collect::<rusqlite::Result<std::collections::HashSet<i64>>>()?;
+                        *counters.statements.as_mut().unwrap() += 1;
+                        keys.insert((id, col), values);
+                    }
+                    if keys[&(id, col)].contains(&k) { return Ok(true); }
+                }
+            }
+        }
+        Ok(false)
+    }
+
     /// Registers `work_function` on the connection that settles this plan.
     pub(crate) fn register_work(&self, db: &Connection) -> rusqlite::Result<()> {
         let rows = self.work_rows.clone();
@@ -2282,6 +2407,8 @@ impl NodesPlan {
             if let Some(id) = id { active[*id] |= staged.contains(table); }
         }
         let mut minted = false;
+        // Key sets read this settle; a write to the delta drops its sets.
+        let mut keys: std::collections::HashMap<(usize, usize), std::collections::HashSet<i64>> = std::collections::HashMap::new();
         for (at, step) in self.steps.iter().enumerate() {
             match step {
                 Step::Fill(sql) if sql.starts_with(crate::terms::AFTER_MINT) => {
@@ -2289,11 +2416,20 @@ impl NodesPlan {
                 }
                 Step::Fill(sql) => {
                     minted = false;
-                    let reads = &self.step_reads[at];
-                    if !reads.is_empty() && !reads.iter().any(|id| active.get(*id) == Some(&true)) { continue; }
+                    let open = match &self.step_gates[at] {
+                        Some(gates) => self.open(db, gates, &active, &mut keys, counters)?,
+                        None => {
+                            let reads = &self.step_reads[at];
+                            reads.is_empty() || reads.iter().any(|id| active.get(*id) == Some(&true))
+                        }
+                    };
+                    if !open { continue; }
                     let rows = Self::exec(db, sql, counters)?;
                     minted = rows > 0;
-                    if let Some(id) = self.step_writes[at] { active[id] |= rows > 0; }
+                    if let Some(id) = self.step_writes[at] {
+                        active[id] |= rows > 0;
+                        if rows > 0 { keys.retain(|(delta, _), _| *delta != id); }
+                    }
                 }
                 Step::Loop(s) => {
                     let reads = &self.scc_reads[*s];
@@ -2305,6 +2441,7 @@ impl NodesPlan {
                     };
                     for (id, nonempty) in self.scc_results[*s].iter().zip(results) {
                         active[*id] |= nonempty;
+                        if nonempty { keys.retain(|(delta, _), _| delta != id); }
                     }
                 }
             }
