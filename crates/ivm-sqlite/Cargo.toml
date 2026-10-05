@@ -6,7 +6,7 @@ license = "MIT OR Apache-2.0"
 description = "SQLite-backed incremental frontier engine: typed cells, indexed integer joins, one settled frontier per transaction."
 
 [features]
-default = ["image"]
+default = []
 # Installed-image cache (`src/1_image.rs`): needs `sqlite3_serialize`, which loadable-extension
 # bindings lack; extension builds turn default features off.
 image = []
