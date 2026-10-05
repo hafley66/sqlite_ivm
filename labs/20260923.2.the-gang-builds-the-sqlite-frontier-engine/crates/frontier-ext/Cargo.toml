@@ -24,5 +24,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"]
 crate-type = ["cdylib"]
 
 [dependencies]
-ivm-sqlite = { path = "../../../../crates/ivm-sqlite" }
+ivm-sqlite = { path = "../../../../crates/ivm-sqlite", default-features = false }
 sqlite-ext = { path = "../../../../hafley-rs/crates/sqlite-ext", features = ["loadable"] }

@@ -31,7 +31,7 @@ crate-type = ["cdylib", "rlib"]
 # SQLite's own page cache, not the system dylib's purgeable one (plans/costs/README.md).
 # Extension builds pass --no-default-features: the host supplies SQLite.
 default = ["bundled", "statements"]
-bundled = ["rusqlite/bundled"]
+bundled = ["rusqlite/bundled", "ivm-sqlite/image"]
 extension = ["rusqlite/loadable_extension", "sqlite-ext/loadable"]
 # Compatibility feature for existing test/benchmark recipes. Native and linked
 # builds both retain statement spans; runtime filters control recording.
@@ -44,7 +44,7 @@ tracing-subscriber = "0.3"
 rusqlite = { version = "=0.40.2", features = ["functions", "vtab"] }
 sqlite-ext = { path = "hafley-rs/crates/sqlite-ext" }
 sqlite3-parser = "=0.17.0"
-ivm-sqlite = { path = "crates/ivm-sqlite" }
+ivm-sqlite = { path = "crates/ivm-sqlite", default-features = false }
 
 [profile.dev]
 debug = 0

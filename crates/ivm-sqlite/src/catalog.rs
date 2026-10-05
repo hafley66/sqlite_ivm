@@ -345,7 +345,8 @@ fn install_program(
     push_savepoint(&mut sql, "frontier_sp_install");
     sql.push_str(&created.ddl);
     push_catalog_ddl(&mut sql);
-    push_program_ddl(&installed, &mut sql, created.shards);
+    let mut shard_sql = String::new();
+    push_program_ddl(&installed, &mut sql, created.shards, &mut shard_sql);
     // Persist the typed program; SQL text is only an install-time input.
     let program_json = serde_json::to_string(&program)
         .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::State(e.to_string())))?;
@@ -364,6 +365,12 @@ fn install_program(
             n = name.replace('\'', "''"),
             col = col.name.replace('\'', "''"),
         ));
+    }
+    // Ahead of the savepoint: a schema inside a transaction cannot be deserialized. Only
+    // `Engine::install` shards, on a fresh connection it drops when the install fails.
+    if !shard_sql.is_empty() {
+        crate::image::install_shards(conn, created.shards, &shard_sql, &mut meter)
+            .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
     }
     meter
         .exec_text(conn, "install", name, &sql)
@@ -829,7 +836,7 @@ pub(crate) fn shard_schema(n: usize) -> String {
 
 /// `CREATE TABLE t ..` / `CREATE INDEX [IF NOT EXISTS] x ON t ..` with the object placed in its
 /// table's shard. Tables the output views read stay in `main`: a view reads only its own schema.
-fn sharded_ddl(ddl: &str, shards: usize, main_only: &str, placed: &mut HashMap<String, usize>) -> String {
+fn sharded_ddl(ddl: &str, shards: usize, main_only: &str, placed: &mut HashMap<String, usize>) -> Option<String> {
     let in_main = |table: &str| main_only.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).any(|word| word == table);
     let (head, rest) = ["CREATE TABLE ", "CREATE INDEX IF NOT EXISTS ", "CREATE INDEX "].iter()
         .find_map(|head| ddl.strip_prefix(head).map(|rest| (*head, rest)))
@@ -838,15 +845,16 @@ fn sharded_ddl(ddl: &str, shards: usize, main_only: &str, placed: &mut HashMap<S
     let table = match (head, words.as_slice()) {
         ("CREATE TABLE ", [name, ..]) => *name,
         ("CREATE INDEX IF NOT EXISTS " | "CREATE INDEX ", [_, "ON", table, ..]) => *table,
-        _ => return ddl.to_owned(),
+        _ => return None,
     };
-    if in_main(table) { return ddl.to_owned(); }
+    if in_main(table) { return None; }
     let next = placed.len() % shards;
     let shard = *placed.entry(table.to_owned()).or_insert(next);
-    format!("{head}{}.{rest}", shard_schema(shard))
+    Some(format!("{head}{}.{rest}", shard_schema(shard)))
 }
 
-fn push_program_ddl(inst: &Installed, sql: &mut String, shards: usize) {
+/// `shard_sql` takes the statements placed in shard schemas (none when `shards` is 0).
+fn push_program_ddl(inst: &Installed, sql: &mut String, shards: usize, shard_sql: &mut String) {
     let p = &inst.name;
     let plan = &inst.plan;
     let width = plan.stage_width.max(1);
@@ -867,12 +875,10 @@ fn push_program_ddl(inst: &Installed, sql: &mut String, shards: usize) {
         ));
         let mut placed = HashMap::new();
         for ddl in &nodes.ddl {
-            if shards == 0 {
-                sql.push_str(ddl);
-            } else {
-                sql.push_str(&sharded_ddl(ddl, shards, &nodes.output_snapshot, &mut placed));
+            match (shards > 0).then(|| sharded_ddl(ddl, shards, &nodes.output_snapshot, &mut placed)).flatten() {
+                Some(sharded) => { shard_sql.push_str(&sharded); shard_sql.push(';'); }
+                None => { sql.push_str(ddl); sql.push(';'); }
             }
-            sql.push(';');
         }
         let names = plan
             .output

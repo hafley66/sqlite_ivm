@@ -9,7 +9,8 @@
 //!
 //! Knobs: `IVM_BENCH_RUNS` (default 5), `IVM_BENCH_PRAGMAS` (SQL run on the connection before the
 //! install), `IVM_BENCH_FILE=1` (a file database in `TMPDIR` instead of `:memory:`),
-//! `IVM_BENCH_SHARDS` (attached schemas for node tables, default `ivm_sqlite::SHARDS`).
+//! `IVM_BENCH_SHARDS` (attached schemas for node tables, default `ivm_sqlite::SHARDS`),
+//! `IVM_BENCH_IMAGE=cold|disk` (see `run`; unset: process-layer hits after the warm-up).
 
 use std::{ffi::{c_int, c_void, CStr}, time::Instant};
 
@@ -67,6 +68,11 @@ struct Run {
 }
 
 fn run(program: &Program) -> Run {
+    // `IVM_BENCH_IMAGE=cold`: every install misses the image cache (and pays its serialize);
+    // `disk`: the process layer is dropped, so a hit reads `IVM_SQLITE_IMAGE_CACHE`.
+    if matches!(std::env::var("IVM_BENCH_IMAGE").as_deref(), Ok("cold" | "disk")) {
+        ivm_sqlite::clear_image_memory();
+    }
     let db = connection();
     let mut traced = Box::new(Trace::default());
     let handle = unsafe { db.handle() };
