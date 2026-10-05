@@ -203,3 +203,28 @@ fn create_scaling() {
         }
     }
 }
+
+/// Every settle statement and the schema of each corpus, one file per corpus under
+/// `IVM_BENCH_DUMP`: install changes that keep plans byte-identical compare these files.
+#[test]
+#[ignore]
+fn plan_text_dump() {
+    let dir = std::path::PathBuf::from(std::env::var_os("IVM_BENCH_DUMP").expect("IVM_BENCH_DUMP"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let corpora: [(&str, &str); 4] = [
+        ("c15", include_str!("corpus/8_c15_program.json")),
+        ("macro_library", include_str!("corpus/install/1_macro_library.json")),
+        ("macrotime", include_str!("corpus/install/2_macrotime.json")),
+        ("registry_comptime", include_str!("corpus/install/3_registry_comptime.json")),
+    ];
+    for (name, text) in corpora {
+        let program = serde_json::from_str::<Program>(text).unwrap();
+        let engine = Sqlite::install_on(Connection::open_in_memory().unwrap(), &program).unwrap();
+        let mut out = engine.statements().join(";\n");
+        let mut schema = engine.db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY rowid").unwrap();
+        let rows = schema.query_map([], |row| Ok(format!("{}|{}|{}|{}", row.get::<_, String>(0)?, row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?, row.get::<_, Option<String>>(3)?.unwrap_or_default()))).unwrap();
+        for row in rows { out.push('\n'); out.push_str(&row.unwrap()); }
+        std::fs::write(dir.join(format!("{name}.sql")), out).unwrap();
+    }
+}
