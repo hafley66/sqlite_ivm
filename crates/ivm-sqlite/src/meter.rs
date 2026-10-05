@@ -44,6 +44,34 @@ impl Meter {
         sqlite_ext::statements::batch(conn, phase, object, sql)
     }
 
+    /// A batch read in place by `sqlite3_exec`; `execute_batch` passes length-bounded slices, and
+    /// SQLite copies the whole remaining text before every prepare.
+    pub fn exec_text(
+        &mut self,
+        conn: &Connection,
+        phase: &str,
+        object: &str,
+        sql: &str,
+    ) -> rusqlite::Result<()> {
+        self.metered(sql);
+        let statement = sqlite_ext::statements::open(phase, object, sql, sqlite_ext::statements::FRESH);
+        let _entered = statement.enter();
+        let text = std::ffi::CString::new(sql).map_err(rusqlite::Error::NulError)?;
+        let mut message: *mut std::ffi::c_char = std::ptr::null_mut();
+        let rc = unsafe {
+            rusqlite::ffi::sqlite3_exec(conn.handle(), text.as_ptr(), None, std::ptr::null_mut(), &mut message)
+        };
+        if rc == rusqlite::ffi::SQLITE_OK {
+            return Ok(());
+        }
+        let detail = (!message.is_null()).then(|| {
+            let detail = unsafe { std::ffi::CStr::from_ptr(message) }.to_string_lossy().into_owned();
+            unsafe { rusqlite::ffi::sqlite3_free(message.cast()) };
+            detail
+        });
+        Err(rusqlite::Error::SqliteFailure(rusqlite::ffi::Error::new(rc), detail))
+    }
+
     /// One cached query collecting every row.
     pub fn rows<T, P: Params>(
         &mut self,

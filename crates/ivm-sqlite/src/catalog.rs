@@ -364,7 +364,7 @@ fn install_program(
         ));
     }
     meter
-        .batch(conn, "install", name, &sql)
+        .exec_text(conn, "install", name, &sql)
         .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
     if !terms_ready {
         if let Err(e) = crate::terms::install(conn, program) {
