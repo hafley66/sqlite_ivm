@@ -11,7 +11,7 @@ use std::collections::{BTreeSet, HashSet};
 pub struct Sqlite {
     /// Work counting on `db` (`Engine::install` with `ivm_sqlite::work` enabled, or
     /// `install_counted`); declared first so it unregisters before `db` closes.
-    work: Option<crate::work::WorkTrace>,
+    work: Option<crate::work::WorkLog>,
     /// The database every installed program, term and source table lives in.
     pub db: Connection,
     programs: Vec<OutputProgram>,
@@ -256,7 +256,7 @@ impl Sqlite {
     /// `Engine::install` with work counting on: `work()` reads the counts.
     pub fn install_counted(ir: &Program) -> Result<Self, EngineError> {
         let db = Connection::open_in_memory().map_err(|e| error(Stage::Install, e))?;
-        let work = crate::work::WorkTrace::start(&db).map_err(|e| error(Stage::Install, e))?;
+        let work = crate::work::WorkLog::start(&db).map_err(|e| error(Stage::Install, e))?;
         Self::install_traced(db, ir, SHARDS, Some(work))
     }
 
@@ -265,7 +265,7 @@ impl Sqlite {
         self.work.as_ref().map(|work| work.work())
     }
 
-    fn install_traced(owned: Connection, ir: &Program, shards: usize, mut work: Option<crate::work::WorkTrace>) -> Result<Self, EngineError> {
+    fn install_traced(owned: Connection, ir: &Program, shards: usize, mut work: Option<crate::work::WorkLog>) -> Result<Self, EngineError> {
         let db = &owned;
         for shard in 0..shards {
             db.execute_batch(&format!("ATTACH DATABASE ':memory:' AS {}", catalog::shard_schema(shard)))
@@ -381,8 +381,8 @@ impl Sqlite {
 impl Engine for Sqlite {
     fn install(ir: &Program) -> Result<Self, EngineError> {
         let db = Connection::open_in_memory().map_err(|e| error(Stage::Install, e))?;
-        let work = if crate::work::WorkTrace::wanted() {
-            Some(crate::work::WorkTrace::start(&db).map_err(|e| error(Stage::Install, e))?)
+        let work = if crate::work::WorkLog::wanted() {
+            Some(crate::work::WorkLog::start(&db).map_err(|e| error(Stage::Install, e))?)
         } else { None };
         Self::install_traced(db, ir, SHARDS, work)
     }

@@ -365,6 +365,7 @@ dependencies = [
 name = "hafley-observe"
 version = "0.1.2"
 dependencies = [
+ "hafley-observe-macros",
  "libc",
  "opentelemetry",
  "opentelemetry-otlp",
@@ -378,6 +379,16 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "tracing-tunnel",
+ "tracking-allocator",
+]
+
+[[package]]
+name = "hafley-observe-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.5",
 ]
 
 [[package]]
@@ -1579,6 +1590,16 @@ checksum = "507bbab1fc2c9e606543558f5656b62e8014ba7e0ffa68b9484511b6871019c5"
 dependencies = [
  "serde",
  "tracing-core",
+]
+
+[[package]]
+name = "tracking-allocator"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b61e0cb3385e17df7db29c565b40fd0350dfe8a076c7eea83d416e30cfd0581"
+dependencies = [
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

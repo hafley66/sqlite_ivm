@@ -23,6 +23,7 @@ rusqlite = { version = "=0.40.2", features = ["functions"] }
 
 [dev-dependencies]
 ivm-dd = { path = "../ivm-dd" }
+hafley-observe = { path = "../../hafley-rs/crates/hafley-observe", features = ["oh"] }
 tracing-subscriber = "0.3"
 # Tests are the SQLite host: they link a bundled copy and load extensions.
 rusqlite = { version = "=0.40.2", features = ["bundled", "load_extension"] }

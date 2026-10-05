@@ -2,7 +2,7 @@
 #[allow(dead_code)]
 mod random;
 
-use std::{collections::BTreeMap, ffi::{c_int, c_void, CStr}, time::Instant};
+use std::{collections::BTreeMap, time::Instant};
 
 use hafley_observe::{assert_growth_sized, Growth, SpanCounts};
 use ivm_dd::Dd;
@@ -11,30 +11,12 @@ use ivm_ir::{Expr, Frontier, Func, LetRec, Op, Program, RelKind, Relation, Sourc
 use ivm_sqlite::Sqlite;
 use rusqlite::Connection;
 
-extern "C" fn count_create(_event: u32, context: *mut c_void, statement: *mut c_void, _extra: *mut c_void) -> c_int {
-    let sql = unsafe { rusqlite::ffi::sqlite3_sql(statement.cast()) };
-    if !sql.is_null() {
-        let sql = unsafe { CStr::from_ptr(sql) }.to_bytes();
-        if sql.iter().take(6).copied().eq(b"CREATE".iter().copied()) {
-            unsafe { *(context as *mut usize) += 1; }
-        }
-    }
-    0
-}
-
 fn counted_install(program: &Program) -> (Sqlite, usize) {
     let db = Connection::open_in_memory().unwrap();
-    let mut creates = 0usize;
-    let handle = unsafe { db.handle() };
-    let result = unsafe { rusqlite::ffi::sqlite3_trace_v2(
-        handle,
-        rusqlite::ffi::SQLITE_TRACE_STMT as u32,
-        Some(count_create),
-        (&mut creates as *mut usize).cast(),
-    ) };
-    assert_eq!(result, rusqlite::ffi::SQLITE_OK);
+    let trace = hafley_observe::sqlite_work::WorkTrace::start(&db).unwrap();
     let installed = Sqlite::install_on(db, program).unwrap();
-    unsafe { rusqlite::ffi::sqlite3_trace_v2(handle, 0, None, std::ptr::null_mut()); }
+    let creates = trace.work().creates as usize;
+    drop(trace);
     (installed, creates)
 }
 
