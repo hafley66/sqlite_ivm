@@ -654,15 +654,15 @@ impl Engine for Sqlite {
         crate::terms::snapshot(db, &self.ir, functor).map_err(|e| error(Stage::Snapshot, e))
     }
     fn intern_terms(&mut self, terms: &[(RelId, Row)]) -> Result<Vec<i64>, EngineError> {
-        let db = &self.db;
-        terms.iter().map(|(functor, args)| {
+        let named = terms.iter().map(|(functor, args)| {
             let rel = self.ir.rel(*functor).filter(|rel| rel.kind == RelKind::Constructor)
                 .ok_or_else(|| EngineError::new(Stage::Settle, Some(*functor), ErrorKind::UnknownRel(*functor)))?;
             if args.len() + 1 != rel.cols.len() {
                 return Err(EngineError::new(Stage::Settle, Some(*functor), ErrorKind::Arity { expected: rel.cols.len() - 1, actual: args.len() }));
             }
-            crate::terms::intern_term(db, &rel.name, args).map_err(|e| error(Stage::Settle, e))
-        }).collect()
+            Ok((rel.name.as_str(), args.as_slice()))
+        }).collect::<Result<Vec<_>, _>>()?;
+        crate::terms::intern_terms(&self.db, &named).map_err(|e| error(Stage::Settle, e))
     }
     fn intern_text(&mut self, value: &str) -> Result<i64, EngineError> {
         let db = &self.db;
