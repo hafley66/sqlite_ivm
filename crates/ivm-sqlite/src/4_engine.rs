@@ -234,33 +234,46 @@ impl Sqlite {
             ));
         }
         crate::terms::install(db, ir).map_err(|e| error(Stage::Install, e))?;
+        // One schema read: the tables the host already holds. Every source DDL runs inside the
+        // program install savepoint, ahead of the program DDL.
+        let present: HashSet<String> = db
+            .prepare("SELECT name FROM sqlite_master WHERE type='table'")
+            .and_then(|mut statement| {
+                statement.query_map([], |row| row.get::<_, String>(0))?.collect()
+            })
+            .map_err(|e| error(Stage::Install, e))?;
+        let mut created = catalog::CreatedSources::default();
         for source in ir.rels.iter().filter(|r| r.kind == RelKind::Source) {
             let columns = (0..source.cols.len())
                 .map(|i| format!("c{i} INTEGER NOT NULL"))
                 .collect::<Vec<_>>()
                 .join(",");
             let keys = (0..source.cols.len()).map(|i| format!("c{i}")).collect::<Vec<_>>().join(",");
-            let present: bool = db.query_row(
-                "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
-                [&source.name], |row| row.get(0),
-            ).map_err(|e| error(Stage::Install, e))?;
             // A new host table is its own set: the key rejects a present insert.
-            let sql = if present { format!(
-                "CREATE UNIQUE INDEX IF NOT EXISTS {} ON {}({keys})",
-                catalog::quote(format!("ivm_host_{}_set", source.name)),
-                catalog::quote(&source.name),
-            ) } else { format!(
-                "CREATE TABLE {}({columns}, PRIMARY KEY ({keys})) WITHOUT ROWID",
-                catalog::quote(&source.name)
-            ) };
-            db.execute_batch(&sql).map_err(|e| error(Stage::Install, e))?;
+            if present.contains(&source.name) {
+                created.ddl.push_str(&format!(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS {} ON {}({keys});",
+                    catalog::quote(format!("ivm_host_{}_set", source.name)),
+                    catalog::quote(&source.name),
+                ));
+            } else {
+                created.ddl.push_str(&format!(
+                    "CREATE TABLE {}({columns}, PRIMARY KEY ({keys})) WITHOUT ROWID;",
+                    catalog::quote(&source.name)
+                ));
+                created.columns.insert(
+                    source.name.clone(),
+                    (0..source.cols.len()).map(|i| format!("c{i}")).collect(),
+                );
+            }
         }
         let mut programs = Vec::new();
         if ir.outputs.len() > 1 {
             let (bundle, members) = bundled_program(ir)?;
             let relation = bundle.rel(bundle.outputs[0]).expect("bundle output");
-            let program = SqlProgram::install_ir_unwatched_terms_ready(db, &relation.name, &bundle)
-                .map_err(plan_error)?;
+            let program =
+                SqlProgram::install_ir_unwatched_terms_ready(db, &relation.name, &bundle, &created)
+                    .map_err(plan_error)?;
             programs.push(OutputProgram { rel: relation.id, program, threshold: false, members });
         } else {
             for &output in &ir.outputs {
@@ -271,8 +284,11 @@ impl Sqlite {
                     .map(str::to_owned)
                     .unwrap_or_else(|| format!("ivm_output_{output}"));
                 let single = output_program(ir, output);
-                let program = SqlProgram::install_ir_unwatched_terms_ready(db, &name, &single)
-                    .map_err(plan_error)?;
+                let program =
+                    SqlProgram::install_ir_unwatched_terms_ready(db, &name, &single, &created)
+                        .map_err(plan_error)?;
+                // The first install created the sources.
+                created = catalog::CreatedSources::default();
                 let threshold = matches!(ir.strata.as_slice(), [Stratum::Let { id, body }]
                     if *id == output && matches!(ir.nodes.get(*body as usize), Some(Op::Threshold(_))));
                 programs.push(OutputProgram {

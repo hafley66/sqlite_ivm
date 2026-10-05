@@ -34,6 +34,7 @@ use crate::plan::{self, Compiled, Root, ScanSpec};
 use crate::OutputColumn;
 use ivm_ir::{Program as IrProgram, Ty};
 use sqlite_ext::rusqlite::{types::Value, Connection};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 pub(crate) struct Installed {
@@ -202,8 +203,20 @@ pub(crate) fn scan_derived_sources(
     conn: &Connection,
     inst: &Installed,
 ) -> Result<Vec<String>, EngineError> {
+    scan_derived_sources_created(conn, inst, &CreatedSources::default())
+}
+
+/// `scan_derived_sources`, skipping the base tables the install creates.
+fn scan_derived_sources_created(
+    conn: &Connection,
+    inst: &Installed,
+    created: &CreatedSources,
+) -> Result<Vec<String>, EngineError> {
     let mut derived = Vec::new();
     for source in &inst.sources {
+        if created.columns.contains_key(source) {
+            continue;
+        }
         if derived_view_program(conn, source)?.is_some() || !is_base_table(conn, source)? {
             derived.push(source.clone());
         }
@@ -245,6 +258,14 @@ pub(crate) enum Watch {
     None,
 }
 
+/// Base tables an install creates inside its own savepoint, before the program DDL: their
+/// `CREATE` statements and the columns of each, known without a schema read.
+#[derive(Default)]
+pub(crate) struct CreatedSources {
+    pub(crate) ddl: String,
+    pub(crate) columns: HashMap<String, Vec<String>>,
+}
+
 pub(crate) fn install(
     conn: &Connection,
     name: &str,
@@ -253,7 +274,7 @@ pub(crate) fn install(
 ) -> Result<Arc<Installed>, EngineError> {
     let parsed = compile(conn, name, select_sql)?;
     let program = plan::lower_ir(&parsed, &|table| source_types(conn, table))?;
-    install_program(conn, name, &program, parsed.output, watch, false, false)
+    install_program(conn, name, &program, parsed.output, watch, false, false, &CreatedSources::default())
 }
 
 pub(crate) fn install_ir(
@@ -262,6 +283,7 @@ pub(crate) fn install_ir(
     program: &IrProgram,
     watch: Watch,
     terms_ready: bool,
+    created: &CreatedSources,
 ) -> Result<Arc<Installed>, EngineError> {
     let output_id = *program.outputs.first().ok_or_else(|| {
         EngineError::unsupported(Stage::Plan, name, "a typed program needs one output")
@@ -276,7 +298,7 @@ pub(crate) fn install_ir(
             name: format!("c{i}"),
         })
         .collect();
-    install_program(conn, name, program, output, watch, true, terms_ready)
+    install_program(conn, name, program, output, watch, true, terms_ready, created)
 }
 
 fn install_program(
@@ -287,12 +309,13 @@ fn install_program(
     watch: Watch,
     typed_ir: bool,
     terms_ready: bool,
+    created: &CreatedSources,
 ) -> Result<Arc<Installed>, EngineError> {
     validate_program_name(name)?;
     let _guard =
         tracing::info_span!(target: observe::TARGET, observe::INSTALL_SPAN, program = name)
             .entered();
-    let compiled = compile_ir(conn, name, program, output, typed_ir)?;
+    let compiled = compile_ir(conn, name, program, output, typed_ir, &created.columns)?;
     let mut meter = Meter::default();
 
     if catalog_row(conn, name, &mut meter)?.is_some() {
@@ -305,7 +328,7 @@ fn install_program(
     let install = next_install(conn, &mut meter)?;
     let installed = {
         let mut built = build_installed(name, install, compiled, program.clone(), !typed_ir);
-        built.derived = scan_derived_sources(conn, &built)?;
+        built.derived = scan_derived_sources_created(conn, &built, created)?;
         if matches!(watch, Watch::Sources) && !built.derived.is_empty() {
             return Err(EngineError::unsupported(
                 Stage::Install,
@@ -318,6 +341,7 @@ fn install_program(
 
     let mut sql = String::new();
     push_savepoint(&mut sql, "frontier_sp_install");
+    sql.push_str(&created.ddl);
     push_catalog_ddl(&mut sql);
     push_program_ddl(&installed, &mut sql);
     // Persist the typed program; SQL text is only an install-time input.
@@ -588,8 +612,12 @@ fn compile_ir(
     program: &IrProgram,
     output: Vec<OutputColumn>,
     typed_ir: bool,
+    created: &HashMap<String, Vec<String>>,
 ) -> Result<Compiled, EngineError> {
     let columns = |table: &str| -> Option<Vec<String>> {
+        if let Some(columns) = created.get(table) {
+            return Some(columns.clone());
+        }
         let mut fresh = Meter::default();
         table_columns(conn, table, &mut fresh)
             .ok()
@@ -926,7 +954,7 @@ pub(crate) fn open(conn: &Connection, name: &str) -> Result<Arc<Installed>, Engi
             |row| row.get::<_, String>(0).map(|name| OutputColumn { name }),
         )
         .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
-    let compiled = compile_ir(conn, name, &program, output, typed_ir)?;
+    let compiled = compile_ir(conn, name, &program, output, typed_ir, &HashMap::new())?;
     let mut installed = build_installed(name, install, compiled, program, !typed_ir);
     installed.derived = scan_derived_sources(conn, &installed)?;
     Ok(Arc::new(installed))
