@@ -190,17 +190,26 @@ impl Program {
         program: &ivm_ir::Program,
     ) -> Result<Self, EngineError> {
         Ok(Self {
-            inner: catalog::install_ir(conn, name, program, catalog::Watch::Sources, false)?,
+            inner: catalog::install_ir(
+                conn,
+                name,
+                program,
+                catalog::Watch::Sources,
+                false,
+                &catalog::CreatedSources::default(),
+            )?,
         })
     }
 
+    /// `created`: source tables the install creates inside its savepoint.
     pub(crate) fn install_ir_unwatched_terms_ready(
         conn: &rusqlite::Connection,
         name: &str,
         program: &ivm_ir::Program,
+        created: &catalog::CreatedSources,
     ) -> Result<Self, EngineError> {
         Ok(Self {
-            inner: catalog::install_ir(conn, name, program, catalog::Watch::None, true)?,
+            inner: catalog::install_ir(conn, name, program, catalog::Watch::None, true, created)?,
         })
     }
 
