@@ -1579,6 +1579,9 @@ fn work_function(program: &str) -> String {
     format!("frontier_{program}_work")
 }
 
+/// Prefix of an integration delete that takes the key of one row its upsert left at weight 0.
+const BY_KEY: &str = "/*by key*/ ";
+
 /// The fill anchor of the one statement that reads an inline join (`push`'s fill shape).
 const FILL_ANCHOR: &str = ", SUM(w) FROM (";
 
@@ -1805,11 +1808,22 @@ impl NodesPlan {
                     ));
                     objects.push(("INDEX".into(), ix));
                 }
-                ints.push(format!("INSERT INTO {i} ({cols}, w) SELECT {cols}, SUM(w) FROM {d} WHERE true GROUP BY {cols} \
-                    ON CONFLICT ({cols}) DO UPDATE SET w = w + excluded.w"));
-                ints.push(format!(
-                    "DELETE FROM {i} WHERE w = 0 AND ({cols}) IN (SELECT {cols} FROM {d})"
-                ));
+                if node.inline && node.owner == Owner::Settle {
+                    // The delta is a CTE chain: the upsert returns every row it touched, and the
+                    // rows it left at weight 0 are deleted by key, without a second evaluation.
+                    ints.push(format!("INSERT INTO {i} ({cols}, w) SELECT {cols}, SUM(w) FROM {d} WHERE true GROUP BY {cols} \
+                        ON CONFLICT ({cols}) DO UPDATE SET w = w + excluded.w RETURNING w, {cols}"));
+                    ints.push(format!(
+                        "{BY_KEY}DELETE FROM {i} WHERE {} AND w = 0",
+                        (0..*arity).map(|x| format!("c{x} = ?{}", x + 1)).collect::<Vec<_>>().join(" AND ")
+                    ));
+                } else {
+                    ints.push(format!("INSERT INTO {i} ({cols}, w) SELECT {cols}, SUM(w) FROM {d} WHERE true GROUP BY {cols} \
+                        ON CONFLICT ({cols}) DO UPDATE SET w = w + excluded.w"));
+                    ints.push(format!(
+                        "DELETE FROM {i} WHERE w = 0 AND ({cols}) IN (SELECT {cols} FROM {d})"
+                    ));
+                }
             }
         }
         for (plan, scc) in rel.sccs.iter().zip(&mut sccs) {
@@ -2175,6 +2189,21 @@ impl NodesPlan {
         Ok(result)
     }
 
+    /// Runs an upsert that returns `w, c0..` of each row it touched: the keys left at weight 0.
+    fn emptied(db: &Connection, sql: &str, counters: &mut Counters) -> rusqlite::Result<Vec<Row>> {
+        let mut stmt = db.prepare_cached(sql)?;
+        let width = stmt.column_count() - 1;
+        let mut rows = stmt.query([])?;
+        let mut keys = Vec::new();
+        while let Some(row) = rows.next()? {
+            if row.get::<_, W>(0)? == 0 {
+                keys.push((1..=width).map(|x| row.get(x)).collect::<rusqlite::Result<Row>>()?);
+            }
+        }
+        *counters.statements.as_mut().unwrap() += 1;
+        Ok(keys)
+    }
+
     /// One settle query yielding a single boolean.
     fn query_bool(db: &Connection, sql: &str, counters: &mut Counters) -> rusqlite::Result<bool> {
         let value = sqlite_ext::statements::query_cached(db, "settle", object_of(sql), sql, [], |r| r.get::<_, bool>(0))?;
@@ -2466,9 +2495,24 @@ impl NodesPlan {
         statement.rows(changes.len());
         drop(_statement);
         *counters.statements.as_mut().unwrap() += 1;
-        for (sql, reads) in self.integrates.iter().zip(&self.integrate_reads) {
-            if reads.is_empty() || reads.iter().any(|id| active.get(*id) == Some(&true)) {
-                Self::exec(db, sql, counters)?;
+        let mut at = 0;
+        while at < self.integrates.len() {
+            let (sql, reads) = (&self.integrates[at], &self.integrate_reads[at]);
+            let open = reads.is_empty() || reads.iter().any(|id| active.get(*id) == Some(&true));
+            match self.integrates.get(at + 1).filter(|delete| delete.starts_with(BY_KEY)) {
+                Some(delete) => {
+                    if open {
+                        for key in Self::emptied(db, sql, counters)? {
+                            sqlite_ext::statements::exec_cached(db, "settle", object_of(delete), delete, rusqlite::params_from_iter(key))?;
+                            *counters.statements.as_mut().unwrap() += 1;
+                        }
+                    }
+                    at += 2;
+                }
+                None => {
+                    if open { Self::exec(db, sql, counters)?; }
+                    at += 1;
+                }
             }
         }
         for (sql, target) in self.clears.iter().zip(&self.clear_targets) {

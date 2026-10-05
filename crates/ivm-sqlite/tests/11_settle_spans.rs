@@ -50,6 +50,7 @@ fn settle_spans_statements_fixpoints_rounds_and_dictionary_counts() {
     // shard DDL batch `Engine::install` runs ahead of it. An insert-only frontier has no
     // retraction: the delete phase is skipped (108 statements and 6 rounds with it).
     // A round reads a variable's change from `to_delta`'s row count (89 with an EXISTS per round).
-    // The typed engine reads no output delta table back (80 with the read).
-    assert_eq!((count("frontier_round"), count("stmt"), rounds), (5, 79, vec!["delete_rounds=0", "insert_rounds=5"]));
+    // The typed engine reads no output delta table back (80 with the read). An integration of an
+    // inline delta deletes weight-0 rows by key only when its upsert left one (79 with the deletes).
+    assert_eq!((count("frontier_round"), count("stmt"), rounds), (5, 77, vec!["delete_rounds=0", "insert_rounds=5"]));
 }
