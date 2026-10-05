@@ -15,6 +15,9 @@ pub struct Sqlite {
     ir: Program,
     tick: u64,
     counters: Counters,
+    /// `mark` opened the `ivm_engine_mark` savepoint: every later write is journaled under it
+    /// and `rewind` rolls back to it.
+    marked: bool,
 }
 
 impl Sqlite {
@@ -305,6 +308,7 @@ impl Sqlite {
             ir: ir.clone(),
             tick: 0,
             counters: Counters::default(),
+            marked: false,
         };
         // A frontier visits every installed output. Rusqlite's default cache of 16
         // statements evicts each output's SQL before the next frontier reaches it.
@@ -543,6 +547,29 @@ impl Engine for Sqlite {
     }
 
     fn counters(&self) -> Counters { self.counters }
+
+    fn rewinds(&self) -> bool { true }
+
+    /// One savepoint around everything after the mark. Each settle's `ivm_engine_frontier`
+    /// savepoint nests inside it; rewinding is SQLite restoring the journaled pages, with no
+    /// statement per relation.
+    fn mark(&mut self) -> Result<(), EngineError> {
+        let sql = if self.marked {
+            "RELEASE ivm_engine_mark; SAVEPOINT ivm_engine_mark;"
+        } else {
+            "SAVEPOINT ivm_engine_mark;"
+        };
+        self.db.execute_batch(sql).map_err(|e| error(Stage::Settle, e))?;
+        self.marked = true;
+        Ok(())
+    }
+
+    fn rewind(&mut self) -> Result<(), EngineError> {
+        if !self.marked {
+            return Err(EngineError::new(Stage::Settle, None, ErrorKind::Unsupported("rewind without mark")));
+        }
+        self.db.execute_batch("ROLLBACK TO ivm_engine_mark;").map_err(|e| error(Stage::Settle, e))
+    }
 
     fn snapshot(&self, rel: RelId) -> Result<Vec<(Row, W)>, EngineError> {
         let output = self

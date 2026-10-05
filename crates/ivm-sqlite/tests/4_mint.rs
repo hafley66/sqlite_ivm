@@ -128,3 +128,31 @@ fn topk_over_ids_uses_dictionary_order_across_programs() {
     }
     assert_eq!(ordered.snapshot(1).unwrap(), vec![(vec![2], 1)]);
 }
+
+#[test]
+fn rewind_returns_relations_and_dictionary_to_the_mark() {
+    let program = mint_program("rewind_source", "rewind_output");
+    let mut engine = Sqlite::install(&program).unwrap();
+    assert!(engine.rewinds());
+    assert!(engine.rewind().is_err());
+    engine.settle(change([1, 3], 1)).unwrap();
+    engine.mark().unwrap();
+    engine.settle(change([1, 2], 1)).unwrap();
+    engine.settle(change([1, 3], -1)).unwrap();
+    assert_eq!(engine.snapshot(2).unwrap(), vec![(vec![1, 2, 2], 1)]);
+    engine.rewind().unwrap();
+    assert_eq!(engine.snapshot(2).unwrap(), vec![(vec![1, 3, 1], 1)]);
+    assert_eq!(engine.intern_snapshot(1).unwrap(), vec![(vec![1, 1, 3], 1)]);
+    // The id minted after the mark is reissued; the delta equals a fresh engine's.
+    let mut fresh = Sqlite::install(&program).unwrap();
+    fresh.settle(change([1, 3], 1)).unwrap();
+    let expected = fresh.settle(change([4, 5], 1)).unwrap();
+    let delta = engine.settle(change([4, 5], 1)).unwrap();
+    assert_eq!(delta.changes, vec![(2, vec![4, 5, 2], 1)]);
+    assert_eq!(delta.changes, expected.changes);
+    // The mark stays: a second rewind returns to it again.
+    engine.rewind().unwrap();
+    assert_eq!(engine.snapshot(2).unwrap(), vec![(vec![1, 3, 1], 1)]);
+    let dd = Dd::install(&program).unwrap();
+    assert!(!dd.rewinds());
+}

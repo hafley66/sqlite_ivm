@@ -110,6 +110,21 @@ pub trait Engine: Sized {
     fn text(&self, id: Cell) -> Result<Option<String>, EngineError>;
     fn intern_any(&mut self, value: &ivm_ir::AnyValue) -> Result<Cell, EngineError>;
     fn any_value(&self, id: Cell) -> Result<ivm_ir::AnyValue, EngineError>;
+    /// Whether `mark` and `rewind` are supported. A caller asks before marking and keeps
+    /// retracting rows on an engine that answers `false`.
+    fn rewinds(&self) -> bool {
+        false
+    }
+    /// Records the current state of every relation, term and text; a later `rewind` returns to
+    /// it. A second `mark` replaces the first.
+    fn mark(&mut self) -> Result<(), EngineError> {
+        Err(EngineError::new(Stage::Settle, None, ErrorKind::Unsupported("mark")))
+    }
+    /// Returns every relation, term and text to the last `mark`, discarding every settle since.
+    /// Cells interned since the mark are freed and may be reissued. The mark stays.
+    fn rewind(&mut self) -> Result<(), EngineError> {
+        Err(EngineError::new(Stage::Settle, None, ErrorKind::Unsupported("rewind")))
+    }
 }
 
 pub trait Rel {
