@@ -49,5 +49,6 @@ fn settle_spans_statements_fixpoints_rounds_and_dictionary_counts() {
     // `sqlite_master` read (109 before, with per-source EXISTS and PRAGMA reads), plus the
     // shard DDL batch `Engine::install` runs ahead of it. An insert-only frontier has no
     // retraction: the delete phase is skipped (108 statements and 6 rounds with it).
-    assert_eq!((count("frontier_round"), count("stmt"), rounds), (5, 89, vec!["delete_rounds=0", "insert_rounds=5"]));
+    // A round reads a variable's change from `to_delta`'s row count (89 with an EXISTS per round).
+    assert_eq!((count("frontier_round"), count("stmt"), rounds), (5, 80, vec!["delete_rounds=0", "insert_rounds=5"]));
 }

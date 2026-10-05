@@ -1424,7 +1424,6 @@ struct VarSql {
     to_del: String,
     clear_nx: String,
     clear_del: String,
-    any: String,
     finish: String,
     clear_acc: String,
     /// Recompute path: the old value into `acc` at -1, before `reset` empties the variable.
@@ -1460,6 +1459,8 @@ struct SccSql {
     insert_seed_writes: Vec<Option<usize>>,
     /// Physical delta of each variable, in `vars` order.
     var_ids: Vec<usize>,
+    /// Physical body delta each variable's phase statement reads, in `vars` order.
+    body_ids: Vec<Vec<usize>>,
     nonmonotone: bool,
     limit: Option<u32>,
     first: Option<RelId>,
@@ -1630,7 +1631,7 @@ impl NodesPlan {
             for v in &scc.vars {
                 all.extend([
                     &v.over_delete, &v.rederive, &v.insert, &v.to_delta, &v.to_acc,
-                    &v.to_del, &v.clear_nx, &v.clear_del, &v.any, &v.finish, &v.clear_acc,
+                    &v.to_del, &v.clear_nx, &v.clear_del, &v.finish, &v.clear_acc,
                 ].into_iter().map(String::as_str));
                 if scc.nonmonotone { all.extend([v.capture.as_str(), v.step.as_str()]); }
             }
@@ -1851,7 +1852,6 @@ impl NodesPlan {
                     to_del: format!("INSERT INTO {del} SELECT * FROM {nx} WHERE k = {k}"),
                     clear_nx: format!("DELETE FROM {nx} WHERE k = {k}"),
                     clear_del: format!("DELETE FROM {del} WHERE k = {k}"),
-                    any: format!("SELECT EXISTS (SELECT 1 FROM {})", v.d),
                     finish: format!("INSERT INTO {} SELECT {cols}, SUM(w) FROM {acc} WHERE k = {k} GROUP BY {cols} HAVING SUM(w) <> 0", r.d),
                     clear_acc: format!("DELETE FROM {acc} WHERE k = {k}"),
                     capture: format!("INSERT INTO {acc} SELECT {k}, {cols}{pad}, -1 FROM {} WHERE w > 0", v.i),
@@ -2004,6 +2004,7 @@ impl NodesPlan {
             scc.delete_seed_writes = scc.delete_seeds.iter().map(|sql| write(sql)).collect();
             scc.insert_seed_writes = scc.insert_seeds.iter().map(|sql| write(sql)).collect();
             scc.var_ids = scc.vars.iter().map(|v| write(&v.to_delta).expect("a variable's delta is physical")).collect();
+            scc.body_ids = scc.vars.iter().map(|v| reads(&v.over_delete)).collect();
         }
         for (scc_id, scc) in self.sccs.iter_mut().enumerate() {
             scc.copy_ids = nodes.iter().filter(|node| node.owner == Owner::Copy(scc_id))
@@ -2105,7 +2106,7 @@ impl NodesPlan {
             for var in &mut scc.vars {
                 for sql in [&mut var.over_delete, &mut var.rederive, &mut var.insert,
                     &mut var.to_delta, &mut var.to_acc, &mut var.to_del, &mut var.clear_nx,
-                    &mut var.clear_del, &mut var.any, &mut var.finish, &mut var.clear_acc,
+                    &mut var.clear_del, &mut var.finish, &mut var.clear_acc,
                     &mut var.capture, &mut var.step] {
                     expand(sql);
                 }
@@ -2149,7 +2150,6 @@ impl NodesPlan {
                     &mut var.to_del,
                     &mut var.clear_nx,
                     &mut var.clear_del,
-                    &mut var.any,
                     &mut var.finish,
                     &mut var.clear_acc,
                     &mut var.capture,
@@ -2247,30 +2247,33 @@ impl NodesPlan {
             if live(active, reads) { Self::exec(db, sql, counters)?; }
         }
         self.count_work(db, Owner::Loop(scc_id), Some(&*active), counters)?;
-        Self::exec_all(
-            db,
-            scc.vars.iter().map(|v| match phase {
+        // Rows each variable's phase statement staged in `nx`; an empty body delta stages none.
+        let mut staged = Vec::with_capacity(scc.vars.len());
+        for (v, body) in scc.vars.iter().zip(&scc.body_ids) {
+            let sql = match phase {
                 Phase::Delete => &v.over_delete,
                 Phase::Insert => &v.insert,
                 Phase::Recompute => &v.step,
-            }),
-            counters,
-        )?;
+            };
+            staged.push(if live(active, body) { Self::exec(db, sql, counters)? } else { 0 });
+        }
         for (sql, target) in scc.clears.iter().zip(&scc.clear_targets) {
             if target.is_none_or(|id| active[id]) { Self::exec(db, sql, counters)?; }
         }
         for id in scc.clear_targets.iter().flatten() { active[*id] = false; }
+        // The variable deltas are cleared above, so a variable changes this round exactly when
+        // `to_delta` moves rows into it, and `nx` holds rows only for variables that staged some.
         let mut more = false;
-        for (v, id) in scc.vars.iter().zip(&scc.var_ids) {
-            Self::exec_all(db, [&v.to_delta, &v.to_acc], counters)?;
+        for ((v, id), staged) in scc.vars.iter().zip(&scc.var_ids).zip(staged) {
+            if staged == 0 { continue; }
+            let changed = Self::exec(db, &v.to_delta, counters)? > 0;
+            Self::exec(db, &v.to_acc, counters)?;
             if deleting {
                 Self::exec(db, &v.to_del, counters)?;
             }
             Self::exec(db, &v.clear_nx, counters)?;
-            let any = sqlite_ext::statements::query_cached(db, "settle", object_of(&v.any), &v.any, [], |r| r.get::<_, bool>(0))?;
-            active[*id] = any;
-            more |= any;
-            *counters.statements.as_mut().unwrap() += 1;
+            active[*id] = changed;
+            more |= changed;
         }
         if more { *counters.rounds.as_mut().unwrap() += 1; }
         Ok(more)
