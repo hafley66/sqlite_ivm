@@ -77,6 +77,7 @@ fn delay_requires_clock_checker() {
 
 script_case!(recursive_antijoin_left_input, "14_recursive_antijoin");
 script_case!(recursive_mint_input, "15_recursive_mint");
+script_case!(nonmonotone_letrec_walk, "17_nonmonotone_walk");
 
 #[test]
 fn dred_self_supporting_cycle_matches_dd() {

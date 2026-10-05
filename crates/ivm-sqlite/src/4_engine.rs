@@ -439,7 +439,10 @@ impl Engine for Sqlite {
                 // constructor scan. Empty-source passes carry those rows forward.
                 for pass in 0..=8192 {
                     let (visible, work) = crate::engine::settle_counted(db, &output.program.inner, &used, false)
-                        .map_err(|e| error(Stage::Settle, e))?;
+                        .map_err(|e| match e.kind {
+                            crate::ErrorKind::LetRecLimit { rel, limit } => EngineError::new(Stage::Settle, rel, ErrorKind::LetRecLimit(limit)),
+                            _ => error(Stage::Settle, e),
+                        })?;
                     for (target, source) in [
                         (&mut counters.delta_rows.filter, work.delta_rows.filter),
                         (&mut counters.delta_rows.join, work.delta_rows.join),

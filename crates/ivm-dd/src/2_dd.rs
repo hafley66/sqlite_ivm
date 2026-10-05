@@ -9,7 +9,7 @@ use differential_dataflow::lattice::Lattice;
 use differential_dataflow::operators::iterate::Variable;
 use differential_dataflow::{AsCollection, VecCollection};
 use std::hash::{DefaultHasher, Hash, Hasher};
-use timely::dataflow::operators::vec::Partition;
+use timely::dataflow::operators::vec::{Filter, Partition};
 use timely::dataflow::Scope;
 use timely::order::Product;
 use timely::progress::Timestamp;
@@ -106,8 +106,8 @@ impl Nest for Time {
     fn letrec<'s>(rel: &mut DdRel<'s, Self>, p: &Program, rec: &LetRec, defined: &[(RelId, Coll<'s>)], outer_nodes: &mut Vec<Option<Coll<'s>>>)
         -> Result<Vec<Coll<'s>>, EngineError> {
         let used = rec_inputs(p, rec);
-        if rec.limit.is_some() {
-            return Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("LetRec limit")));
+        if rec.limit == Some(0) {
+            return Err(EngineError::new(Stage::Install, rec.ids.first().copied(), ErrorKind::Unsupported("LetRec limit 0")));
         }
         if !rec.ids.iter().any(|id| used.contains(id)) {
             return rec.bodies.iter().map(|body| {
@@ -140,6 +140,7 @@ impl Nest for Time {
                 read: BTreeSet::new(),
                 types: rel.types.clone(),
                 arranged: rel.arranged.clone(),
+                limits: Vec::new(),
             };
             let mut nodes = vec![None; p.nodes.len()];
             for (id, c) in hoisted {
@@ -156,6 +157,23 @@ impl Nest for Time {
             for body in &rec.bodies {
                 let c = lower_node(p, &mut inner, &mut nodes, &scope_defined, *body)?;
                 results.push(inner.threshold(c));
+            }
+            // Round r of the scope holds body evaluation r + 1. With `limit = n`, evaluations
+            // 1..=n may change a variable; a change in evaluation n + 1 (round n) means no fixed
+            // point within the limit. Those updates are cut from the feedback and the output, so
+            // the loop stops, and reported through `rel.limits`.
+            if let Some(limit) = rec.limit {
+                let limit = u64::from(limit);
+                let mut over = Vec::new();
+                results = results.into_iter().enumerate().map(|(index, result)| {
+                    over.push(result.inner.clone().filter(move |(_, t, _): &(Row, Inner, W)| t.inner >= limit).as_collection().map(move |mut row| {
+                        row.push(index as Cell);
+                        row
+                    }));
+                    result.inner.filter(move |(_, t, _): &(Row, Inner, W)| t.inner < limit).as_collection()
+                }).collect();
+                let over = differential_dataflow::collection::concatenate(sub, over).leave(outer);
+                rel.limits.push((rec.ids.first().copied(), rec.limit.unwrap_or(0), over));
             }
             for (variable, result) in variables.into_iter().zip(&results) {
                 variable.set(result.clone());
@@ -208,6 +226,9 @@ pub struct DdRel<'s, T: Nest = Time> {
     types: Rc<RefCell<Vec<Option<Option<Vec<Ty>>>>>>,
     /// Join arrangements built and cells sent into them, shared by every scope of one install.
     arranged: Rc<RefCell<ArrangeStats>>,
+    /// Per LetRec with a limit: its first id, the limit, and every variable update past the
+    /// limit (the row tagged with its variable's index), left to the outer scope.
+    limits: Vec<(Option<RelId>, u32, Coll<'s, T>)>,
 }
 
 /// `dd install` / `dd settle` debug fields: join arrangements built at install, and cells (key
@@ -1005,6 +1026,7 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
         let taps: Option<Rc<RefCell<Vec<DdTap>>>> = (mode != Mode::Unmeasured).then(Rc::default);
         let interner = Rc::new(RefCell::new(Interner::default()));
         let sum_error = Rc::new(RefCell::new(None));
+        let limit_hit: Rc<RefCell<Option<(Option<RelId>, u32)>>> = Rc::default();
         let texts = {
             let mut dict = interner.borrow_mut();
             if program.uses_strings() { dict.mint_text(""); }
@@ -1035,10 +1057,16 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
                 constructor_inputs.insert(rel.id, input);
                 sources.insert(rel.id, c);
             }
-            let mut rel = DdRel { scope, rec: None, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone(), constructors: constructors.clone(), interner: interner.clone(), sum_error: sum_error.clone(), texts: texts.clone(), keyed: BTreeMap::new(), read: BTreeSet::new(), types: Rc::default(), arranged: arranged.clone() };
+            let mut rel = DdRel { scope, rec: None, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone(), constructors: constructors.clone(), interner: interner.clone(), sum_error: sum_error.clone(), texts: texts.clone(), keyed: BTreeMap::new(), read: BTreeSet::new(), types: Rc::default(), arranged: arranged.clone(), limits: Vec::new() };
             lower(&program, &mut rel)?;
             // A constructor no operator reads gets no rows: its terms would cost an epoch and drive nothing.
             constructor_inputs.retain(|id, _| rel.read.contains(id));
+            for (id, limit, over) in rel.limits {
+                let hit = limit_hit.clone();
+                over.consolidate()
+                    .inspect(move |_| { hit.borrow_mut().get_or_insert((id, limit)); })
+                    .probe_with(&mut probe);
+            }
             let mut outputs = BTreeMap::new();
             for (id, c) in rel.outputs {
                 let sink = Rc::clone(&captured);
@@ -1127,6 +1155,10 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
                             steps += 1;
                             probe.less_than(&epoch)
                         });
+                    }
+                    if let Some((rel, limit)) = limit_hit.borrow_mut().take() {
+                        let _ = reply.send(Err(EngineError::new(Stage::Settle, rel, ErrorKind::LetRecLimit(limit))));
+                        break;
                     }
                     if let Some(logger) = &reduce_reads { logger.flush(); }
                     let mut net: BTreeMap<(RelId, Row), W> = BTreeMap::new();

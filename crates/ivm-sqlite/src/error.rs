@@ -65,6 +65,9 @@ pub enum ErrorKind {
     State(String),
     /// A SQLite statement failed under the engine.
     Sqlite(String),
+    /// A LetRec with `limit` still changed a variable in body evaluation `limit + 1`; `rel` is
+    /// the LetRec's first id.
+    LetRecLimit { rel: Option<u32>, limit: u32 },
 }
 
 #[derive(Clone, Debug)]
@@ -116,6 +119,7 @@ impl fmt::Display for ErrorKind {
             }
             ErrorKind::State(why) => write!(f, "state: {why}"),
             ErrorKind::Sqlite(why) => write!(f, "sqlite: {why}"),
+            ErrorKind::LetRecLimit { rel, limit } => write!(f, "LetRec limit {limit} reached (rel {rel:?})"),
         }
     }
 }
