@@ -85,7 +85,7 @@ fn independent_inputs<C>(p: &Program, rec: &LetRec, defined: &[(RelId, C)], fuse
 pub trait Nest: Timestamp + Lattice + Ord + Hash + Clone + std::fmt::Debug + 'static {
     /// `(outer tick, loop round)`; the round is `None` outside a LetRec.
     fn split(&self) -> (Time, Option<u64>);
-    fn letrec<'s>(rel: &mut DdRel<'s, Self>, p: &Program, rec: &LetRec, defined: &[(RelId, Coll<'s, Self>)])
+    fn letrec<'s>(rel: &mut DdRel<'s, Self>, p: &Program, rec: &LetRec, defined: &[(RelId, Coll<'s, Self>)], outer: &mut Vec<Option<Coll<'s, Self>>>)
         -> Result<Vec<Coll<'s, Self>>, EngineError>;
 }
 
@@ -93,7 +93,7 @@ impl Nest for Inner {
     fn split(&self) -> (Time, Option<u64>) {
         (self.outer, Some(self.inner))
     }
-    fn letrec<'s>(_: &mut DdRel<'s, Self>, _: &Program, _: &LetRec, _: &[(RelId, Coll<'s, Self>)])
+    fn letrec<'s>(_: &mut DdRel<'s, Self>, _: &Program, _: &LetRec, _: &[(RelId, Coll<'s, Self>)], _: &mut Vec<Option<Coll<'s, Self>>>)
         -> Result<Vec<Coll<'s, Self>>, EngineError> {
         Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("LetRec nested in LetRec")))
     }
@@ -103,28 +103,26 @@ impl Nest for Time {
     fn split(&self) -> (Time, Option<u64>) {
         (*self, None)
     }
-    fn letrec<'s>(rel: &mut DdRel<'s, Self>, p: &Program, rec: &LetRec, defined: &[(RelId, Coll<'s>)])
+    fn letrec<'s>(rel: &mut DdRel<'s, Self>, p: &Program, rec: &LetRec, defined: &[(RelId, Coll<'s>)], outer_nodes: &mut Vec<Option<Coll<'s>>>)
         -> Result<Vec<Coll<'s>>, EngineError> {
         let used = rec_inputs(p, rec);
         if rec.limit.is_some() {
             return Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("LetRec limit")));
         }
         if !rec.ids.iter().any(|id| used.contains(id)) {
-            let mut nodes = vec![None; p.nodes.len()];
             return rec.bodies.iter().map(|body| {
-                let c = lower_node(p, rel, &mut nodes, defined, *body)?;
+                let c = lower_node(p, rel, outer_nodes, defined, *body)?;
                 Ok(rel.threshold(c))
             }).collect();
         }
         // Nodes of the bodies that read no recursive relation are lowered once in the outer scope
         // and entered; the loop then iterates only over the nodes that depend on its variables.
-        let hoisted: Vec<(NodeId, Coll<'s>)> = {
-            let mut outer_nodes = vec![None; p.nodes.len()];
-            independent_inputs(p, rec, defined, rel.fuses_join_project())
-                .into_iter()
-                .map(|id| Ok((id, lower_node(p, rel, &mut outer_nodes, defined, id)?)))
-                .collect::<Result<_, EngineError>>()?
-        };
+        // They share the outer memo with the `Let` strata and the other fixpoints, so a node
+        // several strata read is one collection and its arrangements are shared.
+        let hoisted: Vec<(NodeId, Coll<'s>)> = independent_inputs(p, rec, defined, rel.fuses_join_project())
+            .into_iter()
+            .map(|id| Ok((id, lower_node(p, rel, outer_nodes, defined, id)?)))
+            .collect::<Result<_, EngineError>>()?;
         let outer = rel.scope;
         outer.scoped::<Inner, _, _>("LetRec", |sub| {
             let mut inner = DdRel {
@@ -560,8 +558,8 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
             .map(|(_, row)| row))
     }
 
-    fn letrec(&mut self, p: &Program, rec: &LetRec, defined: &[(RelId, Self::C)]) -> Result<Vec<Self::C>, EngineError> {
-        T::letrec(self, p, rec, defined)
+    fn letrec(&mut self, p: &Program, rec: &LetRec, defined: &[(RelId, Self::C)], outer: &mut Vec<Option<Self::C>>) -> Result<Vec<Self::C>, EngineError> {
+        T::letrec(self, p, rec, defined, outer)
     }
 
     fn node_types(&mut self, p: &Program, id: NodeId) -> Option<Vec<Ty>> {

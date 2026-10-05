@@ -1276,6 +1276,7 @@ impl Rel for SqlRel {
         p: &Program,
         rec: &LetRec,
         defined: &[(RelId, Self::C)],
+        _outer: &mut Vec<Option<Self::C>>,
     ) -> Result<Vec<Self::C>, EngineError> {
         if self.active.is_some() {
             return Err(unsupported("LetRec nested in LetRec"));

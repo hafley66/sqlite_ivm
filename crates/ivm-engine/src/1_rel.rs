@@ -146,7 +146,9 @@ pub trait Rel {
     fn topk(&mut self, c: Self::C, key: &[ColId], order: &[Order], limit: u32, input_types: &[Ty]) -> Result<Self::C, EngineError>;
     fn window(&mut self, c: Self::C, partition: &[ColId], order: &[Order], func: &WinFn, input_types: &[Ty]) -> Result<Self::C, EngineError>;
     /// Engine-owned fixpoint: returns one collection per `rec.ids`, built with `lower_node` on the engine's inner algebra.
-    fn letrec(&mut self, p: &Program, rec: &LetRec, defined: &[(RelId, Self::C)]) -> Result<Vec<Self::C>, EngineError>;
+    /// `outer`: the outer-scope node memo the `Let` strata share; nodes the fixpoint lowers in the
+    /// outer scope go through it, so a node every stratum reads is one collection.
+    fn letrec(&mut self, p: &Program, rec: &LetRec, defined: &[(RelId, Self::C)], outer: &mut Vec<Option<Self::C>>) -> Result<Vec<Self::C>, EngineError>;
     fn output(&mut self, rel: RelId, c: Self::C);
     /// `p.node_types(id)`; an engine that lowers many nodes may memoize it.
     fn node_types(&mut self, p: &Program, id: NodeId) -> Option<Vec<Ty>> {
@@ -299,7 +301,7 @@ pub fn lower<A: Rel>(p: &Program, a: &mut A) -> Result<(), EngineError> {
                 defined.push((*id, c));
             }
             Stratum::LetRec(rec) => {
-                let cs = a.letrec(p, rec, &defined)?;
+                let cs = a.letrec(p, rec, &defined, &mut nodes)?;
                 defined.extend(rec.ids.iter().copied().zip(cs));
             }
         }
