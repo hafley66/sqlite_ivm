@@ -115,12 +115,37 @@ pub(crate) fn settle(
     settle_counted(conn, inst, batch, in_commit).map(|(changes, _)| changes)
 }
 
-pub(crate) fn settle_counted(
+/// One source change as the settle stages it, borrowed from its owner.
+#[derive(Clone, Copy)]
+pub(crate) struct Staged<'a> {
+    pub relation: &'a str,
+    pub sign: Sign,
+    pub row: &'a [Cell],
+}
+
+impl SourceChange {
+    pub(crate) fn staged(&self) -> Staged<'_> {
+        Staged { relation: &self.relation, sign: self.sign, row: &self.row }
+    }
+}
+
+fn counters_for(inst: &Installed) -> Counters {
+    let mut counters = if matches!(inst.plan.root, crate::plan::Root::Nodes(_)) {
+        Counters::measured()
+    } else {
+        Counters { statements: Some(0), ..Counters::default() }
+    };
+    counters.interned = None;
+    counters
+}
+
+/// The typed engine's settle: the plan's output delta rows and weights as `NodesPlan::run`
+/// returns them. The frontier is bumped; no row is written to `frontier_P_delta` or read back.
+pub(crate) fn settle_rows(
     conn: &Connection,
     inst: &Installed,
-    batch: &[SourceChange],
-    in_commit: bool,
-) -> Result<(Vec<OutputChange>, Counters), EngineError> {
+    batch: &[Staged<'_>],
+) -> Result<(Vec<(ivm_ir::Row, ivm_ir::W)>, Counters), EngineError> {
     let span = tracing::info_span!(
         target: observe::TARGET,
         observe::SETTLE_SPAN,
@@ -130,12 +155,53 @@ pub(crate) fn settle_counted(
     );
     let _guard = span.enter();
     let _dictionary = crate::terms::DictCounts::start(&span);
-    let mut counters = if matches!(inst.plan.root, crate::plan::Root::Nodes(_)) {
-        Counters::measured()
-    } else {
-        Counters { statements: Some(0), ..Counters::default() }
-    };
-    counters.interned = None;
+    let mut counters = counters_for(inst);
+    let mut meter = Meter::default();
+    conn.execute_batch("SAVEPOINT frontier_sp_settle;")
+        .map_err(|e| fail("savepoint", &inst.name, e))?;
+    *counters.statements.as_mut().unwrap() += 1;
+    let settled = run_plan(conn, inst, batch, &mut meter, &mut counters).and_then(|rows| {
+        meter
+            .exec(conn, "settle", catalog::catalog(), &inst.sqls.bump, [inst.name.as_str()])
+            .map_err(|e| fail("frontier bump", catalog::catalog(), e))?;
+        Ok(rows)
+    });
+    match settled {
+        Ok(rows) => {
+            if inst.sql_text { counters.delta_rows.join = None; counters.rounds = None; }
+            conn.execute_batch("RELEASE frontier_sp_settle;")
+                .map_err(|e| fail("release", &inst.name, e))?;
+            *counters.statements.as_mut().unwrap() += 1;
+            counters.rows_written = rows.len() as u64;
+            *counters.statements.as_mut().unwrap() += meter.statements;
+            Ok((rows, counters))
+        }
+        Err(e) => {
+            conn.execute_batch("ROLLBACK TO frontier_sp_settle; RELEASE frontier_sp_settle;")
+                .map_err(|e| fail("rollback", &inst.name, e))?;
+            Err(e)
+        }
+    }
+}
+
+pub(crate) fn settle_counted(
+    conn: &Connection,
+    inst: &Installed,
+    batch: &[SourceChange],
+    in_commit: bool,
+) -> Result<(Vec<OutputChange>, Counters), EngineError> {
+    let batch: Vec<Staged<'_>> = batch.iter().map(SourceChange::staged).collect();
+    let batch = batch.as_slice();
+    let span = tracing::info_span!(
+        target: observe::TARGET,
+        observe::SETTLE_SPAN,
+        program = %inst.name,
+        udf_calls = tracing::field::Empty,
+        term_lookups = tracing::field::Empty,
+    );
+    let _guard = span.enter();
+    let _dictionary = crate::terms::DictCounts::start(&span);
+    let mut counters = counters_for(inst);
     if in_commit {
         let mut meter = Meter::default();
         let changes = settle_inner(conn, inst, batch, &mut meter, &mut counters)?;
@@ -173,10 +239,54 @@ const STAGE_CHUNK: usize = 64;
 fn settle_inner(
     conn: &Connection,
     inst: &Installed,
-    batch: &[SourceChange],
+    batch: &[Staged<'_>],
     meter: &mut Meter,
     counters: &mut Counters,
 ) -> Result<Vec<OutputChange>, EngineError> {
+    let changes = run_plan(conn, inst, batch, meter, counters)?;
+    let cols = inst
+        .output
+        .iter()
+        .map(|c| catalog::quote(&c.name))
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "INSERT INTO {}(__sign,{cols}) VALUES ({})",
+        catalog::quote(catalog::delta(&inst.name)),
+        std::iter::once("?1".to_owned()).chain(
+            inst.ir.rel(inst.ir.outputs[0]).expect("output relation").cols.iter().enumerate()
+                .map(|(i, ty)| if inst.sql_text { catalog::decode_sql(*ty, &format!("?{}", i + 2)) } else { format!("?{}", i + 2) })
+        ).collect::<Vec<_>>().join(",")
+    );
+    let mut insert = conn.prepare_cached(&sql).map_err(|e| fail("node delta", &inst.name, e))?;
+    for (row, weight) in changes {
+        let params = std::iter::once(weight)
+            .chain(row.into_iter())
+            .collect::<Vec<_>>();
+        insert.execute(rusqlite::params_from_iter(params))
+            .map_err(|e| fail("node delta", &inst.name, e))?;
+    }
+    drop(insert);
+    meter
+        .exec(
+            conn,
+            "settle",
+            catalog::catalog(),
+            &inst.sqls.bump,
+            [inst.name.as_str()],
+        )
+        .map_err(|e| fail("frontier bump", catalog::catalog(), e))?;
+    read_delta(conn, inst, meter)
+}
+
+/// Clears the staging tables, stages `batch` and runs the plan: its output delta rows.
+fn run_plan(
+    conn: &Connection,
+    inst: &Installed,
+    batch: &[Staged<'_>],
+    meter: &mut Meter,
+    counters: &mut Counters,
+) -> Result<Vec<(ivm_ir::Row, ivm_ir::W)>, EngineError> {
     let phase = "settle";
     validate_batch(inst, batch)?;
 
@@ -186,15 +296,19 @@ fn settle_inner(
             .map_err(|e| fail("clear", object, e))?;
     }
 
-    // Staged in chunks of STAGE_CHUNK rows per statement; the tail one row at a time.
+    // Staged in chunks of STAGE_CHUNK rows per statement; the tail one row at a time. Every
+    // parameter borrows its relation name and cells.
+    use rusqlite::types::{ToSqlOutput, Value, ValueRef};
+    use rusqlite::ToSql;
     let width = inst.plan.stage_width.max(1);
-    let row_params = |i: usize, change: &SourceChange, params: &mut Vec<Cell>| {
-        params.push(Cell::Integer(i as i64));
-        params.push(Cell::Text(change.relation.clone()));
-        params.push(Cell::Integer(change.sign.as_integer()));
-        params.extend(change.row.iter().cloned());
-        params.resize(params.len() + 3 + width - (3 + change.row.len()), Cell::Null);
-    };
+    fn row_params<'a>(i: usize, change: Staged<'a>, width: usize, params: &mut Vec<ToSqlOutput<'a>>) -> rusqlite::Result<()> {
+        params.push(ToSqlOutput::Owned(Value::Integer(i as i64)));
+        params.push(ToSqlOutput::Borrowed(ValueRef::Text(change.relation.as_bytes())));
+        params.push(ToSqlOutput::Owned(Value::Integer(change.sign.as_integer())));
+        for cell in change.row { params.push(cell.to_sql()?); }
+        params.resize_with(params.len() + width - change.row.len(), || ToSqlOutput::Owned(Value::Null));
+        Ok(())
+    }
     let chunked = batch.len() / STAGE_CHUNK * STAGE_CHUNK;
     if chunked > 0 {
         let (head, _) = inst.sqls.stage_insert.split_once(" VALUES ").expect("stage insert has VALUES");
@@ -203,90 +317,57 @@ fn settle_inner(
         for (at, chunk) in batch[..chunked].chunks(STAGE_CHUNK).enumerate() {
             let mut params = Vec::with_capacity(STAGE_CHUNK * (3 + width));
             for (offset, change) in chunk.iter().enumerate() {
-                row_params(at * STAGE_CHUNK + offset, change, &mut params);
+                row_params(at * STAGE_CHUNK + offset, *change, width, &mut params)
+                    .map_err(|e| fail("stage", chunk[0].relation, e))?;
             }
             meter
-                .exec(conn, phase, &chunk[0].relation, &sql, rusqlite::params_from_iter(params))
-                .map_err(|e| fail("stage", &chunk[0].relation, e))?;
+                .exec(conn, phase, chunk[0].relation, &sql, rusqlite::params_from_iter(params))
+                .map_err(|e| fail("stage", chunk[0].relation, e))?;
         }
     }
     for (i, change) in batch.iter().enumerate().skip(chunked) {
         let mut params = Vec::with_capacity(3 + width);
-        row_params(i, change, &mut params);
+        row_params(i, *change, width, &mut params).map_err(|e| fail("stage", change.relation, e))?;
         meter
             .exec(
                 conn,
                 phase,
-                &change.relation,
+                change.relation,
                 &inst.sqls.stage_insert,
                 rusqlite::params_from_iter(params),
             )
-            .map_err(|e| fail("stage", &change.relation, e))?;
+            .map_err(|e| fail("stage", change.relation, e))?;
     }
-    if let crate::plan::Root::Nodes(nodes) = &inst.plan.root {
-        if inst.sql_text { catalog::encode_stage(conn, inst)?; }
-        let changes = nodes
-            .run(conn, counters)
-            .map_err(|e| match &e {
-                rusqlite::Error::UserFunctionError(inner) => match inner.downcast_ref::<crate::nodes::LetRecLimitHit>() {
-                    Some(hit) => EngineError::new(Stage::Settle, &inst.name, ErrorKind::LetRecLimit { rel: hit.rel, limit: hit.limit }),
-                    None => fail("node settle", &inst.name, e),
-                },
-                _ => fail("node settle", &inst.name, e),
-            })?;
-        let cols = inst
-            .output
-            .iter()
-            .map(|c| catalog::quote(&c.name))
-            .collect::<Vec<_>>()
-            .join(",");
-        let sql = format!(
-            "INSERT INTO {}(__sign,{cols}) VALUES ({})",
-            catalog::quote(catalog::delta(&inst.name)),
-            std::iter::once("?1".to_owned()).chain(
-                inst.ir.rel(inst.ir.outputs[0]).expect("output relation").cols.iter().enumerate()
-                    .map(|(i, ty)| if inst.sql_text { catalog::decode_sql(*ty, &format!("?{}", i + 2)) } else { format!("?{}", i + 2) })
-            ).collect::<Vec<_>>().join(",")
-        );
-        let mut insert = conn.prepare_cached(&sql).map_err(|e| fail("node delta", &inst.name, e))?;
-        for (row, weight) in changes {
-            let params = std::iter::once(weight)
-                .chain(row.into_iter())
-                .collect::<Vec<_>>();
-            insert.execute(rusqlite::params_from_iter(params))
-                .map_err(|e| fail("node delta", &inst.name, e))?;
-        }
-        drop(insert);
-        meter
-            .exec(
-                conn,
-                phase,
-                catalog::catalog(),
-                &inst.sqls.bump,
-                [inst.name.as_str()],
-            )
-            .map_err(|e| fail("frontier bump", catalog::catalog(), e))?;
-        return read_delta(conn, inst, meter);
-    }
-
-    unreachable!("runtime plans always use NodesPlan")
+    let crate::plan::Root::Nodes(nodes) = &inst.plan.root else {
+        unreachable!("runtime plans always use NodesPlan")
+    };
+    if inst.sql_text { catalog::encode_stage(conn, inst)?; }
+    nodes
+        .run(conn, counters)
+        .map_err(|e| match &e {
+            rusqlite::Error::UserFunctionError(inner) => match inner.downcast_ref::<crate::nodes::LetRecLimitHit>() {
+                Some(hit) => EngineError::new(Stage::Settle, &inst.name, ErrorKind::LetRecLimit { rel: hit.rel, limit: hit.limit }),
+                None => fail("node settle", &inst.name, e),
+            },
+            _ => fail("node settle", &inst.name, e),
+        })
 }
 
-fn validate_batch(inst: &Installed, batch: &[SourceChange]) -> Result<(), EngineError> {
+fn validate_batch(inst: &Installed, batch: &[Staged<'_>]) -> Result<(), EngineError> {
     for change in batch {
         let Some(scan) = inst.plan.scans.iter().find(|s| s.table == change.relation) else {
             return Err(EngineError::new(
                 Stage::Collect,
-                &change.relation,
-                ErrorKind::UnknownRelation(change.relation.clone()),
+                change.relation,
+                ErrorKind::UnknownRelation(change.relation.to_owned()),
             ));
         };
         if change.row.len() != scan.columns.len() {
             return Err(EngineError::new(
                 Stage::Collect,
-                &change.relation,
+                change.relation,
                 ErrorKind::Arity {
-                    relation: change.relation.clone(),
+                    relation: change.relation.to_owned(),
                     expected: scan.columns.len(),
                     got: change.row.len(),
                 },

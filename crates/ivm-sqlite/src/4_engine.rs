@@ -1,7 +1,7 @@
 //! Typed Engine adapter. The engine opens and owns its SQLite connection.
 
 use crate::{
-    catalog, Cell, Program as SqlProgram, Sign, SourceChange as SqlChange,
+    catalog, Cell, Program as SqlProgram, Sign,
 };
 use ivm_engine::{Counters, Engine, EngineError, ErrorKind, Stage};
 use ivm_ir::{Delta, Expr, Frontier, NodeId, Op, Program, RelId, RelKind, Row, Stratum, W};
@@ -388,7 +388,8 @@ impl Engine for Sqlite {
             .map_err(|e| error(Stage::Settle, e))?;
         *counters.statements.as_mut().unwrap() += 1;
         let mut run = || -> Result<Vec<(RelId, Row, W)>, EngineError> {
-            let mut batch = Vec::new();
+            // Per changed host row: its source name (borrowed from the IR), sign and cells.
+            let mut host: Vec<(&str, Sign, Vec<Cell>)> = Vec::new();
             // Per source: its insert and its delete, built on first use.
             let mut statements: std::collections::HashMap<RelId, (String, String)> = std::collections::HashMap::new();
             for change in &frontier.changes {
@@ -457,19 +458,19 @@ impl Engine for Sqlite {
                 if changed == 0 {
                     continue;
                 }
-                batch.push(SqlChange {
-                    relation: source.name.clone(),
-                    sign: if change.w > 0 {
-                        Sign::Insert
-                    } else {
-                        Sign::Delete
-                    },
-                    row: change.row.iter().copied().map(Cell::Integer).collect(),
-                });
+                host.push((
+                    source.name.as_str(),
+                    if change.w > 0 { Sign::Insert } else { Sign::Delete },
+                    change.row.iter().copied().map(Cell::Integer).collect(),
+                ));
             }
+            let batch: Vec<crate::engine::Staged<'_>> = host.iter()
+                .map(|(relation, sign, row)| crate::engine::Staged { relation, sign: *sign, row })
+                .collect();
             let mut changes = Vec::new();
             for output in &self.programs {
-                let mut used = batch.iter().filter(|change| output.program.inner.plan.sources.contains(&change.relation)).cloned().collect::<Vec<_>>();
+                let sources = &output.program.inner.plan.sources;
+                let mut used = batch.iter().filter(|change| sources.iter().any(|source| source == change.relation)).copied().collect::<Vec<_>>();
                 let mut terms = if output.members.is_empty() { 0 } else {
                     *counters.statements.as_mut().unwrap() += 1;
                     db.query_row("SELECT count(*) FROM ivm_term", [], |r| r.get::<_, i64>(0))
@@ -478,7 +479,7 @@ impl Engine for Sqlite {
                 // Later strata and recursive rounds can mint rows after an earlier
                 // constructor scan. Empty-source passes carry those rows forward.
                 for pass in 0..=8192 {
-                    let (visible, work) = crate::engine::settle_counted(db, &output.program.inner, &used, false)
+                    let (rows, work) = crate::engine::settle_rows(db, &output.program.inner, &used)
                         .map_err(|e| match e.kind {
                             crate::ErrorKind::LetRecLimit { rel, limit } => EngineError::new(Stage::Settle, rel, ErrorKind::LetRecLimit(limit)),
                             _ => error(Stage::Settle, e),
@@ -500,38 +501,19 @@ impl Engine for Sqlite {
                     }
                     *counters.rounds.as_mut().unwrap() += work.rounds.unwrap_or(0);
                     *counters.statements.as_mut().unwrap() += work.statements.unwrap_or(0);
-                    if output.threshold || output.program.inner.sqls.weight_delta.is_none() {
-                        for change in visible {
-                            let row = change
-                                .row
-                                .into_iter()
-                                .map(|cell| match cell {
-                                    Cell::Integer(v) => Ok(v),
-                                    _ => Err(error(Stage::Settle, "non-integer output")),
-                                })
-                                .collect::<Result<Row, _>>()?;
-                            changes.push((output.rel, row, change.sign.as_integer()));
-                        }
-                    } else {
-                        let width = output.program.inner.output.len();
-                        let mut stmt = db
-                            .prepare_cached(output.program.inner.sqls.weight_delta.as_deref().unwrap())
-                            .map_err(|e| error(Stage::Settle, e))?;
-                        let rows = stmt
-                            .query_map([], |r| Ok((row_of(r, width)?, r.get::<_, W>(width)?)))
-                            .map_err(|e| error(Stage::Settle, e))?;
-                        *counters.statements.as_mut().unwrap() += 1;
-                        for row in rows {
-                            let (row, weight) = row.map_err(|e| error(Stage::Settle, e))?;
-                            if output.members.is_empty() {
-                                changes.push((output.rel, row, weight));
-                            } else {
-                                let rel = row[0] as RelId;
-                                let width = output.members.iter().find(|(id, _)| *id == rel)
-                                    .map(|(_, width)| *width)
-                                    .ok_or_else(|| error(Stage::Settle, "unknown bundled output"))?;
-                                changes.push((rel, row[1..=width].to_vec(), weight));
-                            }
+                    // The plan's output rows, consolidated by `output_delta`: a threshold output
+                    // reports each row's sign, any other its weight; a bundle row leads with its
+                    // member relation.
+                    for (row, weight) in rows {
+                        let weight = if output.threshold { if weight < 0 { -1 } else { 1 } } else { weight };
+                        if output.members.is_empty() {
+                            changes.push((output.rel, row, weight));
+                        } else {
+                            let rel = row[0] as RelId;
+                            let width = output.members.iter().find(|(id, _)| *id == rel)
+                                .map(|(_, width)| *width)
+                                .ok_or_else(|| error(Stage::Settle, "unknown bundled output"))?;
+                            changes.push((rel, row[1..=width].to_vec(), weight));
                         }
                     }
                     if output.members.is_empty() { break; }
@@ -654,15 +636,15 @@ impl Engine for Sqlite {
         crate::terms::snapshot(db, &self.ir, functor).map_err(|e| error(Stage::Snapshot, e))
     }
     fn intern_terms(&mut self, terms: &[(RelId, Row)]) -> Result<Vec<i64>, EngineError> {
-        let db = &self.db;
-        terms.iter().map(|(functor, args)| {
+        let named = terms.iter().map(|(functor, args)| {
             let rel = self.ir.rel(*functor).filter(|rel| rel.kind == RelKind::Constructor)
                 .ok_or_else(|| EngineError::new(Stage::Settle, Some(*functor), ErrorKind::UnknownRel(*functor)))?;
             if args.len() + 1 != rel.cols.len() {
                 return Err(EngineError::new(Stage::Settle, Some(*functor), ErrorKind::Arity { expected: rel.cols.len() - 1, actual: args.len() }));
             }
-            crate::terms::intern_term(db, &rel.name, args).map_err(|e| error(Stage::Settle, e))
-        }).collect()
+            Ok((rel.name.as_str(), args.as_slice()))
+        }).collect::<Result<Vec<_>, _>>()?;
+        crate::terms::intern_terms(&self.db, &named).map_err(|e| error(Stage::Settle, e))
     }
     fn intern_text(&mut self, value: &str) -> Result<i64, EngineError> {
         let db = &self.db;

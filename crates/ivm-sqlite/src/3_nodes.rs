@@ -124,6 +124,9 @@ struct Node {
     insert_seed: Vec<String>,
     /// Private state tables of the node (Reduce group accumulators, Min/Max arrangement).
     ddl: Vec<String>,
+    /// An Mfp whose filter holds `input.cX = K` as integer equality: `(input, X, K)`. Its delta
+    /// is empty when no row of the input delta has `cX = K`.
+    eq: Option<(usize, usize, i64)>,
     integrated: bool,
     indexes: Vec<Vec<usize>>,
     owner: Owner,
@@ -429,6 +432,7 @@ impl SqlRel {
             delete_seed: Vec::new(),
             insert_seed: Vec::new(),
             ddl: Vec::new(),
+            eq: None,
             integrated: false,
             indexes: Vec::new(),
             owner,
@@ -823,6 +827,15 @@ impl Rel for SqlRel {
             Some(format!("SELECT {select}, w FROM {} WHERE {wheres}", c.d))
         });
         self.nodes[out.node].inline = true;
+        self.nodes[out.node].eq = filter.iter().find_map(|e| {
+            let Expr::Call(Func::Eq, args) = e else { return None };
+            let (col, k) = match args.as_slice() {
+                [Expr::Col(x), Expr::Lit(k)] | [Expr::Lit(k), Expr::Col(x)] => (*x as usize, *k),
+                _ => return None,
+            };
+            // `equal` renders plain `=` only for equal Int types; other pairs compare sort keys.
+            (col < c.arity && input_types.get(col) == Some(&Ty::Int)).then_some((c.node, col, k))
+        });
         let all: Vec<ColId> = (0..(c.arity + map.len()) as ColId).collect();
         let proj = if project.is_empty() { &all[..] } else { project };
         let pass = proj.iter().map(|p| {
@@ -1411,7 +1424,6 @@ struct VarSql {
     to_del: String,
     clear_nx: String,
     clear_del: String,
-    any: String,
     finish: String,
     clear_acc: String,
     /// Recompute path: the old value into `acc` at -1, before `reset` empties the variable.
@@ -1435,6 +1447,8 @@ struct SccSql {
     vars: Vec<VarSql>,
     /// Per copy: move positive rows aside, then later move them back.
     stash: Vec<String>,
+    /// Per copy, in `copy_ids` order: whether its delta holds a retraction.
+    negatives: Vec<String>,
     restore: Vec<String>,
     /// Physical deltas each phase fill reads, and the one it writes.
     delete_io: Vec<(Vec<usize>, Option<usize>)>,
@@ -1445,6 +1459,8 @@ struct SccSql {
     insert_seed_writes: Vec<Option<usize>>,
     /// Physical delta of each variable, in `vars` order.
     var_ids: Vec<usize>,
+    /// Physical body delta each variable's phase statement reads, in `vars` order.
+    body_ids: Vec<Vec<usize>>,
     nonmonotone: bool,
     limit: Option<u32>,
     first: Option<RelId>,
@@ -1454,6 +1470,18 @@ struct SccSql {
     /// Physical id of each copy, marked changed for the first recompute round.
     copy_ids: Vec<usize>,
 }
+
+/// A condition under which a settle fill can write rows: a physical delta is nonempty, or it
+/// holds a row whose column equals a constant.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Gate {
+    Active(usize),
+    Key(usize, usize, i64),
+}
+
+/// Fills gated on one `(delta, column)` key set before the set is read: one `DISTINCT` read per
+/// settle replaces that many scans of the delta.
+const KEY_READERS: usize = 4;
 
 pub(crate) struct NodesPlan {
     pub ddl: Vec<String>,
@@ -1470,6 +1498,13 @@ pub(crate) struct NodesPlan {
     steps: Vec<Step>,
     step_reads: Vec<Vec<usize>>,
     step_writes: Vec<Option<usize>>,
+    /// Per step, the node it fills and the nodes whose deltas its own SQL names.
+    step_nodes: Vec<Option<(usize, Vec<usize>)>>,
+    /// Per step, its fill's input conditions when one is a key test: the fill runs only when
+    /// one holds. `None` keeps the `step_reads` gate.
+    step_gates: Vec<Option<Vec<Gate>>>,
+    /// Distinct values of one column of one physical delta, per `(delta, column)`.
+    key_sql: std::collections::HashMap<(usize, usize), String>,
     scc_reads: Vec<Vec<usize>>,
     scc_results: Vec<Vec<usize>>,
     sccs: Vec<SccSql>,
@@ -1544,6 +1579,9 @@ fn work_function(program: &str) -> String {
     format!("frontier_{program}_work")
 }
 
+/// Prefix of an integration delete that takes the key of one row its upsert left at weight 0.
+const BY_KEY: &str = "/*by key*/ ";
+
 /// The fill anchor of the one statement that reads an inline join (`push`'s fill shape).
 const FILL_ANCHOR: &str = ", SUM(w) FROM (";
 
@@ -1592,16 +1630,17 @@ impl NodesPlan {
             all.extend(scc.delete_fills.iter().chain(&scc.insert_fills)
                 .chain(&scc.delete_seeds).chain(&scc.insert_seeds)
                 .chain(&scc.integrates).chain(&scc.clears).chain(&scc.stash).chain(&scc.restore)
-                .chain(&scc.reset).map(String::as_str));
+                .chain(&scc.reset).chain(&scc.negatives).map(String::as_str));
             for v in &scc.vars {
                 all.extend([
                     &v.over_delete, &v.rederive, &v.insert, &v.to_delta, &v.to_acc,
-                    &v.to_del, &v.clear_nx, &v.clear_del, &v.any, &v.finish, &v.clear_acc,
+                    &v.to_del, &v.clear_nx, &v.clear_del, &v.finish, &v.clear_acc,
                 ].into_iter().map(String::as_str));
                 if scc.nonmonotone { all.extend([v.capture.as_str(), v.step.as_str()]); }
             }
         }
         all.extend(self.integrates.iter().chain(&self.clears).map(String::as_str));
+        all.extend(self.key_sql.values().map(String::as_str));
         all.push(&self.output_delta);
         all
     }
@@ -1658,6 +1697,8 @@ impl NodesPlan {
         let mut source_deltas = Vec::new();
         let mut source_tables = Vec::new();
         let (mut steps, mut integrates, mut clears) = (Vec::new(), Vec::new(), Vec::new());
+        let mut step_nodes = Vec::new();
+        let node_of = |name: &str| name.strip_prefix("ivm_n").and_then(|n| n.strip_suffix("_d")).and_then(|n| n.parse::<usize>().ok());
         let mut sccs: Vec<SccSql> = rel.sccs.iter().map(|_| SccSql::default()).collect();
         let mut hold_width = vec![0usize; rel.sccs.len()];
         for node in &rel.nodes {
@@ -1685,6 +1726,7 @@ impl NodesPlan {
             for (s, plan) in rel.sccs.iter().enumerate() {
                 if plan.at == *k {
                     steps.push(Step::Loop(s));
+                    step_nodes.push(None);
                 }
             }
             match node.owner {
@@ -1698,7 +1740,10 @@ impl NodesPlan {
                     sccs[s].delete_seeds.extend(node.delete_seed.iter().cloned());
                     sccs[s].insert_seeds.extend(node.insert_seed.iter().cloned());
                 }
-                _ if !node.inline => steps.extend(node.fill.iter().cloned().map(Step::Fill)),
+                _ if !node.inline => {
+                    steps.extend(node.fill.iter().cloned().map(Step::Fill));
+                    step_nodes.extend(node.fill.iter().map(|sql| Some((*k, delta_names(sql).filter_map(node_of).collect()))));
+                }
                 _ => {}
             }
             if let Owner::Copy(s) = node.owner {
@@ -1717,6 +1762,7 @@ impl NodesPlan {
                     format!("DELETE FROM {d} WHERE w > 0"),
                 ]);
                 sccs[s].restore.push(format!("INSERT INTO {d} SELECT {cols}, w FROM {hold} WHERE k = {k}"));
+                sccs[s].negatives.push(format!("SELECT EXISTS (SELECT 1 FROM {d} WHERE w < 0)"));
             }
             match node.owner {
                 Owner::Loop(s) if rel.sccs[s].nonmonotone => {
@@ -1762,11 +1808,22 @@ impl NodesPlan {
                     ));
                     objects.push(("INDEX".into(), ix));
                 }
-                ints.push(format!("INSERT INTO {i} ({cols}, w) SELECT {cols}, SUM(w) FROM {d} WHERE true GROUP BY {cols} \
-                    ON CONFLICT ({cols}) DO UPDATE SET w = w + excluded.w"));
-                ints.push(format!(
-                    "DELETE FROM {i} WHERE w = 0 AND ({cols}) IN (SELECT {cols} FROM {d})"
-                ));
+                if node.inline && node.owner == Owner::Settle {
+                    // The delta is a CTE chain: the upsert returns every row it touched, and the
+                    // rows it left at weight 0 are deleted by key, without a second evaluation.
+                    ints.push(format!("INSERT INTO {i} ({cols}, w) SELECT {cols}, SUM(w) FROM {d} WHERE true GROUP BY {cols} \
+                        ON CONFLICT ({cols}) DO UPDATE SET w = w + excluded.w RETURNING w, {cols}"));
+                    ints.push(format!(
+                        "{BY_KEY}DELETE FROM {i} WHERE {} AND w = 0",
+                        (0..*arity).map(|x| format!("c{x} = ?{}", x + 1)).collect::<Vec<_>>().join(" AND ")
+                    ));
+                } else {
+                    ints.push(format!("INSERT INTO {i} ({cols}, w) SELECT {cols}, SUM(w) FROM {d} WHERE true GROUP BY {cols} \
+                        ON CONFLICT ({cols}) DO UPDATE SET w = w + excluded.w"));
+                    ints.push(format!(
+                        "DELETE FROM {i} WHERE w = 0 AND ({cols}) IN (SELECT {cols} FROM {d})"
+                    ));
+                }
             }
         }
         for (plan, scc) in rel.sccs.iter().zip(&mut sccs) {
@@ -1809,7 +1866,6 @@ impl NodesPlan {
                     to_del: format!("INSERT INTO {del} SELECT * FROM {nx} WHERE k = {k}"),
                     clear_nx: format!("DELETE FROM {nx} WHERE k = {k}"),
                     clear_del: format!("DELETE FROM {del} WHERE k = {k}"),
-                    any: format!("SELECT EXISTS (SELECT 1 FROM {})", v.d),
                     finish: format!("INSERT INTO {} SELECT {cols}, SUM(w) FROM {acc} WHERE k = {k} GROUP BY {cols} HAVING SUM(w) <> 0", r.d),
                     clear_acc: format!("DELETE FROM {acc} WHERE k = {k}"),
                     capture: format!("INSERT INTO {acc} SELECT {k}, {cols}{pad}, -1 FROM {} WHERE w > 0", v.i),
@@ -1853,6 +1909,9 @@ impl NodesPlan {
             steps,
             step_reads: Vec::new(),
             step_writes: Vec::new(),
+            step_nodes,
+            step_gates: Vec::new(),
+            key_sql: std::collections::HashMap::new(),
             scc_reads: Vec::new(),
             scc_results: Vec::new(),
             sccs,
@@ -1947,6 +2006,7 @@ impl NodesPlan {
             }
         }
         self.node_count = names.len();
+        self.gates(nodes, &names);
         let target = |sql: &str| sql.strip_prefix("DELETE FROM ")
             .and_then(|tail| tail.split_whitespace().next())
             .and_then(|name| by_name.get(name).copied());
@@ -1958,11 +2018,13 @@ impl NodesPlan {
             scc.delete_seed_writes = scc.delete_seeds.iter().map(|sql| write(sql)).collect();
             scc.insert_seed_writes = scc.insert_seeds.iter().map(|sql| write(sql)).collect();
             scc.var_ids = scc.vars.iter().map(|v| write(&v.to_delta).expect("a variable's delta is physical")).collect();
+            scc.body_ids = scc.vars.iter().map(|v| reads(&v.over_delete)).collect();
         }
         for (scc_id, scc) in self.sccs.iter_mut().enumerate() {
             scc.copy_ids = nodes.iter().filter(|node| node.owner == Owner::Copy(scc_id))
                 .filter_map(|node| by_name.get(node.c.d.replace("ivm_n", &format!("frontier_{program}_n")).as_str()).copied())
                 .collect();
+            assert_eq!(scc.copy_ids.len(), scc.negatives.len(), "one retraction probe per SCC copy");
         }
         for (scc_id, scc) in self.sccs.iter().enumerate() {
             let internal = nodes.iter().filter(|node| node.owner == Owner::Loop(scc_id))
@@ -1979,6 +2041,66 @@ impl NodesPlan {
             self.scc_results.push(scc.vars.iter().map(|v| write(&v.finish)
                 .expect("SCC finish writes a physical delta")).collect());
         }
+    }
+
+    /// `step_gates` and `key_sql`. Each node's delta is nonempty only if one of its gates holds:
+    /// a physical delta is its own gate; an inline Mfp with an equality over a physical input is
+    /// that input's key test; any other inline node holds when one of its input deltas does.
+    /// Node ids ascend along input edges, so one ascending pass sees every input first.
+    fn gates(&mut self, nodes: &[Node], names: &[String]) {
+        let mut physical = vec![None; nodes.len()];
+        for (at, node) in nodes.iter().enumerate().filter(|(_, node)| !node.inline || node.source).enumerate() {
+            physical[node.0] = Some(at);
+        }
+        let node_of = |name: &str| name.strip_prefix("ivm_n").and_then(|n| n.strip_suffix("_d")).and_then(|n| n.parse::<usize>().ok());
+        // `None`: a node whose inputs could not be read off; steps reading it keep `step_reads`.
+        let mut leaves: Vec<Option<Vec<Gate>>> = Vec::with_capacity(nodes.len());
+        for (at, node) in nodes.iter().enumerate() {
+            let own = if let Some(id) = physical[at] {
+                Some(vec![Gate::Active(id)])
+            } else if let Some((Some(id), col, k)) = node.eq.map(|(input, col, k)| (physical[input].filter(|_| !nodes[input].inline), col, k)) {
+                Some(vec![Gate::Key(id, col, k)])
+            } else {
+                let mut gates = Some(Vec::new());
+                for input in delta_names(node.body.as_deref().unwrap_or("")).filter_map(node_of).filter(|input| *input != at) {
+                    match (gates.as_mut(), leaves.get(input).and_then(Option::as_ref)) {
+                        (Some(gates), Some(more)) if input < at => gates.extend(more.iter().copied()),
+                        _ => gates = None,
+                    }
+                }
+                gates.map(|mut gates| { gates.sort_unstable(); gates.dedup(); gates })
+            };
+            leaves.push(own);
+        }
+        let mut gates: Vec<Option<Vec<Gate>>> = self.step_nodes.iter().map(|step| {
+            let (at, inputs) = step.as_ref()?;
+            let mut gates = Vec::new();
+            for input in inputs.iter().filter(|input| *input != at) {
+                gates.extend(leaves.get(*input)?.as_ref()?.iter().copied());
+            }
+            gates.sort_unstable();
+            gates.dedup();
+            gates.iter().any(|gate| matches!(gate, Gate::Key(..))).then_some(gates)
+        }).collect();
+        let mut readers: std::collections::HashMap<(usize, usize), usize> = std::collections::HashMap::new();
+        for gate in gates.iter().flatten().flatten() {
+            if let Gate::Key(id, col, _) = gate { *readers.entry((*id, *col)).or_default() += 1; }
+        }
+        for step in gates.iter_mut() {
+            let Some(list) = step else { continue };
+            for gate in list.iter_mut() {
+                if let Gate::Key(id, col, _) = *gate {
+                    if readers[&(id, col)] < KEY_READERS { *gate = Gate::Active(id); }
+                }
+            }
+            list.sort_unstable();
+            list.dedup();
+            if !list.iter().any(|gate| matches!(gate, Gate::Key(..))) { *step = None; }
+        }
+        self.key_sql = readers.into_iter().filter(|(_, n)| *n >= KEY_READERS)
+            .map(|((id, col), _)| ((id, col), format!("SELECT DISTINCT c{col} FROM {}", names[id])))
+            .collect();
+        self.step_gates = gates;
     }
 
     fn inline_statements(&mut self, inline_deltas: &[(String, String)], counted: &std::collections::HashMap<String, String>) {
@@ -1998,7 +2120,7 @@ impl NodesPlan {
             for var in &mut scc.vars {
                 for sql in [&mut var.over_delete, &mut var.rederive, &mut var.insert,
                     &mut var.to_delta, &mut var.to_acc, &mut var.to_del, &mut var.clear_nx,
-                    &mut var.clear_del, &mut var.any, &mut var.finish, &mut var.clear_acc,
+                    &mut var.clear_del, &mut var.finish, &mut var.clear_acc,
                     &mut var.capture, &mut var.step] {
                     expand(sql);
                 }
@@ -2031,6 +2153,7 @@ impl NodesPlan {
             scc.stash.iter_mut().for_each(&fix);
             scc.restore.iter_mut().for_each(&fix);
             scc.reset.iter_mut().for_each(&fix);
+            scc.negatives.iter_mut().for_each(&fix);
             for var in &mut scc.vars {
                 for sql in [
                     &mut var.over_delete,
@@ -2041,7 +2164,6 @@ impl NodesPlan {
                     &mut var.to_del,
                     &mut var.clear_nx,
                     &mut var.clear_del,
-                    &mut var.any,
                     &mut var.finish,
                     &mut var.clear_acc,
                     &mut var.capture,
@@ -2065,6 +2187,28 @@ impl NodesPlan {
         let result = sqlite_ext::statements::exec_cached(db, "settle", object_of(sql), sql, [])?;
         *counters.statements.as_mut().unwrap() += 1;
         Ok(result)
+    }
+
+    /// Runs an upsert that returns `w, c0..` of each row it touched: the keys left at weight 0.
+    fn emptied(db: &Connection, sql: &str, counters: &mut Counters) -> rusqlite::Result<Vec<Row>> {
+        let mut stmt = db.prepare_cached(sql)?;
+        let width = stmt.column_count() - 1;
+        let mut rows = stmt.query([])?;
+        let mut keys = Vec::new();
+        while let Some(row) = rows.next()? {
+            if row.get::<_, W>(0)? == 0 {
+                keys.push((1..=width).map(|x| row.get(x)).collect::<rusqlite::Result<Row>>()?);
+            }
+        }
+        *counters.statements.as_mut().unwrap() += 1;
+        Ok(keys)
+    }
+
+    /// One settle query yielding a single boolean.
+    fn query_bool(db: &Connection, sql: &str, counters: &mut Counters) -> rusqlite::Result<bool> {
+        let value = sqlite_ext::statements::query_cached(db, "settle", object_of(sql), sql, [], |r| r.get::<_, bool>(0))?;
+        *counters.statements.as_mut().unwrap() += 1;
+        Ok(value)
     }
 
     /// A registration statement after a mint runs only when that mint inserted rows: the
@@ -2132,30 +2276,33 @@ impl NodesPlan {
             if live(active, reads) { Self::exec(db, sql, counters)?; }
         }
         self.count_work(db, Owner::Loop(scc_id), Some(&*active), counters)?;
-        Self::exec_all(
-            db,
-            scc.vars.iter().map(|v| match phase {
+        // Rows each variable's phase statement staged in `nx`; an empty body delta stages none.
+        let mut staged = Vec::with_capacity(scc.vars.len());
+        for (v, body) in scc.vars.iter().zip(&scc.body_ids) {
+            let sql = match phase {
                 Phase::Delete => &v.over_delete,
                 Phase::Insert => &v.insert,
                 Phase::Recompute => &v.step,
-            }),
-            counters,
-        )?;
+            };
+            staged.push(if live(active, body) { Self::exec(db, sql, counters)? } else { 0 });
+        }
         for (sql, target) in scc.clears.iter().zip(&scc.clear_targets) {
             if target.is_none_or(|id| active[id]) { Self::exec(db, sql, counters)?; }
         }
         for id in scc.clear_targets.iter().flatten() { active[*id] = false; }
+        // The variable deltas are cleared above, so a variable changes this round exactly when
+        // `to_delta` moves rows into it, and `nx` holds rows only for variables that staged some.
         let mut more = false;
-        for (v, id) in scc.vars.iter().zip(&scc.var_ids) {
-            Self::exec_all(db, [&v.to_delta, &v.to_acc], counters)?;
+        for ((v, id), staged) in scc.vars.iter().zip(&scc.var_ids).zip(staged) {
+            if staged == 0 { continue; }
+            let changed = Self::exec(db, &v.to_delta, counters)? > 0;
+            Self::exec(db, &v.to_acc, counters)?;
             if deleting {
                 Self::exec(db, &v.to_del, counters)?;
             }
             Self::exec(db, &v.clear_nx, counters)?;
-            let any = sqlite_ext::statements::query_cached(db, "settle", object_of(&v.any), &v.any, [], |r| r.get::<_, bool>(0))?;
-            active[*id] = any;
-            more |= any;
-            *counters.statements.as_mut().unwrap() += 1;
+            active[*id] = changed;
+            more |= changed;
         }
         if more { *counters.rounds.as_mut().unwrap() += 1; }
         Ok(more)
@@ -2202,20 +2349,33 @@ impl NodesPlan {
         let _fixpoint = span.enter();
         let scc = &self.sccs[scc_id];
         let mut active = outer.to_vec();
-        Self::exec_all(db, &scc.stash, counters)?;
+        // Retractions reach the loop through delete seeds or negative copy rows; the seeds read
+        // no copy, so they run first. Without either, the delete phase reads empty deltas only.
+        let mut retracting = false;
         for (sql, write) in scc.delete_seeds.iter().zip(&scc.delete_seed_writes) {
             let rows = Self::exec(db, sql, counters)?;
+            retracting |= rows > 0;
             if let Some(id) = write { active[*id] |= rows > 0; }
         }
-        let mut rounds = 1u64;
-        while self.round(db, scc_id, Phase::Delete, &mut active, counters)? { rounds += 1; }
-        span.record("delete_rounds", rounds);
-        for (v, id) in scc.vars.iter().zip(&scc.var_ids) {
-            Self::exec_all(db, [&v.rederive, &v.clear_del], counters)?;
-            active[*id] |= Self::exec(db, &v.to_delta, counters)? > 0;
-            Self::exec_all(db, [&v.to_acc, &v.clear_nx], counters)?;
+        for (sql, id) in scc.negatives.iter().zip(&scc.copy_ids) {
+            if retracting { break; }
+            if !active[*id] { continue; }
+            retracting = Self::query_bool(db, sql, counters)?;
         }
-        Self::exec_all(db, &scc.restore, counters)?;
+        if retracting {
+            Self::exec_all(db, &scc.stash, counters)?;
+            let mut rounds = 1u64;
+            while self.round(db, scc_id, Phase::Delete, &mut active, counters)? { rounds += 1; }
+            span.record("delete_rounds", rounds);
+            for (v, id) in scc.vars.iter().zip(&scc.var_ids) {
+                Self::exec_all(db, [&v.rederive, &v.clear_del], counters)?;
+                active[*id] |= Self::exec(db, &v.to_delta, counters)? > 0;
+                Self::exec_all(db, [&v.to_acc, &v.clear_nx], counters)?;
+            }
+            Self::exec_all(db, &scc.restore, counters)?;
+        } else {
+            span.record("delete_rounds", 0u64);
+        }
         for id in scc.clear_targets.iter().flatten() { active[*id] |= outer[*id]; }
         for (sql, write) in scc.insert_seeds.iter().zip(&scc.insert_seed_writes) {
             let rows = Self::exec(db, sql, counters)?;
@@ -2230,6 +2390,28 @@ impl NodesPlan {
             Self::exec(db, &v.clear_acc, counters)?;
         }
         Ok(results)
+    }
+
+    /// Whether one of `gates` holds; a key test reads its delta's distinct column values once.
+    fn open(&self, db: &Connection, gates: &[Gate], active: &[bool],
+        keys: &mut std::collections::HashMap<(usize, usize), std::collections::HashSet<i64>>, counters: &mut Counters) -> rusqlite::Result<bool> {
+        for gate in gates {
+            match *gate {
+                Gate::Active(id) => if active.get(id) == Some(&true) { return Ok(true); },
+                Gate::Key(id, col, k) => {
+                    if active.get(id) != Some(&true) { continue; }
+                    if !keys.contains_key(&(id, col)) {
+                        let sql = &self.key_sql[&(id, col)];
+                        let values = db.prepare_cached(sql)?.query_map([], |r| r.get::<_, i64>(0))?
+                            .collect::<rusqlite::Result<std::collections::HashSet<i64>>>()?;
+                        *counters.statements.as_mut().unwrap() += 1;
+                        keys.insert((id, col), values);
+                    }
+                    if keys[&(id, col)].contains(&k) { return Ok(true); }
+                }
+            }
+        }
+        Ok(false)
     }
 
     /// Registers `work_function` on the connection that settles this plan.
@@ -2257,6 +2439,8 @@ impl NodesPlan {
             if let Some(id) = id { active[*id] |= staged.contains(table); }
         }
         let mut minted = false;
+        // Key sets read this settle; a write to the delta drops its sets.
+        let mut keys: std::collections::HashMap<(usize, usize), std::collections::HashSet<i64>> = std::collections::HashMap::new();
         for (at, step) in self.steps.iter().enumerate() {
             match step {
                 Step::Fill(sql) if sql.starts_with(crate::terms::AFTER_MINT) => {
@@ -2264,11 +2448,20 @@ impl NodesPlan {
                 }
                 Step::Fill(sql) => {
                     minted = false;
-                    let reads = &self.step_reads[at];
-                    if !reads.is_empty() && !reads.iter().any(|id| active.get(*id) == Some(&true)) { continue; }
+                    let open = match &self.step_gates[at] {
+                        Some(gates) => self.open(db, gates, &active, &mut keys, counters)?,
+                        None => {
+                            let reads = &self.step_reads[at];
+                            reads.is_empty() || reads.iter().any(|id| active.get(*id) == Some(&true))
+                        }
+                    };
+                    if !open { continue; }
                     let rows = Self::exec(db, sql, counters)?;
                     minted = rows > 0;
-                    if let Some(id) = self.step_writes[at] { active[id] |= rows > 0; }
+                    if let Some(id) = self.step_writes[at] {
+                        active[id] |= rows > 0;
+                        if rows > 0 { keys.retain(|(delta, _), _| *delta != id); }
+                    }
                 }
                 Step::Loop(s) => {
                     let reads = &self.scc_reads[*s];
@@ -2280,6 +2473,7 @@ impl NodesPlan {
                     };
                     for (id, nonempty) in self.scc_results[*s].iter().zip(results) {
                         active[*id] |= nonempty;
+                        if nonempty { keys.retain(|(delta, _), _| delta != id); }
                     }
                 }
             }
@@ -2301,9 +2495,24 @@ impl NodesPlan {
         statement.rows(changes.len());
         drop(_statement);
         *counters.statements.as_mut().unwrap() += 1;
-        for (sql, reads) in self.integrates.iter().zip(&self.integrate_reads) {
-            if reads.is_empty() || reads.iter().any(|id| active.get(*id) == Some(&true)) {
-                Self::exec(db, sql, counters)?;
+        let mut at = 0;
+        while at < self.integrates.len() {
+            let (sql, reads) = (&self.integrates[at], &self.integrate_reads[at]);
+            let open = reads.is_empty() || reads.iter().any(|id| active.get(*id) == Some(&true));
+            match self.integrates.get(at + 1).filter(|delete| delete.starts_with(BY_KEY)) {
+                Some(delete) => {
+                    if open {
+                        for key in Self::emptied(db, sql, counters)? {
+                            sqlite_ext::statements::exec_cached(db, "settle", object_of(delete), delete, rusqlite::params_from_iter(key))?;
+                            *counters.statements.as_mut().unwrap() += 1;
+                        }
+                    }
+                    at += 2;
+                }
+                None => {
+                    if open { Self::exec(db, sql, counters)?; }
+                    at += 1;
+                }
             }
         }
         for (sql, target) in self.clears.iter().zip(&self.clear_targets) {

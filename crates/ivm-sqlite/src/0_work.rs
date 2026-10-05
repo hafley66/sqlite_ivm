@@ -40,6 +40,18 @@ pub struct Work {
 }
 
 impl Work {
+    fn slot(&mut self, kind: Kind) -> &mut u64 {
+        match kind {
+            Kind::D => &mut self.written_d,
+            Kind::I => &mut self.written_i,
+            Kind::X => &mut self.written_x,
+            Kind::Scratch => &mut self.written_scratch,
+            Kind::Source => &mut self.written_source,
+            Kind::Catalog => &mut self.written_catalog,
+            Kind::Term => &mut self.written_term,
+        }
+    }
+
     pub fn since(&self, earlier: &Work) -> Work {
         let a = self.fields();
         let b = earlier.fields();
@@ -106,6 +118,20 @@ struct State {
     /// Writes of nested statements finished so far.
     nested_changes: u64,
     db: usize,
+    /// A write reset before it ran to completion (e.g. `INSERT ... RETURNING` read for its first
+    /// row): SQLite applies its change count after the PROFILE event, at the reset. Its table kind,
+    /// whether it was nested, and the connection's total changes at its PROFILE event.
+    unsettled: Option<(Kind, bool, i64)>,
+}
+
+impl State {
+    /// Attributes the changes an unfinished write's reset applied since its PROFILE event.
+    fn settle_unfinished(&mut self) {
+        let Some((kind, nested, at)) = self.unsettled.take() else { return };
+        let applied = (unsafe { ffi::sqlite3_total_changes(self.db as *mut ffi::sqlite3) as i64 } - at).max(0) as u64;
+        if nested { self.nested_changes += applied; }
+        *self.work.slot(kind) += applied;
+    }
 }
 
 /// Counting on one connection: registered by `start`, unregistered on drop, which must precede
@@ -142,7 +168,11 @@ impl WorkTrace {
         Ok(WorkTrace { handle, state, reported: Work::default() })
     }
 
-    pub fn work(&self) -> Work { self.state.borrow().work }
+    pub fn work(&self) -> Work {
+        let mut state = self.state.borrow_mut();
+        state.settle_unfinished();
+        state.work
+    }
 
     /// Logs the counts since the last report under `phase`.
     pub fn report(&mut self, phase: &'static str) {
@@ -179,6 +209,7 @@ fn create_schema(sql: &str) -> String {
 unsafe extern "C" fn trace(event: c_uint, context: *mut c_void, p: *mut c_void, x: *mut c_void) -> c_int {
     let state = unsafe { &*(context as *const RefCell<State>) };
     let Ok(mut state) = state.try_borrow_mut() else { return 0 };
+    state.settle_unfinished();
     let stmt = p as *mut ffi::sqlite3_stmt;
     let key = p as usize;
     let db = state.db as *mut ffi::sqlite3;
@@ -230,18 +261,10 @@ unsafe extern "C" fn trace(event: c_uint, context: *mut c_void, p: *mut c_void, 
         } else if matches!(verb, Verb::Write | Verb::Read) && running.rows == 0 && own == 0 {
             work.zero_row_executions += 1;
         }
-        let work = &mut state.work;
-        if own > 0 {
-            let slot = match kind(table) {
-                Kind::D => &mut work.written_d,
-                Kind::I => &mut work.written_i,
-                Kind::X => &mut work.written_x,
-                Kind::Scratch => &mut work.written_scratch,
-                Kind::Source => &mut work.written_source,
-                Kind::Catalog => &mut work.written_catalog,
-                Kind::Term => &mut work.written_term,
-            };
-            *slot += own;
+        if own > 0 { *state.work.slot(kind(table)) += own; }
+        if verb == Verb::Write && unsafe { ffi::sqlite3_stmt_busy(stmt) } != 0 {
+            let at = unsafe { ffi::sqlite3_total_changes(db) as i64 };
+            state.unsettled = Some((kind(table), running.nested, at));
         }
     }
     0

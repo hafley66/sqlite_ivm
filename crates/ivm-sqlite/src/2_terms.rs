@@ -346,28 +346,72 @@ pub(crate) fn mint_texts_sql(source: &str) -> [String; 2] {
 /// settle runs it only when that statement inserted rows.
 pub(crate) const AFTER_MINT: &str = "/*after mint*/ ";
 
-/// Interns `name(args)` as a Mint of that row would: an existing row keeps its id, a new one
-/// takes the next `ivm_term` id and gets its `ivm_term` and sort-key rows.
-pub(crate) fn intern_term(db: &Connection, name: &str, args: &[i64]) -> rusqlite::Result<i64> {
-    let table = crate::catalog::quote(ctor_table(name));
-    let lookup = if args.is_empty() {
-        format!("SELECT c0 FROM {table} LIMIT 1")
-    } else {
-        format!("SELECT c0 FROM {table} WHERE {}", (1..=args.len()).map(|i| format!("c{i}=?{i}")).collect::<Vec<_>>().join(" AND "))
-    };
-    if let Some(id) = db.prepare_cached(&lookup)?.query_row(rusqlite::params_from_iter(args), |r| r.get(0)).optional()? {
-        return Ok(id);
+/// Rows per multi-row insert of `intern_terms`: at most `1 + arity` parameters each, far below
+/// SQLite's bound-parameter limit for any constructor arity.
+const INTERN_CHUNK: usize = 256;
+
+/// Interns each `name(args)` in order as a Mint of that row would: an existing row keeps its id,
+/// a new one takes the next `ivm_term` id and gets its `ivm_term` and constructor rows. Lookups
+/// read the tables as they were before the call plus the terms this call minted (`minted`), so
+/// a repeated term keeps the id its first occurrence took. New rows are written after every
+/// id is known: `ivm_term` and each constructor table by multi-row inserts, ascending id.
+pub(crate) fn intern_terms(db: &Connection, terms: &[(&str, &[i64])]) -> rusqlite::Result<Vec<i64>> {
+    // Per functor: constructor table, lookup SQL and functor id, built once per call.
+    let mut functors: HashMap<&str, (String, String, i64)> = HashMap::new();
+    let mut minted: HashMap<(&str, &[i64]), i64> = HashMap::new();
+    let mut fresh: Vec<(&str, i64, &[i64])> = Vec::new();
+    let mut next: Option<i64> = None;
+    let mut ids = Vec::with_capacity(terms.len());
+    for &(name, args) in terms {
+        if let Some(&id) = minted.get(&(name, args)) {
+            ids.push(id);
+            continue;
+        }
+        let (_, lookup, _) = functors.entry(name).or_insert_with(|| {
+            let table = crate::catalog::quote(ctor_table(name));
+            let lookup = if args.is_empty() {
+                format!("SELECT c0 FROM {table} LIMIT 1")
+            } else {
+                format!("SELECT c0 FROM {table} WHERE {}", (1..=args.len()).map(|i| format!("c{i}=?{i}")).collect::<Vec<_>>().join(" AND "))
+            };
+            (table, lookup, 0)
+        });
+        if let Some(id) = db.prepare_cached(lookup)?.query_row(rusqlite::params_from_iter(args), |r| r.get(0)).optional()? {
+            ids.push(id);
+            continue;
+        }
+        let id = match next {
+            Some(id) => id,
+            None => db.prepare_cached("SELECT coalesce(max(id),0)+1 FROM ivm_term")?.query_row([], |r| r.get(0))?,
+        };
+        next = Some(id + 1);
+        minted.insert((name, args), id);
+        fresh.push((name, id, args));
+        ids.push(id);
     }
-    let id: i64 = db.prepare_cached(
-        "INSERT INTO ivm_term(id,functor_id) SELECT coalesce(max(id),0)+1, (SELECT id FROM ivm_functor WHERE name=?1) FROM ivm_term RETURNING id")?
-        .query_row([name], |r| r.get(0))?;
-    let insert = format!(
-        "INSERT INTO {table}(c0{}) VALUES (?1{})",
-        (1..=args.len()).map(|i| format!(",c{i}")).collect::<String>(),
-        (2..=args.len() + 1).map(|i| format!(",?{i}")).collect::<String>(),
-    );
-    db.prepare_cached(&insert)?.execute(rusqlite::params_from_iter(std::iter::once(&id).chain(args)))?;
-    Ok(id)
+    if fresh.is_empty() { return Ok(ids); }
+    for (name, (_, _, fid)) in functors.iter_mut() {
+        if fresh.iter().any(|(minted, ..)| minted == name) {
+            *fid = db.prepare_cached("SELECT id FROM ivm_functor WHERE name=?1")?.query_row([*name], |r| r.get(0))?;
+        }
+    }
+    for chunk in fresh.chunks(INTERN_CHUNK) {
+        let sql = format!("INSERT INTO ivm_term(id,functor_id) VALUES {}", vec!["(?,?)"; chunk.len()].join(","));
+        let params = chunk.iter().flat_map(|(name, id, _)| [*id, functors[name].2]);
+        db.prepare_cached(&sql)?.execute(rusqlite::params_from_iter(params))?;
+    }
+    for (name, (table, _, _)) in &functors {
+        let rows: Vec<&(&str, i64, &[i64])> = fresh.iter().filter(|(minted, ..)| minted == name).collect();
+        let Some((_, _, first)) = rows.first() else { continue };
+        let one = format!("({})", vec!["?"; first.len() + 1].join(","));
+        let cols = (1..=first.len()).map(|i| format!(",c{i}")).collect::<String>();
+        for chunk in rows.chunks(INTERN_CHUNK) {
+            let sql = format!("INSERT INTO {table}(c0{cols}) VALUES {}", vec![one.as_str(); chunk.len()].join(","));
+            let params = chunk.iter().flat_map(|(_, id, args)| std::iter::once(id).chain(args.iter()));
+            db.prepare_cached(&sql)?.execute(rusqlite::params_from_iter(params))?;
+        }
+    }
+    Ok(ids)
 }
 
 /// Interns `value` whole: one `ivm_term`, `ivm_text` and sort-key row. Decompose mints the head and
