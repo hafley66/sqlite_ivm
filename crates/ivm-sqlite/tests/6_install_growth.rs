@@ -346,7 +346,7 @@ fn c15_shaped_ir_installs_one_shared_plan() {
         program.strata.len(),
         program.outputs.len()
     );
-    assert_eq!(creates, 2232); // join-read images are views; one-reader join and few-reader source deltas are CTEs
+    assert_eq!(creates, 2477); // join-read images are views; join deltas expanded once and few-reader source deltas are CTEs; unions read by several statements are stored
     assert!(
         objects < 8_000,
         "c15-shaped install created {objects} schema objects"
