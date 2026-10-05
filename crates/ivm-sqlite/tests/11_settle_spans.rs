@@ -46,6 +46,7 @@ fn settle_spans_statements_fixpoints_rounds_and_dictionary_counts() {
     assert_eq!(shape, [("frontier_settle", 1), ("frontier_fixpoint", 1), ("delete_rounds", 1), ("insert_rounds", 1), ("udf_calls", 1), ("term_lookups", 1)]);
     let rounds: Vec<&str> = seen.iter().filter(|s| s.contains("_rounds=")).map(String::as_str).collect();
     // `stmt` includes install: the source DDL runs inside the install savepoint after one
-    // `sqlite_master` read (109 before, with per-source EXISTS and PRAGMA reads).
-    assert_eq!((count("frontier_round"), count("stmt"), rounds), (6, 107, vec!["delete_rounds=1", "insert_rounds=5"]));
+    // `sqlite_master` read (109 before, with per-source EXISTS and PRAGMA reads), plus the
+    // shard DDL batch `Engine::install` runs ahead of it.
+    assert_eq!((count("frontier_round"), count("stmt"), rounds), (6, 108, vec!["delete_rounds=1", "insert_rounds=5"]));
 }

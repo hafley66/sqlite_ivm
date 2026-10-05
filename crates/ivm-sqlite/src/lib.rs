@@ -36,6 +36,8 @@
 use sqlite_ext::rusqlite;
 
 mod catalog;
+#[path = "1_image.rs"]
+mod image;
 #[path = "2_terms.rs"]
 mod terms;
 mod composition;
@@ -159,7 +161,8 @@ pub struct Program {
 
 #[path = "4_engine.rs"]
 mod trait_engine;
-pub use trait_engine::Sqlite;
+pub use trait_engine::{Sqlite, SHARDS};
+pub use image::clear_memory as clear_image_memory;
 
 impl std::fmt::Debug for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

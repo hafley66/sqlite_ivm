@@ -264,6 +264,8 @@ pub(crate) enum Watch {
 pub(crate) struct CreatedSources {
     pub(crate) ddl: String,
     pub(crate) columns: HashMap<String, Vec<String>>,
+    /// Attached schemas `ivm_s0..` the node tables spread over; 0 keeps every table in `main`.
+    pub(crate) shards: usize,
 }
 
 pub(crate) fn install(
@@ -343,7 +345,8 @@ fn install_program(
     push_savepoint(&mut sql, "frontier_sp_install");
     sql.push_str(&created.ddl);
     push_catalog_ddl(&mut sql);
-    push_program_ddl(&installed, &mut sql);
+    let mut shard_sql = String::new();
+    push_program_ddl(&installed, &mut sql, created.shards, &mut shard_sql);
     // Persist the typed program; SQL text is only an install-time input.
     let program_json = serde_json::to_string(&program)
         .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::State(e.to_string())))?;
@@ -363,8 +366,14 @@ fn install_program(
             col = col.name.replace('\'', "''"),
         ));
     }
+    // Ahead of the savepoint: a schema inside a transaction cannot be deserialized. Only
+    // `Engine::install` shards, on a fresh connection it drops when the install fails.
+    if !shard_sql.is_empty() {
+        crate::image::install_shards(conn, created.shards, &shard_sql, &mut meter)
+            .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
+    }
     meter
-        .batch(conn, "install", name, &sql)
+        .exec_text(conn, "install", name, &sql)
         .map_err(|e| EngineError::new(Stage::Install, name, ErrorKind::Sqlite(e.to_string())))?;
     if !terms_ready {
         if let Err(e) = crate::terms::install(conn, program) {
@@ -819,7 +828,33 @@ fn push_catalog_ddl(sql: &mut String) {
     ));
 }
 
-fn push_program_ddl(inst: &Installed, sql: &mut String) {
+/// The schema `ivm_s{n}` a node table lives in. SQLite reparses its schema table (a full scan)
+/// after every CREATE, so one schema of N objects costs O(N^2); `shards` schemas divide it.
+pub(crate) fn shard_schema(n: usize) -> String {
+    format!("ivm_s{n}")
+}
+
+/// `CREATE TABLE t ..` / `CREATE INDEX [IF NOT EXISTS] x ON t ..` with the object placed in its
+/// table's shard. Tables the output views read stay in `main`: a view reads only its own schema.
+fn sharded_ddl(ddl: &str, shards: usize, main_only: &str, placed: &mut HashMap<String, usize>) -> Option<String> {
+    let in_main = |table: &str| main_only.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).any(|word| word == table);
+    let (head, rest) = ["CREATE TABLE ", "CREATE INDEX IF NOT EXISTS ", "CREATE INDEX "].iter()
+        .find_map(|head| ddl.strip_prefix(head).map(|rest| (*head, rest)))
+        .unwrap_or(("", ddl));
+    let words = rest.split_whitespace().collect::<Vec<_>>();
+    let table = match (head, words.as_slice()) {
+        ("CREATE TABLE ", [name, ..]) => *name,
+        ("CREATE INDEX IF NOT EXISTS " | "CREATE INDEX ", [_, "ON", table, ..]) => *table,
+        _ => return None,
+    };
+    if in_main(table) { return None; }
+    let next = placed.len() % shards;
+    let shard = *placed.entry(table.to_owned()).or_insert(next);
+    Some(format!("{head}{}.{rest}", shard_schema(shard)))
+}
+
+/// `shard_sql` takes the statements placed in shard schemas (none when `shards` is 0).
+fn push_program_ddl(inst: &Installed, sql: &mut String, shards: usize, shard_sql: &mut String) {
     let p = &inst.name;
     let plan = &inst.plan;
     let width = plan.stage_width.max(1);
@@ -838,9 +873,12 @@ fn push_program_ddl(inst: &Installed, sql: &mut String) {
             quote(format!("{}_table", stage(p))),
             quote(stage(p)),
         ));
+        let mut placed = HashMap::new();
         for ddl in &nodes.ddl {
-            sql.push_str(ddl);
-            sql.push(';');
+            match (shards > 0).then(|| sharded_ddl(ddl, shards, &nodes.output_snapshot, &mut placed)).flatten() {
+                Some(sharded) => { shard_sql.push_str(&sharded); shard_sql.push(';'); }
+                None => { sql.push_str(ddl); sql.push(';'); }
+            }
         }
         let names = plan
             .output
