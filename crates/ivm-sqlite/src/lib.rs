@@ -35,6 +35,9 @@
 
 use sqlite_ext::rusqlite;
 
+#[path = "0_work.rs"]
+mod work;
+pub use work::Work;
 mod catalog;
 #[path = "1_image.rs"]
 mod image;
