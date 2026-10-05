@@ -1435,6 +1435,8 @@ struct SccSql {
     vars: Vec<VarSql>,
     /// Per copy: move positive rows aside, then later move them back.
     stash: Vec<String>,
+    /// Per copy, in `copy_ids` order: whether its delta holds a retraction.
+    negatives: Vec<String>,
     restore: Vec<String>,
     /// Physical deltas each phase fill reads, and the one it writes.
     delete_io: Vec<(Vec<usize>, Option<usize>)>,
@@ -1592,7 +1594,7 @@ impl NodesPlan {
             all.extend(scc.delete_fills.iter().chain(&scc.insert_fills)
                 .chain(&scc.delete_seeds).chain(&scc.insert_seeds)
                 .chain(&scc.integrates).chain(&scc.clears).chain(&scc.stash).chain(&scc.restore)
-                .chain(&scc.reset).map(String::as_str));
+                .chain(&scc.reset).chain(&scc.negatives).map(String::as_str));
             for v in &scc.vars {
                 all.extend([
                     &v.over_delete, &v.rederive, &v.insert, &v.to_delta, &v.to_acc,
@@ -1717,6 +1719,7 @@ impl NodesPlan {
                     format!("DELETE FROM {d} WHERE w > 0"),
                 ]);
                 sccs[s].restore.push(format!("INSERT INTO {d} SELECT {cols}, w FROM {hold} WHERE k = {k}"));
+                sccs[s].negatives.push(format!("SELECT EXISTS (SELECT 1 FROM {d} WHERE w < 0)"));
             }
             match node.owner {
                 Owner::Loop(s) if rel.sccs[s].nonmonotone => {
@@ -1963,6 +1966,7 @@ impl NodesPlan {
             scc.copy_ids = nodes.iter().filter(|node| node.owner == Owner::Copy(scc_id))
                 .filter_map(|node| by_name.get(node.c.d.replace("ivm_n", &format!("frontier_{program}_n")).as_str()).copied())
                 .collect();
+            assert_eq!(scc.copy_ids.len(), scc.negatives.len(), "one retraction probe per SCC copy");
         }
         for (scc_id, scc) in self.sccs.iter().enumerate() {
             let internal = nodes.iter().filter(|node| node.owner == Owner::Loop(scc_id))
@@ -2031,6 +2035,7 @@ impl NodesPlan {
             scc.stash.iter_mut().for_each(&fix);
             scc.restore.iter_mut().for_each(&fix);
             scc.reset.iter_mut().for_each(&fix);
+            scc.negatives.iter_mut().for_each(&fix);
             for var in &mut scc.vars {
                 for sql in [
                     &mut var.over_delete,
@@ -2065,6 +2070,13 @@ impl NodesPlan {
         let result = sqlite_ext::statements::exec_cached(db, "settle", object_of(sql), sql, [])?;
         *counters.statements.as_mut().unwrap() += 1;
         Ok(result)
+    }
+
+    /// One settle query yielding a single boolean.
+    fn query_bool(db: &Connection, sql: &str, counters: &mut Counters) -> rusqlite::Result<bool> {
+        let value = sqlite_ext::statements::query_cached(db, "settle", object_of(sql), sql, [], |r| r.get::<_, bool>(0))?;
+        *counters.statements.as_mut().unwrap() += 1;
+        Ok(value)
     }
 
     /// A registration statement after a mint runs only when that mint inserted rows: the
@@ -2202,20 +2214,33 @@ impl NodesPlan {
         let _fixpoint = span.enter();
         let scc = &self.sccs[scc_id];
         let mut active = outer.to_vec();
-        Self::exec_all(db, &scc.stash, counters)?;
+        // Retractions reach the loop through delete seeds or negative copy rows; the seeds read
+        // no copy, so they run first. Without either, the delete phase reads empty deltas only.
+        let mut retracting = false;
         for (sql, write) in scc.delete_seeds.iter().zip(&scc.delete_seed_writes) {
             let rows = Self::exec(db, sql, counters)?;
+            retracting |= rows > 0;
             if let Some(id) = write { active[*id] |= rows > 0; }
         }
-        let mut rounds = 1u64;
-        while self.round(db, scc_id, Phase::Delete, &mut active, counters)? { rounds += 1; }
-        span.record("delete_rounds", rounds);
-        for (v, id) in scc.vars.iter().zip(&scc.var_ids) {
-            Self::exec_all(db, [&v.rederive, &v.clear_del], counters)?;
-            active[*id] |= Self::exec(db, &v.to_delta, counters)? > 0;
-            Self::exec_all(db, [&v.to_acc, &v.clear_nx], counters)?;
+        for (sql, id) in scc.negatives.iter().zip(&scc.copy_ids) {
+            if retracting { break; }
+            if !active[*id] { continue; }
+            retracting = Self::query_bool(db, sql, counters)?;
         }
-        Self::exec_all(db, &scc.restore, counters)?;
+        if retracting {
+            Self::exec_all(db, &scc.stash, counters)?;
+            let mut rounds = 1u64;
+            while self.round(db, scc_id, Phase::Delete, &mut active, counters)? { rounds += 1; }
+            span.record("delete_rounds", rounds);
+            for (v, id) in scc.vars.iter().zip(&scc.var_ids) {
+                Self::exec_all(db, [&v.rederive, &v.clear_del], counters)?;
+                active[*id] |= Self::exec(db, &v.to_delta, counters)? > 0;
+                Self::exec_all(db, [&v.to_acc, &v.clear_nx], counters)?;
+            }
+            Self::exec_all(db, &scc.restore, counters)?;
+        } else {
+            span.record("delete_rounds", 0u64);
+        }
         for id in scc.clear_targets.iter().flatten() { active[*id] |= outer[*id]; }
         for (sql, write) in scc.insert_seeds.iter().zip(&scc.insert_seed_writes) {
             let rows = Self::exec(db, sql, counters)?;

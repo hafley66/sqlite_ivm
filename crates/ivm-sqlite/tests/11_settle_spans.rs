@@ -47,6 +47,7 @@ fn settle_spans_statements_fixpoints_rounds_and_dictionary_counts() {
     let rounds: Vec<&str> = seen.iter().filter(|s| s.contains("_rounds=")).map(String::as_str).collect();
     // `stmt` includes install: the source DDL runs inside the install savepoint after one
     // `sqlite_master` read (109 before, with per-source EXISTS and PRAGMA reads), plus the
-    // shard DDL batch `Engine::install` runs ahead of it.
-    assert_eq!((count("frontier_round"), count("stmt"), rounds), (6, 108, vec!["delete_rounds=1", "insert_rounds=5"]));
+    // shard DDL batch `Engine::install` runs ahead of it. An insert-only frontier has no
+    // retraction: the delete phase is skipped (108 statements and 6 rounds with it).
+    assert_eq!((count("frontier_round"), count("stmt"), rounds), (5, 89, vec!["delete_rounds=0", "insert_rounds=5"]));
 }
