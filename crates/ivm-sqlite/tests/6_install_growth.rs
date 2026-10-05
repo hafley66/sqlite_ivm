@@ -79,6 +79,7 @@ fn recursive_program(strata: usize) -> Program {
             ids: vec![id],
             bodies: vec![at + 4],
             limit: None,
+            nested: vec![],
         }));
     }
     program

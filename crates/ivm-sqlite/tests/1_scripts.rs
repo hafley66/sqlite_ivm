@@ -99,3 +99,4 @@ fn dred_self_supporting_cycle_matches_dd() {
             dd.snapshot(2).unwrap());
     }
 }
+script_case!(nested_letrec_wave_reach, "18_nested_wave_reach");

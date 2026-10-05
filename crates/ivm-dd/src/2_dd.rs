@@ -9,7 +9,7 @@ use differential_dataflow::lattice::Lattice;
 use differential_dataflow::operators::iterate::Variable;
 use differential_dataflow::{AsCollection, VecCollection};
 use std::hash::{DefaultHasher, Hash, Hasher};
-use timely::dataflow::operators::vec::{Filter, Partition};
+use timely::dataflow::operators::vec::{Filter, Map as _, Partition};
 use timely::dataflow::Scope;
 use timely::order::Product;
 use timely::progress::Timestamp;
@@ -52,157 +52,164 @@ fn rec_inputs(p: &Program, rec: &LetRec) -> BTreeSet<RelId> {
     inputs
 }
 
-/// The nodes a LetRec's loop reads that depend on none of its relations: every body that reads
-/// no recursive relation, and every such input of a node that does. Each is the root of a
-/// subtree the loop can read as one entered collection.
-fn independent_inputs<C>(p: &Program, rec: &LetRec, defined: &[(RelId, C)], fuse: bool) -> BTreeSet<NodeId> {
-    // Post-order over the nodes the bodies reach, inputs first, with an explicit stack.
-    let mut dependent: Vec<Option<bool>> = vec![None; p.nodes.len()];
-    let mut stack: Vec<(NodeId, bool)> = rec.bodies.iter().map(|body| (*body, false)).collect();
-    while let Some((id, expanded)) = stack.pop() {
-        if dependent[id as usize].is_some() { continue; }
-        let op = &p.nodes[id as usize];
-        let inputs = lowered_inputs(p, defined, op, fuse);
-        if expanded {
-            let reads_rec = matches!(op, Op::Get(rel) if rec.ids.contains(rel));
-            let value = reads_rec || inputs.iter().any(|input| dependent[*input as usize] == Some(true));
-            dependent[id as usize] = Some(value);
-            continue;
-        }
-        stack.push((id, true));
-        stack.extend(inputs.iter().filter(|input| dependent[**input as usize].is_none()).map(|input| (*input, false)));
-    }
-    let mut roots: BTreeSet<NodeId> = rec.bodies.iter().copied().filter(|body| dependent[*body as usize] == Some(false)).collect();
-    for (id, value) in dependent.iter().enumerate() {
-        if *value == Some(true) {
-            roots.extend(lowered_inputs(p, defined, &p.nodes[id], fuse).into_iter().filter(|input| dependent[*input as usize] == Some(false)));
-        }
-    }
-    roots
-}
-
-/// Timestamps the algebra runs at. Only the top level may open a LetRec scope; this bounds monomorphization.
+/// Timestamps the algebra runs at: the top level, one LetRec scope, and one LetRec nested in it.
+/// The nested scope opens no further scope; this bounds monomorphization.
 pub trait Nest: Timestamp + Lattice + Ord + Hash + Clone + std::fmt::Debug + 'static {
-    /// `(outer tick, loop round)`; the round is `None` outside a LetRec.
+    /// `(outer tick, innermost loop round)`; the round is `None` outside a LetRec.
     fn split(&self) -> (Time, Option<u64>);
     fn letrec<'s>(rel: &mut DdRel<'s, Self>, p: &Program, rec: &LetRec, defined: &[(RelId, Coll<'s, Self>)], outer: &mut Vec<Option<Coll<'s, Self>>>)
         -> Result<Vec<Coll<'s, Self>>, EngineError>;
+}
+
+type Nested = Product<Inner, u64>;
+
+impl Nest for Time {
+    fn split(&self) -> (Time, Option<u64>) {
+        (*self, None)
+    }
+    fn letrec<'s>(rel: &mut DdRel<'s, Self>, p: &Program, rec: &LetRec, defined: &[(RelId, Coll<'s>)], outer: &mut Vec<Option<Coll<'s>>>)
+        -> Result<Vec<Coll<'s>>, EngineError> {
+        letrec_scope(rel, p, rec, defined, outer)
+    }
 }
 
 impl Nest for Inner {
     fn split(&self) -> (Time, Option<u64>) {
         (self.outer, Some(self.inner))
     }
-    fn letrec<'s>(_: &mut DdRel<'s, Self>, _: &Program, _: &LetRec, _: &[(RelId, Coll<'s, Self>)], _: &mut Vec<Option<Coll<'s, Self>>>)
+    fn letrec<'s>(rel: &mut DdRel<'s, Self>, p: &Program, rec: &LetRec, defined: &[(RelId, Coll<'s, Self>)], outer: &mut Vec<Option<Coll<'s, Self>>>)
         -> Result<Vec<Coll<'s, Self>>, EngineError> {
-        Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("LetRec nested in LetRec")))
+        letrec_scope(rel, p, rec, defined, outer)
     }
 }
 
-impl Nest for Time {
+impl Nest for Nested {
     fn split(&self) -> (Time, Option<u64>) {
-        (*self, None)
+        (self.outer.outer, Some(self.inner))
     }
-    fn letrec<'s>(rel: &mut DdRel<'s, Self>, p: &Program, rec: &LetRec, defined: &[(RelId, Coll<'s>)], outer_nodes: &mut Vec<Option<Coll<'s>>>)
-        -> Result<Vec<Coll<'s>>, EngineError> {
-        let used = rec_inputs(p, rec);
-        if rec.limit == Some(0) {
-            return Err(EngineError::new(Stage::Install, rec.ids.first().copied(), ErrorKind::Unsupported("LetRec limit 0")));
+    fn letrec<'s>(_: &mut DdRel<'s, Self>, _: &Program, rec: &LetRec, _: &[(RelId, Coll<'s, Self>)], _: &mut Vec<Option<Coll<'s, Self>>>)
+        -> Result<Vec<Coll<'s, Self>>, EngineError> {
+        Err(EngineError::new(Stage::Install, rec.ids.first().copied(), ErrorKind::Unsupported("LetRec nested two deep")))
+    }
+}
+
+/// One LetRec as a DD scope over `T`; each nested LetRec is a scope inside it, at
+/// `Product<Product<T, u64>, u64>`, so it reaches its fixed point within each round of this one.
+fn letrec_scope<'s, T: Nest>(rel: &mut DdRel<'s, T>, p: &Program, rec: &LetRec, defined: &[(RelId, Coll<'s, T>)], outer_nodes: &mut Vec<Option<Coll<'s, T>>>)
+    -> Result<Vec<Coll<'s, T>>, EngineError>
+where Product<T, u64>: Nest + Timestamp<Summary = Product<<T as Timestamp>::Summary, u64>> {
+    let used = rec_inputs(p, rec);
+    // Checked before the scope opens: an error inside it leaves a timely operator slot unfilled.
+    for inner in std::iter::once(rec).chain(&rec.nested) {
+        if inner.limit == Some(0) {
+            return Err(EngineError::new(Stage::Install, inner.ids.first().copied(), ErrorKind::Unsupported("LetRec limit 0")));
         }
-        if !rec.ids.iter().any(|id| used.contains(id)) {
-            return rec.bodies.iter().map(|body| {
-                let c = lower_node(p, rel, outer_nodes, defined, *body)?;
-                Ok(rel.threshold(c))
-            }).collect();
+    }
+    if let Some(deep) = rec.nested.iter().find(|inner| !inner.nested.is_empty()) {
+        return Err(EngineError::new(Stage::Install, deep.ids.first().copied(), ErrorKind::Unsupported("LetRec nested two deep")));
+    }
+    if rec.nested.is_empty() && !rec.ids.iter().any(|id| used.contains(id)) {
+        return rec.bodies.iter().map(|body| {
+            let c = lower_node(p, rel, outer_nodes, defined, *body)?;
+            Ok(rel.threshold(c))
+        }).collect();
+    }
+    // Lowered once in the outer scope through the shared outer memo, then entered; this
+    // includes nested LetRec nodes that read no variable of either loop.
+    let mut reach = LetRec { ids: rec.ids.clone(), bodies: rec.bodies.clone(), limit: None, nested: Vec::new() };
+    for nested in &rec.nested {
+        reach.ids.extend(nested.ids.iter().copied());
+        reach.bodies.extend(nested.bodies.iter().copied());
+    }
+    let hoisted: Vec<(NodeId, Coll<'s, T>)> = independent_inputs(p, &reach, defined, rel.fuses_join_project())
+        .into_iter()
+        .map(|id| Ok((id, lower_node(p, rel, outer_nodes, defined, id)?)))
+        .collect::<Result<_, EngineError>>()?;
+    let outer = rel.scope;
+    outer.scoped::<Product<T, u64>, _, _>("LetRec", |sub| {
+        let mut inner = DdRel {
+            scope: sub,
+            rec: rec.ids.first().copied(),
+            sources: BTreeMap::new(),
+            outputs: Vec::new(),
+            taps: rel.taps.clone(),
+            reduce_reads: rel.reduce_reads.clone(),
+            constructors: rel.constructors.clone(),
+            interner: rel.interner.clone(),
+            sum_error: rel.sum_error.clone(),
+            texts: rel.texts.clone(),
+            keyed: BTreeMap::new(),
+            read: BTreeSet::new(),
+            types: rel.types.clone(),
+            arranged: rel.arranged.clone(),
+            limits: Vec::new(),
+        };
+        let mut nodes = vec![None; p.nodes.len()];
+        for (id, c) in hoisted {
+            nodes[id as usize] = Some(c.enter(sub));
         }
-        // Nodes of the bodies that read no recursive relation are lowered once in the outer scope
-        // and entered; the loop then iterates only over the nodes that depend on its variables.
-        // They share the outer memo with the `Let` strata and the other fixpoints, so a node
-        // several strata read is one collection and its arrangements are shared.
-        let hoisted: Vec<(NodeId, Coll<'s>)> = independent_inputs(p, rec, defined, rel.fuses_join_project())
-            .into_iter()
-            .map(|id| Ok((id, lower_node(p, rel, outer_nodes, defined, id)?)))
-            .collect::<Result<_, EngineError>>()?;
-        let outer = rel.scope;
-        outer.scoped::<Inner, _, _>("LetRec", |sub| {
-            let mut inner = DdRel {
-                scope: sub,
-                rec: rec.ids.first().copied(),
-                sources: BTreeMap::new(),
-                outputs: Vec::new(),
-                taps: rel.taps.clone(),
-                reduce_reads: rel.reduce_reads.clone(),
-                constructors: rel.constructors.clone(),
-                interner: rel.interner.clone(),
-                sum_error: rel.sum_error.clone(),
-                texts: rel.texts.clone(),
-                keyed: BTreeMap::new(),
-                read: BTreeSet::new(),
-                types: rel.types.clone(),
-                arranged: rel.arranged.clone(),
-                limits: Vec::new(),
-            };
-            let mut nodes = vec![None; p.nodes.len()];
-            for (id, c) in hoisted {
-                nodes[id as usize] = Some(c.enter(sub));
-            }
-            let mut scope_defined: Vec<(RelId, Coll<'_, Inner>)> = Vec::new();
-            let mut variables = Vec::new();
-            for id in &rec.ids {
-                let (variable, current) = Variable::new(sub, Product::new(Default::default(), 1));
-                variables.push(variable);
-                scope_defined.push((*id, current));
-            }
-            let mut results = Vec::new();
-            for body in &rec.bodies {
-                let c = lower_node(p, &mut inner, &mut nodes, &scope_defined, *body)?;
-                results.push(inner.threshold(c));
-            }
-            // Round r of the scope holds body evaluation r + 1. With `limit = n`, evaluations
-            // 1..=n may change a variable; a change in evaluation n + 1 (round n) means no fixed
-            // point within the limit. Those updates are cut from the feedback and the output, so
-            // the loop stops, and reported through `rel.limits`.
-            if let Some(limit) = rec.limit {
-                let limit = u64::from(limit);
-                let mut over = Vec::new();
-                results = results.into_iter().enumerate().map(|(index, result)| {
-                    over.push(result.inner.clone().filter(move |(_, t, _): &(Row, Inner, W)| t.inner >= limit).as_collection().map(move |mut row| {
+        let mut scope_defined: Vec<(RelId, Coll<'_, Product<T, u64>>)> = Vec::new();
+        let mut variables = Vec::new();
+        for id in &rec.ids {
+            let (variable, current) = Variable::new(sub, Product::new(Default::default(), 1));
+            variables.push(variable);
+            scope_defined.push((*id, current));
+        }
+        for nested in &rec.nested {
+            let cs = <Product<T, u64> as Nest>::letrec(&mut inner, p, nested, &scope_defined, &mut nodes)?;
+            scope_defined.extend(nested.ids.iter().copied().zip(cs));
+        }
+        let mut results = Vec::new();
+        for body in &rec.bodies {
+            let c = lower_node(p, &mut inner, &mut nodes, &scope_defined, *body)?;
+            results.push(inner.threshold(c));
+        }
+        // Round n holds evaluation n + 1: its updates are cut and reported. Inside an outer loop
+        // a cut row carries the outer round, so a later round's correction cannot cancel it.
+        if let Some(limit) = rec.limit {
+            let limit = u64::from(limit);
+            let mut over = Vec::new();
+            results = results.into_iter().enumerate().map(|(index, result)| {
+                over.push(result.inner.clone().filter(move |(_, t, _): &(Row, Product<T, u64>, W)| t.inner >= limit)
+                    .map(move |(mut row, t, w): (Row, Product<T, u64>, W)| {
                         row.push(index as Cell);
-                        row
-                    }));
-                    result.inner.filter(move |(_, t, _): &(Row, Inner, W)| t.inner < limit).as_collection()
-                }).collect();
-                let over = differential_dataflow::collection::concatenate(sub, over).leave(outer);
-                rel.limits.push((rec.ids.first().copied(), rec.limit.unwrap_or(0), over));
-            }
-            for (variable, result) in variables.into_iter().zip(&results) {
-                variable.set(result.clone());
-            }
-            if results.len() == 1 {
-                return Ok(results.into_iter().map(|result| result.leave(outer)).collect());
-            }
-            // One scope output for the whole fixpoint: timely summarizes reachability from every
-            // location in the scope to every scope output, so each extra output multiplies the
-            // install and progress-tracking cost of the scope.
-            let parts = results.len() as u64;
-            let tagged = results.into_iter().enumerate().map(|(index, result)| {
-                result.map(move |mut row| {
-                    row.push(index as Cell);
-                    row
-                })
-            });
-            let left = differential_dataflow::collection::concatenate(sub, tagged).leave(outer);
-            Ok(left
-                .inner
-                .partition(parts, |(mut row, time, w): (Row, Time, W)| {
-                    let index = row.pop().expect("tagged row") as u64;
-                    (index, (row, time, w))
-                })
-                .into_iter()
-                .map(|stream| stream.as_collection())
-                .collect())
-        })
-    }
+                        if let (_, Some(round)) = t.outer.split() { row.push(round as Cell); }
+                        (row, t, w)
+                    }).as_collection());
+                result.inner.filter(move |(_, t, _): &(Row, Product<T, u64>, W)| t.inner < limit).as_collection()
+            }).collect();
+            let over = differential_dataflow::collection::concatenate(sub, over).leave(outer);
+            rel.limits.push((rec.ids.first().copied(), rec.limit.unwrap_or(0), over));
+        }
+        for (id, limit, over) in std::mem::take(&mut inner.limits) {
+            rel.limits.push((id, limit, over.leave(outer)));
+        }
+        for (variable, result) in variables.into_iter().zip(&results) {
+            variable.set(result.clone());
+        }
+        if results.len() == 1 {
+            return Ok(results.into_iter().map(|result| result.leave(outer)).collect());
+        }
+        // One scope output: timely summarizes reachability to every scope output, so each extra
+        // output multiplies the scope's install and progress-tracking cost.
+        let parts = results.len() as u64;
+        let tagged = results.into_iter().enumerate().map(|(index, result)| {
+            result.map(move |mut row| {
+                row.push(index as Cell);
+                row
+            })
+        });
+        let left = differential_dataflow::collection::concatenate(sub, tagged).leave(outer);
+        Ok(left
+            .inner
+            .partition(parts, |(mut row, time, w): (Row, T, W)| {
+                let index = row.pop().expect("tagged row") as u64;
+                (index, (row, time, w))
+            })
+            .into_iter()
+            .map(|stream| stream.as_collection())
+            .collect())
+    })
 }
 
 pub struct DdRel<'s, T: Nest = Time> {

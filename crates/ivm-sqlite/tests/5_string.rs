@@ -174,7 +174,7 @@ fn walk_program() -> Program {
             Op::Mfp { input: 8, filter: vec![], map: vec![], project: vec![1, 2] },
         ],
         strata: vec![
-            Stratum::LetRec(LetRec { ids: vec![1], bodies: vec![6], limit: None }),
+            Stratum::LetRec(LetRec { ids: vec![1], bodies: vec![6], limit: None, nested: vec![] }),
             Stratum::Let { id: 2, body: 9 },
         ],
         outputs: vec![2],

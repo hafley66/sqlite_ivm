@@ -227,6 +227,17 @@ pub struct LetRec {
     pub ids: Vec<RelId>,
     pub bodies: Vec<NodeId>,
     pub limit: Option<u32>,
+    /// Run to their own fixed point inside every round, in order, over the previous round's
+    /// values; their ids are visible only inside this LetRec. One level deep.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub nested: Vec<LetRec>,
+}
+
+impl LetRec {
+    /// `rel` is one of this LetRec's variables or a variable of a LetRec nested in it.
+    pub fn binds(&self, rel: RelId) -> bool {
+        self.ids.contains(&rel) || self.nested.iter().any(|inner| inner.ids.contains(&rel))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

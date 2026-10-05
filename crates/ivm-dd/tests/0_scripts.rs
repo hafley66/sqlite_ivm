@@ -128,3 +128,8 @@ fn pokemon_6_walk() {
 fn pokemon_7_rare_candy() {
     println!("{}", support::run::<Dd>("pokemon/7_rare_candy"));
 }
+
+#[test]
+fn nested_letrec_wave_reach() {
+    println!("{}", support::run::<Dd>("18_nested_wave_reach"));
+}

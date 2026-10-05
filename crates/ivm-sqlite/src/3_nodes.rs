@@ -140,12 +140,15 @@ struct SccPlan {
     nonmonotone: bool,
     limit: Option<u32>,
     first: Option<RelId>,
+    /// The LetRec this one is nested in: it runs inside each round of that loop.
+    parent: Option<usize>,
 }
 
 struct Active {
     scc: usize,
     copies: Vec<(usize, SqlC)>,
     nonmonotone: bool,
+    parent: Option<usize>,
 }
 
 /// A LetRec whose body may negate, aggregate or retract a variable, or that carries a limit.
@@ -404,8 +407,11 @@ impl SqlRel {
         if arity == 0 {
             self.fail(unsupported("zero-arity relation"));
         }
+        // Inside a nested LetRec a node that reads none of its variables still runs per round
+        // of the enclosing loop.
         let owner = match (&self.active, rec) {
             (Some(a), true) => Owner::Loop(a.scc),
+            (Some(Active { parent: Some(parent), .. }), false) => Owner::Loop(*parent),
             _ => Owner::Settle,
         };
         let body = body(&c);
@@ -609,6 +615,87 @@ impl SqlRel {
                 *sql = with_views(sql, &views);
             }
         }
+    }
+
+    /// Reserves the SCC slot of one LetRec and makes it the active one; `close_scc` fills it.
+    fn open_scc(&mut self, nonmonotone: bool, parent: Option<usize>) -> usize {
+        let scc = self.sccs.len();
+        self.sccs.push(SccPlan { vars: Vec::new(), at: usize::MAX, nonmonotone, limit: None, first: None, parent });
+        self.active = Some(Active { scc, copies: Vec::new(), nonmonotone, parent });
+        scc
+    }
+
+    /// One loop-owned variable node per id; `scope` gains them.
+    fn variables(&mut self, p: &Program, rec: &LetRec, mut scope: Vec<(RelId, SqlC)>) -> Result<(Vec<(RelId, SqlC)>, Vec<SqlC>), EngineError> {
+        let mut vs = Vec::new();
+        for id in &rec.ids {
+            let rel = p.rel(*id).ok_or_else(|| {
+                EngineError::new(Stage::Install, Some(*id), ErrorKind::UnknownRel(*id))
+            })?;
+            let v = self.push(rel.cols.len(), true, |_| None);
+            self.integrate(&v, Vec::new());
+            scope.push((*id, v.clone()));
+            vs.push(v);
+        }
+        self.mark = self.nodes.len();
+        Ok((scope, vs))
+    }
+
+    fn bodies(&mut self, p: &Program, rec: &LetRec, scope: &[(RelId, SqlC)], nodes: &mut Vec<Option<SqlC>>) -> Result<Vec<SqlC>, EngineError> {
+        let mut bs = Vec::new();
+        for body in &rec.bodies {
+            let c = lower_node(p, self, nodes, scope, *body)?;
+            let b = if c.rec { c } else { self.copy(c) };
+            // DRed reads and clears the body delta after each round.
+            self.nodes[b.node].inline = false;
+            self.integrate(&b, Vec::new());
+            bs.push(b);
+        }
+        Ok(bs)
+    }
+
+    /// The result node per variable, read after the loop: by later strata, or inside a nested
+    /// LetRec's enclosing loop, owned by that loop.
+    fn close_scc(&mut self, scc: usize, rec: &LetRec, vs: Vec<SqlC>, bs: Vec<SqlC>, nonmonotone: bool, parent: Option<usize>) -> Vec<SqlC> {
+        if vs.len() != bs.len() || vs.iter().zip(&bs).any(|(v, b)| v.arity != b.arity) {
+            self.fail(unsupported("LetRec ids and bodies differ in count or arity"));
+        }
+        let at = self.nodes.len();
+        let mut vars = Vec::new();
+        for (v, b) in vs.into_iter().zip(bs) {
+            let r = self.push(v.arity, parent.is_some(), |_| None);
+            vars.push((v, b, r.clone()));
+        }
+        let rs = vars.iter().map(|(_, _, r)| r.clone()).collect();
+        self.sccs[scc] = SccPlan { vars, at, nonmonotone, limit: rec.limit, first: rec.ids.first().copied(), parent };
+        self.mark = self.nodes.len();
+        rs
+    }
+
+    /// A LetRec nested in the active one: its independent roots are built in the enclosing loop
+    /// (outside both loops: through that loop's copy) and copied in once per enclosing round.
+    fn nested(&mut self, p: &Program, rec: &LetRec, defined: &[(RelId, SqlC)], outer_nodes: &mut Vec<Option<SqlC>>) -> Result<Vec<SqlC>, EngineError> {
+        if !rec.nested.is_empty() {
+            return Err(unsupported("LetRec nested two deep"));
+        }
+        if rec.limit == Some(0) {
+            return Err(unsupported("LetRec limit 0"));
+        }
+        let mut nodes = vec![None; p.nodes.len()];
+        for root in ivm_engine::independent_inputs(p, rec, defined, false) {
+            let c = lower_node(p, self, outer_nodes, defined, root)?;
+            let c = if c.rec { c } else { self.copy(c) };
+            nodes[root as usize] = Some(SqlC { rec: false, ..c });
+        }
+        let parent = self.active.take().expect("a nested LetRec has an enclosing one");
+        let nonmonotone = nonmonotone(p, rec);
+        let scc = self.open_scc(nonmonotone, Some(parent.scc));
+        let outside = defined.iter().map(|(id, c)| (*id, SqlC { rec: false, ..c.clone() })).collect();
+        let (scope, vs) = self.variables(p, rec, outside)?;
+        let bs = self.bodies(p, rec, &scope, &mut nodes)?;
+        let parent_scc = parent.scc;
+        self.active = Some(parent);
+        Ok(self.close_scc(scc, rec, vs, bs, nonmonotone, Some(parent_scc)))
     }
 
     /// Non-monotone ops over a LetRec variable are outside the round loop's DRed contract; a
@@ -1327,6 +1414,8 @@ impl Rel for SqlRel {
     }
 
     /// Variables are SCC-owned tables maintained by a DRed round loop at settle; see `Sql::fixpoint`.
+    /// A LetRec with nested LetRecs takes the recompute path; each nested one is an SCC that
+    /// runs inside every round of it (`NodesPlan::recompute_nested`).
     fn letrec(
         &mut self,
         p: &Program,
@@ -1340,51 +1429,17 @@ impl Rel for SqlRel {
         if rec.limit == Some(0) {
             return Err(unsupported("LetRec limit 0"));
         }
-        let scc = self.sccs.len();
-        let nonmonotone = nonmonotone(p, rec);
-        self.active = Some(Active {
-            scc,
-            copies: Vec::new(),
-            nonmonotone,
-        });
-        let mut scope: Vec<(RelId, SqlC)> = defined.to_vec();
-        let mut vs = Vec::new();
-        for id in &rec.ids {
-            let rel = p.rel(*id).ok_or_else(|| {
-                EngineError::new(Stage::Install, Some(*id), ErrorKind::UnknownRel(*id))
-            })?;
-            let v = self.push(rel.cols.len(), true, |_| None);
-            self.integrate(&v, Vec::new());
-            scope.push((*id, v.clone()));
-            vs.push(v);
-        }
-        self.mark = self.nodes.len();
+        let nonmonotone = nonmonotone(p, rec) || !rec.nested.is_empty();
+        let scc = self.open_scc(nonmonotone, None);
+        let (mut scope, vs) = self.variables(p, rec, defined.to_vec())?;
         let mut nodes = vec![None; p.nodes.len()];
-        let mut bs = Vec::new();
-        for body in &rec.bodies {
-            let c = lower_node(p, self, &mut nodes, &scope, *body)?;
-            let b = if c.rec { c } else { self.copy(c) };
-            // DRed reads and clears the body delta after each round.
-            self.nodes[b.node].inline = false;
-            self.integrate(&b, Vec::new());
-            bs.push(b);
+        for inner in &rec.nested {
+            let rs = self.nested(p, inner, &scope, &mut nodes)?;
+            scope.extend(inner.ids.iter().copied().zip(rs));
         }
-        if vs.len() != bs.len() || vs.iter().zip(&bs).any(|(v, b)| v.arity != b.arity) {
-            return Err(unsupported(
-                "LetRec ids and bodies differ in count or arity",
-            ));
-        }
+        let bs = self.bodies(p, rec, &scope, &mut nodes)?;
         self.active = None;
-        let at = self.nodes.len();
-        let mut vars = Vec::new();
-        for (v, b) in vs.into_iter().zip(bs) {
-            let r = self.push(v.arity, false, |_| None);
-            vars.push((v, b, r.clone()));
-        }
-        let rs = vars.iter().map(|(_, _, r)| r.clone()).collect();
-        self.sccs.push(SccPlan { vars, at, nonmonotone, limit: rec.limit, first: rec.ids.first().copied() });
-        self.mark = self.nodes.len();
-        Ok(rs)
+        Ok(self.close_scc(scc, rec, vs, bs, nonmonotone, None))
     }
 
     fn output(&mut self, rel: RelId, c: Self::C) {
@@ -1469,6 +1524,8 @@ struct SccSql {
     reset: Vec<String>,
     /// Physical id of each copy, marked changed for the first recompute round.
     copy_ids: Vec<usize>,
+    /// `(i, s)`: nested SCC `s` runs before insert fill `i` of each round.
+    nested: Vec<(usize, usize)>,
 }
 
 /// A condition under which a settle fill can write rows: a physical delta is nonempty, or it
@@ -1724,9 +1781,16 @@ impl NodesPlan {
                 }
             }
             for (s, plan) in rel.sccs.iter().enumerate() {
-                if plan.at == *k {
-                    steps.push(Step::Loop(s));
-                    step_nodes.push(None);
+                if plan.at != *k { continue; }
+                match plan.parent {
+                    Some(parent) => {
+                        let at = sccs[parent].insert_fills.len();
+                        sccs[parent].nested.push((at, s));
+                    }
+                    None => {
+                        steps.push(Step::Loop(s));
+                        step_nodes.push(None);
+                    }
                 }
             }
             match node.owner {
@@ -1739,6 +1803,12 @@ impl NodesPlan {
                     sccs[s].insert_fills.extend(node.insert_fill.iter().cloned());
                     sccs[s].delete_seeds.extend(node.delete_seed.iter().cloned());
                     sccs[s].insert_seeds.extend(node.insert_seed.iter().cloned());
+                }
+                // A nested SCC's copies fill in each round of the enclosing loop.
+                Owner::Copy(s) if rel.sccs[s].parent.is_some() => {
+                    let parent = rel.sccs[s].parent.unwrap();
+                    sccs[parent].delete_fills.extend(node.fill.iter().cloned());
+                    sccs[parent].insert_fills.extend(node.fill.iter().cloned());
                 }
                 _ if !node.inline => {
                     steps.extend(node.fill.iter().cloned().map(Step::Fill));
@@ -1782,6 +1852,16 @@ impl NodesPlan {
                     format!("DELETE FROM {i}"),
                 ]),
                 _ => {}
+            }
+            // The enclosing loop recomputes from empty: a nested SCC's state starts empty too.
+            if let Some(parent) = match node.owner { Owner::Loop(s) | Owner::Copy(s) => rel.sccs[s].parent, Owner::Settle => None } {
+                if node.integrated { sccs[parent].reset.push(format!("DELETE FROM {i}")); }
+                if !node.inline { sccs[parent].reset.push(format!("DELETE FROM {d}")); }
+                for extra in &node.ddl {
+                    if let Some((kind, name)) = ddl_object(extra) {
+                        if kind == "TABLE" { sccs[parent].reset.push(format!("DELETE FROM {name}")); }
+                    }
+                }
             }
             let (ints, clrs) = match node.owner {
                 Owner::Settle => (&mut integrates, &mut clears),
@@ -2258,10 +2338,19 @@ impl NodesPlan {
         let deleting = phase == Phase::Delete;
         let _round = tracing::debug_span!(target: crate::observe::TARGET, "frontier_round", scc = scc_id, deleting).entered();
         let scc = &self.sccs[scc_id];
-        let (phase_fills, phase_io) = if deleting { (&scc.delete_fills, &scc.delete_io) } else { (&scc.insert_fills, &scc.insert_io) };
+        let fills = if deleting { scc.delete_fills.len() } else { scc.insert_fills.len() };
+        self.fills(db, scc_id, phase, 0..fills, active, counters)?;
+        self.close_round(db, scc_id, phase, active, counters)
+    }
+
+    /// The phase fills `range` of one round of SCC `scc_id`; a fill whose deltas are all empty
+    /// is skipped.
+    fn fills(&self, db: &Connection, scc_id: usize, phase: Phase, range: std::ops::Range<usize>, active: &mut [bool], counters: &mut Counters) -> rusqlite::Result<()> {
+        let scc = &self.sccs[scc_id];
+        let (phase_fills, phase_io) = if phase == Phase::Delete { (&scc.delete_fills, &scc.delete_io) } else { (&scc.insert_fills, &scc.insert_io) };
         let live = |active: &[bool], reads: &[usize]| reads.is_empty() || reads.iter().any(|id| active[*id]);
         let mut minted = false;
-        for (sql, (reads, write)) in phase_fills.iter().zip(phase_io) {
+        for (sql, (reads, write)) in phase_fills[range.clone()].iter().zip(&phase_io[range]) {
             if sql.starts_with(crate::terms::AFTER_MINT) {
                 if minted { Self::exec(db, sql, counters)?; }
                 continue;
@@ -2272,6 +2361,15 @@ impl NodesPlan {
             minted = rows > 0;
             if let Some(id) = write { active[*id] |= rows > 0; }
         }
+        Ok(())
+    }
+
+    /// The rest of a round after its fills: integrate, stage each variable's change, clear the
+    /// SCC's deltas, and move the staged changes into the variable deltas.
+    fn close_round(&self, db: &Connection, scc_id: usize, phase: Phase, active: &mut [bool], counters: &mut Counters) -> rusqlite::Result<bool> {
+        let deleting = phase == Phase::Delete;
+        let scc = &self.sccs[scc_id];
+        let live = |active: &[bool], reads: &[usize]| reads.is_empty() || reads.iter().any(|id| active[*id]);
         for (sql, reads) in scc.integrates.iter().zip(&scc.integrate_reads) {
             if live(active, reads) { Self::exec(db, sql, counters)?; }
         }
@@ -2318,20 +2416,71 @@ impl NodesPlan {
         let span = tracing::debug_span!(target: crate::observe::TARGET, "frontier_recompute", scc = scc_id,
             rounds = tracing::field::Empty);
         let _recompute = span.enter();
+        let mut active = self.start_recompute(db, scc_id, outer, counters)?;
+        let mut evaluation = 0u32;
+        while self.round(db, scc_id, Phase::Recompute, &mut active, counters)? {
+            evaluation += 1;
+            self.within_limit(scc_id, evaluation, &span)?;
+        }
+        self.finish_recompute(db, scc_id, evaluation, &span, counters)
+    }
+
+    /// `recompute` whose rounds run each nested SCC (`fixpoint` or `recompute`) at its fill
+    /// position, over the round's deltas so far.
+    fn recompute_nested(&self, db: &Connection, scc_id: usize, outer: &[bool], counters: &mut Counters) -> rusqlite::Result<Vec<bool>> {
+        let span = tracing::debug_span!(target: crate::observe::TARGET, "frontier_recompute", scc = scc_id,
+            rounds = tracing::field::Empty);
+        let _recompute = span.enter();
+        let scc = &self.sccs[scc_id];
+        let mut active = self.start_recompute(db, scc_id, outer, counters)?;
+        let mut evaluation = 0u32;
+        loop {
+            let _round = tracing::debug_span!(target: crate::observe::TARGET, "frontier_round", scc = scc_id, deleting = false).entered();
+            let mut from = 0;
+            for &(at, inner) in &scc.nested {
+                self.fills(db, scc_id, Phase::Recompute, from..at, &mut active, counters)?;
+                from = at;
+                let reads = &self.scc_reads[inner];
+                if !reads.is_empty() && !reads.iter().any(|id| active[*id]) { continue; }
+                let results = if self.sccs[inner].nonmonotone {
+                    self.recompute(db, inner, &active, counters)?
+                } else {
+                    self.fixpoint(db, inner, &active, counters)?
+                };
+                for id in self.sccs[inner].clear_targets.iter().flatten() { active[*id] = false; }
+                for (id, nonempty) in self.scc_results[inner].iter().zip(results) { active[*id] |= nonempty; }
+            }
+            self.fills(db, scc_id, Phase::Recompute, from..scc.insert_fills.len(), &mut active, counters)?;
+            if !self.close_round(db, scc_id, Phase::Recompute, &mut active, counters)? { break; }
+            evaluation += 1;
+            self.within_limit(scc_id, evaluation, &span)?;
+        }
+        self.finish_recompute(db, scc_id, evaluation, &span, counters)
+    }
+
+    /// The old value into `acc` at -1, the loop's state emptied, every copy marked changed.
+    fn start_recompute(&self, db: &Connection, scc_id: usize, outer: &[bool], counters: &mut Counters) -> rusqlite::Result<Vec<bool>> {
         let scc = &self.sccs[scc_id];
         let mut active = outer.to_vec();
         Self::exec_all(db, scc.vars.iter().map(|v| &v.capture), counters)?;
         Self::exec_all(db, &scc.reset, counters)?;
         for id in &scc.copy_ids { active[*id] = true; }
         for id in &scc.var_ids { active[*id] = false; }
-        let mut evaluation = 0u32;
-        while self.round(db, scc_id, Phase::Recompute, &mut active, counters)? {
-            evaluation += 1;
-            if scc.limit.is_some_and(|limit| evaluation > limit) {
-                span.record("rounds", evaluation);
-                return Err(rusqlite::Error::UserFunctionError(Box::new(LetRecLimitHit { rel: scc.first, limit: scc.limit.unwrap_or(0) })));
-            }
+        Ok(active)
+    }
+
+    /// Evaluation `limit + 1` that still changed a variable stops the settle.
+    fn within_limit(&self, scc_id: usize, evaluation: u32, span: &tracing::Span) -> rusqlite::Result<()> {
+        let scc = &self.sccs[scc_id];
+        if scc.limit.is_some_and(|limit| evaluation > limit) {
+            span.record("rounds", evaluation);
+            return Err(rusqlite::Error::UserFunctionError(Box::new(LetRecLimitHit { rel: scc.first, limit: scc.limit.unwrap_or(0) })));
         }
+        Ok(())
+    }
+
+    fn finish_recompute(&self, db: &Connection, scc_id: usize, evaluation: u32, span: &tracing::Span, counters: &mut Counters) -> rusqlite::Result<Vec<bool>> {
+        let scc = &self.sccs[scc_id];
         span.record("rounds", evaluation + 1);
         tracing::debug!(target: crate::observe::TARGET, scc = scc_id, evaluations = evaluation + 1, "LetRec recomputed");
         let mut results = Vec::with_capacity(scc.vars.len());
@@ -2466,7 +2615,9 @@ impl NodesPlan {
                 Step::Loop(s) => {
                     let reads = &self.scc_reads[*s];
                     if !reads.is_empty() && !reads.iter().any(|id| active.get(*id) == Some(&true)) { continue; }
-                    let results = if self.sccs[*s].nonmonotone {
+                    let results = if !self.sccs[*s].nested.is_empty() {
+                        self.recompute_nested(db, *s, &active, counters)?
+                    } else if self.sccs[*s].nonmonotone {
                         self.recompute(db, *s, &active, counters)?
                     } else {
                         self.fixpoint(db, *s, &active, counters)?

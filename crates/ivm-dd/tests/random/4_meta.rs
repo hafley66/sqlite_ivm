@@ -42,6 +42,12 @@ fn permuted(p: &Program, rng: &mut Rng) -> (Program, BTreeMap<RelId, RelId>) {
                 ids: rec.ids.iter().map(|id| rel[id]).collect(),
                 bodies: rec.bodies.iter().map(n).collect(),
                 limit: rec.limit,
+                nested: rec.nested.iter().map(|inner| LetRec {
+                    ids: inner.ids.iter().map(|id| rel[id]).collect(),
+                    bodies: inner.bodies.iter().map(n).collect(),
+                    limit: inner.limit,
+                    nested: Vec::new(),
+                }).collect(),
             }),
         })
         .collect();

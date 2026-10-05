@@ -333,7 +333,7 @@ fn recursive_program(rng: &mut Rng) -> Program {
         let step = gen.push(Op::Mfp { input: join, filter: vec![], map: vec![], project: vec![2] }, 1, 2);
         bodies.push(gen.push(Op::Union(vec![seed, step]), 1, 3));
     }
-    let mut strata = vec![Stratum::LetRec(LetRec { ids: ids.clone(), bodies, limit: None })];
+    let mut strata = vec![Stratum::LetRec(LetRec { ids: ids.clone(), bodies, limit: None, nested: vec![] })];
     for id in &ids {
         gen.rels.push((*id, 1, 4));
     }
@@ -390,7 +390,7 @@ pub fn recursive_shapes_program(rng: &mut Rng) -> Program {
         rels,
         nodes,
         strata: vec![
-            Stratum::LetRec(LetRec { ids: vec![4], bodies: vec![9], limit: None }),
+            Stratum::LetRec(LetRec { ids: vec![4], bodies: vec![9], limit: None, nested: vec![] }),
             Stratum::Let { id: 5, body: 11 },
         ],
         outputs: vec![4, 5],
@@ -423,7 +423,7 @@ pub fn k5_program() -> Program {
         Op::Reduce { input: 11, key: vec![0], aggs: vec![Agg::Sum(1), Agg::Count] },
     ];
     let strata = vec![
-        Stratum::LetRec(LetRec { ids: vec![3], bodies: vec![5], limit: None }),
+        Stratum::LetRec(LetRec { ids: vec![3], bodies: vec![5], limit: None, nested: vec![] }),
         Stratum::Let { id: 4, body: 10 },
         Stratum::Let { id: 5, body: 12 },
     ];
