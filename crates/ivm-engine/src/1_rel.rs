@@ -384,6 +384,34 @@ pub fn lowered_inputs<C>(p: &Program, defined: &[(RelId, C)], op: &Op, fuse: boo
     }
 }
 
+/// Roots of the subtrees a LetRec's loop reads that depend on none of its relations (`binds`):
+/// independent bodies, and independent inputs of dependent nodes.
+pub fn independent_inputs<C>(p: &Program, rec: &LetRec, defined: &[(RelId, C)], fuse: bool) -> std::collections::BTreeSet<NodeId> {
+    // Post-order over the nodes the bodies reach, inputs first, with an explicit stack.
+    let mut dependent: Vec<Option<bool>> = vec![None; p.nodes.len()];
+    let mut stack: Vec<(NodeId, bool)> = rec.bodies.iter().map(|body| (*body, false)).collect();
+    while let Some((id, expanded)) = stack.pop() {
+        if dependent[id as usize].is_some() { continue; }
+        let op = &p.nodes[id as usize];
+        let inputs = lowered_inputs(p, defined, op, fuse);
+        if expanded {
+            let reads_rec = matches!(op, Op::Get(rel) if rec.binds(*rel));
+            let value = reads_rec || inputs.iter().any(|input| dependent[*input as usize] == Some(true));
+            dependent[id as usize] = Some(value);
+            continue;
+        }
+        stack.push((id, true));
+        stack.extend(inputs.iter().filter(|input| dependent[**input as usize].is_none()).map(|input| (*input, false)));
+    }
+    let mut roots: std::collections::BTreeSet<NodeId> = rec.bodies.iter().copied().filter(|body| dependent[*body as usize] == Some(false)).collect();
+    for (id, value) in dependent.iter().enumerate() {
+        if *value == Some(true) {
+            roots.extend(lowered_inputs(p, defined, &p.nodes[id], fuse).into_iter().filter(|input| dependent[*input as usize] == Some(false)));
+        }
+    }
+    roots
+}
+
 /// Lowers every node `id` reaches, inputs first, with an explicit stack; each node is built
 /// once and memoized in `nodes`. A node reached again while its inputs are pending is a cycle.
 pub fn lower_node<A: Rel>(

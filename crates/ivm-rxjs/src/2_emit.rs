@@ -215,6 +215,7 @@ fn stratum_source(stratum: &Stratum, index: usize) -> Result<String, String> {
             &[("BODY", body.to_string()), ("REL", id.to_string()), ("INDEX", index.to_string())])),
         Stratum::LetRec(rec) => {
             if rec.limit.is_some() { return Err("LetRec limit unsupported".into()); }
+            if !rec.nested.is_empty() { return Err("nested LetRec unsupported".into()); }
             if rec.ids.len() != rec.bodies.len() || rec.ids.is_empty() { return Err("LetRec ids and bodies mismatch".into()); }
             let mut next = String::new();
             for (i, rel) in rec.ids.iter().enumerate() {

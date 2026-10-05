@@ -161,7 +161,7 @@ fn k1_team_cost_reduce_reads_grow_logarithmically() {
 fn hierarchical_reduce_inside_letrec_matches_top_level() {
     let plain = support::program("1_team_cost");
     let mut nested = plain.clone();
-    nested.strata[0] = Stratum::LetRec(LetRec { ids: vec![1], bodies: vec![1], limit: None });
+    nested.strata[0] = Stratum::LetRec(LetRec { ids: vec![1], bodies: vec![1], limit: None, nested: vec![] });
     let mut top = Dd::install(&plain).unwrap();
     let mut inner = Dd::install(&nested).unwrap();
     let steps = [

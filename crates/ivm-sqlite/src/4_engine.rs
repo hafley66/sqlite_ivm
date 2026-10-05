@@ -116,7 +116,9 @@ fn output_program(ir: &Program, output: RelId) -> Program {
         match stratum {
             Stratum::Let { body, .. } => visit_node(ir, *body, &mut seen, &mut relations),
             Stratum::LetRec(rec) => {
-                for &body in &rec.bodies { visit_node(ir, body, &mut seen, &mut relations); }
+                for &body in rec.bodies.iter().chain(rec.nested.iter().flat_map(|inner| &inner.bodies)) {
+                    visit_node(ir, body, &mut seen, &mut relations);
+                }
             }
         }
         pending.extend(relations);
@@ -130,7 +132,9 @@ fn output_program(ir: &Program, output: RelId) -> Program {
         match stratum {
             Stratum::Let { body, .. } => visit_node(ir, *body, &mut used, &mut relations),
             Stratum::LetRec(rec) => {
-                for &body in &rec.bodies { visit_node(ir, body, &mut used, &mut relations); }
+                for &body in rec.bodies.iter().chain(rec.nested.iter().flat_map(|inner| &inner.bodies)) {
+                    visit_node(ir, body, &mut used, &mut relations);
+                }
             }
         }
     }
@@ -158,7 +162,10 @@ fn output_program(ir: &Program, output: RelId) -> Program {
     for stratum in &single.strata {
         match stratum {
             Stratum::Let { id, .. } => { relations.insert(*id); }
-            Stratum::LetRec(rec) => relations.extend(rec.ids.iter().copied()),
+            Stratum::LetRec(rec) => {
+                relations.extend(rec.ids.iter().copied());
+                relations.extend(rec.nested.iter().flat_map(|inner| inner.ids.iter().copied()));
+            }
         }
     }
     for op in &single.nodes {
@@ -187,9 +194,12 @@ fn output_program(ir: &Program, output: RelId) -> Program {
             Stratum::Let { body, .. } => {
                 if let Some(mapped) = remap.get(*body as usize) { *body = *mapped; }
             }
-            Stratum::LetRec(rec) => rec.bodies.iter_mut().for_each(|body| {
-                if let Some(mapped) = remap.get(*body as usize) { *body = *mapped; }
-            }),
+            Stratum::LetRec(rec) => {
+                let nested = rec.nested.iter_mut().flat_map(|inner| inner.bodies.iter_mut());
+                rec.bodies.iter_mut().chain(nested).for_each(|body| {
+                    if let Some(mapped) = remap.get(*body as usize) { *body = *mapped; }
+                });
+            }
         }
     }
     single

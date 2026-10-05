@@ -1,0 +1,32 @@
+{
+  "rels": [
+    {"id": 0, "name": "edge", "cols": ["Int", "Int"], "kind": "Source"},
+    {"id": 1, "name": "root", "cols": ["Int"], "kind": "Source"},
+    {"id": 2, "name": "cut", "cols": ["Int"], "kind": "Source"},
+    {"id": 3, "name": "started", "cols": ["Int"], "kind": "Derived"},
+    {"id": 4, "name": "g", "cols": ["Int", "Int"], "kind": "Derived"},
+    {"id": 5, "name": "reach", "cols": ["Int"], "kind": "Derived"}
+  ],
+  "nodes": [
+    {"Get": 0},
+    {"Get": 1},
+    {"Get": 2},
+    {"Get": 3},
+    {"Get": 4},
+    {"Get": 5},
+    {"Mfp": {"input": 1, "map": [{"Lit": 0}], "project": [1]}},
+    {"Antijoin": {"l": 0, "r": 3, "lk": [], "rk": []}},
+    {"Join": {"inputs": [5, 2], "equivalences": [[[0, 0], [1, 0]]]}},
+    {"Mfp": {"input": 8, "project": [0]}},
+    {"Antijoin": {"l": 4, "r": 9, "lk": [0], "rk": [0]}},
+    {"Join": {"inputs": [10, 3], "equivalences": []}},
+    {"Mfp": {"input": 11, "project": [0, 1]}},
+    {"Union": [7, 12]},
+    {"Join": {"inputs": [5, 4], "equivalences": [[[0, 0], [1, 0]]]}},
+    {"Mfp": {"input": 14, "project": [2]}},
+    {"Union": [1, 15]}
+  ],
+  "strata": [{"LetRec": {"ids": [3, 4], "bodies": [6, 13], "limit": 8,
+    "nested": [{"ids": [5], "bodies": [16], "limit": null}]}}],
+  "outputs": [4]
+}
