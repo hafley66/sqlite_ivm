@@ -1,0 +1,4 @@
+[env]
+# Bundled SQLite's attached-schema ceiling (default 10, at most 125): `Engine::install` opens one
+# shard schema per `SHARD_OBJECTS` node objects, up to `SHARDS`.
+LIBSQLITE3_FLAGS = "SQLITE_MAX_ATTACHED=125"
