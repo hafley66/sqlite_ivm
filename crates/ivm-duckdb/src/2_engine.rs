@@ -160,6 +160,7 @@ impl DuckDb {
         installed: &mut BTreeSet<NodeId>,
         recursive: &BTreeSet<NodeId>,
         texts: &[Cell],
+        terms: &[Cell],
         nil: Cell,
     ) -> Result<()> {
         let mut walk = vec![(root, false)];
@@ -184,7 +185,8 @@ impl DuckDb {
                 continue;
             }
             active.remove(&node);
-            let weighted_query = sql::query(&self.program, node, &self.types, texts, nil, false)?;
+            let weighted_query =
+                sql::query(&self.program, node, &self.types, texts, terms, nil, false)?;
             let dictionary = weighted_query
                 .as_ref()
                 .is_some_and(|q| q.contains(" FROM dict WHERE") || q.contains(" FROM texts WHERE"));
@@ -206,16 +208,30 @@ impl DuckDb {
                 None
             };
             let bag = reason.is_none();
+            let constant_false =
+                matches!(&op, Op::Mfp { filter, .. } if filter.contains(&Expr::Lit(0)));
             let query = if bag {
-                sql::query(&self.program, node, &self.types, texts, nil, true)?
+                sql::query(&self.program, node, &self.types, texts, terms, nil, true)?
             } else {
                 weighted_query
             };
             if bag {
                 self.exec(&format!("DROP TABLE n{node}"))?;
                 if let Some(ref q) = query {
-                    self.create_view(&format!("n{node}"), sql::operator(&op), q)?;
-                    self.materialized[node as usize] = true;
+                    if constant_false {
+                        // OpenIVM classifies this as SIMPLE_PROJECTION, but refresh
+                        // optimizes it to EMPTY_RESULT and rejects the single-node plan.
+                        // Execute the actual projection through the ordinary SQL path;
+                        // its bag table remains an OpenIVM input for downstream views.
+                        self.exec(&format!(
+                            "CREATE TABLE n{node}({})",
+                            sql::bag_decl(self.types[node as usize].len())
+                        ))?;
+                        eprintln!("BOUNDARY node={node} operator=Mfp reason=constant-false filter: OpenIVM refresh rejects EMPTY_RESULT: Plan contains single node, this is not supported");
+                    } else {
+                        self.create_view(&format!("n{node}"), sql::operator(&op), q)?;
+                        self.materialized[node as usize] = true;
+                    }
                 } else {
                     self.exec(&format!(
                         "CREATE TABLE n{node}({})",
@@ -301,7 +317,7 @@ impl DuckDb {
             match op {
                 Op::Mint { functor, args, .. } => {
                     let args = args.iter().map(|c| row[*c as usize]).collect();
-                    row.push(self.intern_term(*functor, &args)?);
+                    row.push(self.intern_term(*functor, &args, true)?);
                 }
                 Op::StrCons { mode, .. } => match mode {
                     StrMode::Construct { head, rest } => {
@@ -576,7 +592,7 @@ impl DuckDb {
             changes,
         })
     }
-    fn intern_term(&mut self, functor: RelId, args: &Row) -> Result<Cell> {
+    fn intern_term(&mut self, functor: RelId, args: &Row, publish: bool) -> Result<Cell> {
         let rel = self
             .program
             .rel(functor)
@@ -616,7 +632,9 @@ impl DuckDb {
         ))?;
         let mut row = vec![id];
         row.extend(args);
-        self.write_rows(&format!("r{functor}"), &[(row, 1)])?;
+        if publish {
+            self.write_rows(&format!("r{functor}"), &[(row, 1)])?;
+        }
         Ok(id)
     }
     fn term_key(&self, id: Cell, term: &Term) -> Result<String> {
@@ -767,6 +785,33 @@ impl Engine for DuckDb {
         for text in &program.texts {
             text_ids.push(engine.intern_text(text)?);
         }
+        let mut term_ids = Vec::with_capacity(program.terms.len());
+        let mut term_rows = BTreeMap::new();
+        for term in &program.terms {
+            let args = term
+                .args
+                .iter()
+                .map(|arg| match arg {
+                    TermArg::Term(index) => {
+                        term_ids.get(*index as usize).copied().ok_or_else(|| {
+                            error(Stage::Install, "ground term must reference an earlier term")
+                        })
+                    }
+                    TermArg::Text(index) => text_ids
+                        .get(*index as usize)
+                        .copied()
+                        .ok_or_else(|| error(Stage::Install, "ground term text index")),
+                    TermArg::Raw(cell) => Ok(*cell),
+                })
+                .collect::<Result<Row>>()?;
+            // Resolve IDs before SQL lowering. Publish after MV creation so OpenIVM
+            // sees these rows as first-settle changes, including output deltas.
+            let id = engine.intern_term(term.functor, &args, false)?;
+            term_ids.push(id);
+            let mut row = vec![id];
+            row.extend(args);
+            term_rows.insert(id, (term.functor, row));
+        }
         let nil = if program.uses_strings() {
             engine.intern_text("")?
         } else {
@@ -821,6 +866,7 @@ impl Engine for DuckDb {
                         &mut installed,
                         &recursive_nodes,
                         &text_ids,
+                        &term_ids,
                         nil,
                     )?;
                     engine.exec(&format!("DROP VIEW zr{id}"))?;
@@ -839,6 +885,7 @@ impl Engine for DuckDb {
                                 &mut installed,
                                 &recursive_nodes,
                                 &text_ids,
+                                &term_ids,
                                 nil,
                             )?;
                         }
@@ -852,6 +899,7 @@ impl Engine for DuckDb {
                 &mut installed,
                 &recursive_nodes,
                 &text_ids,
+                &term_ids,
                 nil,
             )?;
         }
@@ -876,6 +924,9 @@ impl Engine for DuckDb {
                 )?;
                 engine.bags.insert(format!("read{rel}"));
             }
+        }
+        for (functor, row) in term_rows.into_values() {
+            engine.write_rows(&format!("r{functor}"), &[(row, 1)])?;
         }
         engine.exec("SET openivm_profile_refresh=false")?;
         engine.db.borrow_mut().stage = Stage::Settle;
@@ -982,7 +1033,7 @@ impl Engine for DuckDb {
     fn intern_terms(&mut self, terms: &[(RelId, Row)]) -> Result<Vec<Cell>> {
         terms
             .iter()
-            .map(|(f, args)| self.intern_term(*f, args))
+            .map(|(f, args)| self.intern_term(*f, args, true))
             .collect()
     }
     fn text(&self, id: Cell) -> Result<Option<String>> {

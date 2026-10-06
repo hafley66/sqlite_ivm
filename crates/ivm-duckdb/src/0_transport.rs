@@ -50,6 +50,7 @@ pub struct Sql {
     pub dir: tempfile::TempDir,
     pub work: Work,
     serial: u64,
+    total_refreshes: u64,
     pub stage: Stage,
     pub diagnostics: String,
 }
@@ -91,6 +92,7 @@ impl Sql {
             dir,
             work: Work::default(),
             serial: 0,
+            total_refreshes: 0,
             stage: Stage::Install,
             diagnostics: String::new(),
         };
@@ -173,6 +175,9 @@ impl Sql {
     pub fn exec(&mut self, statement: &str) -> Result<Vec<Value>, EngineError> {
         self.serial += 1;
         self.work.statements += 1;
+        if statement.starts_with("PRAGMA refresh(") {
+            self.total_refreshes += 1;
+        }
         let marker = format!("__ivm_end_{}__", self.serial);
         let offset = self
             .stderr
@@ -235,6 +240,10 @@ impl Sql {
 }
 impl Drop for Sql {
     fn drop(&mut self) {
+        eprintln!(
+            "TRANSPORT {{\"statements\":{},\"refreshes\":{}}}",
+            self.serial, self.total_refreshes
+        );
         let _ = self.child.kill();
         let _ = self.child.wait();
     }

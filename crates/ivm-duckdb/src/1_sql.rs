@@ -98,6 +98,7 @@ fn expr(
     columns: &[String],
     types: &[Ty],
     texts: &[Cell],
+    terms: &[Cell],
     nil: Cell,
 ) -> Result<(String, Ty), EngineError> {
     let bad = || {
@@ -117,6 +118,7 @@ fn expr(
             texts.get(*t as usize).ok_or_else(bad)?.to_string(),
             Ty::Text,
         ),
+        Expr::Term(t) => (terms.get(*t as usize).ok_or_else(bad)?.to_string(), Ty::Id),
         Expr::Call(Func::StrNil, args) => {
             if !args.is_empty() {
                 return Err(bad());
@@ -129,7 +131,7 @@ fn expr(
             }
             let a = args
                 .iter()
-                .map(|x| expr(x, columns, types, texts, nil))
+                .map(|x| expr(x, columns, types, texts, terms, nil))
                 .collect::<Result<Vec<_>, _>>()?;
             let (x, xt) = a.first().ok_or_else(bad)?;
             if *f == Func::Not {
@@ -195,6 +197,7 @@ pub fn query(
     id: NodeId,
     types: &[Vec<Ty>],
     texts: &[Cell],
+    terms: &[Cell],
     nil: Cell,
     bag: bool,
 ) -> Result<Option<String>, EngineError> {
@@ -217,10 +220,10 @@ pub fn query(
             let mut cs = cols(ts.len(), "s.");
             let predicates = filter
                 .iter()
-                .map(|e| expr(e, &cs, &ts, texts, nil).map(|(v, _)| format!("({v})<>0")))
+                .map(|e| expr(e, &cs, &ts, texts, terms, nil).map(|(v, _)| format!("({v})<>0")))
                 .collect::<Result<Vec<_>, _>>()?;
             for m in map {
-                let (v, t) = expr(m, &cs, &ts, texts, nil)?;
+                let (v, t) = expr(m, &cs, &ts, texts, terms, nil)?;
                 cs.push(v);
                 ts.push(t);
             }
@@ -280,6 +283,7 @@ pub fn query(
         Op::Join {
             inputs,
             equivalences,
+            project,
         } => {
             for (side, col) in equivalences.iter().flatten() {
                 let input = *inputs
@@ -292,12 +296,26 @@ pub fn query(
                     return Err(unsupported("Join Real/Any SQL equality"));
                 }
             }
-            let mut out = Vec::new();
+            let mut all = Vec::new();
             for (i, n) in inputs.iter().enumerate() {
-                for c in cols(types[*n as usize].len(), &format!("s{i}.")) {
-                    out.push(format!("{c} AS c{}", out.len()));
-                }
+                all.extend(cols(types[*n as usize].len(), &format!("s{i}.")));
             }
+            let selected = if project.is_empty() {
+                all.iter().collect::<Vec<_>>()
+            } else {
+                project
+                    .iter()
+                    .map(|c| {
+                        all.get(*c as usize)
+                            .ok_or_else(|| unsupported("Join projection column index"))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?
+            };
+            let mut out = selected
+                .iter()
+                .enumerate()
+                .map(|(i, c)| format!("{c} AS c{i}"))
+                .collect::<Vec<_>>();
             if !bag {
                 out.push(format!(
                     "{} AS w",

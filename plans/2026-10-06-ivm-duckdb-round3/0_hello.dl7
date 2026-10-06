@@ -1,0 +1,2 @@
+(: Hello (* (: msg str)))
+(Hello "hello world")
