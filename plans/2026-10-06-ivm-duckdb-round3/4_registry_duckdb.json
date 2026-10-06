@@ -1,0 +1,1 @@
+{"diagnostics":[{"args":[{"a":"ir_eval"},{"a":"none"},{"args":[{"a":"engine"},{"s":"src/_6_eval/_9b_ir_eval.rs:1035: Settle rel None: Worker(\"Not implemented Error: Plan contains single node, this is not supported\\n\\nSQL: PRAGMA refresh('n52')\")"}],"f":"ir_engine_error"}],"f":"diagnostic"}],"files":[]}

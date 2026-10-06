@@ -1,0 +1,1668 @@
+ivm-duckdb: LetRec [22, 23, 25, 27, 28, 29, 31, 32, 33, 34, 35, 36, 37, 40, 41, 51]: SQL full recompute from empty; OpenIVM has no recursive IVM
+ivm-duckdb: LetRec [24]: SQL full recompute from empty; OpenIVM has no recursive IVM
+BOUNDARY node=176 operator=Get reason=LetRec round body
+BOUNDARY node=7 operator=Get reason=LetRec round body
+BOUNDARY node=328 operator=Union reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r38","type":"SIMPLE_PROJECTION","type_code":2,"view":"n329"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r42","type":"SIMPLE_PROJECTION","type_code":2,"view":"n330"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r46","type":"SIMPLE_PROJECTION","type_code":2,"view":"n331"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r48","type":"SIMPLE_PROJECTION","type_code":2,"view":"n332"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r52","type":"SIMPLE_PROJECTION","type_code":2,"view":"n333"}
+BOUNDARY node=0 operator=Get reason=LetRec round body
+BOUNDARY node=108 operator=Mfp reason=LetRec round body
+BOUNDARY node=111 operator=Get reason=LetRec round body
+BOUNDARY node=112 operator=Mfp reason=LetRec round body
+BOUNDARY node=95 operator=Get reason=LetRec round body
+BOUNDARY node=96 operator=Mfp reason=LetRec round body
+BOUNDARY node=117 operator=Mfp reason=LetRec round body
+BOUNDARY node=334 operator=Union reason=LetRec round body
+BOUNDARY node=1 operator=Get reason=LetRec round body
+BOUNDARY node=109 operator=Mfp reason=LetRec round body
+BOUNDARY node=118 operator=Mfp reason=LetRec round body
+BOUNDARY node=113 operator=Get reason=LetRec round body
+BOUNDARY node=114 operator=Mfp reason=LetRec round body
+BOUNDARY node=119 operator=Mfp reason=LetRec round body
+BOUNDARY node=120 operator=Mfp reason=LetRec round body
+BOUNDARY node=335 operator=Union reason=LetRec round body
+BOUNDARY node=128 operator=Get reason=LetRec round body
+BOUNDARY node=4 operator=Get reason=LetRec round body
+BOUNDARY node=129 operator=Join reason=LetRec round body
+BOUNDARY node=130 operator=Mfp reason=LetRec round body
+BOUNDARY node=131 operator=Get reason=LetRec round body
+BOUNDARY node=132 operator=Join reason=LetRec round body
+BOUNDARY node=133 operator=Mfp reason=LetRec round body
+BOUNDARY node=15 operator=Get reason=LetRec round body
+BOUNDARY node=134 operator=Mfp reason=LetRec round body
+BOUNDARY node=135 operator=Join reason=LetRec round body
+BOUNDARY node=136 operator=Mfp reason=LetRec round body
+BOUNDARY node=137 operator=Join reason=LetRec round body
+BOUNDARY node=138 operator=Mfp reason=LetRec round body
+BOUNDARY node=139 operator=Join reason=LetRec round body
+BOUNDARY node=140 operator=Mfp reason=LetRec round body
+BOUNDARY node=58 operator=Get reason=LetRec round body
+BOUNDARY node=141 operator=Join reason=LetRec round body
+BOUNDARY node=142 operator=Mfp reason=LetRec round body
+BOUNDARY node=143 operator=Join reason=LetRec round body
+BOUNDARY node=144 operator=Mfp reason=LetRec round body
+BOUNDARY node=145 operator=Join reason=LetRec round body
+BOUNDARY node=146 operator=Mfp reason=LetRec round body
+BOUNDARY node=147 operator=Mfp reason=LetRec round body
+BOUNDARY node=148 operator=Mfp reason=LetRec round body
+BOUNDARY node=149 operator=Get reason=LetRec round body
+BOUNDARY node=150 operator=Mfp reason=LetRec round body
+BOUNDARY node=336 operator=Union reason=LetRec round body
+BOUNDARY node=166 operator=Get reason=LetRec round body
+BOUNDARY node=167 operator=Mfp reason=LetRec round body
+BOUNDARY node=168 operator=Mfp reason=LetRec round body
+BOUNDARY node=169 operator=Mint reason=LetRec round body
+BOUNDARY node=170 operator=Mint reason=LetRec round body
+BOUNDARY node=171 operator=Mint reason=LetRec round body
+BOUNDARY node=172 operator=Mfp reason=LetRec round body
+BOUNDARY node=173 operator=Mint reason=LetRec round body
+BOUNDARY node=174 operator=Mint reason=LetRec round body
+BOUNDARY node=175 operator=Mfp reason=LetRec round body
+BOUNDARY node=177 operator=Join reason=LetRec round body
+BOUNDARY node=178 operator=Get reason=LetRec round body
+BOUNDARY node=179 operator=Join reason=LetRec round body
+BOUNDARY node=180 operator=Join reason=LetRec round body
+BOUNDARY node=181 operator=Join reason=LetRec round body
+BOUNDARY node=182 operator=Mfp reason=LetRec round body
+BOUNDARY node=183 operator=Mint reason=LetRec round body
+BOUNDARY node=184 operator=Mint reason=LetRec round body
+BOUNDARY node=185 operator=Mint reason=LetRec round body
+BOUNDARY node=186 operator=Mint reason=LetRec round body
+BOUNDARY node=187 operator=Mint reason=LetRec round body
+BOUNDARY node=189 operator=Mfp reason=LetRec round body
+BOUNDARY node=190 operator=Mfp reason=LetRec round body
+BOUNDARY node=191 operator=Mint reason=LetRec round body
+BOUNDARY node=192 operator=Mint reason=LetRec round body
+BOUNDARY node=193 operator=Mint reason=LetRec round body
+BOUNDARY node=194 operator=Mfp reason=LetRec round body
+BOUNDARY node=195 operator=Mint reason=LetRec round body
+BOUNDARY node=196 operator=Mint reason=LetRec round body
+BOUNDARY node=197 operator=Mfp reason=LetRec round body
+BOUNDARY node=198 operator=Join reason=LetRec round body
+BOUNDARY node=199 operator=Join reason=LetRec round body
+BOUNDARY node=200 operator=Join reason=LetRec round body
+BOUNDARY node=201 operator=Join reason=LetRec round body
+BOUNDARY node=202 operator=Mfp reason=LetRec round body
+BOUNDARY node=203 operator=Mint reason=LetRec round body
+BOUNDARY node=204 operator=Mint reason=LetRec round body
+BOUNDARY node=205 operator=Mint reason=LetRec round body
+BOUNDARY node=206 operator=Mint reason=LetRec round body
+BOUNDARY node=207 operator=Mint reason=LetRec round body
+BOUNDARY node=209 operator=Mfp reason=LetRec round body
+BOUNDARY node=210 operator=Join reason=LetRec round body
+BOUNDARY node=211 operator=Mfp reason=LetRec round body
+BOUNDARY node=217 operator=Mfp reason=LetRec round body
+BOUNDARY node=33 operator=Get reason=LetRec round body
+BOUNDARY node=218 operator=Mfp reason=LetRec round body
+BOUNDARY node=219 operator=Mfp reason=LetRec round body
+BOUNDARY node=220 operator=Mfp reason=LetRec round body
+BOUNDARY node=221 operator=Mfp reason=LetRec round body
+BOUNDARY node=222 operator=Mfp reason=LetRec round body
+BOUNDARY node=75 operator=Get reason=LetRec round body
+BOUNDARY node=223 operator=Join reason=LetRec round body
+BOUNDARY node=224 operator=Mfp reason=LetRec round body
+BOUNDARY node=337 operator=Union reason=LetRec round body
+BOUNDARY node=225 operator=Get reason=LetRec round body
+BOUNDARY node=226 operator=Mfp reason=LetRec round body
+BOUNDARY node=227 operator=Mint reason=LetRec round body
+BOUNDARY node=228 operator=Mint reason=LetRec round body
+BOUNDARY node=229 operator=Mint reason=LetRec round body
+BOUNDARY node=230 operator=Mfp reason=LetRec round body
+BOUNDARY node=231 operator=Mint reason=LetRec round body
+BOUNDARY node=232 operator=Mint reason=LetRec round body
+BOUNDARY node=233 operator=Mfp reason=LetRec round body
+BOUNDARY node=234 operator=Join reason=LetRec round body
+BOUNDARY node=235 operator=Join reason=LetRec round body
+BOUNDARY node=236 operator=Join reason=LetRec round body
+BOUNDARY node=237 operator=Join reason=LetRec round body
+BOUNDARY node=238 operator=Mfp reason=LetRec round body
+BOUNDARY node=239 operator=Mint reason=LetRec round body
+BOUNDARY node=240 operator=Mint reason=LetRec round body
+BOUNDARY node=241 operator=Mint reason=LetRec round body
+BOUNDARY node=242 operator=Mint reason=LetRec round body
+BOUNDARY node=243 operator=Mint reason=LetRec round body
+BOUNDARY node=245 operator=Mfp reason=LetRec round body
+BOUNDARY node=16 operator=Mfp reason=LetRec round body
+BOUNDARY node=17 operator=Get reason=LetRec round body
+BOUNDARY node=18 operator=Join reason=LetRec round body
+BOUNDARY node=19 operator=Mfp reason=LetRec round body
+BOUNDARY node=20 operator=Mfp reason=LetRec round body
+BOUNDARY node=246 operator=Mfp reason=LetRec round body
+BOUNDARY node=34 operator=Join reason=LetRec round body
+BOUNDARY node=35 operator=Mfp reason=LetRec round body
+BOUNDARY node=247 operator=Mfp reason=LetRec round body
+BOUNDARY node=59 operator=Join reason=LetRec round body
+BOUNDARY node=61 operator=Mfp reason=LetRec round body
+BOUNDARY node=62 operator=Mfp reason=LetRec round body
+BOUNDARY node=248 operator=Mfp reason=LetRec round body
+BOUNDARY node=73 operator=Mfp reason=LetRec round body
+BOUNDARY node=74 operator=Mfp reason=LetRec round body
+BOUNDARY node=249 operator=Mfp reason=LetRec round body
+BOUNDARY node=338 operator=Union reason=LetRec round body
+BOUNDARY node=250 operator=Mfp reason=LetRec round body
+BOUNDARY node=251 operator=Join reason=LetRec round body
+BOUNDARY node=252 operator=Join reason=LetRec round body
+BOUNDARY node=253 operator=Join reason=LetRec round body
+BOUNDARY node=254 operator=Mfp reason=LetRec round body
+BOUNDARY node=255 operator=Mfp reason=LetRec round body
+BOUNDARY node=256 operator=Mfp reason=LetRec round body
+BOUNDARY node=257 operator=Join reason=LetRec round body
+BOUNDARY node=258 operator=Join reason=LetRec round body
+BOUNDARY node=259 operator=Mfp reason=LetRec round body
+BOUNDARY node=339 operator=Union reason=LetRec round body
+BOUNDARY node=213 operator=Mfp reason=LetRec round body
+BOUNDARY node=214 operator=Join reason=LetRec round body
+BOUNDARY node=215 operator=Mfp reason=LetRec round body
+BOUNDARY node=260 operator=Join reason=LetRec round body
+BOUNDARY node=261 operator=Join reason=LetRec round body
+BOUNDARY node=262 operator=Mfp reason=LetRec round body
+BOUNDARY node=263 operator=Join reason=LetRec round body
+BOUNDARY node=264 operator=Mfp reason=LetRec round body
+BOUNDARY node=265 operator=Join reason=LetRec round body
+BOUNDARY node=266 operator=Mfp reason=LetRec round body
+BOUNDARY node=93 operator=Get reason=LetRec round body
+BOUNDARY node=267 operator=Join reason=LetRec round body
+BOUNDARY node=268 operator=Join reason=LetRec round body
+BOUNDARY node=269 operator=Join reason=LetRec round body
+BOUNDARY node=270 operator=Mfp reason=LetRec round body
+BOUNDARY node=271 operator=Join reason=LetRec round body
+BOUNDARY node=272 operator=Mfp reason=LetRec round body
+BOUNDARY node=273 operator=Join reason=LetRec round body
+BOUNDARY node=274 operator=Mfp reason=LetRec round body
+BOUNDARY node=275 operator=Join reason=LetRec round body
+BOUNDARY node=276 operator=Join reason=LetRec round body
+BOUNDARY node=277 operator=Mfp reason=LetRec round body
+BOUNDARY node=278 operator=Join reason=LetRec round body
+BOUNDARY node=279 operator=Mfp reason=LetRec round body
+BOUNDARY node=280 operator=Join reason=LetRec round body
+BOUNDARY node=281 operator=Join reason=LetRec round body
+BOUNDARY node=10 operator=Get reason=LetRec round body
+BOUNDARY node=282 operator=Join reason=LetRec round body
+BOUNDARY node=283 operator=Join reason=LetRec round body
+BOUNDARY node=284 operator=Mfp reason=LetRec round body
+BOUNDARY node=285 operator=Mint reason=LetRec round body
+BOUNDARY node=286 operator=Mint reason=LetRec round body
+BOUNDARY node=287 operator=Mfp reason=LetRec round body
+BOUNDARY node=288 operator=Mfp reason=LetRec round body
+BOUNDARY node=289 operator=Join reason=LetRec round body
+BOUNDARY node=290 operator=Mfp reason=LetRec round body
+BOUNDARY node=291 operator=Join reason=LetRec round body
+BOUNDARY node=292 operator=Join reason=LetRec round body
+BOUNDARY node=293 operator=Join reason=LetRec round body
+BOUNDARY node=294 operator=Join reason=LetRec round body
+BOUNDARY node=295 operator=Mfp reason=LetRec round body
+BOUNDARY node=296 operator=Join reason=LetRec round body
+BOUNDARY node=297 operator=Join reason=LetRec round body
+BOUNDARY node=298 operator=Mfp reason=LetRec round body
+BOUNDARY node=299 operator=Join reason=LetRec round body
+BOUNDARY node=300 operator=Mfp reason=LetRec round body
+BOUNDARY node=301 operator=Join reason=LetRec round body
+BOUNDARY node=302 operator=Mfp reason=LetRec round body
+BOUNDARY node=303 operator=Join reason=LetRec round body
+BOUNDARY node=304 operator=Join reason=LetRec round body
+BOUNDARY node=305 operator=Mfp reason=LetRec round body
+BOUNDARY node=306 operator=Get reason=LetRec round body
+BOUNDARY node=307 operator=Join reason=LetRec round body
+BOUNDARY node=308 operator=Mfp reason=LetRec round body
+BOUNDARY node=309 operator=Mint reason=LetRec round body
+BOUNDARY node=310 operator=Mint reason=LetRec round body
+BOUNDARY node=311 operator=Mint reason=LetRec round body
+BOUNDARY node=312 operator=Mfp reason=LetRec round body
+BOUNDARY node=313 operator=Mint reason=LetRec round body
+BOUNDARY node=314 operator=Mint reason=LetRec round body
+BOUNDARY node=315 operator=Mfp reason=LetRec round body
+BOUNDARY node=316 operator=Join reason=LetRec round body
+BOUNDARY node=317 operator=Join reason=LetRec round body
+BOUNDARY node=318 operator=Join reason=LetRec round body
+BOUNDARY node=319 operator=Join reason=LetRec round body
+BOUNDARY node=320 operator=Mfp reason=LetRec round body
+BOUNDARY node=321 operator=Mint reason=LetRec round body
+BOUNDARY node=322 operator=Mint reason=LetRec round body
+BOUNDARY node=323 operator=Mint reason=LetRec round body
+BOUNDARY node=324 operator=Mint reason=LetRec round body
+BOUNDARY node=325 operator=Mint reason=LetRec round body
+BOUNDARY node=327 operator=Mfp reason=LetRec round body
+BOUNDARY node=340 operator=Get reason=LetRec round body
+BOUNDARY node=2 operator=Join reason=LetRec round body
+BOUNDARY node=3 operator=Mfp reason=LetRec round body
+BOUNDARY node=5 operator=Join reason=LetRec round body
+BOUNDARY node=6 operator=Mfp reason=LetRec round body
+BOUNDARY node=8 operator=Join reason=LetRec round body
+BOUNDARY node=9 operator=Join reason=LetRec round body
+BOUNDARY node=11 operator=Join reason=LetRec round body
+BOUNDARY node=12 operator=Join reason=LetRec round body
+BOUNDARY node=13 operator=Mfp reason=LetRec round body
+BOUNDARY node=14 operator=Mfp reason=LetRec round body
+BOUNDARY node=21 operator=Mfp reason=LetRec round body
+BOUNDARY node=22 operator=Mfp reason=LetRec round body
+BOUNDARY node=23 operator=Join reason=LetRec round body
+BOUNDARY node=24 operator=Mfp reason=LetRec round body
+BOUNDARY node=25 operator=Mfp reason=LetRec round body
+BOUNDARY node=26 operator=Mfp reason=LetRec round body
+BOUNDARY node=27 operator=Mfp reason=LetRec round body
+BOUNDARY node=28 operator=Join reason=LetRec round body
+BOUNDARY node=29 operator=Join reason=LetRec round body
+BOUNDARY node=30 operator=Join reason=LetRec round body
+BOUNDARY node=31 operator=Join reason=LetRec round body
+BOUNDARY node=32 operator=Mfp reason=LetRec round body
+BOUNDARY node=36 operator=Mfp reason=LetRec round body
+BOUNDARY node=37 operator=Mfp reason=LetRec round body
+BOUNDARY node=38 operator=Mfp reason=LetRec round body
+BOUNDARY node=39 operator=Join reason=LetRec round body
+BOUNDARY node=40 operator=Mfp reason=LetRec round body
+BOUNDARY node=41 operator=Mfp reason=LetRec round body
+BOUNDARY node=42 operator=Join reason=LetRec round body
+BOUNDARY node=43 operator=Mfp reason=LetRec round body
+BOUNDARY node=44 operator=Mfp reason=LetRec round body
+BOUNDARY node=45 operator=Join reason=LetRec round body
+BOUNDARY node=46 operator=Join reason=LetRec round body
+BOUNDARY node=47 operator=Join reason=LetRec round body
+BOUNDARY node=48 operator=Join reason=LetRec round body
+BOUNDARY node=49 operator=Mfp reason=LetRec round body
+BOUNDARY node=50 operator=Join reason=LetRec round body
+BOUNDARY node=51 operator=Join reason=LetRec round body
+BOUNDARY node=52 operator=Join reason=LetRec round body
+BOUNDARY node=53 operator=Join reason=LetRec round body
+BOUNDARY node=54 operator=Mfp reason=LetRec round body
+BOUNDARY node=55 operator=Mint reason=LetRec round body
+BOUNDARY node=56 operator=Mint reason=LetRec round body
+BOUNDARY node=57 operator=Mfp reason=LetRec round body
+BOUNDARY node=60 operator=Mfp reason=LetRec round body
+BOUNDARY node=63 operator=Join reason=LetRec round body
+BOUNDARY node=64 operator=Mfp reason=LetRec round body
+BOUNDARY node=65 operator=Mfp reason=LetRec round body
+BOUNDARY node=66 operator=Mfp reason=LetRec round body
+BOUNDARY node=67 operator=Mfp reason=LetRec round body
+BOUNDARY node=68 operator=Join reason=LetRec round body
+BOUNDARY node=69 operator=Join reason=LetRec round body
+BOUNDARY node=70 operator=Join reason=LetRec round body
+BOUNDARY node=71 operator=Join reason=LetRec round body
+BOUNDARY node=72 operator=Mfp reason=LetRec round body
+BOUNDARY node=76 operator=Join reason=LetRec round body
+BOUNDARY node=77 operator=Mfp reason=LetRec round body
+BOUNDARY node=78 operator=Join reason=LetRec round body
+BOUNDARY node=79 operator=Join reason=LetRec round body
+BOUNDARY node=80 operator=Join reason=LetRec round body
+BOUNDARY node=81 operator=Join reason=LetRec round body
+BOUNDARY node=82 operator=Mfp reason=LetRec round body
+BOUNDARY node=83 operator=Join reason=LetRec round body
+BOUNDARY node=84 operator=Mfp reason=LetRec round body
+BOUNDARY node=85 operator=Join reason=LetRec round body
+BOUNDARY node=86 operator=Join reason=LetRec round body
+BOUNDARY node=87 operator=Join reason=LetRec round body
+BOUNDARY node=88 operator=Join reason=LetRec round body
+BOUNDARY node=89 operator=Mfp reason=LetRec round body
+BOUNDARY node=90 operator=Mint reason=LetRec round body
+BOUNDARY node=91 operator=Mint reason=LetRec round body
+BOUNDARY node=92 operator=Mfp reason=LetRec round body
+BOUNDARY node=94 operator=Mfp reason=LetRec round body
+BOUNDARY node=97 operator=Mfp reason=LetRec round body
+BOUNDARY node=98 operator=Mfp reason=LetRec round body
+BOUNDARY node=99 operator=Join reason=LetRec round body
+BOUNDARY node=100 operator=Mfp reason=LetRec round body
+BOUNDARY node=101 operator=Join reason=LetRec round body
+BOUNDARY node=102 operator=Mfp reason=LetRec round body
+BOUNDARY node=103 operator=Join reason=LetRec round body
+BOUNDARY node=104 operator=Join reason=LetRec round body
+BOUNDARY node=105 operator=Join reason=LetRec round body
+BOUNDARY node=106 operator=Join reason=LetRec round body
+BOUNDARY node=107 operator=Mfp reason=LetRec round body
+BOUNDARY node=341 operator=Union reason=LetRec round body
+BOUNDARY node=212 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=216 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=342 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=343 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r44","type":"SIMPLE_PROJECTION","type_code":2,"view":"n344"}
+BOUNDARY node=110 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=115 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=116 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=345 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=346 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=151 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=152 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=153 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=154 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=155 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=156 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=157 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=158 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=159 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=160 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=161 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=162 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=163 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=164 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=165 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=347 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=121 operator=Get reason=LetRec round body
+BOUNDARY node=122 operator=Join reason=LetRec round body
+BOUNDARY node=123 operator=Join reason=LetRec round body
+BOUNDARY node=124 operator=Join reason=LetRec round body
+BOUNDARY node=125 operator=Mfp reason=LetRec round body
+BOUNDARY node=126 operator=Join reason=LetRec round body
+BOUNDARY node=127 operator=Join reason=LetRec round body
+BOUNDARY node=348 operator=Union reason=LetRec round body
+BOUNDARY node=188 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=208 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=244 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=326 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=349 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=350 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0 FROM r39","type":"SIMPLE_PROJECTION","type_code":2,"view":"out39"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0 FROM out39","type":"SIMPLE_PROJECTION","type_code":2,"view":"read39"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0 FROM r43","type":"SIMPLE_PROJECTION","type_code":2,"view":"out43"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0 FROM out43","type":"SIMPLE_PROJECTION","type_code":2,"view":"read43"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0 FROM r47","type":"SIMPLE_PROJECTION","type_code":2,"view":"out47"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0 FROM out47","type":"SIMPLE_PROJECTION","type_code":2,"view":"read47"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0 FROM r49","type":"SIMPLE_PROJECTION","type_code":2,"view":"out49"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0 FROM out49","type":"SIMPLE_PROJECTION","type_code":2,"view":"read49"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0,c1,c2,c3 FROM r53","type":"SIMPLE_PROJECTION","type_code":2,"view":"out53"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0,c1,c2,c3 FROM out53","type":"SIMPLE_PROJECTION","type_code":2,"view":"read53"}
+TRANSPORT {"statements":7836,"refreshes":16}
+ivm-duckdb: LetRec [28, 30, 38, 42, 44, 46, 50, 52, 54, 56, 58, 60, 62, 66, 68, 74]: SQL full recompute from empty; OpenIVM has no recursive IVM
+ivm-duckdb: LetRec [36]: SQL full recompute from empty; OpenIVM has no recursive IVM
+BOUNDARY node=176 operator=Get reason=LetRec round body
+BOUNDARY node=7 operator=Get reason=LetRec round body
+BOUNDARY node=328 operator=Union reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r25","type":"SIMPLE_PROJECTION","type_code":2,"view":"n329"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r31","type":"SIMPLE_PROJECTION","type_code":2,"view":"n330"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r33","type":"SIMPLE_PROJECTION","type_code":2,"view":"n331"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r63","type":"SIMPLE_PROJECTION","type_code":2,"view":"n332"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r69","type":"SIMPLE_PROJECTION","type_code":2,"view":"n333"}
+BOUNDARY node=334 operator=Get reason=LetRec round body
+BOUNDARY node=0 operator=Get reason=LetRec round body
+BOUNDARY node=108 operator=Mfp reason=LetRec round body
+BOUNDARY node=111 operator=Get reason=LetRec round body
+BOUNDARY node=112 operator=Mfp reason=LetRec round body
+BOUNDARY node=95 operator=Get reason=LetRec round body
+BOUNDARY node=96 operator=Mfp reason=LetRec round body
+BOUNDARY node=117 operator=Mfp reason=LetRec round body
+BOUNDARY node=335 operator=Union reason=LetRec round body
+BOUNDARY node=336 operator=Get reason=LetRec round body
+BOUNDARY node=1 operator=Get reason=LetRec round body
+BOUNDARY node=109 operator=Mfp reason=LetRec round body
+BOUNDARY node=118 operator=Mfp reason=LetRec round body
+BOUNDARY node=113 operator=Get reason=LetRec round body
+BOUNDARY node=114 operator=Mfp reason=LetRec round body
+BOUNDARY node=119 operator=Mfp reason=LetRec round body
+BOUNDARY node=120 operator=Mfp reason=LetRec round body
+BOUNDARY node=337 operator=Union reason=LetRec round body
+BOUNDARY node=338 operator=Get reason=LetRec round body
+BOUNDARY node=128 operator=Get reason=LetRec round body
+BOUNDARY node=4 operator=Get reason=LetRec round body
+BOUNDARY node=129 operator=Join reason=LetRec round body
+BOUNDARY node=130 operator=Mfp reason=LetRec round body
+BOUNDARY node=131 operator=Get reason=LetRec round body
+BOUNDARY node=132 operator=Join reason=LetRec round body
+BOUNDARY node=133 operator=Mfp reason=LetRec round body
+BOUNDARY node=15 operator=Get reason=LetRec round body
+BOUNDARY node=134 operator=Mfp reason=LetRec round body
+BOUNDARY node=135 operator=Join reason=LetRec round body
+BOUNDARY node=136 operator=Mfp reason=LetRec round body
+BOUNDARY node=137 operator=Join reason=LetRec round body
+BOUNDARY node=138 operator=Mfp reason=LetRec round body
+BOUNDARY node=139 operator=Join reason=LetRec round body
+BOUNDARY node=140 operator=Mfp reason=LetRec round body
+BOUNDARY node=58 operator=Get reason=LetRec round body
+BOUNDARY node=141 operator=Join reason=LetRec round body
+BOUNDARY node=142 operator=Mfp reason=LetRec round body
+BOUNDARY node=143 operator=Join reason=LetRec round body
+BOUNDARY node=144 operator=Mfp reason=LetRec round body
+BOUNDARY node=145 operator=Join reason=LetRec round body
+BOUNDARY node=146 operator=Mfp reason=LetRec round body
+BOUNDARY node=147 operator=Mfp reason=LetRec round body
+BOUNDARY node=148 operator=Mfp reason=LetRec round body
+BOUNDARY node=149 operator=Get reason=LetRec round body
+BOUNDARY node=150 operator=Mfp reason=LetRec round body
+BOUNDARY node=339 operator=Union reason=LetRec round body
+BOUNDARY node=340 operator=Get reason=LetRec round body
+BOUNDARY node=166 operator=Get reason=LetRec round body
+BOUNDARY node=167 operator=Mfp reason=LetRec round body
+BOUNDARY node=168 operator=Mfp reason=LetRec round body
+BOUNDARY node=169 operator=Mint reason=LetRec round body
+BOUNDARY node=170 operator=Mint reason=LetRec round body
+BOUNDARY node=171 operator=Mint reason=LetRec round body
+BOUNDARY node=172 operator=Mfp reason=LetRec round body
+BOUNDARY node=173 operator=Mint reason=LetRec round body
+BOUNDARY node=174 operator=Mint reason=LetRec round body
+BOUNDARY node=175 operator=Mfp reason=LetRec round body
+BOUNDARY node=177 operator=Join reason=LetRec round body
+BOUNDARY node=178 operator=Get reason=LetRec round body
+BOUNDARY node=179 operator=Join reason=LetRec round body
+BOUNDARY node=180 operator=Join reason=LetRec round body
+BOUNDARY node=181 operator=Join reason=LetRec round body
+BOUNDARY node=182 operator=Mfp reason=LetRec round body
+BOUNDARY node=183 operator=Mint reason=LetRec round body
+BOUNDARY node=184 operator=Mint reason=LetRec round body
+BOUNDARY node=185 operator=Mint reason=LetRec round body
+BOUNDARY node=186 operator=Mint reason=LetRec round body
+BOUNDARY node=187 operator=Mint reason=LetRec round body
+BOUNDARY node=189 operator=Mfp reason=LetRec round body
+BOUNDARY node=341 operator=Union reason=LetRec round body
+BOUNDARY node=342 operator=Get reason=LetRec round body
+BOUNDARY node=190 operator=Mfp reason=LetRec round body
+BOUNDARY node=191 operator=Mint reason=LetRec round body
+BOUNDARY node=192 operator=Mint reason=LetRec round body
+BOUNDARY node=193 operator=Mint reason=LetRec round body
+BOUNDARY node=194 operator=Mfp reason=LetRec round body
+BOUNDARY node=195 operator=Mint reason=LetRec round body
+BOUNDARY node=196 operator=Mint reason=LetRec round body
+BOUNDARY node=197 operator=Mfp reason=LetRec round body
+BOUNDARY node=198 operator=Join reason=LetRec round body
+BOUNDARY node=199 operator=Join reason=LetRec round body
+BOUNDARY node=200 operator=Join reason=LetRec round body
+BOUNDARY node=201 operator=Join reason=LetRec round body
+BOUNDARY node=202 operator=Mfp reason=LetRec round body
+BOUNDARY node=203 operator=Mint reason=LetRec round body
+BOUNDARY node=204 operator=Mint reason=LetRec round body
+BOUNDARY node=205 operator=Mint reason=LetRec round body
+BOUNDARY node=206 operator=Mint reason=LetRec round body
+BOUNDARY node=207 operator=Mint reason=LetRec round body
+BOUNDARY node=209 operator=Mfp reason=LetRec round body
+BOUNDARY node=343 operator=Union reason=LetRec round body
+BOUNDARY node=344 operator=Get reason=LetRec round body
+BOUNDARY node=210 operator=Join reason=LetRec round body
+BOUNDARY node=211 operator=Mfp reason=LetRec round body
+BOUNDARY node=345 operator=Union reason=LetRec round body
+BOUNDARY node=346 operator=Get reason=LetRec round body
+BOUNDARY node=217 operator=Mfp reason=LetRec round body
+BOUNDARY node=33 operator=Get reason=LetRec round body
+BOUNDARY node=218 operator=Mfp reason=LetRec round body
+BOUNDARY node=219 operator=Mfp reason=LetRec round body
+BOUNDARY node=220 operator=Mfp reason=LetRec round body
+BOUNDARY node=221 operator=Mfp reason=LetRec round body
+BOUNDARY node=222 operator=Mfp reason=LetRec round body
+BOUNDARY node=75 operator=Get reason=LetRec round body
+BOUNDARY node=223 operator=Join reason=LetRec round body
+BOUNDARY node=224 operator=Mfp reason=LetRec round body
+BOUNDARY node=347 operator=Union reason=LetRec round body
+BOUNDARY node=348 operator=Get reason=LetRec round body
+BOUNDARY node=225 operator=Get reason=LetRec round body
+BOUNDARY node=226 operator=Mfp reason=LetRec round body
+BOUNDARY node=227 operator=Mint reason=LetRec round body
+BOUNDARY node=228 operator=Mint reason=LetRec round body
+BOUNDARY node=229 operator=Mint reason=LetRec round body
+BOUNDARY node=230 operator=Mfp reason=LetRec round body
+BOUNDARY node=231 operator=Mint reason=LetRec round body
+BOUNDARY node=232 operator=Mint reason=LetRec round body
+BOUNDARY node=233 operator=Mfp reason=LetRec round body
+BOUNDARY node=234 operator=Join reason=LetRec round body
+BOUNDARY node=235 operator=Join reason=LetRec round body
+BOUNDARY node=236 operator=Join reason=LetRec round body
+BOUNDARY node=237 operator=Join reason=LetRec round body
+BOUNDARY node=238 operator=Mfp reason=LetRec round body
+BOUNDARY node=239 operator=Mint reason=LetRec round body
+BOUNDARY node=240 operator=Mint reason=LetRec round body
+BOUNDARY node=241 operator=Mint reason=LetRec round body
+BOUNDARY node=242 operator=Mint reason=LetRec round body
+BOUNDARY node=243 operator=Mint reason=LetRec round body
+BOUNDARY node=245 operator=Mfp reason=LetRec round body
+BOUNDARY node=349 operator=Union reason=LetRec round body
+BOUNDARY node=350 operator=Get reason=LetRec round body
+BOUNDARY node=16 operator=Mfp reason=LetRec round body
+BOUNDARY node=17 operator=Get reason=LetRec round body
+BOUNDARY node=18 operator=Join reason=LetRec round body
+BOUNDARY node=19 operator=Mfp reason=LetRec round body
+BOUNDARY node=20 operator=Mfp reason=LetRec round body
+BOUNDARY node=246 operator=Mfp reason=LetRec round body
+BOUNDARY node=34 operator=Join reason=LetRec round body
+BOUNDARY node=35 operator=Mfp reason=LetRec round body
+BOUNDARY node=247 operator=Mfp reason=LetRec round body
+BOUNDARY node=59 operator=Join reason=LetRec round body
+BOUNDARY node=61 operator=Mfp reason=LetRec round body
+BOUNDARY node=62 operator=Mfp reason=LetRec round body
+BOUNDARY node=248 operator=Mfp reason=LetRec round body
+BOUNDARY node=73 operator=Mfp reason=LetRec round body
+BOUNDARY node=74 operator=Mfp reason=LetRec round body
+BOUNDARY node=249 operator=Mfp reason=LetRec round body
+BOUNDARY node=351 operator=Union reason=LetRec round body
+BOUNDARY node=352 operator=Get reason=LetRec round body
+BOUNDARY node=250 operator=Mfp reason=LetRec round body
+BOUNDARY node=251 operator=Join reason=LetRec round body
+BOUNDARY node=252 operator=Join reason=LetRec round body
+BOUNDARY node=253 operator=Join reason=LetRec round body
+BOUNDARY node=254 operator=Mfp reason=LetRec round body
+BOUNDARY node=255 operator=Mfp reason=LetRec round body
+BOUNDARY node=256 operator=Mfp reason=LetRec round body
+BOUNDARY node=257 operator=Join reason=LetRec round body
+BOUNDARY node=258 operator=Join reason=LetRec round body
+BOUNDARY node=259 operator=Mfp reason=LetRec round body
+BOUNDARY node=353 operator=Union reason=LetRec round body
+BOUNDARY node=354 operator=Get reason=LetRec round body
+BOUNDARY node=213 operator=Mfp reason=LetRec round body
+BOUNDARY node=214 operator=Join reason=LetRec round body
+BOUNDARY node=215 operator=Mfp reason=LetRec round body
+BOUNDARY node=260 operator=Join reason=LetRec round body
+BOUNDARY node=261 operator=Join reason=LetRec round body
+BOUNDARY node=262 operator=Mfp reason=LetRec round body
+BOUNDARY node=263 operator=Join reason=LetRec round body
+BOUNDARY node=264 operator=Mfp reason=LetRec round body
+BOUNDARY node=265 operator=Join reason=LetRec round body
+BOUNDARY node=266 operator=Mfp reason=LetRec round body
+BOUNDARY node=93 operator=Get reason=LetRec round body
+BOUNDARY node=267 operator=Join reason=LetRec round body
+BOUNDARY node=268 operator=Join reason=LetRec round body
+BOUNDARY node=269 operator=Join reason=LetRec round body
+BOUNDARY node=270 operator=Mfp reason=LetRec round body
+BOUNDARY node=271 operator=Join reason=LetRec round body
+BOUNDARY node=355 operator=Union reason=LetRec round body
+BOUNDARY node=356 operator=Get reason=LetRec round body
+BOUNDARY node=272 operator=Mfp reason=LetRec round body
+BOUNDARY node=273 operator=Join reason=LetRec round body
+BOUNDARY node=274 operator=Mfp reason=LetRec round body
+BOUNDARY node=275 operator=Join reason=LetRec round body
+BOUNDARY node=276 operator=Join reason=LetRec round body
+BOUNDARY node=277 operator=Mfp reason=LetRec round body
+BOUNDARY node=278 operator=Join reason=LetRec round body
+BOUNDARY node=279 operator=Mfp reason=LetRec round body
+BOUNDARY node=280 operator=Join reason=LetRec round body
+BOUNDARY node=281 operator=Join reason=LetRec round body
+BOUNDARY node=10 operator=Get reason=LetRec round body
+BOUNDARY node=282 operator=Join reason=LetRec round body
+BOUNDARY node=283 operator=Join reason=LetRec round body
+BOUNDARY node=284 operator=Mfp reason=LetRec round body
+BOUNDARY node=285 operator=Mint reason=LetRec round body
+BOUNDARY node=286 operator=Mint reason=LetRec round body
+BOUNDARY node=287 operator=Mfp reason=LetRec round body
+BOUNDARY node=357 operator=Union reason=LetRec round body
+BOUNDARY node=358 operator=Get reason=LetRec round body
+BOUNDARY node=288 operator=Mfp reason=LetRec round body
+BOUNDARY node=289 operator=Join reason=LetRec round body
+BOUNDARY node=290 operator=Mfp reason=LetRec round body
+BOUNDARY node=291 operator=Join reason=LetRec round body
+BOUNDARY node=292 operator=Join reason=LetRec round body
+BOUNDARY node=293 operator=Join reason=LetRec round body
+BOUNDARY node=294 operator=Join reason=LetRec round body
+BOUNDARY node=295 operator=Mfp reason=LetRec round body
+BOUNDARY node=296 operator=Join reason=LetRec round body
+BOUNDARY node=297 operator=Join reason=LetRec round body
+BOUNDARY node=298 operator=Mfp reason=LetRec round body
+BOUNDARY node=299 operator=Join reason=LetRec round body
+BOUNDARY node=300 operator=Mfp reason=LetRec round body
+BOUNDARY node=301 operator=Join reason=LetRec round body
+BOUNDARY node=302 operator=Mfp reason=LetRec round body
+BOUNDARY node=303 operator=Join reason=LetRec round body
+BOUNDARY node=304 operator=Join reason=LetRec round body
+BOUNDARY node=359 operator=Union reason=LetRec round body
+BOUNDARY node=360 operator=Get reason=LetRec round body
+BOUNDARY node=305 operator=Mfp reason=LetRec round body
+BOUNDARY node=361 operator=Union reason=LetRec round body
+BOUNDARY node=362 operator=Get reason=LetRec round body
+BOUNDARY node=306 operator=Get reason=LetRec round body
+BOUNDARY node=307 operator=Join reason=LetRec round body
+BOUNDARY node=308 operator=Mfp reason=LetRec round body
+BOUNDARY node=309 operator=Mint reason=LetRec round body
+BOUNDARY node=310 operator=Mint reason=LetRec round body
+BOUNDARY node=311 operator=Mint reason=LetRec round body
+BOUNDARY node=312 operator=Mfp reason=LetRec round body
+BOUNDARY node=313 operator=Mint reason=LetRec round body
+BOUNDARY node=314 operator=Mint reason=LetRec round body
+BOUNDARY node=315 operator=Mfp reason=LetRec round body
+BOUNDARY node=316 operator=Join reason=LetRec round body
+BOUNDARY node=317 operator=Join reason=LetRec round body
+BOUNDARY node=318 operator=Join reason=LetRec round body
+BOUNDARY node=319 operator=Join reason=LetRec round body
+BOUNDARY node=320 operator=Mfp reason=LetRec round body
+BOUNDARY node=321 operator=Mint reason=LetRec round body
+BOUNDARY node=322 operator=Mint reason=LetRec round body
+BOUNDARY node=323 operator=Mint reason=LetRec round body
+BOUNDARY node=324 operator=Mint reason=LetRec round body
+BOUNDARY node=325 operator=Mint reason=LetRec round body
+BOUNDARY node=327 operator=Mfp reason=LetRec round body
+BOUNDARY node=363 operator=Union reason=LetRec round body
+BOUNDARY node=364 operator=Get reason=LetRec round body
+BOUNDARY node=2 operator=Join reason=LetRec round body
+BOUNDARY node=3 operator=Mfp reason=LetRec round body
+BOUNDARY node=5 operator=Join reason=LetRec round body
+BOUNDARY node=6 operator=Mfp reason=LetRec round body
+BOUNDARY node=8 operator=Join reason=LetRec round body
+BOUNDARY node=9 operator=Join reason=LetRec round body
+BOUNDARY node=11 operator=Join reason=LetRec round body
+BOUNDARY node=12 operator=Join reason=LetRec round body
+BOUNDARY node=13 operator=Mfp reason=LetRec round body
+BOUNDARY node=14 operator=Mfp reason=LetRec round body
+BOUNDARY node=21 operator=Mfp reason=LetRec round body
+BOUNDARY node=22 operator=Mfp reason=LetRec round body
+BOUNDARY node=23 operator=Join reason=LetRec round body
+BOUNDARY node=24 operator=Mfp reason=LetRec round body
+BOUNDARY node=25 operator=Mfp reason=LetRec round body
+BOUNDARY node=26 operator=Mfp reason=LetRec round body
+BOUNDARY node=27 operator=Mfp reason=LetRec round body
+BOUNDARY node=28 operator=Join reason=LetRec round body
+BOUNDARY node=29 operator=Join reason=LetRec round body
+BOUNDARY node=30 operator=Join reason=LetRec round body
+BOUNDARY node=31 operator=Join reason=LetRec round body
+BOUNDARY node=32 operator=Mfp reason=LetRec round body
+BOUNDARY node=36 operator=Mfp reason=LetRec round body
+BOUNDARY node=37 operator=Mfp reason=LetRec round body
+BOUNDARY node=38 operator=Mfp reason=LetRec round body
+BOUNDARY node=39 operator=Join reason=LetRec round body
+BOUNDARY node=40 operator=Mfp reason=LetRec round body
+BOUNDARY node=41 operator=Mfp reason=LetRec round body
+BOUNDARY node=42 operator=Join reason=LetRec round body
+BOUNDARY node=43 operator=Mfp reason=LetRec round body
+BOUNDARY node=44 operator=Mfp reason=LetRec round body
+BOUNDARY node=45 operator=Join reason=LetRec round body
+BOUNDARY node=46 operator=Join reason=LetRec round body
+BOUNDARY node=47 operator=Join reason=LetRec round body
+BOUNDARY node=48 operator=Join reason=LetRec round body
+BOUNDARY node=49 operator=Mfp reason=LetRec round body
+BOUNDARY node=50 operator=Join reason=LetRec round body
+BOUNDARY node=51 operator=Join reason=LetRec round body
+BOUNDARY node=52 operator=Join reason=LetRec round body
+BOUNDARY node=53 operator=Join reason=LetRec round body
+BOUNDARY node=54 operator=Mfp reason=LetRec round body
+BOUNDARY node=55 operator=Mint reason=LetRec round body
+BOUNDARY node=56 operator=Mint reason=LetRec round body
+BOUNDARY node=57 operator=Mfp reason=LetRec round body
+BOUNDARY node=60 operator=Mfp reason=LetRec round body
+BOUNDARY node=63 operator=Join reason=LetRec round body
+BOUNDARY node=64 operator=Mfp reason=LetRec round body
+BOUNDARY node=65 operator=Mfp reason=LetRec round body
+BOUNDARY node=66 operator=Mfp reason=LetRec round body
+BOUNDARY node=67 operator=Mfp reason=LetRec round body
+BOUNDARY node=68 operator=Join reason=LetRec round body
+BOUNDARY node=69 operator=Join reason=LetRec round body
+BOUNDARY node=70 operator=Join reason=LetRec round body
+BOUNDARY node=71 operator=Join reason=LetRec round body
+BOUNDARY node=72 operator=Mfp reason=LetRec round body
+BOUNDARY node=76 operator=Join reason=LetRec round body
+BOUNDARY node=77 operator=Mfp reason=LetRec round body
+BOUNDARY node=78 operator=Join reason=LetRec round body
+BOUNDARY node=79 operator=Join reason=LetRec round body
+BOUNDARY node=80 operator=Join reason=LetRec round body
+BOUNDARY node=81 operator=Join reason=LetRec round body
+BOUNDARY node=82 operator=Mfp reason=LetRec round body
+BOUNDARY node=83 operator=Join reason=LetRec round body
+BOUNDARY node=84 operator=Mfp reason=LetRec round body
+BOUNDARY node=85 operator=Join reason=LetRec round body
+BOUNDARY node=86 operator=Join reason=LetRec round body
+BOUNDARY node=87 operator=Join reason=LetRec round body
+BOUNDARY node=88 operator=Join reason=LetRec round body
+BOUNDARY node=89 operator=Mfp reason=LetRec round body
+BOUNDARY node=90 operator=Mint reason=LetRec round body
+BOUNDARY node=91 operator=Mint reason=LetRec round body
+BOUNDARY node=92 operator=Mfp reason=LetRec round body
+BOUNDARY node=94 operator=Mfp reason=LetRec round body
+BOUNDARY node=97 operator=Mfp reason=LetRec round body
+BOUNDARY node=98 operator=Mfp reason=LetRec round body
+BOUNDARY node=99 operator=Join reason=LetRec round body
+BOUNDARY node=100 operator=Mfp reason=LetRec round body
+BOUNDARY node=101 operator=Join reason=LetRec round body
+BOUNDARY node=102 operator=Mfp reason=LetRec round body
+BOUNDARY node=103 operator=Join reason=LetRec round body
+BOUNDARY node=104 operator=Join reason=LetRec round body
+BOUNDARY node=105 operator=Join reason=LetRec round body
+BOUNDARY node=106 operator=Join reason=LetRec round body
+BOUNDARY node=107 operator=Mfp reason=LetRec round body
+BOUNDARY node=365 operator=Union reason=LetRec round body
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r47","type":"SIMPLE_PROJECTION","type_code":2,"view":"n366"}
+BOUNDARY node=212 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=216 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=367 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=368 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r71","type":"SIMPLE_PROJECTION","type_code":2,"view":"n369"}
+BOUNDARY node=110 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=115 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=116 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=370 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=371 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r39","type":"SIMPLE_PROJECTION","type_code":2,"view":"n372"}
+BOUNDARY node=151 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=152 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=153 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=154 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=155 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=156 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=157 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=158 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=159 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=160 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=161 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=162 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=163 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=164 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=165 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=373 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=374 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=375 operator=Get reason=LetRec round body
+BOUNDARY node=121 operator=Get reason=LetRec round body
+BOUNDARY node=122 operator=Join reason=LetRec round body
+BOUNDARY node=123 operator=Join reason=LetRec round body
+BOUNDARY node=124 operator=Join reason=LetRec round body
+BOUNDARY node=125 operator=Mfp reason=LetRec round body
+BOUNDARY node=126 operator=Join reason=LetRec round body
+BOUNDARY node=127 operator=Join reason=LetRec round body
+BOUNDARY node=376 operator=Union reason=LetRec round body
+BOUNDARY node=188 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=208 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=244 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=326 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=377 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=378 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0,c1 FROM r26","type":"SIMPLE_PROJECTION","type_code":2,"view":"out26"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0,c1 FROM out26","type":"SIMPLE_PROJECTION","type_code":2,"view":"read26"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0,c1 FROM r32","type":"SIMPLE_PROJECTION","type_code":2,"view":"out32"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0,c1 FROM out32","type":"SIMPLE_PROJECTION","type_code":2,"view":"read32"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0,c1,c2 FROM r34","type":"SIMPLE_PROJECTION","type_code":2,"view":"out34"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0,c1,c2 FROM out34","type":"SIMPLE_PROJECTION","type_code":2,"view":"read34"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0 FROM r64","type":"SIMPLE_PROJECTION","type_code":2,"view":"out64"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0 FROM out64","type":"SIMPLE_PROJECTION","type_code":2,"view":"read64"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0 FROM r70","type":"SIMPLE_PROJECTION","type_code":2,"view":"out70"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0 FROM out70","type":"SIMPLE_PROJECTION","type_code":2,"view":"read70"}
+TRANSPORT {"statements":6270,"refreshes":36}
+ivm-duckdb: LetRec [103]: SQL full recompute from empty; OpenIVM has no recursive IVM
+ivm-duckdb: LetRec [109, 110]: SQL full recompute from empty; OpenIVM has no recursive IVM
+ivm-duckdb: LetRec [111]: SQL full recompute from empty; OpenIVM has no recursive IVM
+ivm-duckdb: LetRec [43, 62, 65, 66, 126, 136]: SQL full recompute from empty; OpenIVM has no recursive IVM
+ivm-duckdb: LetRec [94]: SQL full recompute from empty; OpenIVM has no recursive IVM
+BOUNDARY node=75 operator=Get reason=LetRec round body
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r10","type":"SIMPLE_PROJECTION","type_code":2,"view":"n139"}
+BOUNDARY node=747 operator=Union reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r24","type":"SIMPLE_PROJECTION","type_code":2,"view":"n753"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r28","type":"SIMPLE_PROJECTION","type_code":2,"view":"n754"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r32","type":"SIMPLE_PROJECTION","type_code":2,"view":"n755"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r36","type":"SIMPLE_PROJECTION","type_code":2,"view":"n756"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r38","type":"SIMPLE_PROJECTION","type_code":2,"view":"n757"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r63","type":"SIMPLE_PROJECTION","type_code":2,"view":"n758"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r87","type":"SIMPLE_PROJECTION","type_code":2,"view":"n759"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r90","type":"SIMPLE_PROJECTION","type_code":2,"view":"n760"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r99","type":"SIMPLE_PROJECTION","type_code":2,"view":"n761"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r101","type":"SIMPLE_PROJECTION","type_code":2,"view":"n762"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r106","type":"SIMPLE_PROJECTION","type_code":2,"view":"n763"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r114","type":"SIMPLE_PROJECTION","type_code":2,"view":"n764"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r117","type":"SIMPLE_PROJECTION","type_code":2,"view":"n765"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r121","type":"SIMPLE_PROJECTION","type_code":2,"view":"n766"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r0","type":"SIMPLE_PROJECTION","type_code":2,"view":"n104"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Mfp","sql":"SELECT s.c0 AS c0 FROM n104 s ","type":"SIMPLE_PROJECTION","type_code":2,"view":"n105"}
+VIEW {"openivm_detail":"refresh_type=AGGREGATE_GROUP; group_cols=1; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=1; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=1; full_recompute_nodes=1","openivm_warning":"","operator":"Threshold","sql":"SELECT DISTINCT c0 FROM n105","type":"AGGREGATE_GROUP","type_code":0,"view":"n767"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=20; group_recompute_mode=source_delta; scan_occurrences=6; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=24; node_unsupported=0; delta_only_nodes=19; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Union","sql":"SELECT * FROM n105 UNION ALL SELECT * FROM n105 UNION ALL SELECT * FROM n105 UNION ALL SELECT * FROM n105 UNION ALL SELECT * FROM n105 UNION ALL SELECT * FROM n105","type":"SIMPLE_PROJECTION","type_code":2,"view":"n768"}
+VIEW {"openivm_detail":"refresh_type=AGGREGATE_GROUP; group_cols=1; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=1; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=1; full_recompute_nodes=1","openivm_warning":"","operator":"Threshold","sql":"SELECT DISTINCT c0 FROM n768","type":"AGGREGATE_GROUP","type_code":0,"view":"n769"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=8; group_recompute_mode=source_delta; scan_occurrences=2; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=8; node_unsupported=0; delta_only_nodes=7; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Union","sql":"SELECT * FROM n105 UNION ALL SELECT * FROM n105","type":"SIMPLE_PROJECTION","type_code":2,"view":"n770"}
+VIEW {"openivm_detail":"refresh_type=AGGREGATE_GROUP; group_cols=1; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=1; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=1; full_recompute_nodes=1","openivm_warning":"","operator":"Threshold","sql":"SELECT DISTINCT c0 FROM n770","type":"AGGREGATE_GROUP","type_code":0,"view":"n771"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r141","type":"SIMPLE_PROJECTION","type_code":2,"view":"n772"}
+BOUNDARY node=11 operator=Get reason=LetRec round body
+BOUNDARY node=12 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=430 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=773 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r46","type":"SIMPLE_PROJECTION","type_code":2,"view":"n774"}
+BOUNDARY node=428 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=429 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=775 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=776 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=174 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=72 operator=Get reason=LetRec round body
+BOUNDARY node=383 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=777 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=177 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=178 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=77 operator=Get reason=LetRec round body
+BOUNDARY node=179 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=180 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=80 operator=Get reason=LetRec round body
+BOUNDARY node=181 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=182 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=183 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=184 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=778 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r115","type":"SIMPLE_PROJECTION","type_code":2,"view":"n8"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Mfp","sql":"SELECT s.c0 AS c0 FROM n8 s ","type":"SIMPLE_PROJECTION","type_code":2,"view":"n9"}
+VIEW {"openivm_detail":"refresh_type=AGGREGATE_GROUP; group_cols=1; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=1; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=1; full_recompute_nodes=1","openivm_warning":"","operator":"Threshold","sql":"SELECT DISTINCT c0 FROM n9","type":"AGGREGATE_GROUP","type_code":0,"view":"n779"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r142","type":"SIMPLE_PROJECTION","type_code":2,"view":"n780"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r133","type":"SIMPLE_PROJECTION","type_code":2,"view":"n748"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=8; group_recompute_mode=source_delta; scan_occurrences=2; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=8; node_unsupported=0; delta_only_nodes=7; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Union","sql":"SELECT * FROM n780 UNION ALL SELECT * FROM n748","type":"SIMPLE_PROJECTION","type_code":2,"view":"n781"}
+VIEW {"openivm_detail":"refresh_type=AGGREGATE_GROUP; group_cols=3; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=1; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=1; full_recompute_nodes=1","openivm_warning":"","operator":"Threshold","sql":"SELECT DISTINCT c0,c1,c2 FROM n781","type":"AGGREGATE_GROUP","type_code":0,"view":"n782"}
+BOUNDARY node=418 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=419 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=420 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=421 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=422 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=423 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=424 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=425 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=426 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=363 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=427 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=783 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=372 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=380 operator=Antijoin reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=381 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=373 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=382 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=784 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=785 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=374 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=375 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=376 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=377 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=378 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=379 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=786 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=347 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=348 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=349 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=350 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=351 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=352 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=353 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=354 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=355 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=362 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=364 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=787 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=160 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=161 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=167 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=168 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=176 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=788 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=173 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=175 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=789 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r88","type":"SIMPLE_PROJECTION","type_code":2,"view":"n0"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Mfp","sql":"SELECT s.c2 AS c0,s.c0 AS c1 FROM n0 s ","type":"SIMPLE_PROJECTION","type_code":2,"view":"n69"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r118","type":"SIMPLE_PROJECTION","type_code":2,"view":"n3"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r116","type":"SIMPLE_PROJECTION","type_code":2,"view":"n4"}
+VIEW {"openivm_detail":"refresh_type=SEMI_ANTI_RECOMPUTE; group_cols=0; model_nodes=7; group_recompute_mode=source_delta; scan_occurrences=2; model_domains=1; node_domains=1; lineage_entries=0; node_lineage=0; node_semantics=8; node_unsupported=0; delta_only_nodes=5; delta_state_nodes=1; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Antijoin","sql":"SELECT l.c0,l.c1,l.c2,l.c3 FROM n3 l ANTI JOIN n4 r ON l.c3=r.c0","type":"SEMI_ANTI_RECOMPUTE","type_code":9,"view":"n5"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Mfp","sql":"SELECT s.c2 AS c0,s.c3 AS c1 FROM n5 s ","type":"SIMPLE_PROJECTION","type_code":2,"view":"n70"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r100","type":"SIMPLE_PROJECTION","type_code":2,"view":"n10"}
+BOUNDARY node=13 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=71 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=73 operator=Mfp reason=LetRec round body
+BOUNDARY node=74 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=76 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=78 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=79 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=81 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=82 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=83 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=84 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=85 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=790 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=791 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r143","type":"SIMPLE_PROJECTION","type_code":2,"view":"n792"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r134","type":"SIMPLE_PROJECTION","type_code":2,"view":"n749"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=8; group_recompute_mode=source_delta; scan_occurrences=2; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=8; node_unsupported=0; delta_only_nodes=7; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Union","sql":"SELECT * FROM n792 UNION ALL SELECT * FROM n749","type":"SIMPLE_PROJECTION","type_code":2,"view":"n793"}
+VIEW {"openivm_detail":"refresh_type=AGGREGATE_GROUP; group_cols=3; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=1; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=1; full_recompute_nodes=1","openivm_warning":"","operator":"Threshold","sql":"SELECT DISTINCT c0,c1,c2 FROM n793","type":"AGGREGATE_GROUP","type_code":0,"view":"n794"}
+BOUNDARY node=401 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=412 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=413 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=414 operator=Join reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r6","type":"SIMPLE_PROJECTION","type_code":2,"view":"n142"}
+BOUNDARY node=415 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=416 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=417 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=795 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=356 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=357 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=358 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=359 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=360 operator=Antijoin reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=361 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=796 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=169 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=170 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=171 operator=Antijoin reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=172 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=797 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=406 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=411 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=798 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=330 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=341 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=342 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=343 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=344 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=345 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=346 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=799 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=165 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=166 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=800 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=402 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=403 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=404 operator=Antijoin reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=405 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=407 operator=Reduce reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=408 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=409 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=410 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=801 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=802 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=335 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=340 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=803 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=162 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=163 operator=Antijoin reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=164 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=804 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=117 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=185 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=186 operator=Mfp reason=constant-false filter: OpenIVM refresh rejects EMPTY_RESULT: Plan contains single node, this is not supported
+BOUNDARY node=120 operator=Get reason=LetRec round body
+BOUNDARY node=187 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=188 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=805 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=806 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=331 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=332 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=333 operator=Antijoin reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=334 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=336 operator=Reduce reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=337 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=338 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=339 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=807 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=808 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=154 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=155 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=156 operator=Antijoin reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=157 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=158 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=159 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=809 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=810 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=123 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=124 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=135 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=136 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=137 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=138 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=140 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=141 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=143 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=144 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=145 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=146 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=147 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=148 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=149 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=150 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=151 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=152 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=153 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=811 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=812 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=102 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=103 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r123","type":"SIMPLE_PROJECTION","type_code":2,"view":"n108"}
+BOUNDARY node=109 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=110 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=111 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=112 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=113 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=114 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=115 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=116 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=118 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=119 operator=Mfp reason=constant-false filter: OpenIVM refresh rejects EMPTY_RESULT: Plan contains single node, this is not supported
+BOUNDARY node=121 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=122 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=813 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=814 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r127","type":"SIMPLE_PROJECTION","type_code":2,"view":"n433"}
+BOUNDARY node=434 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=435 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=436 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=437 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=438 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=439 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=440 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=441 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=442 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=443 operator=Mfp reason=constant-false filter: OpenIVM refresh rejects EMPTY_RESULT: Plan contains single node, this is not supported
+BOUNDARY node=444 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=445 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=815 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=816 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r129","type":"SIMPLE_PROJECTION","type_code":2,"view":"n473"}
+BOUNDARY node=474 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=475 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=476 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=477 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=478 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=479 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=480 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=481 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=482 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=483 operator=Mfp reason=constant-false filter: OpenIVM refresh rejects EMPTY_RESULT: Plan contains single node, this is not supported
+BOUNDARY node=484 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=485 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=817 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=818 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=128 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=129 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=134 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=819 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=106 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=107 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=125 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=126 operator=Antijoin reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=127 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=130 operator=Reduce reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=131 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=132 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=133 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=820 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=821 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=25 operator=Get reason=LetRec round body
+BOUNDARY node=26 operator=Get reason=LetRec round body
+BOUNDARY node=27 operator=Antijoin reason=LetRec round body
+BOUNDARY node=28 operator=Join reason=LetRec round body
+BOUNDARY node=63 operator=Mfp reason=LetRec round body
+BOUNDARY node=64 operator=Join reason=LetRec round body
+BOUNDARY node=19 operator=Get reason=LetRec round body
+BOUNDARY node=65 operator=Mfp reason=LetRec round body
+BOUNDARY node=822 operator=Union reason=LetRec round body
+BOUNDARY node=62 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=61 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=823 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=58 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=34 operator=Get reason=LetRec round body
+BOUNDARY node=59 operator=Antijoin reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=60 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=17 operator=Get reason=LetRec round body
+BOUNDARY node=41 operator=Mfp reason=LetRec round body
+BOUNDARY node=42 operator=Join reason=LetRec round body
+BOUNDARY node=43 operator=Join reason=LetRec round body
+BOUNDARY node=44 operator=Join reason=LetRec round body
+BOUNDARY node=45 operator=Get reason=LetRec round body
+BOUNDARY node=46 operator=Join reason=LetRec round body
+BOUNDARY node=47 operator=Mfp reason=LetRec round body
+BOUNDARY node=48 operator=Get reason=LetRec round body
+BOUNDARY node=49 operator=Join reason=LetRec round body
+BOUNDARY node=50 operator=Mfp reason=LetRec round body
+BOUNDARY node=51 operator=Mfp reason=LetRec round body
+BOUNDARY node=52 operator=Join reason=LetRec round body
+BOUNDARY node=53 operator=Antijoin reason=LetRec round body
+BOUNDARY node=54 operator=Join reason=LetRec round body
+BOUNDARY node=55 operator=Get reason=LetRec round body
+BOUNDARY node=56 operator=Antijoin reason=LetRec round body
+BOUNDARY node=57 operator=Mfp reason=LetRec round body
+BOUNDARY node=824 operator=Union reason=LetRec round body
+BOUNDARY node=1 operator=Get reason=LetRec round body
+BOUNDARY node=40 operator=Mfp reason=LetRec round body
+BOUNDARY node=2 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=29 operator=Mfp reason=LetRec round body
+BOUNDARY node=30 operator=Join reason=LetRec round body
+BOUNDARY node=21 operator=Get reason=LetRec round body
+BOUNDARY node=31 operator=Join reason=LetRec round body
+BOUNDARY node=32 operator=Get reason=LetRec round body
+BOUNDARY node=33 operator=Join reason=LetRec round body
+BOUNDARY node=35 operator=Antijoin reason=LetRec round body
+BOUNDARY node=36 operator=Mfp reason=LetRec round body
+BOUNDARY node=37 operator=Join reason=LetRec round body
+BOUNDARY node=38 operator=Antijoin reason=LetRec round body
+BOUNDARY node=39 operator=Mfp reason=LetRec round body
+BOUNDARY node=825 operator=Union reason=LetRec round body
+BOUNDARY node=86 operator=Antijoin reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=87 operator=Antijoin reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=88 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=18 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=20 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=22 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=23 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=24 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=826 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=827 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=6 operator=Get reason=LetRec round body
+BOUNDARY node=101 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=14 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=15 operator=Antijoin reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=16 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=828 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=7 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=829 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=66 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=67 operator=Antijoin reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=68 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=384 operator=Mfp reason=LetRec round body
+BOUNDARY node=385 operator=Join reason=LetRec round body
+BOUNDARY node=386 operator=Join reason=LetRec round body
+BOUNDARY node=387 operator=Mfp reason=LetRec round body
+BOUNDARY node=388 operator=Join reason=LetRec round body
+BOUNDARY node=389 operator=Join reason=LetRec round body
+BOUNDARY node=390 operator=Mfp reason=LetRec round body
+BOUNDARY node=300 operator=Get reason=LetRec round body
+BOUNDARY node=301 operator=Mfp reason=LetRec round body
+BOUNDARY node=391 operator=Join reason=LetRec round body
+BOUNDARY node=392 operator=Mfp reason=LetRec round body
+BOUNDARY node=393 operator=Join reason=LetRec round body
+BOUNDARY node=394 operator=Mfp reason=LetRec round body
+BOUNDARY node=395 operator=Join reason=LetRec round body
+BOUNDARY node=396 operator=Mfp reason=LetRec round body
+BOUNDARY node=397 operator=Join reason=LetRec round body
+BOUNDARY node=398 operator=Mfp reason=LetRec round body
+BOUNDARY node=311 operator=Get reason=LetRec round body
+BOUNDARY node=399 operator=Join reason=LetRec round body
+BOUNDARY node=313 operator=Mfp reason=LetRec round body
+BOUNDARY node=400 operator=Join reason=LetRec round body
+BOUNDARY node=830 operator=Union reason=LetRec round body
+BOUNDARY node=215 operator=Get reason=LetRec round body
+BOUNDARY node=237 operator=Mfp reason=LetRec round body
+BOUNDARY node=238 operator=Mint reason=LetRec round body
+BOUNDARY node=239 operator=Mint reason=LetRec round body
+BOUNDARY node=240 operator=Mfp reason=LetRec round body
+BOUNDARY node=241 operator=Mint reason=LetRec round body
+BOUNDARY node=242 operator=Mint reason=LetRec round body
+BOUNDARY node=243 operator=Mfp reason=LetRec round body
+BOUNDARY node=244 operator=Join reason=LetRec round body
+BOUNDARY node=245 operator=Get reason=LetRec round body
+BOUNDARY node=246 operator=Join reason=LetRec round body
+BOUNDARY node=247 operator=Join reason=LetRec round body
+BOUNDARY node=248 operator=Mfp reason=LetRec round body
+BOUNDARY node=249 operator=Mint reason=LetRec round body
+BOUNDARY node=250 operator=Mint reason=LetRec round body
+BOUNDARY node=251 operator=Mint reason=LetRec round body
+BOUNDARY node=252 operator=Mint reason=LetRec round body
+BOUNDARY node=254 operator=Mfp reason=LetRec round body
+BOUNDARY node=255 operator=Mfp reason=LetRec round body
+BOUNDARY node=256 operator=Mint reason=LetRec round body
+BOUNDARY node=257 operator=Mfp reason=LetRec round body
+BOUNDARY node=258 operator=Mint reason=LetRec round body
+BOUNDARY node=259 operator=Mint reason=LetRec round body
+BOUNDARY node=260 operator=Mfp reason=LetRec round body
+BOUNDARY node=261 operator=Join reason=LetRec round body
+BOUNDARY node=262 operator=Join reason=LetRec round body
+BOUNDARY node=263 operator=Mfp reason=LetRec round body
+BOUNDARY node=264 operator=Mint reason=LetRec round body
+BOUNDARY node=265 operator=Mint reason=LetRec round body
+BOUNDARY node=266 operator=Mint reason=LetRec round body
+BOUNDARY node=268 operator=Mfp reason=LetRec round body
+BOUNDARY node=269 operator=Mfp reason=LetRec round body
+BOUNDARY node=272 operator=Get reason=LetRec round body
+BOUNDARY node=273 operator=Mfp reason=LetRec round body
+BOUNDARY node=274 operator=Mfp reason=LetRec round body
+BOUNDARY node=275 operator=Mint reason=LetRec round body
+BOUNDARY node=276 operator=Mint reason=LetRec round body
+BOUNDARY node=277 operator=Mfp reason=LetRec round body
+BOUNDARY node=278 operator=Mint reason=LetRec round body
+BOUNDARY node=279 operator=Mint reason=LetRec round body
+BOUNDARY node=280 operator=Mfp reason=LetRec round body
+BOUNDARY node=281 operator=Join reason=LetRec round body
+BOUNDARY node=282 operator=Join reason=LetRec round body
+BOUNDARY node=283 operator=Join reason=LetRec round body
+BOUNDARY node=284 operator=Mfp reason=LetRec round body
+BOUNDARY node=285 operator=Mint reason=LetRec round body
+BOUNDARY node=286 operator=Mint reason=LetRec round body
+BOUNDARY node=287 operator=Mint reason=LetRec round body
+BOUNDARY node=288 operator=Mint reason=LetRec round body
+BOUNDARY node=290 operator=Mfp reason=LetRec round body
+BOUNDARY node=315 operator=Mfp reason=LetRec round body
+BOUNDARY node=316 operator=Mint reason=LetRec round body
+BOUNDARY node=317 operator=Mfp reason=LetRec round body
+BOUNDARY node=318 operator=Mint reason=LetRec round body
+BOUNDARY node=319 operator=Mint reason=LetRec round body
+BOUNDARY node=320 operator=Mfp reason=LetRec round body
+BOUNDARY node=321 operator=Join reason=LetRec round body
+BOUNDARY node=322 operator=Join reason=LetRec round body
+BOUNDARY node=323 operator=Mfp reason=LetRec round body
+BOUNDARY node=324 operator=Mint reason=LetRec round body
+BOUNDARY node=325 operator=Mint reason=LetRec round body
+BOUNDARY node=326 operator=Mint reason=LetRec round body
+BOUNDARY node=328 operator=Mfp reason=LetRec round body
+BOUNDARY node=329 operator=Mfp reason=LetRec round body
+BOUNDARY node=831 operator=Union reason=LetRec round body
+BOUNDARY node=222 operator=Get reason=LetRec round body
+BOUNDARY node=236 operator=Mfp reason=LetRec round body
+BOUNDARY node=230 operator=Get reason=LetRec round body
+BOUNDARY node=231 operator=Get reason=LetRec round body
+BOUNDARY node=232 operator=Join reason=LetRec round body
+BOUNDARY node=233 operator=Join reason=LetRec round body
+BOUNDARY node=234 operator=Mfp reason=LetRec round body
+BOUNDARY node=235 operator=Join reason=LetRec round body
+BOUNDARY node=270 operator=Get reason=LetRec round body
+BOUNDARY node=271 operator=Mfp reason=LetRec round body
+BOUNDARY node=291 operator=Get reason=LetRec round body
+BOUNDARY node=292 operator=Join reason=LetRec round body
+BOUNDARY node=293 operator=Mfp reason=LetRec round body
+BOUNDARY node=294 operator=Join reason=LetRec round body
+BOUNDARY node=295 operator=Join reason=LetRec round body
+BOUNDARY node=296 operator=Mfp reason=LetRec round body
+BOUNDARY node=297 operator=Join reason=LetRec round body
+BOUNDARY node=298 operator=Join reason=LetRec round body
+BOUNDARY node=299 operator=Mfp reason=LetRec round body
+BOUNDARY node=302 operator=Join reason=LetRec round body
+BOUNDARY node=303 operator=Mfp reason=LetRec round body
+BOUNDARY node=304 operator=Join reason=LetRec round body
+BOUNDARY node=305 operator=Mfp reason=LetRec round body
+BOUNDARY node=306 operator=Join reason=LetRec round body
+BOUNDARY node=307 operator=Join reason=LetRec round body
+BOUNDARY node=308 operator=Mfp reason=LetRec round body
+BOUNDARY node=309 operator=Join reason=LetRec round body
+BOUNDARY node=310 operator=Mfp reason=LetRec round body
+BOUNDARY node=312 operator=Join reason=LetRec round body
+BOUNDARY node=314 operator=Join reason=LetRec round body
+BOUNDARY node=832 operator=Union reason=LetRec round body
+BOUNDARY node=833 operator=Get reason=LetRec round body
+BOUNDARY node=253 operator=Mfp reason=LetRec round body
+BOUNDARY node=267 operator=Mfp reason=LetRec round body
+BOUNDARY node=289 operator=Mfp reason=LetRec round body
+BOUNDARY node=327 operator=Mfp reason=LetRec round body
+BOUNDARY node=539 operator=Mfp reason=LetRec round body
+BOUNDARY node=540 operator=Join reason=LetRec round body
+BOUNDARY node=541 operator=Join reason=LetRec round body
+BOUNDARY node=542 operator=Join reason=LetRec round body
+BOUNDARY node=543 operator=Mfp reason=LetRec round body
+BOUNDARY node=544 operator=Mint reason=LetRec round body
+BOUNDARY node=545 operator=Mint reason=LetRec round body
+BOUNDARY node=546 operator=Mint reason=LetRec round body
+BOUNDARY node=547 operator=Mint reason=LetRec round body
+BOUNDARY node=548 operator=Mfp reason=LetRec round body
+BOUNDARY node=550 operator=Mfp reason=LetRec round body
+BOUNDARY node=551 operator=Join reason=LetRec round body
+BOUNDARY node=552 operator=Join reason=LetRec round body
+BOUNDARY node=553 operator=Join reason=LetRec round body
+BOUNDARY node=554 operator=Mfp reason=LetRec round body
+BOUNDARY node=555 operator=Mint reason=LetRec round body
+BOUNDARY node=556 operator=Mint reason=LetRec round body
+BOUNDARY node=557 operator=Mint reason=LetRec round body
+BOUNDARY node=558 operator=Mint reason=LetRec round body
+BOUNDARY node=559 operator=Mfp reason=LetRec round body
+BOUNDARY node=834 operator=Union reason=LetRec round body
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r30","type":"SIMPLE_PROJECTION","type_code":2,"view":"n835"}
+BOUNDARY node=431 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=432 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=446 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=447 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=448 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=449 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=450 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=451 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=452 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=453 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=454 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=455 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=456 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=457 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=458 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=459 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=460 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=461 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=462 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=463 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=464 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=465 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=466 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=467 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=468 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=469 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=470 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=836 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=837 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=533 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=534 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=838 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=839 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=549 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=560 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=840 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=841 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=371 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=229 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=842 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r131","type":"SIMPLE_PROJECTION","type_code":2,"view":"n488"}
+BOUNDARY node=489 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=490 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=491 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=492 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=493 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=494 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=495 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=496 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=497 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=498 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=499 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=500 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=501 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=502 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=503 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=504 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=505 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=506 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=507 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=843 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=844 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r145","type":"SIMPLE_PROJECTION","type_code":2,"view":"n845"}
+BOUNDARY node=846 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=847 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=365 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=366 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=367 operator=Reduce reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=368 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=369 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=370 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=848 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=223 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=224 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=225 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=226 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=227 operator=Antijoin reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=228 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=849 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r146","type":"SIMPLE_PROJECTION","type_code":2,"view":"n850"}
+BOUNDARY node=750 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=851 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=852 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=220 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=221 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=853 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=216 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=217 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=218 operator=Antijoin reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=219 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=195 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=208 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=209 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=210 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=211 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=212 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=213 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=214 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=854 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=202 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=207 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=855 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=198 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=199 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=200 operator=Antijoin reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=201 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=203 operator=Reduce reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=204 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=205 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=206 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=856 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=857 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=196 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=197 operator=Join reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r34","type":"SIMPLE_PROJECTION","type_code":2,"view":"n858"}
+BOUNDARY node=471 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=561 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=562 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=563 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=189 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=190 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=564 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=565 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=566 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=567 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=568 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=569 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=570 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=571 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=572 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=573 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=574 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=575 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=576 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=577 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=578 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=580 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=581 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=582 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=583 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=584 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=585 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=586 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=587 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=588 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=589 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=590 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=591 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=592 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=593 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=594 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=595 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=596 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=597 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=599 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=600 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=601 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=602 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=603 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=604 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=605 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=606 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=607 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=608 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=609 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=610 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=611 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=612 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=613 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=614 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=615 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=616 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=618 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=619 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=620 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=621 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=622 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=623 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=624 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=625 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=626 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=627 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=628 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=629 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=630 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=632 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=633 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=634 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=635 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=636 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=637 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=638 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=639 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=640 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=641 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=642 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=643 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=644 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=645 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=646 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=647 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=648 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=649 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=651 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=652 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=653 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=654 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=655 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=656 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=657 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=658 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=659 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=660 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=661 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=662 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=663 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=664 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=665 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=666 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=667 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=669 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=670 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=671 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=672 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=673 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=674 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=675 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=676 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=677 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=678 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=679 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=680 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=681 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=682 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=683 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=684 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=685 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=686 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=688 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=689 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=690 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=691 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=692 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=693 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=694 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=695 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=696 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=697 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=698 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=699 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=700 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=702 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=703 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=704 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=705 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=706 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=707 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=708 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=709 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=710 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=711 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=712 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=713 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=714 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=715 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=716 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=717 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=718 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=719 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=721 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=722 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=723 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=724 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=725 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=726 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=727 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=728 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=729 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=730 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=731 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=732 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=733 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=734 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=735 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=736 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=738 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=739 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=740 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=741 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=742 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=743 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=744 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=745 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=746 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=859 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=860 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=191 operator=Reduce reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=192 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=193 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=194 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=861 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r26","type":"SIMPLE_PROJECTION","type_code":2,"view":"n862"}
+BOUNDARY node=472 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=486 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=487 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=508 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=509 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=94 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=510 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=511 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=512 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=513 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=514 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=515 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=516 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=517 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=518 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=519 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=520 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=521 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=522 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=523 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=524 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=525 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=526 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=527 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=528 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=529 operator=Mint reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=531 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=532 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=863 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=864 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=535 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=536 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=537 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=538 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=865 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=866 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=98 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r91","type":"SIMPLE_PROJECTION","type_code":2,"view":"n99"}
+BOUNDARY node=100 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=867 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=95 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r29","type":"SIMPLE_PROJECTION","type_code":2,"view":"n96"}
+BOUNDARY node=97 operator=Join reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=868 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r147","type":"SIMPLE_PROJECTION","type_code":2,"view":"n869"}
+BOUNDARY node=530 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=579 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=598 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=617 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=631 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=650 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=668 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=687 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=701 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=720 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=737 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=751 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=870 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=871 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=3; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=2; node_unsupported=0; delta_only_nodes=2; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Get","sql":"SELECT * FROM r148","type":"SIMPLE_PROJECTION","type_code":2,"view":"n872"}
+BOUNDARY node=752 operator=Get reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=873 operator=Union reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=874 operator=Threshold reason=weighted input from an explicit IR recompute boundary
+BOUNDARY node=91 operator=Get reason=LetRec round body
+BOUNDARY node=89 operator=Get reason=LetRec round body
+BOUNDARY node=92 operator=Join reason=LetRec round body
+BOUNDARY node=93 operator=Mfp reason=LetRec round body
+BOUNDARY node=875 operator=Union reason=LetRec round body
+BOUNDARY node=90 operator=Mfp reason=weighted input from an explicit IR recompute boundary
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0,c1,c2 FROM r25","type":"SIMPLE_PROJECTION","type_code":2,"view":"out25"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0,c1,c2 FROM out25","type":"SIMPLE_PROJECTION","type_code":2,"view":"read25"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0 FROM r29","type":"SIMPLE_PROJECTION","type_code":2,"view":"out29"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0 FROM out29","type":"SIMPLE_PROJECTION","type_code":2,"view":"read29"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0 FROM r33","type":"SIMPLE_PROJECTION","type_code":2,"view":"out33"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0 FROM out33","type":"SIMPLE_PROJECTION","type_code":2,"view":"read33"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0,c1,c2,c3 FROM r37","type":"SIMPLE_PROJECTION","type_code":2,"view":"out37"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0,c1,c2,c3 FROM out37","type":"SIMPLE_PROJECTION","type_code":2,"view":"read37"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0,c1,c2 FROM r39","type":"SIMPLE_PROJECTION","type_code":2,"view":"out39"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0,c1,c2 FROM out39","type":"SIMPLE_PROJECTION","type_code":2,"view":"read39"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0 FROM r64","type":"SIMPLE_PROJECTION","type_code":2,"view":"out64"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0 FROM out64","type":"SIMPLE_PROJECTION","type_code":2,"view":"read64"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0,c1,c2 FROM r88","type":"SIMPLE_PROJECTION","type_code":2,"view":"out88"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0,c1,c2 FROM out88","type":"SIMPLE_PROJECTION","type_code":2,"view":"read88"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0,c1 FROM r91","type":"SIMPLE_PROJECTION","type_code":2,"view":"out91"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0,c1 FROM out91","type":"SIMPLE_PROJECTION","type_code":2,"view":"read91"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0,c1 FROM r100","type":"SIMPLE_PROJECTION","type_code":2,"view":"out100"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0,c1 FROM out100","type":"SIMPLE_PROJECTION","type_code":2,"view":"read100"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0,c1 FROM r102","type":"SIMPLE_PROJECTION","type_code":2,"view":"out102"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0,c1 FROM out102","type":"SIMPLE_PROJECTION","type_code":2,"view":"read102"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0 FROM r107","type":"SIMPLE_PROJECTION","type_code":2,"view":"out107"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0 FROM out107","type":"SIMPLE_PROJECTION","type_code":2,"view":"read107"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0,c1 FROM r115","type":"SIMPLE_PROJECTION","type_code":2,"view":"out115"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0,c1 FROM out115","type":"SIMPLE_PROJECTION","type_code":2,"view":"read115"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0 FROM r116","type":"SIMPLE_PROJECTION","type_code":2,"view":"out116"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0 FROM out116","type":"SIMPLE_PROJECTION","type_code":2,"view":"read116"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0,c1,c2,c3 FROM r118","type":"SIMPLE_PROJECTION","type_code":2,"view":"out118"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0,c1,c2,c3 FROM out118","type":"SIMPLE_PROJECTION","type_code":2,"view":"read118"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=5; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=6; node_unsupported=0; delta_only_nodes=4; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"Output","sql":"SELECT c0 FROM r122","type":"SIMPLE_PROJECTION","type_code":2,"view":"out122"}
+VIEW {"openivm_detail":"refresh_type=SIMPLE_PROJECTION; group_cols=0; model_nodes=4; group_recompute_mode=source_delta; scan_occurrences=1; model_domains=0; node_domains=0; lineage_entries=0; node_lineage=0; node_semantics=4; node_unsupported=0; delta_only_nodes=3; delta_state_nodes=0; affected_recompute_nodes=0; full_recompute_nodes=1","openivm_warning":"","operator":"OutputSnapshot","sql":"SELECT c0 FROM out122","type":"SIMPLE_PROJECTION","type_code":2,"view":"read122"}
+TRANSPORT {"statements":18668,"refreshes":94}

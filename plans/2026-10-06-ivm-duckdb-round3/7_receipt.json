@@ -1,0 +1,296 @@
+{
+  "sqlite_ivm_base": "68cbda8cb4d7bc4bb5c5b92404e50a8f3dd1ea19",
+  "sprefa_base": "d4faed10f",
+  "transport": "external DuckDB CLI, SQL stdin and JSON stdout",
+  "duckdb": {
+    "version": "v1.5.2",
+    "commit": "8a5851971fae891f292c2714d86046ee018e9737"
+  },
+  "openivm": "cec35ae41e930a607db774673310e6cc263775bd",
+  "suites_run": 0,
+  "duckdb_runs": 4,
+  "ir_dd_control_runs": 2,
+  "counts": "Aggregated over every engine instance in each command. Statements include install, interning, settle, snapshots, checkpoints and rollback reconfiguration. Refresh calls include failed calls. Boundary nodes count each installed IR instance; scalar bag boundaries retain OpenIVM downstream tracking.",
+  "canonical_registry": {
+    "path": "/Users/chrishafley/projects/sprefa-wt/hafley-rs-dep/crates/hafley_scm/src/read/tsi/registry.rs",
+    "sha256": "6e4b5a324e0c8bb3c428b914a495ac4d79a9264fe78fb4dd790893cca3e9b960"
+  },
+  "runs": [
+    {
+      "run": "2_hello_duckdb",
+      "kind": "hello",
+      "exit_code": 1,
+      "ir_dd_exit_code": 0,
+      "output_equal_ir_dd": false,
+      "output_sha256": "ae9f1dd3098220cafc5fe1abb7cd391c9d374c54427c88e20f677aa1a12abe4b",
+      "ir_dd_output_sha256": "c17f63c5dc734ce0480170ea9bc851277517ab7c96321b5881752f57e4f9c312",
+      "registry_equal_hafley_scm": null,
+      "materialized_views": 124,
+      "refresh_types": {
+        "SIMPLE_PROJECTION": 117,
+        "AGGREGATE_GROUP": 6,
+        "SEMI_ANTI_RECOMPUTE": 1
+      },
+      "views_by_operator": {
+        "Get": {
+          "SIMPLE_PROJECTION": 55
+        },
+        "Output": {
+          "SIMPLE_PROJECTION": 25
+        },
+        "OutputSnapshot": {
+          "SIMPLE_PROJECTION": 25
+        },
+        "Mfp": {
+          "SIMPLE_PROJECTION": 8
+        },
+        "Threshold": {
+          "AGGREGATE_GROUP": 6
+        },
+        "Union": {
+          "SIMPLE_PROJECTION": 4
+        },
+        "Antijoin": {
+          "SEMI_ANTI_RECOMPUTE": 1
+        }
+      },
+      "boundary_nodes": 1532,
+      "boundary_reasons": {
+        "LetRec round body": 851,
+        "weighted input from an explicit IR recompute boundary": 681
+      },
+      "statements_sent": 30793,
+      "refresh_calls": 96,
+      "transport_instances": 3,
+      "full_refresh_reasons": [],
+      "largest_materialized_union": 6,
+      "diagnostics": [
+        {
+          "args": [
+            {
+              "a": "ir_eval"
+            },
+            {
+              "a": "none"
+            },
+            {
+              "args": [
+                {
+                  "a": "engine"
+                },
+                {
+                  "s": "src/_6_eval/_9b_ir_eval.rs:1035: Settle rel None: Worker(\"Not implemented Error: Plan contains single node, this is not supported\\n\\nSQL: PRAGMA refresh('n186')\")"
+                }
+              ],
+              "f": "ir_engine_error"
+            }
+          ],
+          "f": "diagnostic"
+        }
+      ],
+      "log": "2_hello_duckdb.log",
+      "output": "2_hello_duckdb.json"
+    },
+    {
+      "run": "4_registry_duckdb",
+      "kind": "registry",
+      "exit_code": 1,
+      "ir_dd_exit_code": 0,
+      "output_equal_ir_dd": false,
+      "output_sha256": null,
+      "ir_dd_output_sha256": "6e4b5a324e0c8bb3c428b914a495ac4d79a9264fe78fb4dd790893cca3e9b960",
+      "registry_equal_hafley_scm": false,
+      "materialized_views": 293,
+      "refresh_types": {
+        "SIMPLE_PROJECTION": 283,
+        "AGGREGATE_GROUP": 8,
+        "SEMI_ANTI_RECOMPUTE": 2
+      },
+      "views_by_operator": {
+        "Get": {
+          "SIMPLE_PROJECTION": 145
+        },
+        "Output": {
+          "SIMPLE_PROJECTION": 34
+        },
+        "OutputSnapshot": {
+          "SIMPLE_PROJECTION": 34
+        },
+        "Mfp": {
+          "SIMPLE_PROJECTION": 47
+        },
+        "Union": {
+          "SIMPLE_PROJECTION": 8
+        },
+        "Threshold": {
+          "AGGREGATE_GROUP": 8
+        },
+        "Join": {
+          "SIMPLE_PROJECTION": 15
+        },
+        "Antijoin": {
+          "SEMI_ANTI_RECOMPUTE": 2
+        }
+      },
+      "boundary_nodes": 2502,
+      "boundary_reasons": {
+        "LetRec round body": 1263,
+        "weighted input from an explicit IR recompute boundary": 1201,
+        "Rust dictionary/string scalar evaluation; bag output tracked by OpenIVM": 33,
+        "dictionary scalar lookup; excluded from OpenIVM NUL-sensitive change tracking": 5
+      },
+      "statements_sent": 193258,
+      "refresh_calls": 217,
+      "transport_instances": 3,
+      "full_refresh_reasons": [],
+      "largest_materialized_union": 7,
+      "diagnostics": [
+        {
+          "args": [
+            {
+              "a": "ir_eval"
+            },
+            {
+              "a": "none"
+            },
+            {
+              "args": [
+                {
+                  "a": "engine"
+                },
+                {
+                  "s": "src/_6_eval/_9b_ir_eval.rs:1035: Settle rel None: Worker(\"Not implemented Error: Plan contains single node, this is not supported\\n\\nSQL: PRAGMA refresh('n52')\")"
+                }
+              ],
+              "f": "ir_engine_error"
+            }
+          ],
+          "f": "diagnostic"
+        }
+      ],
+      "log": "4_registry_duckdb.log",
+      "output": "4_registry_duckdb/target/tsi/registry.rs"
+    },
+    {
+      "run": "5_hello_fixed",
+      "kind": "hello",
+      "exit_code": 0,
+      "ir_dd_exit_code": 0,
+      "output_equal_ir_dd": true,
+      "output_sha256": "c17f63c5dc734ce0480170ea9bc851277517ab7c96321b5881752f57e4f9c312",
+      "ir_dd_output_sha256": "c17f63c5dc734ce0480170ea9bc851277517ab7c96321b5881752f57e4f9c312",
+      "registry_equal_hafley_scm": null,
+      "materialized_views": 120,
+      "refresh_types": {
+        "SIMPLE_PROJECTION": 113,
+        "AGGREGATE_GROUP": 6,
+        "SEMI_ANTI_RECOMPUTE": 1
+      },
+      "views_by_operator": {
+        "Get": {
+          "SIMPLE_PROJECTION": 55
+        },
+        "Output": {
+          "SIMPLE_PROJECTION": 25
+        },
+        "OutputSnapshot": {
+          "SIMPLE_PROJECTION": 25
+        },
+        "Mfp": {
+          "SIMPLE_PROJECTION": 4
+        },
+        "Threshold": {
+          "AGGREGATE_GROUP": 6
+        },
+        "Union": {
+          "SIMPLE_PROJECTION": 4
+        },
+        "Antijoin": {
+          "SEMI_ANTI_RECOMPUTE": 1
+        }
+      },
+      "boundary_nodes": 1536,
+      "boundary_reasons": {
+        "LetRec round body": 851,
+        "weighted input from an explicit IR recompute boundary": 681,
+        "constant-false filter: OpenIVM refresh rejects EMPTY_RESULT: Plan contains single node, this is not supported": 4
+      },
+      "statements_sent": 32774,
+      "refresh_calls": 146,
+      "transport_instances": 3,
+      "full_refresh_reasons": [],
+      "largest_materialized_union": 6,
+      "diagnostics": [],
+      "log": "5_hello_fixed.log",
+      "output": "5_hello_fixed.json"
+    },
+    {
+      "run": "6_registry_fixed",
+      "kind": "registry",
+      "exit_code": 0,
+      "ir_dd_exit_code": 0,
+      "output_equal_ir_dd": true,
+      "output_sha256": "6e4b5a324e0c8bb3c428b914a495ac4d79a9264fe78fb4dd790893cca3e9b960",
+      "ir_dd_output_sha256": "6e4b5a324e0c8bb3c428b914a495ac4d79a9264fe78fb4dd790893cca3e9b960",
+      "registry_equal_hafley_scm": true,
+      "materialized_views": 288,
+      "refresh_types": {
+        "SIMPLE_PROJECTION": 278,
+        "AGGREGATE_GROUP": 8,
+        "SEMI_ANTI_RECOMPUTE": 2
+      },
+      "views_by_operator": {
+        "Get": {
+          "SIMPLE_PROJECTION": 145
+        },
+        "Output": {
+          "SIMPLE_PROJECTION": 34
+        },
+        "OutputSnapshot": {
+          "SIMPLE_PROJECTION": 34
+        },
+        "Mfp": {
+          "SIMPLE_PROJECTION": 42
+        },
+        "Union": {
+          "SIMPLE_PROJECTION": 8
+        },
+        "Threshold": {
+          "AGGREGATE_GROUP": 8
+        },
+        "Join": {
+          "SIMPLE_PROJECTION": 15
+        },
+        "Antijoin": {
+          "SEMI_ANTI_RECOMPUTE": 2
+        }
+      },
+      "boundary_nodes": 2507,
+      "boundary_reasons": {
+        "LetRec round body": 1263,
+        "weighted input from an explicit IR recompute boundary": 1201,
+        "Rust dictionary/string scalar evaluation; bag output tracked by OpenIVM": 33,
+        "constant-false filter: OpenIVM refresh rejects EMPTY_RESULT: Plan contains single node, this is not supported": 5,
+        "dictionary scalar lookup; excluded from OpenIVM NUL-sensitive change tracking": 5
+      },
+      "statements_sent": 3212582,
+      "refresh_calls": 11021,
+      "transport_instances": 3,
+      "full_refresh_reasons": [],
+      "largest_materialized_union": 7,
+      "diagnostics": [],
+      "log": "6_registry_fixed.log",
+      "output": "6_registry_fixed/target/tsi/registry.rs"
+    }
+  ],
+  "sprefa_branch": "feature/ivm-duckdb-engine",
+  "sprefa_sha": "0e00e73d8c5730bb06e0485721ad78a40dc02768",
+  "validation": {
+    "engine": "cargo check --offline -j4 -p ivm-duckdb: passed",
+    "sprefa": "cargo build --offline -j4 --bin dl8 and cargo check --offline -j4: passed",
+    "suites": "none",
+    "reruns": "one authorized rerun per DuckDB command after the constant-false fix; controls ran once each"
+  },
+  "constant_false_fix": "Mfp with a literal-false filter executes its SQL into an ordinary bag table. OpenIVM downstream views still track that table. The boundary log records OpenIVM rejecting the single-node EMPTY_RESULT refresh plan.",
+  "union_fix": "No change: no CLI exit observed; largest materialized union had 7 branches."
+}
