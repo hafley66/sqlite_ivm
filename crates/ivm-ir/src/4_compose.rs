@@ -100,7 +100,7 @@ pub fn compose(parts: &[(&str, &Program)]) -> Result<Composed, String> {
                 },
                 Op::Union(inputs) => Op::Union(inputs.iter().map(|i| n(*i)).collect()),
                 Op::Negate(input) => Op::Negate(n(*input)),
-                Op::Join { inputs, equivalences } => Op::Join { inputs: inputs.iter().map(|i| n(*i)).collect(), equivalences: equivalences.clone() },
+                Op::Join { inputs, equivalences, project } => Op::Join { inputs: inputs.iter().map(|i| n(*i)).collect(), equivalences: equivalences.clone(), project: project.clone() },
                 Op::Antijoin { l, r, lk, rk } => Op::Antijoin { l: n(*l), r: n(*r), lk: lk.clone(), rk: rk.clone() },
                 Op::Reduce { input, key, aggs } => Op::Reduce { input: n(*input), key: key.clone(), aggs: aggs.clone() },
                 Op::Threshold(input) => Op::Threshold(n(*input)),

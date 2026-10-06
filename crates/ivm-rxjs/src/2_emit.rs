@@ -128,8 +128,12 @@ fn node_source(program: &Program, id: usize, op: &Op) -> Result<String, String> 
         }
         Op::Negate(input) => render("n@INPUT@.pipe(map(b => { const delta = empty(); for (const { row, w } of b) put(delta, row, -w); return pack(@ID@, @OLD@, delta, b); }), @CACHE@);",
             &[("INPUT", input.to_string()), ("ID", id.to_string()), ("OLD", old), ("CACHE", cached().into())]),
-        Op::Join { inputs, equivalences } => {
+        Op::Join { inputs, equivalences, project } => {
             if inputs.len() != 2 { return Err("Join arity != 2".into()); }
+            // The joined row, `project` of it when the Join projects.
+            let pick = |row: &str| if project.is_empty() { row.to_owned() } else {
+                format!("((r) => [{}])({row})", project.iter().map(|c| format!("r[{c}]")).collect::<Vec<_>>().join(", "))
+            };
             let side = |which: u8| -> Result<Vec<ColId>, String> {
                 equivalences.iter().map(|class| class.iter().find(|(i, _)| *i == which).map(|(_, c)| *c).ok_or_else(|| "Join class missing side".into())).collect()
             };
@@ -140,7 +144,7 @@ fn node_source(program: &Program, id: usize, op: &Op) -> Result<String, String> 
                   let left = state.left;
                   for (const { row, w } of event.batch) {
                     const key = keyOf(row, @LK@);
-                    for (const other of state.right.get(key)?.values() ?? []) put(delta, [...row, ...other.row], w * other.w);
+                    for (const other of state.right.get(key)?.values() ?? []) put(delta, @PICK_LEFT@, w * other.w);
                     left = indexAdd(left, key, row, w);
                   }
                   return { left, right: state.right, delta };
@@ -148,14 +152,14 @@ fn node_source(program: &Program, id: usize, op: &Op) -> Result<String, String> 
                 let right = state.right;
                 for (const { row, w } of event.batch) {
                   const key = keyOf(row, @RK@);
-                  for (const other of state.left.get(key)?.values() ?? []) put(delta, [...other.row, ...row], other.w * w);
+                  for (const other of state.left.get(key)?.values() ?? []) put(delta, @PICK_RIGHT@, other.w * w);
                   right = indexAdd(right, key, row, w);
                 }
                 return { left: state.left, right, delta };
               }, { left: groups(node(a).old, @LK@), right: groups(node(b).old, @RK@), delta: empty() }),
               last(), map(state => pack(@ID@, @OLD@, state.delta, a, b)),
             )), @CACHE@);"#,
-                &[("LEFT", inputs[0].to_string()), ("RIGHT", inputs[1].to_string()), ("LK", json(&side(0)?)), ("RK", json(&side(1)?)), ("ID", id.to_string()), ("OLD", old), ("CACHE", cached().into())])
+                &[("LEFT", inputs[0].to_string()), ("RIGHT", inputs[1].to_string()), ("LK", json(&side(0)?)), ("RK", json(&side(1)?)), ("PICK_LEFT", pick("[...row, ...other.row]")), ("PICK_RIGHT", pick("[...other.row, ...row]")), ("ID", id.to_string()), ("OLD", old), ("CACHE", cached().into())])
         }
         Op::Antijoin { l, r, lk, rk } => render("forkJoin([n@LEFT@, n@RIGHT@]).pipe(scan((_: Batch | null, [a, b]) => { const delta = empty(); const before = weightByKey(node(b).old, @RK@); const after = weightByKey(node(b).now, @RK@); for (const { row, w } of a) if ((after.get(keyOf(row, @LK@)) ?? 0) <= 0) put(delta, row, w); for (const { row, w } of node(a).old.values()) { const key = keyOf(row, @LK@); const had = (before.get(key) ?? 0) <= 0; const has = (after.get(key) ?? 0) <= 0; if (had !== has) put(delta, row, has ? w : -w); } return pack(@ID@, @OLD@, delta, a, b); }, null), map(b => b!), @CACHE@);",
             &[("LEFT", l.to_string()), ("RIGHT", r.to_string()), ("LK", json(lk)), ("RK", json(rk)), ("ID", id.to_string()), ("OLD", old), ("CACHE", cached().into())]),

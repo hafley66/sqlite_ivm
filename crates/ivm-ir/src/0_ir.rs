@@ -193,11 +193,13 @@ pub enum Op {
     },
     Union(Vec<NodeId>),
     Negate(NodeId),
-    /// Output columns are the inputs' columns concatenated. Each equivalence class lists
-    /// `(input position, column)` pairs that must be equal.
+    /// Output columns are the inputs' columns concatenated, then `project` of them (empty = all).
+    /// Each equivalence class lists `(input position, column)` pairs that must be equal.
     Join {
         inputs: Vec<NodeId>,
         equivalences: Vec<Vec<(u8, ColId)>>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        project: Vec<ColId>,
     },
     Antijoin {
         l: NodeId,
@@ -392,10 +394,10 @@ impl Program {
             }
             Op::Union(inputs) => types_of(*inputs.first()?)?,
             Op::Negate(input) | Op::Threshold(input) | Op::Delay(input) => types_of(*input)?,
-            Op::Join { inputs, .. } => {
+            Op::Join { inputs, project, .. } => {
                 let mut cols = Vec::new();
                 for input in inputs { cols.extend(types_of(*input)?); }
-                cols
+                if project.is_empty() { cols } else { project.iter().map(|c| cols.get(*c as usize).copied()).collect::<Option<Vec<_>>>()? }
             }
             Op::Antijoin { l, .. } => types_of(*l)?,
             Op::Reduce { input, key, aggs } => {

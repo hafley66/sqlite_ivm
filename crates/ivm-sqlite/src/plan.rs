@@ -383,6 +383,7 @@ pub(crate) fn lower_ir(plan: &Compiled, source_types: &dyn Fn(&str) -> Option<Ve
                         nodes.push(Op::Join {
                             inputs: vec![scan_nodes[join.left], scan_nodes[join.right]],
                             equivalences,
+    project: vec![],
                         });
                         let mut project: Vec<ColId> =
                             join.left_proj.iter().map(|&i| i as ColId).collect();

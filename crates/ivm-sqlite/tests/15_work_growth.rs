@@ -36,7 +36,7 @@ fn family(n: usize) -> Program {
         program.nodes.extend([
             Op::Get(0),
             Op::Get(id),
-            Op::Join { inputs: vec![at + 1, at], equivalences: vec![vec![(0, 1), (1, 0)]] },
+            Op::Join { inputs: vec![at + 1, at], equivalences: vec![vec![(0, 1), (1, 0)]], project: vec![] },
             Op::Mfp { input: at + 2, filter: vec![], map: vec![], project: vec![0, 3] },
             Op::Union(vec![at, at + 3]),
         ]);

@@ -165,6 +165,7 @@ fn typed_map_filter_over_join_uses_join_delta() {
             Op::Join {
                 inputs: vec![0, 1],
                 equivalences: vec![vec![(0, 1), (1, 0)]],
+                project: vec![],
             },
             Op::Mfp {
                 input: 2,

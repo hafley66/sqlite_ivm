@@ -49,6 +49,7 @@ fn recursive_program(strata: usize) -> Program {
             Op::Join {
                 inputs: vec![at + 1, at],
                 equivalences: vec![vec![(0, 1), (1, 0)]],
+                project: vec![],
             },
             Op::Mfp {
                 input: at + 2,
