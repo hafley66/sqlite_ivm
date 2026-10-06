@@ -238,6 +238,15 @@ fn files(dir: &Path, extension: &str) -> TestResult<Vec<PathBuf>> {
     out.sort();
     Ok(out)
 }
+/// An ignored test run without the external DuckDB build fails instead of passing.
+fn require_env() -> TestResult<()> {
+    for var in ["IVM_DUCKDB_CLI", "IVM_DUCKDB_EXTENSION"] {
+        if std::env::var_os(var).is_none() {
+            return Err(format!("{var} is unset; it names the OpenIVM DuckDB build").into());
+        }
+    }
+    Ok(())
+}
 fn report(name: &str, result: TestResult<()>, counts: &mut (usize, usize)) {
     match result {
         Ok(()) => {
@@ -251,7 +260,9 @@ fn report(name: &str, result: TestResult<()>, counts: &mut (usize, usize)) {
     }
 }
 #[test]
+#[ignore = "needs IVM_DUCKDB_CLI and IVM_DUCKDB_EXTENSION"]
 fn shared_conformance() -> TestResult<()> {
+    require_env()?;
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
     let oracle = root.join("ivm-dd/oracle");
     let mut counts = (0, 0);
@@ -329,7 +340,9 @@ fn shared_conformance() -> TestResult<()> {
     Ok(())
 }
 #[test]
+#[ignore = "needs IVM_DUCKDB_CLI and IVM_DUCKDB_EXTENSION"]
 fn string_lifecycle_and_rewind() -> TestResult<()> {
+    require_env()?;
     println!("INSTALL strings");
     let p: Program =
         serde_json::from_str(include_str!("../../ivm-dd/oracle/16_string.program.json"))?;
