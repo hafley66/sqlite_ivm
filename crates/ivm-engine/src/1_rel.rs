@@ -110,6 +110,12 @@ pub trait Engine: Sized {
     /// the same row would. Each argument is an interned term, a text cell or a raw value.
     /// The constructor's rows hold the new terms from the next settle on.
     fn intern_terms(&mut self, terms: &[(RelId, Row)]) -> Result<Vec<Cell>, EngineError>;
+    /// Constructors `(name, argument columns)` no operator reads: one id each (a known name keeps
+    /// its own), accepted by `intern_terms` from then on.
+    fn declare_constructors(&mut self, ctors: &[(String, Vec<Ty>)]) -> Result<Vec<RelId>, EngineError> {
+        let _ = ctors;
+        Err(EngineError::new(Stage::Settle, None, ErrorKind::Unsupported("declare_constructors")))
+    }
     fn text(&self, id: Cell) -> Result<Option<String>, EngineError>;
     fn intern_any(&mut self, value: &ivm_ir::AnyValue) -> Result<Cell, EngineError>;
     fn any_value(&self, id: Cell) -> Result<ivm_ir::AnyValue, EngineError>;

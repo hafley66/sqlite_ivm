@@ -879,6 +879,7 @@ enum Command {
     InternSnapshot(RelId, mpsc::Sender<Result<Vec<(Row, W)>, EngineError>>),
     InternSnapshots(Vec<RelId>, mpsc::Sender<Result<Vec<Vec<(Row, W)>>, EngineError>>),
     InternTerms(Vec<(RelId, Row)>, mpsc::Sender<Result<Vec<Cell>, EngineError>>),
+    DeclareConstructors(Vec<(String, Vec<Ty>)>, mpsc::Sender<Vec<RelId>>),
     InternText(String, mpsc::Sender<Cell>),
     Text(Cell, mpsc::Sender<Option<String>>),
     InternAny(AnyValue, mpsc::Sender<Cell>),
@@ -979,6 +980,11 @@ impl Engine for Dd {
         self.tx.send(Command::InternTerms(terms.to_vec(), reply)).map_err(|e| worker_error(Stage::Settle, e))?;
         answer.recv().map_err(|e| worker_error(Stage::Settle, e))?
     }
+    fn declare_constructors(&mut self, ctors: &[(String, Vec<Ty>)]) -> Result<Vec<RelId>, EngineError> {
+        let (reply, answer) = mpsc::channel();
+        self.tx.send(Command::DeclareConstructors(ctors.to_vec(), reply)).map_err(|e| worker_error(Stage::Settle, e))?;
+        answer.recv().map_err(|e| worker_error(Stage::Settle, e))
+    }
     fn intern_text(&mut self, value: &str) -> Result<Cell, EngineError> {
         let (reply, answer) = mpsc::channel();
         self.tx.send(Command::InternText(value.to_owned(), reply)).map_err(|e| worker_error(Stage::Settle, e))?;
@@ -1043,7 +1049,7 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
             if program.uses_strings() { dict.mint_text(""); }
             program.texts.iter().map(|text| dict.mint_text(text)).collect::<Vec<_>>()
         };
-        let constructors: BTreeMap<RelId, (String, Vec<Ty>)> = program.rels.iter()
+        let mut constructors: BTreeMap<RelId, (String, Vec<Ty>)> = program.rels.iter()
             .filter(|r| r.kind == RelKind::Constructor)
             .map(|r| (r.id, (r.name.clone(), r.cols.iter().skip(1).copied().collect())))
             .collect();
@@ -1256,6 +1262,20 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
                         Ok(interner.borrow_mut().mint(name, args, types))
                     }).collect();
                     let _ = reply.send(answer);
+                }
+                Command::DeclareConstructors(ctors, reply) => {
+                    let mut next = program.rels.iter().map(|rel| rel.id + 1).chain(constructors.keys().map(|id| id + 1)).max().unwrap_or(0);
+                    let ids = ctors.into_iter().map(|(name, types)| match constructor_ids.get(&name) {
+                        Some(id) => *id,
+                        None => {
+                            let id = next;
+                            next += 1;
+                            constructor_ids.insert(name.clone(), id);
+                            constructors.insert(id, (name, types));
+                            id
+                        }
+                    }).collect();
+                    let _ = reply.send(ids);
                 }
                 Command::InternText(value, reply) => { let _ = reply.send(interner.borrow_mut().mint_text(&value)); }
                 Command::Text(id, reply) => { let _ = reply.send(interner.borrow().text(id).map(str::to_owned)); }
