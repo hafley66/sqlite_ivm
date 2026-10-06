@@ -48,6 +48,7 @@ impl Case {
         let mut rng = Rng(seed);
         let args = if rng.chance(50) { vec![0, 1] } else { vec![1, 0] };
         let program = Program {
+            terms: vec![],
             texts: vec![],
             rels: vec![
                 Relation { id: 0, name: "mint_source".into(), cols: vec![Ty::Int, Ty::Int], kind: RelKind::Source },

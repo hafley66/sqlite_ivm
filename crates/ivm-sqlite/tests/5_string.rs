@@ -155,6 +155,7 @@ fn walk_program() -> Program {
     use ivm_ir::{Expr, Func, LetRec, Op, RelKind, Relation, StrMode, Stratum, Ty};
     let rel = |id, name: &str, cols: Vec<Ty>, kind| Relation { id, name: name.into(), cols, kind };
     Program {
+        terms: vec![],
         texts: vec![],
         rels: vec![
             rel(0, "word", vec![Ty::Id], RelKind::Source),

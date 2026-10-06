@@ -4,7 +4,7 @@ use crate::{
     catalog, Cell, Program as SqlProgram, Sign,
 };
 use ivm_engine::{Counters, Engine, EngineError, ErrorKind, Stage};
-use ivm_ir::{Delta, Expr, Frontier, NodeId, Op, Program, RelId, RelKind, Row, Stratum, W};
+use ivm_ir::{Delta, Expr, Frontier, NodeId, Op, Program, RelId, RelKind, Row, Stratum, TermArg, W};
 use sqlite_ext::rusqlite::{self, Connection};
 use std::collections::{BTreeSet, HashSet};
 
@@ -175,6 +175,8 @@ fn output_program(ir: &Program, output: RelId) -> Program {
             _ => {}
         }
     }
+    // The term table stays whole: its functors and its texts stay with it.
+    relations.extend(single.terms.iter().map(|term| term.functor));
     single.rels.retain(|relation| relations.contains(&relation.id));
     let mut used_texts = BTreeSet::new();
     for op in &single.nodes {
@@ -182,11 +184,21 @@ fn output_program(ir: &Program, output: RelId) -> Program {
             filter.iter().chain(map).for_each(|expr| text_refs(expr, &mut used_texts));
         }
     }
+    for term in &single.terms {
+        used_texts.extend(term.args.iter().filter_map(|arg| match arg { TermArg::Text(id) => Some(*id), _ => None }));
+    }
     let text_ids = used_texts.into_iter().collect::<Vec<_>>();
     single.texts = text_ids.iter().filter_map(|id| ir.texts.get(*id as usize).cloned()).collect();
     for op in &mut single.nodes {
         if let Op::Mfp { filter, map, .. } = op {
             filter.iter_mut().chain(map).for_each(|expr| remap_text(expr, &text_ids));
+        }
+    }
+    for term in &mut single.terms {
+        for arg in &mut term.args {
+            if let TermArg::Text(id) = arg {
+                if let Ok(mapped) = text_ids.binary_search(id) { *id = mapped as u32; }
+            }
         }
     }
     for stratum in &mut single.strata {
@@ -667,7 +679,7 @@ impl Engine for Sqlite {
             next += 1;
         }
         if !added.is_empty() {
-            let declared = Program { texts: Vec::new(), rels: added.clone(), nodes: Vec::new(), strata: Vec::new(), outputs: Vec::new() };
+            let declared = Program { texts: Vec::new(), terms: Vec::new(), rels: added.clone(), nodes: Vec::new(), strata: Vec::new(), outputs: Vec::new() };
             crate::terms::install(&self.db, &declared).map_err(|e| error(Stage::Settle, e))?;
             self.ir.rels.extend(added);
         }

@@ -30,6 +30,7 @@ fn nullable_sql_text_source_matches_sqlite() {
 
 fn extrema_ir() -> Program {
     Program {
+        terms: vec![],
         texts: vec![],
         rels: vec![
             Relation { id: 0, name: "src".into(), cols: vec![Ty::Int, Ty::Any], kind: RelKind::Source },

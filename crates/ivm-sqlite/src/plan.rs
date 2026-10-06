@@ -432,7 +432,8 @@ pub(crate) fn lower_ir(plan: &Compiled, source_types: &dyn Fn(&str) -> Option<Ve
         }
     };
     let mut program = IrProgram {
-        texts: vec![],
+                texts: vec![],
+        terms: vec![],
         rels,
         nodes,
         strata: vec![Stratum::Let {

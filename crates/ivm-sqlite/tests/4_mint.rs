@@ -6,6 +6,7 @@ use rusqlite::{Connection, OpenFlags};
 
 fn mint_program(source: &str, output: &str) -> Program {
     Program {
+        terms: vec![],
         texts: vec![],
         rels: vec![
             Relation { id: 0, name: source.into(), cols: vec![Ty::Int, Ty::Int], kind: RelKind::Source },
@@ -80,6 +81,7 @@ fn failed_constructor_write_rolls_back_source_and_dictionary() {
 #[test]
 fn constructor_and_mint_paths_consolidate_one_delta() {
     let program = Program {
+        terms: vec![],
         texts: vec![],
         rels: vec![
             Relation { id: 0, name: "twice_source".into(), cols: vec![Ty::Int], kind: RelKind::Source },
@@ -112,6 +114,7 @@ fn topk_over_ids_uses_dictionary_order_across_programs() {
     minted.settle(change([1, 3], 1)).unwrap();
     minted.settle(change([1, 2], 1)).unwrap();
     let program = Program {
+        terms: vec![],
         texts: vec![],
         rels: vec![
             Relation { id: 0, name: "order_ids".into(), cols: vec![Ty::Id], kind: RelKind::Source },

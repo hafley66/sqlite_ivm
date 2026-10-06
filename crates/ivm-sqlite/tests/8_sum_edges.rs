@@ -10,6 +10,7 @@ use support::sqlite_rows;
 
 fn sum_ir() -> Program {
     Program {
+        terms: vec![],
         texts: vec![],
         rels: vec![
             Relation { id: 0, name: "src".into(), cols: vec![Ty::Int, Ty::Int, Ty::Any], kind: RelKind::Source },

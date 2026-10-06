@@ -6,6 +6,7 @@ use ivm_sqlite::Sqlite;
 /// `out(x) :- src(x), x > floor`, with a constructor `9:1:f` the program names.
 fn part(floor: i64) -> Program {
     Program {
+        terms: vec![],
         texts: Vec::new(),
         rels: vec![
             Relation { id: 0, name: "src".into(), cols: vec![Ty::Int], kind: RelKind::Source },

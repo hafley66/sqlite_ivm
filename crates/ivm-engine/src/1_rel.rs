@@ -190,7 +190,7 @@ pub fn eval(expr: &Expr, row: &[Cell]) -> Cell {
 }
 
 pub fn eval_with(expr: &Expr, row: &[Cell], term_lt: &dyn Fn(Cell, Cell) -> bool) -> Cell {
-    eval_with_text(expr, row, term_lt, &|_| panic!("Text requires a dictionary"), &|| panic!("StrNil requires a dictionary"))
+    eval_with_text(expr, row, term_lt, &|_| panic!("Text requires a dictionary"), &|_| panic!("Term requires a dictionary"), &|| panic!("StrNil requires a dictionary"))
 }
 
 enum ExprStep<'e> {
@@ -242,11 +242,13 @@ fn walk_expr<V: Copy>(expr: &Expr, leaf: impl Fn(&Expr) -> V, apply: impl Fn(&Fu
     values[0]
 }
 
-pub fn eval_with_text(expr: &Expr, row: &[Cell], term_lt: &dyn Fn(Cell, Cell) -> bool, text: &dyn Fn(u32) -> Cell, nil: &dyn Fn() -> Cell) -> Cell {
+/// `text(i)` and `term(i)` are the cells of `Program::texts[i]` and `Program::terms[i]`.
+pub fn eval_with_text(expr: &Expr, row: &[Cell], term_lt: &dyn Fn(Cell, Cell) -> bool, text: &dyn Fn(u32) -> Cell, term: &dyn Fn(u32) -> Cell, nil: &dyn Fn() -> Cell) -> Cell {
     let leaf = |e: &Expr| match e {
         Expr::Col(c) => row[*c as usize],
         Expr::Lit(v) => *v,
         Expr::Text(index) => text(*index),
+        Expr::Term(index) => term(*index),
         Expr::Call(..) => nil(),
     };
     walk_expr(expr, leaf, |func, a: &[Cell]| match func {
@@ -270,7 +272,7 @@ pub fn eval_with_text(expr: &Expr, row: &[Cell], term_lt: &dyn Fn(Cell, Cell) ->
 pub fn eval_typed_with_text(
     expr: &Expr, row: &[Cell], types: &[Ty],
     term_lt: &dyn Fn(Cell, Cell) -> bool,
-    text: &dyn Fn(u32) -> Cell, nil: &dyn Fn() -> Cell,
+    text: &dyn Fn(u32) -> Cell, term: &dyn Fn(u32) -> Cell, nil: &dyn Fn() -> Cell,
     compare: &dyn Fn(Ty, Cell, Ty, Cell) -> std::cmp::Ordering,
 ) -> Cell {
     use std::cmp::Ordering;
@@ -278,6 +280,7 @@ pub fn eval_typed_with_text(
         Expr::Col(c) => (row[*c as usize], types.get(*c as usize).copied()),
         Expr::Lit(v) => (*v, Some(Ty::Int)),
         Expr::Text(index) => (text(*index), Some(Ty::Text)),
+        Expr::Term(index) => (term(*index), Some(Ty::Id)),
         Expr::Call(..) => (nil(), Some(Ty::Text)),
     };
     let apply = |func: &Func, a: &[(Cell, Option<Ty>)]| {

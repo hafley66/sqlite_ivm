@@ -239,6 +239,7 @@ fn expr(t: &str, a: usize, map: &[Expr], e: &Expr) -> String {
         Expr::Col(c) => col(t, a, map, *c as usize),
         Expr::Lit(v) => format!("({v})"),
         Expr::Text(_) => panic!("string expressions use the text oracle"),
+        Expr::Term(_) => panic!("the generator draws no term literals"),
         Expr::Call(f, args) => {
             let x = |i: usize| expr(t, a, map, &args[i]);
             let op = match f {

@@ -1,7 +1,7 @@
 //! Several programs as one install. The parts share nothing but the dictionary: a constructor
 //! relation is one relation per name, every other relation belongs to one part.
 
-use crate::{Expr, LetRec, Op, Program, RelId, RelKind, Relation, Stratum, Ty};
+use crate::{Expr, LetRec, Op, Program, RelId, RelKind, Relation, Stratum, TermArg, TermLit, Ty};
 use std::collections::BTreeMap;
 
 pub struct Composed {
@@ -10,14 +10,16 @@ pub struct Composed {
     pub rels: Vec<BTreeMap<RelId, RelId>>,
 }
 
-/// `expr` with every `Text` index shifted by `base`: post-order over an explicit stack.
-fn texts(expr: &Expr, base: u32) -> Expr {
+/// `expr` with every `Text` index shifted by `base` and every `Term` index by `terms`: post-order
+/// over an explicit stack.
+fn texts(expr: &Expr, base: u32, terms: u32) -> Expr {
     enum Step<'e> { Enter(&'e Expr), Build(crate::Func, usize) }
     let mut steps = vec![Step::Enter(expr)];
     let mut done: Vec<Expr> = Vec::new();
     while let Some(step) = steps.pop() {
         match step {
             Step::Enter(Expr::Text(index)) => done.push(Expr::Text(index + base)),
+            Step::Enter(Expr::Term(index)) => done.push(Expr::Term(index + terms)),
             Step::Enter(Expr::Call(func, args)) => {
                 steps.push(Step::Build(*func, args.len()));
                 steps.extend(args.iter().rev().map(Step::Enter));
@@ -52,7 +54,7 @@ fn letrec(rec: &LetRec, rel: &impl Fn(RelId) -> RelId, node: u32) -> LetRec {
 /// `parts` as `(prefix, program)`, concatenated in order; output 0 reads every source. `Err`
 /// names a constructor two parts declare with different columns.
 pub fn compose(parts: &[(&str, &Program)]) -> Result<Composed, String> {
-    let mut out = Program { texts: Vec::new(), rels: Vec::new(), nodes: Vec::new(), strata: Vec::new(), outputs: Vec::new() };
+    let mut out = Program { texts: Vec::new(), terms: Vec::new(), rels: Vec::new(), nodes: Vec::new(), strata: Vec::new(), outputs: Vec::new() };
     let mut constructors: BTreeMap<String, (RelId, Vec<Ty>)> = BTreeMap::new();
     let mut maps = Vec::with_capacity(parts.len());
     // Id 0 is the sentinel that reads every source.
@@ -83,6 +85,7 @@ pub fn compose(parts: &[(&str, &Program)]) -> Result<Composed, String> {
         }
         let node_base = out.nodes.len() as u32;
         let text_base = out.texts.len() as u32;
+        let term_base = out.terms.len() as u32;
         let rel = |id: RelId| map[&id];
         for op in &part.nodes {
             let n = |id: u32| id + node_base;
@@ -93,8 +96,8 @@ pub fn compose(parts: &[(&str, &Program)]) -> Result<Composed, String> {
                 Op::Str { input, op, args } => Op::Str { input: n(*input), op: *op, args: args.clone() },
                 Op::Mfp { input, filter, map, project } => Op::Mfp {
                     input: n(*input),
-                    filter: filter.iter().map(|e| texts(e, text_base)).collect(),
-                    map: map.iter().map(|e| texts(e, text_base)).collect(),
+                    filter: filter.iter().map(|e| texts(e, text_base, term_base)).collect(),
+                    map: map.iter().map(|e| texts(e, text_base, term_base)).collect(),
                     project: project.clone(),
                 },
                 Op::Union(inputs) => Op::Union(inputs.iter().map(|i| n(*i)).collect()),
@@ -116,6 +119,14 @@ pub fn compose(parts: &[(&str, &Program)]) -> Result<Composed, String> {
         }
         out.outputs.extend(part.outputs.iter().map(|id| rel(*id)));
         out.texts.extend(part.texts.iter().cloned());
+        out.terms.extend(part.terms.iter().map(|term| TermLit {
+            functor: rel(term.functor),
+            args: term.args.iter().map(|arg| match arg {
+                TermArg::Term(index) => TermArg::Term(index + term_base),
+                TermArg::Text(index) => TermArg::Text(index + text_base),
+                TermArg::Raw(cell) => TermArg::Raw(*cell),
+            }).collect(),
+        }));
         maps.push(map);
     }
     let sources: Vec<(RelId, usize)> = out.rels.iter().filter(|r| r.kind == RelKind::Source).map(|r| (r.id, r.cols.len())).collect();
@@ -140,7 +151,8 @@ mod tests {
 
     fn part(name: &str) -> Program {
         Program {
-            texts: vec![format!("{name} text")],
+                        texts: vec![format!("{name} text")],
+            terms: Vec::new(),
             rels: vec![
                 Relation { id: 0, name: "src".into(), cols: vec![Ty::Int], kind: RelKind::Source },
                 Relation { id: 1, name: "9:1:f".into(), cols: vec![Ty::Id, Ty::Id], kind: RelKind::Constructor },

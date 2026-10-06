@@ -207,6 +207,9 @@ pub struct SqlRel {
     terms: Vec<(usize, Vec<String>)>,
     constructors: std::collections::BTreeMap<RelId, (String, Vec<Ty>)>,
     texts: Vec<String>,
+    /// Per `Program::terms` entry, a scalar subquery reading its id from its constructor table;
+    /// `terms::install` interned every entry.
+    lits: Vec<String>,
     /// Join SQL node per (left node, right node, predicates): rules that join the same inputs on the
     /// same keys share one plan node.
     joins: std::collections::HashMap<(usize, usize, Vec<String>), SqlC>,
@@ -244,7 +247,37 @@ fn unsupported(what: &'static str) -> EngineError {
 
 /// Expr as SQL text; comparisons and logic yield 0/1, Add/Sub wrap like `eval`. Renders the tree
 /// in post-order with an explicit stack: each call reads its arguments' rendered text.
-fn render(e: &Expr, arity: usize, maps: &[String], texts: &[String], types: &[Ty]) -> Result<String, EngineError> {
+/// The SQL of each `Program::terms` entry: its id read back from its constructor table by its
+/// arguments, an argument term by its own entry's SQL.
+fn term_lits(p: &Program) -> Result<Vec<String>, EngineError> {
+    let mut lits: Vec<String> = Vec::with_capacity(p.terms.len());
+    for lit in &p.terms {
+        let rel = p.rel(lit.functor).filter(|rel| rel.kind == RelKind::Constructor)
+            .ok_or_else(|| EngineError::new(Stage::Install, Some(lit.functor), ErrorKind::UnknownRel(lit.functor)))?;
+        let table = crate::catalog::quote(crate::terms::ctor_table(&rel.name));
+        let mut on = Vec::with_capacity(lit.args.len());
+        for (position, arg) in lit.args.iter().enumerate() {
+            let value = match arg {
+                TermArg::Term(index) => lits.get(*index as usize).cloned().ok_or_else(|| unsupported("term argument after its term"))?,
+                TermArg::Text(index) => {
+                    let value = p.texts.get(*index as usize).ok_or_else(|| unsupported("Text index out of range"))?;
+                    format!("ivm_text_id('{}')", value.replace('\'', "''"))
+                }
+                TermArg::Raw(cell) if *cell == i64::MIN => I64_MIN.into(),
+                TermArg::Raw(cell) => format!("({cell})"),
+            };
+            on.push(format!("c{} = {value}", position + 1));
+        }
+        lits.push(if on.is_empty() {
+            format!("(SELECT c0 FROM {table} LIMIT 1)")
+        } else {
+            format!("(SELECT c0 FROM {table} WHERE {})", on.join(" AND "))
+        });
+    }
+    Ok(lits)
+}
+
+fn render(e: &Expr, arity: usize, maps: &[String], texts: &[String], lits: &[String], types: &[Ty]) -> Result<String, EngineError> {
     // Pre-order with the last argument first; reversed, every argument precedes its call, left to right.
     let mut order = Vec::new();
     let mut walk = vec![e];
@@ -266,6 +299,7 @@ fn render(e: &Expr, arity: usize, maps: &[String], texts: &[String], types: &[Ty
                 let value = texts.get(*index as usize).ok_or_else(|| unsupported("Text index out of range"))?;
                 format!("ivm_text_id('{}')", value.replace('\'', "''"))
             }
+            Expr::Term(index) => lits.get(*index as usize).cloned().ok_or_else(|| unsupported("Term index out of range"))?,
             Expr::Call(func, args) => {
                 let rendered = done.split_off(done.len() - args.len());
                 let a = |i: usize| -> Result<String, EngineError> {
@@ -372,6 +406,7 @@ impl SqlRel {
             constructors: p.rels.iter().filter(|r| r.kind == RelKind::Constructor)
                 .map(|r| (r.id, (r.name.clone(), r.cols.iter().skip(1).copied().collect()))).collect(),
             texts: p.texts.clone(),
+            lits: Vec::new(),
             joins: std::collections::HashMap::new(),
             types: Vec::new(),
         };
@@ -380,6 +415,10 @@ impl SqlRel {
             rel.integrate(&c, (0..c.arity).collect());
             rel.nodes[c.node].source = true;
             rel.sources.push((r.id, c));
+        }
+        match term_lits(p) {
+            Ok(lits) => rel.lits = lits,
+            Err(e) => rel.err = Some(e),
         }
         rel.mark = rel.nodes.len();
         rel
@@ -875,13 +914,13 @@ impl Rel for SqlRel {
             let mut maps = Vec::new();
             let mut types = input_types.to_vec();
             for e in map {
-                let m = render(e, c.arity, &maps, &self.texts, &types)?;
+                let m = render(e, c.arity, &maps, &self.texts, &self.lits, &types)?;
                 maps.push(m);
                 types.push(expr_type(e, &types).ok_or_else(|| unsupported("Mfp expression type"))?);
             }
             let wheres = filter
                 .iter()
-                .map(|e| Ok(format!("({}) <> 0", render(e, c.arity, &[], &self.texts, input_types)?)))
+                .map(|e| Ok(format!("({}) <> 0", render(e, c.arity, &[], &self.texts, &self.lits, input_types)?)))
                 .collect::<Result<_, _>>()?;
             let all: Vec<ColId> = (0..(c.arity + maps.len()) as ColId).collect();
             let proj = if project.is_empty() {
@@ -891,7 +930,7 @@ impl Rel for SqlRel {
             };
             let cols = proj
                 .iter()
-                .map(|p| render(&Expr::Col(*p), c.arity, &maps, &self.texts, &types))
+                .map(|p| render(&Expr::Col(*p), c.arity, &maps, &self.texts, &self.lits, &types))
                 .collect::<Result<_, _>>()?;
             Ok((wheres, cols))
         })();

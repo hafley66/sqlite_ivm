@@ -64,6 +64,7 @@ fn expression_node(expr: &Expr, row: &str, rendered: Vec<String>) -> String {
         Expr::Col(col) => format!("{row}[{col}]"),
         Expr::Lit(value) => value.to_string(),
         Expr::Text(index) => format!("terms.literals[{index}]"),
+        Expr::Term(_) => unreachable!("emit rejects a program with a term table"),
         Expr::Call(func, _) => {
             let mut rendered = rendered.into_iter();
             let a = rendered.next().unwrap_or_default();
@@ -261,6 +262,9 @@ fn stratum_source(stratum: &Stratum, index: usize) -> Result<String, String> {
 pub fn emit(program: &Program) -> Result<String, String> {
     for op in &program.nodes {
         if matches!(op, Op::Delay(_)) { return Err("Delay requires a clock checker".into()); }
+    }
+    if !program.terms.is_empty() {
+        return Err("a term table: resolve each Expr::Term to its cell before emitting".into());
     }
     let source_ids: Vec<_> = program.rels.iter().filter(|rel| rel.kind == RelKind::Source).map(|rel| rel.id).collect();
     let mut out = String::new();

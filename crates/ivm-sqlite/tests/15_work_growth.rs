@@ -23,6 +23,7 @@ const EDGES: i64 = 8;
 /// `n` reach rules over one edge source: n + 1 relations, n LetRec strata, 5n nodes.
 fn family(n: usize) -> Program {
     let mut program = Program {
+        terms: vec![],
         texts: vec![],
         rels: vec![Relation { id: 0, name: "edges".into(), cols: vec![Ty::Int, Ty::Int], kind: RelKind::Source }],
         nodes: vec![],
