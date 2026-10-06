@@ -2,7 +2,7 @@
 //! relation is one relation per name, every other relation belongs to one part. Texts and term
 //! literals are values: equal entries of any parts share one composed entry.
 
-use crate::{Expr, LetRec, Op, Program, RelId, RelKind, Relation, Stratum, TermArg, TermLit, Ty};
+use crate::{Expr, LetRec, NodeId, Op, Program, RelId, RelKind, Relation, Stratum, TermArg, TermLit, Ty};
 use std::collections::{BTreeMap, HashMap};
 
 pub struct Composed {
@@ -35,24 +35,37 @@ fn texts(expr: &Expr, texts: &[u32], terms: &[u32]) -> Expr {
     done.pop().expect("one expression")
 }
 
+/// Every input of `op`.
+fn inputs(op: &Op) -> Vec<NodeId> {
+    match op {
+        Op::Get(_) => Vec::new(),
+        Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Mfp { input, .. }
+        | Op::Negate(input) | Op::Threshold(input) | Op::Delay(input) | Op::Reduce { input, .. }
+        | Op::TopK { input, .. } | Op::Window { input, .. } => vec![*input],
+        Op::Union(inputs) | Op::Join { inputs, .. } => inputs.clone(),
+        Op::Antijoin { l, r, .. } => vec![*l, *r],
+    }
+}
+
 /// One LetRec level; `LetRec::nested` is one level deep.
-fn letrec_level(rec: &LetRec, rel: &impl Fn(RelId) -> RelId, node: u32) -> LetRec {
+fn letrec_level(rec: &LetRec, rel: &impl Fn(RelId) -> RelId, node: &impl Fn(NodeId) -> NodeId) -> LetRec {
     LetRec {
         ids: rec.ids.iter().map(|id| rel(*id)).collect(),
-        bodies: rec.bodies.iter().map(|body| body + node).collect(),
+        bodies: rec.bodies.iter().map(|body| node(*body)).collect(),
         limit: rec.limit,
         nested: Vec::new(),
     }
 }
 
-fn letrec(rec: &LetRec, rel: &impl Fn(RelId) -> RelId, node: u32) -> LetRec {
+fn letrec(rec: &LetRec, rel: &impl Fn(RelId) -> RelId, node: &impl Fn(NodeId) -> NodeId) -> LetRec {
     LetRec {
         nested: rec.nested.iter().map(|inner| letrec_level(inner, rel, node)).collect(),
         ..letrec_level(rec, rel, node)
     }
 }
 
-/// `parts` as `(prefix, program)`, concatenated in order. `Err`
+/// `parts` as `(prefix, program)`, concatenated in order; a source-free node of a later part equal
+/// to an earlier composed node is that node. `Err`
 /// names a constructor two parts declare with different columns.
 pub fn compose(parts: &[(&str, &Program)]) -> Result<Composed, String> {
     let mut out = Program { texts: Vec::new(), terms: Vec::new(), rels: Vec::new(), nodes: Vec::new(), strata: Vec::new(), outputs: Vec::new() };
@@ -60,6 +73,9 @@ pub fn compose(parts: &[(&str, &Program)]) -> Result<Composed, String> {
     let mut maps = Vec::with_capacity(parts.len());
     let mut text_ids: HashMap<String, u32> = HashMap::new();
     let mut term_ids: HashMap<TermLit, u32> = HashMap::new();
+    // Composed source-free nodes by value, and the first `Let` over each source-free body.
+    let mut consed: HashMap<Op, NodeId> = HashMap::new();
+    let mut let_of_body: HashMap<NodeId, RelId> = HashMap::new();
     let mut next: RelId = 0;
     for (prefix, part) in parts {
         let mut map = BTreeMap::new();
@@ -84,7 +100,7 @@ pub fn compose(parts: &[(&str, &Program)]) -> Result<Composed, String> {
             };
             map.insert(rel.id, id);
         }
-        let node_base = out.nodes.len() as u32;
+        let constructor_ids: std::collections::HashSet<RelId> = part.rels.iter().filter(|r| r.kind == RelKind::Constructor).map(|r| r.id).collect();
         let rel = |id: RelId| map[&id];
         let text_map: Vec<u32> = part.texts.iter().map(|text| {
             *text_ids.entry(text.clone()).or_insert_with(|| {
@@ -108,34 +124,83 @@ pub fn compose(parts: &[(&str, &Program)]) -> Result<Composed, String> {
             });
             term_map.push(id);
         }
-        for op in &part.nodes {
-            let n = |id: u32| id + node_base;
-            out.nodes.push(match op {
-                Op::Get(id) => Op::Get(rel(*id)),
-                Op::Mint { input, functor, args } => Op::Mint { input: n(*input), functor: rel(*functor), args: args.clone() },
-                Op::StrCons { input, mode } => Op::StrCons { input: n(*input), mode: mode.clone() },
-                Op::Str { input, op, args } => Op::Str { input: n(*input), op: *op, args: args.clone() },
-                Op::Mfp { input, filter, map, project } => Op::Mfp {
-                    input: n(*input),
-                    filter: filter.iter().map(|e| texts(e, &text_map, &term_map)).collect(),
-                    map: map.iter().map(|e| texts(e, &text_map, &term_map)).collect(),
-                    project: project.clone(),
-                },
-                Op::Union(inputs) => Op::Union(inputs.iter().map(|i| n(*i)).collect()),
-                Op::Negate(input) => Op::Negate(n(*input)),
-                Op::Join { inputs, equivalences, project } => Op::Join { inputs: inputs.iter().map(|i| n(*i)).collect(), equivalences: equivalences.clone(), project: project.clone() },
-                Op::Antijoin { l, r, lk, rk } => Op::Antijoin { l: n(*l), r: n(*r), lk: lk.clone(), rk: rk.clone() },
-                Op::Reduce { input, key, aggs } => Op::Reduce { input: n(*input), key: key.clone(), aggs: aggs.clone() },
-                Op::Threshold(input) => Op::Threshold(n(*input)),
-                Op::TopK { input, key, order, limit } => Op::TopK { input: n(*input), key: key.clone(), order: order.clone(), limit: *limit },
-                Op::Window { input, partition, order, func } => Op::Window { input: n(*input), partition: partition.clone(), order: order.clone(), func: func.clone() },
-                Op::Delay(input) => Op::Delay(n(*input)),
-            });
+        // Post-order over every node, a `Get` of a `Let` relation after the `Let`'s body. A
+        // source-free node (it reads constructors, term literals and source-free `Let`s only)
+        // equal to one composed earlier is that node; a `Get` of a source-free `Let` whose body
+        // is shared reads the first `Let` over that body.
+        let lets: HashMap<RelId, NodeId> = part.strata.iter().filter_map(|stratum| match stratum {
+            Stratum::Let { id, body } => Some((*id, *body)),
+            Stratum::LetRec(_) => None,
+        }).collect();
+        let deps = |op: &Op| -> Vec<NodeId> {
+            let mut deps = inputs(op);
+            if let Op::Get(id) = op { deps.extend(lets.get(id).copied()); }
+            deps
+        };
+        let mut node_map: Vec<Option<NodeId>> = vec![None; part.nodes.len()];
+        let mut srcfree: Vec<bool> = vec![false; part.nodes.len()];
+        let mut open: Vec<bool> = vec![false; part.nodes.len()];
+        for root in 0..part.nodes.len() as NodeId {
+            let mut stack = vec![(root, false)];
+            while let Some((id, expanded)) = stack.pop() {
+                if node_map[id as usize].is_some() { continue; }
+                let op = &part.nodes[id as usize];
+                if !expanded {
+                    if std::mem::replace(&mut open[id as usize], true) {
+                        return Err(format!("{prefix}: node {id} reaches itself"));
+                    }
+                    stack.push((id, true));
+                    stack.extend(deps(op).into_iter().rev().filter(|dep| node_map[*dep as usize].is_none()).map(|dep| (dep, false)));
+                    continue;
+                }
+                let n = |input: NodeId| node_map[input as usize].expect("input composed first");
+                let free = match op {
+                    Op::Get(id) => constructor_ids.contains(id) || lets.get(id).is_some_and(|body| srcfree[*body as usize]),
+                    _ => inputs(op).iter().all(|input| srcfree[*input as usize]),
+                };
+                let composed = match op {
+                    Op::Get(id) => Op::Get(match lets.get(id) {
+                        Some(body) if free => let_of_body.get(&n(*body)).copied().unwrap_or(rel(*id)),
+                        _ => rel(*id),
+                    }),
+                    Op::Mint { input, functor, args } => Op::Mint { input: n(*input), functor: rel(*functor), args: args.clone() },
+                    Op::StrCons { input, mode } => Op::StrCons { input: n(*input), mode: mode.clone() },
+                    Op::Str { input, op, args } => Op::Str { input: n(*input), op: *op, args: args.clone() },
+                    Op::Mfp { input, filter, map, project } => Op::Mfp {
+                        input: n(*input),
+                        filter: filter.iter().map(|e| texts(e, &text_map, &term_map)).collect(),
+                        map: map.iter().map(|e| texts(e, &text_map, &term_map)).collect(),
+                        project: project.clone(),
+                    },
+                    Op::Union(inputs) => Op::Union(inputs.iter().map(|i| n(*i)).collect()),
+                    Op::Negate(input) => Op::Negate(n(*input)),
+                    Op::Join { inputs, equivalences, project } => Op::Join { inputs: inputs.iter().map(|i| n(*i)).collect(), equivalences: equivalences.clone(), project: project.clone() },
+                    Op::Antijoin { l, r, lk, rk } => Op::Antijoin { l: n(*l), r: n(*r), lk: lk.clone(), rk: rk.clone() },
+                    Op::Reduce { input, key, aggs } => Op::Reduce { input: n(*input), key: key.clone(), aggs: aggs.clone() },
+                    Op::Threshold(input) => Op::Threshold(n(*input)),
+                    Op::TopK { input, key, order, limit } => Op::TopK { input: n(*input), key: key.clone(), order: order.clone(), limit: *limit },
+                    Op::Window { input, partition, order, func } => Op::Window { input: n(*input), partition: partition.clone(), order: order.clone(), func: func.clone() },
+                    Op::Delay(input) => Op::Delay(n(*input)),
+                };
+                srcfree[id as usize] = free;
+                open[id as usize] = false;
+                let existing = if free { consed.get(&composed).copied() } else { None };
+                node_map[id as usize] = Some(existing.unwrap_or_else(|| {
+                    let at = out.nodes.len() as NodeId;
+                    if free { consed.insert(composed.clone(), at); }
+                    out.nodes.push(composed);
+                    at
+                }));
+            }
         }
+        let node = |id: NodeId| node_map[id as usize].expect("every node composed");
         for stratum in &part.strata {
             out.strata.push(match stratum {
-                Stratum::Let { id, body } => Stratum::Let { id: rel(*id), body: body + node_base },
-                Stratum::LetRec(rec) => Stratum::LetRec(letrec(rec, &rel, node_base)),
+                Stratum::Let { id, body } => {
+                    if srcfree[*body as usize] { let_of_body.entry(node(*body)).or_insert(rel(*id)); }
+                    Stratum::Let { id: rel(*id), body: node(*body) }
+                }
+                Stratum::LetRec(rec) => Stratum::LetRec(letrec(rec, &rel, &node)),
             });
         }
         out.outputs.extend(part.outputs.iter().map(|id| rel(*id)));

@@ -84,7 +84,7 @@ pub struct Relation {
     pub kind: RelKind,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Func {
     Eq,
     Ne,
@@ -102,7 +102,7 @@ pub enum Func {
     StrNil,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Expr {
     Col(ColId),
     Lit(Cell),
@@ -131,13 +131,13 @@ pub struct TermLit {
     pub args: Vec<TermArg>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum StrMode {
     Construct { head: ColId, rest: ColId },
     Decompose { whole: ColId },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Agg {
     Count,
     Sum(ColId),
@@ -145,13 +145,13 @@ pub enum Agg {
     Max(ColId),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Order {
     pub col: ColId,
     pub desc: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WinFn {
     RowNumber,
     Rank,
@@ -164,7 +164,7 @@ pub enum WinFn {
     Count,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Op {
     Get(RelId),
     /// Intern selected columns under the named constructor relation and append its ID.
