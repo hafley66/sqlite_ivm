@@ -188,8 +188,12 @@ where Product<T, u64>: Nest + Timestamp<Summary = Product<<T as Timestamp>::Summ
         let arranged = rel.keyed(c.clone(), key.clone(), any.clone());
         pre.push((input, key, any, arranged));
     }
+    // In-loop nodes are left to the enclosing scope only without a limit (a left collection
+    // accumulates to its value at the fixed point) and without taps (a measured install taps
+    // each node in the scope that builds it).
+    let exportable = rel.taps.is_none() && rec.limit.is_none() && rec.nested.iter().all(|inner| inner.limit.is_none());
     let outer = rel.scope;
-    outer.scoped::<Product<T, u64>, _, _>("LetRec", |sub| {
+    let (results, exported) = outer.scoped::<Product<T, u64>, _, _>("LetRec", |sub| {
         let mut inner = DdRel {
             scope: sub,
             rec: rec.ids.first().copied(),
@@ -265,20 +269,32 @@ where Product<T, u64>: Nest + Timestamp<Summary = Product<<T as Timestamp>::Summ
         for (variable, result) in variables.into_iter().zip(&results) {
             variable.set(result.clone());
         }
-        if results.len() == 1 {
-            return Ok(results.into_iter().map(|result| result.leave(outer)).collect());
+        // Nodes built in this scope that a later stratum reads: left with the results, so the
+        // enclosing scope reuses them instead of building them again over the LetRec outputs.
+        let exports: Vec<(NodeId, Coll<'_, Product<T, u64>>)> = if exportable {
+            later_reads(p, rec, defined, fuse, outer_nodes, &nodes)
+                .into_iter()
+                .map(|id| (id, nodes[id as usize].clone().expect("built in this scope")))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let results_len = results.len();
+        if results_len == 1 && exports.is_empty() {
+            return Ok((results.into_iter().map(|result| result.leave(outer)).collect(), Vec::new()));
         }
         // One scope output: timely summarizes reachability to every scope output, so each extra
         // output multiplies the scope's install and progress-tracking cost.
-        let parts = results.len() as u64;
-        let tagged = results.into_iter().enumerate().map(|(index, result)| {
+        let export_ids: Vec<NodeId> = exports.iter().map(|(id, _)| *id).collect();
+        let parts = (results_len + exports.len()) as u64;
+        let tagged = results.into_iter().chain(exports.into_iter().map(|(_, c)| c)).enumerate().map(|(index, result)| {
             result.map(move |mut row| {
                 row.push(index as Cell);
                 row
             })
         });
         let left = differential_dataflow::collection::concatenate(sub, tagged).leave(outer);
-        Ok(left
+        let mut streams: Vec<Coll<'s, T>> = left
             .inner
             .partition(parts, |(mut row, time, w): (Row, T, W)| {
                 let index = row.pop().expect("tagged row") as u64;
@@ -286,8 +302,51 @@ where Product<T, u64>: Nest + Timestamp<Summary = Product<<T as Timestamp>::Summ
             })
             .into_iter()
             .map(|stream| stream.as_collection())
-            .collect())
-    })
+            .collect();
+        let exported = streams.split_off(results_len);
+        Ok((streams, export_ids.into_iter().zip(exported).collect()))
+    })?;
+    for (id, c) in exported {
+        outer_nodes[id as usize] = Some(c);
+    }
+    Ok(results)
+}
+
+/// Nodes built in a LetRec's scope (`inner`) that a stratum after `rec` reaches without passing
+/// a node the enclosing scope built (`outer`) or a `Get`: the enclosing scope would build each
+/// again. Empty for a LetRec that is no stratum of `p` (a nested one).
+fn later_reads<C, D>(p: &Program, rec: &LetRec, defined: &[(RelId, C)], fuse: bool, outer: &[Option<C>], inner: &[Option<D>]) -> Vec<NodeId> {
+    let Some(at) = p.strata.iter().position(|stratum| matches!(stratum, Stratum::LetRec(r) if std::ptr::eq(r, rec))) else {
+        return Vec::new();
+    };
+    let mut walk: Vec<NodeId> = Vec::new();
+    for stratum in &p.strata[at + 1..] {
+        match stratum {
+            Stratum::Let { body, .. } => walk.push(*body),
+            Stratum::LetRec(later) => {
+                walk.extend(later.bodies.iter().copied());
+                for nested in &later.nested {
+                    walk.extend(nested.bodies.iter().copied());
+                }
+            }
+        }
+    }
+    let mut seen = vec![false; p.nodes.len()];
+    let mut reads = Vec::new();
+    while let Some(id) = walk.pop() {
+        let index = id as usize;
+        if std::mem::replace(&mut seen[index], true) { continue; }
+        if outer.get(index).is_some_and(Option::is_some) { continue; }
+        let op = &p.nodes[index];
+        if matches!(op, Op::Get(_)) { continue; }
+        if inner.get(index).is_some_and(Option::is_some) {
+            reads.push(id);
+            continue;
+        }
+        walk.extend(lowered_inputs(p, defined, op, fuse));
+    }
+    reads.sort_unstable();
+    reads
 }
 
 pub struct DdRel<'s, T: Nest = Time> {
