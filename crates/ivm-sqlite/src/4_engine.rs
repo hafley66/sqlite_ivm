@@ -651,6 +651,28 @@ impl Engine for Sqlite {
         let db = &self.db;
         crate::terms::snapshot(db, &self.ir, functor).map_err(|e| error(Stage::Snapshot, e))
     }
+    fn declare_constructors(&mut self, ctors: &[(String, Vec<ivm_ir::Ty>)]) -> Result<Vec<RelId>, EngineError> {
+        let mut next = self.ir.rels.iter().map(|rel| rel.id).chain(self.programs.iter().map(|p| p.rel)).max().map_or(0, |id| id + 1);
+        let (mut ids, mut added) = (Vec::with_capacity(ctors.len()), Vec::new());
+        for (name, types) in ctors {
+            let known = self.ir.rels.iter().chain(&added).find(|rel: &&ivm_ir::Relation| rel.kind == RelKind::Constructor && &rel.name == name);
+            if let Some(rel) = known {
+                ids.push(rel.id);
+                continue;
+            }
+            let mut cols = vec![ivm_ir::Ty::Id];
+            cols.extend(types.iter().copied());
+            added.push(ivm_ir::Relation { id: next, name: name.clone(), cols, kind: RelKind::Constructor });
+            ids.push(next);
+            next += 1;
+        }
+        if !added.is_empty() {
+            let declared = Program { texts: Vec::new(), rels: added.clone(), nodes: Vec::new(), strata: Vec::new(), outputs: Vec::new() };
+            crate::terms::install(&self.db, &declared).map_err(|e| error(Stage::Settle, e))?;
+            self.ir.rels.extend(added);
+        }
+        Ok(ids)
+    }
     fn intern_terms(&mut self, terms: &[(RelId, Row)]) -> Result<Vec<i64>, EngineError> {
         let named = terms.iter().map(|(functor, args)| {
             let rel = self.ir.rel(*functor).filter(|rel| rel.kind == RelKind::Constructor)
