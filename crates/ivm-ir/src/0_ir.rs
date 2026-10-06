@@ -84,7 +84,7 @@ pub struct Relation {
     pub kind: RelKind,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Func {
     Eq,
     Ne,
@@ -102,7 +102,7 @@ pub enum Func {
     StrNil,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Expr {
     Col(ColId),
     Lit(Cell),
@@ -113,7 +113,7 @@ pub enum Expr {
 }
 
 /// One argument of a ground term the engine interns at install.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TermArg {
     /// An earlier entry of `Program::terms`.
     Term(u32),
@@ -125,19 +125,19 @@ pub enum TermArg {
 
 /// A ground term `functor(args)`: `functor` is a constructor relation; the engine interns it at
 /// install, as `Engine::intern_terms` would, and its constructor rows hold it from the first settle.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TermLit {
     pub functor: RelId,
     pub args: Vec<TermArg>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum StrMode {
     Construct { head: ColId, rest: ColId },
     Decompose { whole: ColId },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Agg {
     Count,
     Sum(ColId),
@@ -145,13 +145,13 @@ pub enum Agg {
     Max(ColId),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Order {
     pub col: ColId,
     pub desc: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WinFn {
     RowNumber,
     Rank,
@@ -164,7 +164,7 @@ pub enum WinFn {
     Count,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Op {
     Get(RelId),
     /// Intern selected columns under the named constructor relation and append its ID.

@@ -4,7 +4,7 @@ use ivm_ir::*;
 use ivm_engine::*;
 use differential_dataflow::input::{Input, InputSession};
 use differential_dataflow::operators::arrange::{Arranged, TraceAgent};
-use differential_dataflow::trace::implementations::ValSpine;
+use differential_dataflow::trace::implementations::{KeySpine, ValSpine};
 use differential_dataflow::lattice::Lattice;
 use differential_dataflow::operators::iterate::Variable;
 use differential_dataflow::{AsCollection, VecCollection};
@@ -27,6 +27,28 @@ type Coll<'s, T = Time> = VecCollection<'s, T, Row, W>;
 type Inner = Product<Time, u64>;
 /// A collection keyed on some of its columns: `(key, row)`.
 type Keyed<'s, T> = Arranged<'s, TraceAgent<ValSpine<Row, Row, T, W>>>;
+/// The distinct keys of a collection, each with weight 1: an antijoin's right side.
+type KeySet<'s, T> = Arranged<'s, TraceAgent<KeySpine<Row, T, W>>>;
+/// A join against an arrangement built in the enclosing scope and entered into this one:
+/// `(the other input arranged here, the entered arrangement is the left input, left width,
+/// project)`.
+type EnteredJoin<'s, T> = Rc<dyn Fn(Keyed<'s, T>, bool, usize, Option<Vec<ColId>>) -> Coll<'s, T> + 's>;
+
+/// The row a join emits for `a` (left, `left` columns) and `b`: both concatenated, then `project`.
+fn join_row(a: &Row, b: &Row, left: usize, project: &Option<Vec<ColId>>) -> Row {
+    match project {
+        None => {
+            let mut row = Vec::with_capacity(a.len() + b.len());
+            row.extend_from_slice(a);
+            row.extend_from_slice(b);
+            row
+        }
+        Some(project) => project.iter().map(|c| {
+            let c = *c as usize;
+            if c < left { a[c] } else { b[c - left] }
+        }).collect(),
+    }
+}
 /// Rows supplied by an arrangement to a hierarchical reduce closure.
 pub type ReduceReadEventBuilder = timely::container::CapacityContainerBuilder<Vec<(Duration, usize)>>;
 type ReduceReadLogger = timely::logging_core::Logger<ReduceReadEventBuilder>;
@@ -125,8 +147,53 @@ where Product<T, u64>: Nest + Timestamp<Summary = Product<<T as Timestamp>::Summ
         .into_iter()
         .map(|id| Ok((id, lower_node(p, rel, outer_nodes, defined, id)?)))
         .collect::<Result<_, EngineError>>()?;
+    // Joins built in this scope (reached from the bodies without passing a hoisted root) on a
+    // hoisted input: that input is arranged in the enclosing scope, through its `keyed` memo, and
+    // the arrangement entered. An input whose arrangement this scope's parent entered from
+    // further out is arranged inside, as before.
+    let fuse = rel.fuses_join_project();
+    let hoisted_ids: BTreeSet<NodeId> = hoisted.iter().map(|(id, _)| *id).collect();
+    let mut requests: BTreeSet<(NodeId, Vec<ColId>, Vec<bool>)> = BTreeSet::new();
+    let mut seen = vec![false; p.nodes.len()];
+    let mut walk: Vec<NodeId> = rec.bodies.clone();
+    while let Some(id) = walk.pop() {
+        if hoisted_ids.contains(&id) || std::mem::replace(&mut seen[id as usize], true) { continue; }
+        let op = &p.nodes[id as usize];
+        let inputs = lowered_inputs(p, defined, op, fuse);
+        let equivalences = match projected_join(p, defined, op).filter(|_| fuse) {
+            Some((_, equivalences, _)) => Some(equivalences),
+            None => match op {
+                Op::Join { equivalences, .. } if inputs.len() == 2 => Some(equivalences.as_slice()),
+                _ => None,
+            },
+        };
+        if let Some(equivalences) = equivalences {
+            for (side, input) in inputs.iter().enumerate() {
+                if !hoisted_ids.contains(input) { continue; }
+                let key: Option<Vec<ColId>> = equivalences.iter()
+                    .map(|class| class.iter().find(|(i, _)| *i as usize == side).map(|(_, c)| *c))
+                    .collect();
+                let (Some(key), Some(types)) = (key, rel.node_types(p, *input)) else { continue };
+                let any = key.iter().map(|c| types.get(*c as usize) == Some(&Ty::Any)).collect();
+                requests.insert((*input, key, any));
+            }
+        }
+        walk.extend(inputs);
+    }
+    let mut pre: Vec<(NodeId, Vec<ColId>, Vec<bool>, Keyed<'s, T>)> = Vec::new();
+    for (input, key, any) in requests {
+        let Some((_, c)) = hoisted.iter().find(|(id, _)| *id == input) else { continue };
+        let stream = *c.inner.name();
+        if rel.entered.contains_key(&(stream.node, stream.port, key.clone(), any.clone())) { continue; }
+        let arranged = rel.keyed(c.clone(), key.clone(), any.clone());
+        pre.push((input, key, any, arranged));
+    }
+    // In-loop nodes are left to the enclosing scope only without a limit (a left collection
+    // accumulates to its value at the fixed point) and without taps (a measured install taps
+    // each node in the scope that builds it).
+    let exportable = rel.taps.is_none() && rec.limit.is_none() && rec.nested.iter().all(|inner| inner.limit.is_none());
     let outer = rel.scope;
-    outer.scoped::<Product<T, u64>, _, _>("LetRec", |sub| {
+    let (results, exported) = outer.scoped::<Product<T, u64>, _, _>("LetRec", |sub| {
         let mut inner = DdRel {
             scope: sub,
             rec: rec.ids.first().copied(),
@@ -140,6 +207,8 @@ where Product<T, u64>: Nest + Timestamp<Summary = Product<<T as Timestamp>::Summ
             texts: rel.texts.clone(),
             terms: rel.terms.clone(),
             keyed: BTreeMap::new(),
+            key_sets: BTreeMap::new(),
+            entered: BTreeMap::new(),
             read: BTreeSet::new(),
             types: rel.types.clone(),
             arranged: rel.arranged.clone(),
@@ -148,6 +217,18 @@ where Product<T, u64>: Nest + Timestamp<Summary = Product<<T as Timestamp>::Summ
         let mut nodes = vec![None; p.nodes.len()];
         for (id, c) in hoisted {
             nodes[id as usize] = Some(c.enter(sub));
+        }
+        for (id, key, any, arranged) in pre {
+            let stream = *nodes[id as usize].as_ref().expect("hoisted input entered").inner.name();
+            let entered = arranged.enter(sub);
+            let join: EnteredJoin<'_, Product<T, u64>> = Rc::new(move |local, entered_left, left, project| {
+                if entered_left {
+                    entered.clone().join_core(local, move |_, a: &Row, b: &Row| Some(join_row(a, b, left, &project)))
+                } else {
+                    local.join_core(entered.clone(), move |_, a: &Row, b: &Row| Some(join_row(a, b, left, &project)))
+                }
+            });
+            inner.entered.insert((stream.node, stream.port, key, any), join);
         }
         let mut scope_defined: Vec<(RelId, Coll<'_, Product<T, u64>>)> = Vec::new();
         let mut variables = Vec::new();
@@ -188,20 +269,32 @@ where Product<T, u64>: Nest + Timestamp<Summary = Product<<T as Timestamp>::Summ
         for (variable, result) in variables.into_iter().zip(&results) {
             variable.set(result.clone());
         }
-        if results.len() == 1 {
-            return Ok(results.into_iter().map(|result| result.leave(outer)).collect());
+        // Nodes built in this scope that a later stratum reads: left with the results, so the
+        // enclosing scope reuses them instead of building them again over the LetRec outputs.
+        let exports: Vec<(NodeId, Coll<'_, Product<T, u64>>)> = if exportable {
+            later_reads(p, rec, defined, fuse, outer_nodes, &nodes)
+                .into_iter()
+                .map(|id| (id, nodes[id as usize].clone().expect("built in this scope")))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let results_len = results.len();
+        if results_len == 1 && exports.is_empty() {
+            return Ok((results.into_iter().map(|result| result.leave(outer)).collect(), Vec::new()));
         }
         // One scope output: timely summarizes reachability to every scope output, so each extra
         // output multiplies the scope's install and progress-tracking cost.
-        let parts = results.len() as u64;
-        let tagged = results.into_iter().enumerate().map(|(index, result)| {
+        let export_ids: Vec<NodeId> = exports.iter().map(|(id, _)| *id).collect();
+        let parts = (results_len + exports.len()) as u64;
+        let tagged = results.into_iter().chain(exports.into_iter().map(|(_, c)| c)).enumerate().map(|(index, result)| {
             result.map(move |mut row| {
                 row.push(index as Cell);
                 row
             })
         });
         let left = differential_dataflow::collection::concatenate(sub, tagged).leave(outer);
-        Ok(left
+        let mut streams: Vec<Coll<'s, T>> = left
             .inner
             .partition(parts, |(mut row, time, w): (Row, T, W)| {
                 let index = row.pop().expect("tagged row") as u64;
@@ -209,8 +302,51 @@ where Product<T, u64>: Nest + Timestamp<Summary = Product<<T as Timestamp>::Summ
             })
             .into_iter()
             .map(|stream| stream.as_collection())
-            .collect())
-    })
+            .collect();
+        let exported = streams.split_off(results_len);
+        Ok((streams, export_ids.into_iter().zip(exported).collect()))
+    })?;
+    for (id, c) in exported {
+        outer_nodes[id as usize] = Some(c);
+    }
+    Ok(results)
+}
+
+/// Nodes built in a LetRec's scope (`inner`) that a stratum after `rec` reaches without passing
+/// a node the enclosing scope built (`outer`) or a `Get`: the enclosing scope would build each
+/// again. Empty for a LetRec that is no stratum of `p` (a nested one).
+fn later_reads<C, D>(p: &Program, rec: &LetRec, defined: &[(RelId, C)], fuse: bool, outer: &[Option<C>], inner: &[Option<D>]) -> Vec<NodeId> {
+    let Some(at) = p.strata.iter().position(|stratum| matches!(stratum, Stratum::LetRec(r) if std::ptr::eq(r, rec))) else {
+        return Vec::new();
+    };
+    let mut walk: Vec<NodeId> = Vec::new();
+    for stratum in &p.strata[at + 1..] {
+        match stratum {
+            Stratum::Let { body, .. } => walk.push(*body),
+            Stratum::LetRec(later) => {
+                walk.extend(later.bodies.iter().copied());
+                for nested in &later.nested {
+                    walk.extend(nested.bodies.iter().copied());
+                }
+            }
+        }
+    }
+    let mut seen = vec![false; p.nodes.len()];
+    let mut reads = Vec::new();
+    while let Some(id) = walk.pop() {
+        let index = id as usize;
+        if std::mem::replace(&mut seen[index], true) { continue; }
+        if outer.get(index).is_some_and(Option::is_some) { continue; }
+        let op = &p.nodes[index];
+        if matches!(op, Op::Get(_)) { continue; }
+        if inner.get(index).is_some_and(Option::is_some) {
+            reads.push(id);
+            continue;
+        }
+        walk.extend(lowered_inputs(p, defined, op, fuse));
+    }
+    reads.sort_unstable();
+    reads
 }
 
 pub struct DdRel<'s, T: Nest = Time> {
@@ -227,9 +363,14 @@ pub struct DdRel<'s, T: Nest = Time> {
     texts: Vec<Cell>,
     /// The cell of each `Program::terms` entry, minted at install.
     terms: Vec<Cell>,
-    /// Join inputs arranged once per `(stream, key columns)`; every join reading the same
-    /// stream on the same key shares the arrangement.
-    keyed: BTreeMap<(usize, usize, Vec<ColId>), Keyed<'s, T>>,
+    /// Join and antijoin left inputs arranged once per `(stream, key columns, Any columns)`;
+    /// every join or antijoin reading the same stream on the same key shares the arrangement.
+    keyed: BTreeMap<(usize, usize, Vec<ColId>, Vec<bool>), Keyed<'s, T>>,
+    /// Antijoin right sides: the thresholded key set of a stream, once per `(stream, key columns)`.
+    key_sets: BTreeMap<(usize, usize, Vec<ColId>), KeySet<'s, T>>,
+    /// Hoisted LetRec inputs arranged in the enclosing scope and entered, per `(entered stream,
+    /// key columns, Any columns)`: a join on one of them uses the entered arrangement.
+    entered: BTreeMap<(usize, usize, Vec<ColId>, Vec<bool>), EnteredJoin<'s, T>>,
     /// Relations `get` handed a collection for.
     read: BTreeSet<RelId>,
     /// `Program::node_types_memo` answers, shared by every scope of one install.
@@ -253,7 +394,7 @@ struct ArrangeStats {
 impl<'s, T: Nest> DdRel<'s, T> {
     fn keyed(&mut self, c: Coll<'s, T>, key: Vec<ColId>, any: Vec<bool>) -> Keyed<'s, T> {
         let source = *c.inner.name();
-        let id = (source.node, source.port, key.clone());
+        let id = (source.node, source.port, key.clone(), any.clone());
         if let Some(arranged) = self.keyed.get(&id) {
             return arranged.clone();
         }
@@ -296,23 +437,22 @@ impl<'s, T: Nest> DdRel<'s, T> {
         let r_any = rk.iter().map(|c| types[1][*c as usize] == Ty::Any).collect::<Vec<_>>();
         let mut cs = cs.into_iter();
         let (l, r) = (cs.next().unwrap(), cs.next().unwrap());
+        let left = types[0].len();
+        let id = |c: &Coll<'s, T>, key: &Vec<ColId>, any: &Vec<bool>| {
+            let source = *c.inner.name();
+            (source.node, source.port, key.clone(), any.clone())
+        };
+        if let Some(join) = self.entered.get(&id(&l, &lk, &l_any)).cloned() {
+            let r = self.keyed(r, rk, r_any);
+            return Ok(join(r, true, left, project));
+        }
+        if let Some(join) = self.entered.get(&id(&r, &rk, &r_any)).cloned() {
+            let l = self.keyed(l, lk, l_any);
+            return Ok(join(l, false, left, project));
+        }
         let l = self.keyed(l, lk, l_any);
         let r = self.keyed(r, rk, r_any);
-        let left = types[0].len();
-        Ok(l.join_core(r, move |_, a: &Row, b: &Row| {
-            Some(match &project {
-                None => {
-                    let mut row = Vec::with_capacity(a.len() + b.len());
-                    row.extend_from_slice(a);
-                    row.extend_from_slice(b);
-                    row
-                }
-                Some(project) => project.iter().map(|c| {
-                    let c = *c as usize;
-                    if c < left { a[c] } else { b[c - left] }
-                }).collect(),
-            })
-        }))
+        Ok(l.join_core(r, move |_, a: &Row, b: &Row| Some(join_row(a, b, left, &project))))
     }
 }
 
@@ -488,12 +628,25 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
         self.join_rows(cs, eq, types, Some(project.to_vec()))
     }
 
+    /// `l` minus its semijoin with `r`'s key set: the left side through the `keyed` memo, the
+    /// right side's thresholded key set memoized per `(stream, key)`.
     fn antijoin(&mut self, l: Self::C, r: Self::C, lk: &[ColId], rk: &[ColId]) -> Self::C {
-        let (lk, rk) = (lk.to_vec(), rk.to_vec());
-        let keys = r
-            .map(move |row| cols(&row, &rk))
-            .threshold(|_, w: &W| if *w > 0 { 1 as W } else { 0 });
-        l.map(move |row| (cols(&row, &lk), row)).antijoin(keys).map(|(_, row)| row)
+        let right = *r.inner.name();
+        let id = (right.node, right.port, rk.to_vec());
+        let keys = match self.key_sets.get(&id) {
+            Some(keys) => keys.clone(),
+            None => {
+                let rk = rk.to_vec();
+                let keys = r
+                    .map(move |row| cols(&row, &rk))
+                    .threshold(|_, w: &W| if *w > 0 { 1 as W } else { 0 })
+                    .arrange_by_self();
+                self.key_sets.insert(id, keys.clone());
+                keys
+            }
+        };
+        let left = self.keyed(l.clone(), lk.to_vec(), vec![false; lk.len()]);
+        l.concat(left.join_core(keys, |_, row: &Row, _| Some(row.clone())).negate())
     }
 
     fn reduce(&mut self, c: Self::C, key: &[ColId], aggs: &[Agg], input_types: &[Ty]) -> Self::C {
@@ -1096,7 +1249,7 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
                 constructor_inputs.insert(rel.id, input);
                 sources.insert(rel.id, c);
             }
-            let mut rel = DdRel { scope, rec: None, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone(), constructors: constructors.clone(), interner: interner.clone(), sum_error: sum_error.clone(), texts: texts.clone(), terms, keyed: BTreeMap::new(), read: BTreeSet::new(), types: Rc::default(), arranged: arranged.clone(), limits: Vec::new() };
+            let mut rel = DdRel { scope, rec: None, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone(), constructors: constructors.clone(), interner: interner.clone(), sum_error: sum_error.clone(), texts: texts.clone(), terms, keyed: BTreeMap::new(), key_sets: BTreeMap::new(), entered: BTreeMap::new(), read: BTreeSet::new(), types: Rc::default(), arranged: arranged.clone(), limits: Vec::new() };
             lower(&program, &mut rel)?;
             // A constructor no operator reads gets no rows: its terms would cost an epoch and drive nothing.
             constructor_inputs.retain(|id, _| rel.read.contains(id));
