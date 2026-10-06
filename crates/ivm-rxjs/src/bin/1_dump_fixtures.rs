@@ -165,6 +165,7 @@ fn main() {
         all.push(dump(&dir, &format!("random_{seed}"), program, frontiers));
     }
     let negate = Program {
+        terms: vec![],
         texts: vec![],
         rels: vec![
             Relation { id: 0, name: "source".into(), cols: vec![Ty::Int], kind: RelKind::Source },
@@ -180,6 +181,7 @@ fn main() {
     ];
     all.push(dump(&dir, "negate", negate, frontiers));
     let shape = Program {
+        terms: vec![],
         texts: vec![],
         rels: vec![
             Relation { id: 0, name: "source".into(), cols: vec![Ty::Int], kind: RelKind::Source },

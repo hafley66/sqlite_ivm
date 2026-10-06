@@ -11,6 +11,7 @@ use support::sqlite_rows;
 
 fn blob_ir() -> Program {
     Program {
+        terms: vec![],
         texts: vec![],
         rels: vec![
             Relation { id: 0, name: "src".into(), cols: vec![Ty::Any, Ty::Int], kind: RelKind::Source },

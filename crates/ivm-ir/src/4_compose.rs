@@ -1,7 +1,7 @@
 //! Several programs as one install. The parts share nothing but the dictionary: a constructor
 //! relation is one relation per name, every other relation belongs to one part.
 
-use crate::{Expr, LetRec, Op, Program, RelId, RelKind, Relation, Stratum, Ty};
+use crate::{Expr, LetRec, Op, Program, RelId, RelKind, Relation, Stratum, TermArg, TermLit, Ty};
 use std::collections::BTreeMap;
 
 pub struct Composed {
@@ -10,14 +10,16 @@ pub struct Composed {
     pub rels: Vec<BTreeMap<RelId, RelId>>,
 }
 
-/// `expr` with every `Text` index shifted by `base`: post-order over an explicit stack.
-fn texts(expr: &Expr, base: u32) -> Expr {
+/// `expr` with every `Text` index shifted by `base` and every `Term` index by `terms`: post-order
+/// over an explicit stack.
+fn texts(expr: &Expr, base: u32, terms: u32) -> Expr {
     enum Step<'e> { Enter(&'e Expr), Build(crate::Func, usize) }
     let mut steps = vec![Step::Enter(expr)];
     let mut done: Vec<Expr> = Vec::new();
     while let Some(step) = steps.pop() {
         match step {
             Step::Enter(Expr::Text(index)) => done.push(Expr::Text(index + base)),
+            Step::Enter(Expr::Term(index)) => done.push(Expr::Term(index + terms)),
             Step::Enter(Expr::Call(func, args)) => {
                 steps.push(Step::Build(*func, args.len()));
                 steps.extend(args.iter().rev().map(Step::Enter));
@@ -49,15 +51,13 @@ fn letrec(rec: &LetRec, rel: &impl Fn(RelId) -> RelId, node: u32) -> LetRec {
     }
 }
 
-/// `parts` as `(prefix, program)`, concatenated in order; output 0 reads every source. `Err`
+/// `parts` as `(prefix, program)`, concatenated in order. `Err`
 /// names a constructor two parts declare with different columns.
 pub fn compose(parts: &[(&str, &Program)]) -> Result<Composed, String> {
-    let mut out = Program { texts: Vec::new(), rels: Vec::new(), nodes: Vec::new(), strata: Vec::new(), outputs: Vec::new() };
+    let mut out = Program { texts: Vec::new(), terms: Vec::new(), rels: Vec::new(), nodes: Vec::new(), strata: Vec::new(), outputs: Vec::new() };
     let mut constructors: BTreeMap<String, (RelId, Vec<Ty>)> = BTreeMap::new();
     let mut maps = Vec::with_capacity(parts.len());
-    // Id 0 is the sentinel that reads every source.
-    let sentinel: RelId = 0;
-    let mut next: RelId = 1;
+    let mut next: RelId = 0;
     for (prefix, part) in parts {
         let mut map = BTreeMap::new();
         for rel in &part.rels {
@@ -83,6 +83,7 @@ pub fn compose(parts: &[(&str, &Program)]) -> Result<Composed, String> {
         }
         let node_base = out.nodes.len() as u32;
         let text_base = out.texts.len() as u32;
+        let term_base = out.terms.len() as u32;
         let rel = |id: RelId| map[&id];
         for op in &part.nodes {
             let n = |id: u32| id + node_base;
@@ -93,13 +94,13 @@ pub fn compose(parts: &[(&str, &Program)]) -> Result<Composed, String> {
                 Op::Str { input, op, args } => Op::Str { input: n(*input), op: *op, args: args.clone() },
                 Op::Mfp { input, filter, map, project } => Op::Mfp {
                     input: n(*input),
-                    filter: filter.iter().map(|e| texts(e, text_base)).collect(),
-                    map: map.iter().map(|e| texts(e, text_base)).collect(),
+                    filter: filter.iter().map(|e| texts(e, text_base, term_base)).collect(),
+                    map: map.iter().map(|e| texts(e, text_base, term_base)).collect(),
                     project: project.clone(),
                 },
                 Op::Union(inputs) => Op::Union(inputs.iter().map(|i| n(*i)).collect()),
                 Op::Negate(input) => Op::Negate(n(*input)),
-                Op::Join { inputs, equivalences } => Op::Join { inputs: inputs.iter().map(|i| n(*i)).collect(), equivalences: equivalences.clone() },
+                Op::Join { inputs, equivalences, project } => Op::Join { inputs: inputs.iter().map(|i| n(*i)).collect(), equivalences: equivalences.clone(), project: project.clone() },
                 Op::Antijoin { l, r, lk, rk } => Op::Antijoin { l: n(*l), r: n(*r), lk: lk.clone(), rk: rk.clone() },
                 Op::Reduce { input, key, aggs } => Op::Reduce { input: n(*input), key: key.clone(), aggs: aggs.clone() },
                 Op::Threshold(input) => Op::Threshold(n(*input)),
@@ -116,21 +117,16 @@ pub fn compose(parts: &[(&str, &Program)]) -> Result<Composed, String> {
         }
         out.outputs.extend(part.outputs.iter().map(|id| rel(*id)));
         out.texts.extend(part.texts.iter().cloned());
+        out.terms.extend(part.terms.iter().map(|term| TermLit {
+            functor: rel(term.functor),
+            args: term.args.iter().map(|arg| match arg {
+                TermArg::Term(index) => TermArg::Term(index + term_base),
+                TermArg::Text(index) => TermArg::Text(index + text_base),
+                TermArg::Raw(cell) => TermArg::Raw(*cell),
+            }).collect(),
+        }));
         maps.push(map);
     }
-    let sources: Vec<(RelId, usize)> = out.rels.iter().filter(|r| r.kind == RelKind::Source).map(|r| (r.id, r.cols.len())).collect();
-    let mut touch = Vec::with_capacity(sources.len());
-    for (id, width) in sources {
-        let get = out.nodes.len() as u32;
-        out.nodes.push(Op::Get(id));
-        touch.push(out.nodes.len() as u32);
-        out.nodes.push(Op::Mfp { input: get, filter: vec![], map: vec![Expr::Lit(1)], project: vec![width as u16] });
-    }
-    let union = out.nodes.len() as u32;
-    out.nodes.push(Op::Union(touch));
-    out.rels.insert(0, Relation { id: sentinel, name: "__ir_all_sources".into(), cols: vec![Ty::Int], kind: RelKind::Derived });
-    out.strata.push(Stratum::Let { id: sentinel, body: union });
-    out.outputs.insert(0, sentinel);
     Ok(Composed { program: out, rels: maps })
 }
 
@@ -141,12 +137,16 @@ mod tests {
     fn part(name: &str) -> Program {
         Program {
             texts: vec![format!("{name} text")],
+            terms: vec![
+                TermLit { functor: 1, args: vec![TermArg::Text(0)] },
+                TermLit { functor: 1, args: vec![TermArg::Term(0)] },
+            ],
             rels: vec![
                 Relation { id: 0, name: "src".into(), cols: vec![Ty::Int], kind: RelKind::Source },
                 Relation { id: 1, name: "9:1:f".into(), cols: vec![Ty::Id, Ty::Id], kind: RelKind::Constructor },
                 Relation { id: 2, name: "out".into(), cols: vec![Ty::Int], kind: RelKind::Derived },
             ],
-            nodes: vec![Op::Get(0), Op::Mfp { input: 0, filter: vec![Expr::Call(crate::Func::Ne, vec![Expr::Col(0), Expr::Text(0)])], map: vec![], project: vec![] }],
+            nodes: vec![Op::Get(0), Op::Mfp { input: 0, filter: vec![Expr::Call(crate::Func::Ne, vec![Expr::Col(0), Expr::Text(0)])], map: vec![Expr::Term(1)], project: vec![] }],
             strata: vec![Stratum::Let { id: 2, body: 1 }],
             outputs: vec![2],
         }
@@ -157,10 +157,14 @@ mod tests {
         let (a, b) = (part("a"), part("b"));
         let composed = compose(&[("a.", &a), ("b.", &b)]).unwrap();
         let names: Vec<(RelId, &str)> = composed.program.rels.iter().map(|r| (r.id, r.name.as_str())).collect();
-        assert_eq!(names, vec![(0, "__ir_all_sources"), (1, "a.src"), (2, "9:1:f"), (3, "a.out"), (4, "b.src"), (5, "b.out")]);
-        assert_eq!(composed.rels[1].get(&1), Some(&2));
-        assert_eq!(composed.program.nodes[3], Op::Mfp { input: 2, filter: vec![Expr::Call(crate::Func::Ne, vec![Expr::Col(0), Expr::Text(1)])], map: vec![], project: vec![] });
-        assert_eq!(composed.program.outputs, vec![0, 3, 5]);
+        assert_eq!(names, vec![(0, "a.src"), (1, "9:1:f"), (2, "a.out"), (3, "b.src"), (4, "b.out")]);
+        assert_eq!(composed.rels[1].get(&1), Some(&1));
+        assert_eq!(composed.program.nodes[3], Op::Mfp { input: 2, filter: vec![Expr::Call(crate::Func::Ne, vec![Expr::Col(0), Expr::Text(1)])], map: vec![Expr::Term(3)], project: vec![] });
+        assert_eq!(composed.program.outputs, vec![2, 4]);
         assert_eq!(composed.program.texts, vec!["a text".to_string(), "b text".to_string()]);
+        assert_eq!(composed.program.terms[2..], [
+            TermLit { functor: 1, args: vec![TermArg::Text(1)] },
+            TermLit { functor: 1, args: vec![TermArg::Term(2)] },
+        ]);
     }
 }

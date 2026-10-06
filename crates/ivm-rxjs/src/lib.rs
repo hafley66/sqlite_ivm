@@ -11,6 +11,7 @@ mod tests {
     #[test]
     fn emits_per_node_observables() {
         let program = Program {
+            terms: vec![],
             texts: vec![],
             rels: vec![
                 Relation { id: 0, name: "source".into(), cols: vec![Ty::Int], kind: RelKind::Source },
@@ -37,7 +38,7 @@ mod tests {
 
     #[test]
     fn delay_is_unsupported() {
-        let program = Program { texts: vec![], rels: vec![], nodes: vec![Op::Delay(0)], strata: vec![], outputs: vec![] };
+        let program = Program { terms: vec![], texts: vec![], rels: vec![], nodes: vec![Op::Delay(0)], strata: vec![], outputs: vec![] };
         assert!(emit(&program).is_err());
     }
 }

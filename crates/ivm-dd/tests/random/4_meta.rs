@@ -20,7 +20,7 @@ fn permuted(p: &Program, rng: &mut Rng) -> (Program, BTreeMap<RelId, RelId>) {
             Op::Mfp { input, filter, map, project } => Op::Mfp { input: n(&input), filter, map, project },
             Op::Union(ns) => Op::Union(ns.iter().map(n).collect()),
             Op::Negate(i) => Op::Negate(n(&i)),
-            Op::Join { inputs, equivalences } => Op::Join { inputs: inputs.iter().map(n).collect(), equivalences },
+            Op::Join { inputs, equivalences, project } => Op::Join { inputs: inputs.iter().map(n).collect(), equivalences, project },
             Op::Antijoin { l, r, lk, rk } => Op::Antijoin { l: n(&l), r: n(&r), lk, rk },
             Op::Reduce { input, key, aggs } => Op::Reduce { input: n(&input), key, aggs },
             Op::Threshold(i) => Op::Threshold(n(&i)),
@@ -53,7 +53,7 @@ fn permuted(p: &Program, rng: &mut Rng) -> (Program, BTreeMap<RelId, RelId>) {
         .collect();
     let mut outputs: Vec<RelId> = p.outputs.iter().map(|o| rel[o]).collect();
     rng.shuffle(&mut outputs);
-    (Program { texts: p.texts.clone(), rels, nodes, strata, outputs }, rel)
+    (Program { terms: vec![], texts: p.texts.clone(), rels, nodes, strata, outputs }, rel)
 }
 
 fn settle<E: Engine>(e: &mut E, f: &Frontier, at: usize) -> Result<Vec<(RelId, Row, W)>, String> {

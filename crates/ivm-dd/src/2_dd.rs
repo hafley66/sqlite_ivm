@@ -138,6 +138,7 @@ where Product<T, u64>: Nest + Timestamp<Summary = Product<<T as Timestamp>::Summ
             interner: rel.interner.clone(),
             sum_error: rel.sum_error.clone(),
             texts: rel.texts.clone(),
+            terms: rel.terms.clone(),
             keyed: BTreeMap::new(),
             read: BTreeSet::new(),
             types: rel.types.clone(),
@@ -224,6 +225,8 @@ pub struct DdRel<'s, T: Nest = Time> {
     interner: Rc<RefCell<Interner>>,
     sum_error: Rc<RefCell<Option<String>>>,
     texts: Vec<Cell>,
+    /// The cell of each `Program::terms` entry, minted at install.
+    terms: Vec<Cell>,
     /// Join inputs arranged once per `(stream, key columns)`; every join reading the same
     /// stream on the same key shares the arrangement.
     keyed: BTreeMap<(usize, usize, Vec<ColId>), Keyed<'s, T>>,
@@ -432,9 +435,11 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
         let input_types = input_types.to_vec();
         let interner = self.interner.clone();
         let texts = self.texts.clone();
+        let terms = self.terms.clone();
         c.flat_map(move |mut row: Row| {
             let lt = |a, b| interner.borrow().compare(a, b) == Ordering::Less;
             let literal = |index: u32| texts[index as usize];
+            let term = |index: u32| terms[index as usize];
             let nil = || interner.borrow().text_id("").expect("empty string");
             let compare = |ta: Ty, a: Cell, tb: Ty, b: Cell| {
                 let numeric = |ty: Ty| matches!(ty, Ty::Int | Ty::Real);
@@ -447,12 +452,12 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
                 let rank = |ty: Ty| match ty { Ty::Int | Ty::Real => 1, Ty::Text => 2, Ty::Id => 3, Ty::Any => 4 };
                 rank(ta).cmp(&rank(tb)).then_with(|| cmp_cell(ta, a, b, &interner.borrow()))
             };
-            if !filter.iter().all(|e| eval_typed_with_text(e, &row, &input_types, &lt, &literal, &nil, &compare) != 0) {
+            if !filter.iter().all(|e| eval_typed_with_text(e, &row, &input_types, &lt, &literal, &term, &nil, &compare) != 0) {
                 return None;
             }
             let mut types = input_types.clone();
             for e in &map {
-                let v = eval_typed_with_text(e, &row, &types, &lt, &literal, &nil, &compare);
+                let v = eval_typed_with_text(e, &row, &types, &lt, &literal, &term, &nil, &compare);
                 types.push(expr_type(e, &types).expect("Mfp expression type"));
                 row.push(v);
             }
@@ -1060,6 +1065,23 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
         let build_start = std::time::Instant::now();
         let arranged: Rc<RefCell<ArrangeStats>> = Rc::default();
         let built = worker.dataflow::<Time, _, _>(|scope| -> Result<Built, EngineError> {
+            // The term table, in order: each argument term is minted before the term naming it.
+            // The minted rows enter the constructor inputs with the first settle.
+            let mut terms: Vec<Cell> = Vec::with_capacity(program.terms.len());
+            for lit in &program.terms {
+                let (name, types) = constructors.get(&lit.functor)
+                    .ok_or_else(|| EngineError::new(Stage::Install, Some(lit.functor), ErrorKind::UnknownRel(lit.functor)))?;
+                if lit.args.len() != types.len() {
+                    return Err(EngineError::new(Stage::Install, Some(lit.functor), ErrorKind::Arity { expected: types.len(), actual: lit.args.len() }));
+                }
+                let args = lit.args.iter().map(|arg| match arg {
+                    TermArg::Term(index) => terms.get(*index as usize).copied(),
+                    TermArg::Text(index) => texts.get(*index as usize).copied(),
+                    TermArg::Raw(cell) => Some(*cell),
+                }).collect::<Option<Vec<Cell>>>()
+                    .ok_or_else(|| EngineError::new(Stage::Install, Some(lit.functor), ErrorKind::Unsupported("term argument after its term")))?;
+                terms.push(interner.borrow_mut().mint(name, &args, types));
+            }
             let mut inputs = BTreeMap::new();
             let mut constructor_inputs = BTreeMap::new();
             let mut sources = BTreeMap::new();
@@ -1074,7 +1096,7 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
                 constructor_inputs.insert(rel.id, input);
                 sources.insert(rel.id, c);
             }
-            let mut rel = DdRel { scope, rec: None, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone(), constructors: constructors.clone(), interner: interner.clone(), sum_error: sum_error.clone(), texts: texts.clone(), keyed: BTreeMap::new(), read: BTreeSet::new(), types: Rc::default(), arranged: arranged.clone(), limits: Vec::new() };
+            let mut rel = DdRel { scope, rec: None, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone(), constructors: constructors.clone(), interner: interner.clone(), sum_error: sum_error.clone(), texts: texts.clone(), terms, keyed: BTreeMap::new(), read: BTreeSet::new(), types: Rc::default(), arranged: arranged.clone(), limits: Vec::new() };
             lower(&program, &mut rel)?;
             // A constructor no operator reads gets no rows: its terms would cost an epoch and drive nothing.
             constructor_inputs.retain(|id, _| rel.read.contains(id));

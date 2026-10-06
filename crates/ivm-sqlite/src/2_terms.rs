@@ -1,4 +1,4 @@
-use ivm_ir::{self, AnyValue, RelKind, Program, RelId, Row, Term, Ty, W};
+use ivm_ir::{self, AnyValue, RelKind, Program, RelId, Row, Term, TermArg, Ty, W};
 use sqlite_ext::rusqlite::{self, Connection, OptionalExtension, functions::{Context, FunctionFlags}, types::Value};
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -82,6 +82,20 @@ pub(crate) fn install(db: &Connection, ir: &Program) -> rusqlite::Result<()> {
         db.execute_batch(&format!("CREATE TABLE IF NOT EXISTS {table}(c0 INTEGER PRIMARY KEY{}{});",
             if fields.is_empty() { String::new() } else { format!(",{}", fields.join(",")) },
             if unique.is_empty() { String::new() } else { format!(",UNIQUE({})", unique.join(",")) }))?;
+    }
+    // The term table, in order: each argument term is interned before the term naming it.
+    let mut cells: Vec<i64> = Vec::with_capacity(ir.terms.len());
+    for lit in &ir.terms {
+        let rel = ir.rel(lit.functor).filter(|rel| rel.kind == RelKind::Constructor).ok_or(rusqlite::Error::InvalidQuery)?;
+        let mut args = Vec::with_capacity(lit.args.len());
+        for arg in &lit.args {
+            args.push(match arg {
+                TermArg::Term(index) => *cells.get(*index as usize).ok_or(rusqlite::Error::InvalidQuery)?,
+                TermArg::Text(index) => intern_text(db, ir.texts.get(*index as usize).ok_or(rusqlite::Error::InvalidQuery)?)?,
+                TermArg::Raw(cell) => *cell,
+            });
+        }
+        cells.push(intern_terms(db, &[(rel.name.as_str(), args.as_slice())])?[0]);
     }
     register(db)
 }
@@ -485,7 +499,7 @@ mod tests {
     #[test]
     fn dictionary_function_prepares_once_per_statement_run() {
         let db = Connection::open_in_memory().unwrap();
-        let ir = Program { texts: (0..TEXTS).map(|i| format!("t{i}")).collect(), rels: vec![], nodes: vec![], strata: vec![], outputs: vec![] };
+        let ir = Program { terms: vec![], texts: (0..TEXTS).map(|i| format!("t{i}")).collect(), rels: vec![], nodes: vec![], strata: vec![], outputs: vec![] };
         install(&db, &ir).unwrap();
         let read = |db: &Connection| db.prepare("SELECT ivm_text_value(id) FROM ivm_text").unwrap()
             .query_map([], |r| r.get::<_, String>(0)).unwrap().count();
@@ -521,6 +535,7 @@ mod tests {
         let db = Connection::open_in_memory().unwrap();
         let wrap = vec![Ty::Id, Ty::Id, Ty::Text, Ty::Int];
         let ir = Program {
+            terms: vec![],
             texts: vec!["b".into(), "a".into()],
             rels: vec![ivm_ir::Relation { id: 0, name: "wrap".into(), cols: wrap.clone(), kind: RelKind::Constructor }],
             nodes: vec![], strata: vec![], outputs: vec![],

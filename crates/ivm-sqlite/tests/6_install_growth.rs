@@ -22,6 +22,7 @@ fn counted_install(program: &Program) -> (Sqlite, usize) {
 
 fn recursive_program(strata: usize) -> Program {
     let mut program = Program {
+        terms: vec![],
         texts: vec![],
         rels: vec![Relation {
             id: 0,
@@ -48,6 +49,7 @@ fn recursive_program(strata: usize) -> Program {
             Op::Join {
                 inputs: vec![at + 1, at],
                 equivalences: vec![vec![(0, 1), (1, 0)]],
+                project: vec![],
             },
             Op::Mfp {
                 input: at + 2,
@@ -121,6 +123,7 @@ fn schema_objects_grow_linearly_with_independent_recursive_strata() {
 #[test]
 fn pure_delta_chain_has_fixed_create_count() {
     let program = Program {
+        terms: vec![],
         texts: vec![],
         rels: vec![
             Relation { id: 0, name: "source".into(), cols: vec![Ty::Int], kind: RelKind::Source },
@@ -162,6 +165,7 @@ fn pure_delta_chain_has_fixed_create_count() {
 #[test]
 fn output_install_keeps_transitive_strata_and_filters_other_sources() {
     let program = Program {
+        terms: vec![],
         texts: vec![],
         rels: vec![
             Relation {
@@ -232,6 +236,7 @@ fn output_install_keeps_transitive_strata_and_filters_other_sources() {
 #[test]
 fn output_install_remaps_text_literals() {
     let program = Program {
+        terms: vec![],
         texts: vec!["unused".into(), "first".into(), "second".into()],
         rels: vec![
             Relation {
@@ -359,6 +364,7 @@ fn c15_empty_frontier_agrees_with_dd() {
 #[test]
 fn bundled_outputs_keep_set_and_bag_weights() {
     let program = Program {
+        terms: vec![],
         texts: vec![],
         rels: vec![
             Relation {

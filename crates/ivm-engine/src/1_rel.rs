@@ -190,7 +190,7 @@ pub fn eval(expr: &Expr, row: &[Cell]) -> Cell {
 }
 
 pub fn eval_with(expr: &Expr, row: &[Cell], term_lt: &dyn Fn(Cell, Cell) -> bool) -> Cell {
-    eval_with_text(expr, row, term_lt, &|_| panic!("Text requires a dictionary"), &|| panic!("StrNil requires a dictionary"))
+    eval_with_text(expr, row, term_lt, &|_| panic!("Text requires a dictionary"), &|_| panic!("Term requires a dictionary"), &|| panic!("StrNil requires a dictionary"))
 }
 
 enum ExprStep<'e> {
@@ -242,11 +242,13 @@ fn walk_expr<V: Copy>(expr: &Expr, leaf: impl Fn(&Expr) -> V, apply: impl Fn(&Fu
     values[0]
 }
 
-pub fn eval_with_text(expr: &Expr, row: &[Cell], term_lt: &dyn Fn(Cell, Cell) -> bool, text: &dyn Fn(u32) -> Cell, nil: &dyn Fn() -> Cell) -> Cell {
+/// `text(i)` and `term(i)` are the cells of `Program::texts[i]` and `Program::terms[i]`.
+pub fn eval_with_text(expr: &Expr, row: &[Cell], term_lt: &dyn Fn(Cell, Cell) -> bool, text: &dyn Fn(u32) -> Cell, term: &dyn Fn(u32) -> Cell, nil: &dyn Fn() -> Cell) -> Cell {
     let leaf = |e: &Expr| match e {
         Expr::Col(c) => row[*c as usize],
         Expr::Lit(v) => *v,
         Expr::Text(index) => text(*index),
+        Expr::Term(index) => term(*index),
         Expr::Call(..) => nil(),
     };
     walk_expr(expr, leaf, |func, a: &[Cell]| match func {
@@ -270,7 +272,7 @@ pub fn eval_with_text(expr: &Expr, row: &[Cell], term_lt: &dyn Fn(Cell, Cell) ->
 pub fn eval_typed_with_text(
     expr: &Expr, row: &[Cell], types: &[Ty],
     term_lt: &dyn Fn(Cell, Cell) -> bool,
-    text: &dyn Fn(u32) -> Cell, nil: &dyn Fn() -> Cell,
+    text: &dyn Fn(u32) -> Cell, term: &dyn Fn(u32) -> Cell, nil: &dyn Fn() -> Cell,
     compare: &dyn Fn(Ty, Cell, Ty, Cell) -> std::cmp::Ordering,
 ) -> Cell {
     use std::cmp::Ordering;
@@ -278,6 +280,7 @@ pub fn eval_typed_with_text(
         Expr::Col(c) => (row[*c as usize], types.get(*c as usize).copied()),
         Expr::Lit(v) => (*v, Some(Ty::Int)),
         Expr::Text(index) => (text(*index), Some(Ty::Text)),
+        Expr::Term(index) => (term(*index), Some(Ty::Id)),
         Expr::Call(..) => (nil(), Some(Ty::Text)),
     };
     let apply = |func: &Func, a: &[(Cell, Option<Ty>)]| {
@@ -355,12 +358,20 @@ fn decoded<C>(p: &Program, defined: &[(RelId, C)], inputs: &[NodeId], equivalenc
     })
 }
 
-/// `Mfp { project }` with no filter or map over a two-input `Join` that is no constructor
-/// decode: `(join inputs, equivalences, project)`.
+/// A two-input `Join` that is no constructor decode, projected: the Join's own `project`, or an
+/// `Mfp { project }` with no filter or map over a Join without one. `(join inputs, equivalences,
+/// project)`.
 pub fn projected_join<'p, C>(p: &'p Program, defined: &[(RelId, C)], op: &'p Op) -> Option<(&'p [NodeId], &'p [Vec<(u8, ColId)>], &'p [ColId])> {
-    let Op::Mfp { input, filter, map, project } = op else { return None };
-    if !filter.is_empty() || !map.is_empty() || project.is_empty() { return None; }
-    let Op::Join { inputs, equivalences } = p.nodes.get(*input as usize)? else { return None };
+    let (inputs, equivalences, project) = match op {
+        Op::Join { inputs, equivalences, project } if !project.is_empty() => (inputs, equivalences, project),
+        Op::Mfp { input, filter, map, project } => {
+            if !filter.is_empty() || !map.is_empty() || project.is_empty() { return None; }
+            let Op::Join { inputs, equivalences, project: none } = p.nodes.get(*input as usize)? else { return None };
+            if !none.is_empty() { return None; }
+            (inputs, equivalences, project)
+        }
+        _ => return None,
+    };
     (inputs.len() == 2 && decoded(p, defined, inputs, equivalences).is_none()).then_some((inputs.as_slice(), equivalences.as_slice(), project.as_slice()))
 }
 
@@ -381,7 +392,7 @@ pub fn lowered_inputs<C>(p: &Program, defined: &[(RelId, C)], op: &Op, fuse: boo
         Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Mfp { input, .. }
         | Op::Negate(input) | Op::Reduce { input, .. } | Op::Threshold(input)
         | Op::TopK { input, .. } | Op::Window { input, .. } => smallvec![*input],
-        Op::Join { inputs, equivalences } => match decoded(p, defined, inputs, equivalences) {
+        Op::Join { inputs, equivalences, .. } => match decoded(p, defined, inputs, equivalences) {
             Some((side, ..)) => smallvec![inputs[1 - side]],
             None => SmallVec::from_slice(inputs),
         },
@@ -485,26 +496,38 @@ fn build_node<A: Rel>(
         }
         Op::Union(_) => a.union(built.to_vec()),
         Op::Negate(_) => a.negate(first()),
-        Op::Join { inputs, equivalences } if decoded(p, defined, inputs, equivalences).is_some() => {
+        Op::Join { inputs, equivalences, project } if decoded(p, defined, inputs, equivalences).is_some() => {
             let (side, col, functor) = decoded(p, defined, inputs, equivalences).unwrap();
             let other = inputs[1 - side];
             let types = [other, inputs[side]].map(|n| a.node_types(p, n).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Join input types"))));
             let types = [types[0].clone()?, types[1].clone()?];
             let c = a.decode(first(), functor, col, &types)?;
-            if side == 1 {
+            let (width, ctor) = (types[0].len(), types[1].len());
+            let mut all = types[0].clone();
+            all.extend(types[1].iter().copied());
+            // The decode's columns are the other input's, then the constructor's; the Join's are in
+            // input order, then `project` of them.
+            let order: Vec<ColId> = if side == 1 {
+                (0..width + ctor).map(|x| x as ColId).collect()
+            } else {
+                (width..width + ctor).chain(0..width).map(|x| x as ColId).collect()
+            };
+            let project: Vec<ColId> = if project.is_empty() { order } else { project.iter().map(|x| order[*x as usize]).collect() };
+            if project.iter().copied().eq((0..width + ctor).map(|x| x as ColId)) {
                 c
             } else {
-                // The constructor input came first: its columns lead.
-                let (width, ctor) = (types[0].len(), types[1].len());
-                let project = (width..width + ctor).chain(0..width).map(|x| x as ColId).collect::<Vec<_>>();
-                let mut all = types[0].clone();
-                all.extend(types[1].iter().copied());
                 a.mfp(c, &[], &[], &project, &all)
             }
         }
-        Op::Join { inputs, equivalences } => {
+        Op::Join { inputs, equivalences, project } => {
             let types = inputs.iter().map(|n| a.node_types(p, *n).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Join input types")))).collect::<Result<Vec<_>, _>>()?;
-            a.join(built.to_vec(), equivalences, &types)?
+            let c = a.join(built.to_vec(), equivalences, &types)?;
+            if project.is_empty() {
+                c
+            } else {
+                let all: Vec<Ty> = types.iter().flatten().copied().collect();
+                a.mfp(c, &[], &[], project, &all)
+            }
         }
         Op::Antijoin { lk, rk, .. } => a.antijoin(built[0].clone(), built[1].clone(), lk, rk),
         Op::Reduce { input, key, aggs } => {

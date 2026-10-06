@@ -82,7 +82,7 @@ fn recursive_cte(p: &Program, rec: &LetRec) -> String {
         let Op::Get(seed) = &p.nodes[parts[0] as usize] else { panic!("printer: recursive seed") };
         let Op::Mfp { input, filter, map, project } = &p.nodes[parts[1] as usize] else { panic!("printer: recursive step") };
         assert!(filter.is_empty() && map.is_empty() && project == &[2]);
-        let Op::Join { inputs, equivalences } = &p.nodes[*input as usize] else { panic!("printer: recursive join") };
+        let Op::Join { inputs, equivalences, .. } = &p.nodes[*input as usize] else { panic!("printer: recursive join") };
         assert_eq!(equivalences, &vec![vec![(0, 0), (1, 0)]]);
         let Op::Get(from) = &p.nodes[inputs[0] as usize] else { panic!("printer: recursive input") };
         let Op::Get(edge) = &p.nodes[inputs[1] as usize] else { panic!("printer: recursive edge") };
@@ -130,7 +130,7 @@ impl Printer<'_> {
                 let parts: Vec<String> = ns.iter().map(|n| format!("SELECT * FROM ({})", self.node(*n))).collect();
                 parts.join(" UNION ALL ")
             }
-            Op::Join { inputs, equivalences } => {
+            Op::Join { inputs, equivalences, .. } => {
                 let mut sel = Vec::new();
                 let mut from = Vec::new();
                 let mut ts = Vec::new();
@@ -239,6 +239,7 @@ fn expr(t: &str, a: usize, map: &[Expr], e: &Expr) -> String {
         Expr::Col(c) => col(t, a, map, *c as usize),
         Expr::Lit(v) => format!("({v})"),
         Expr::Text(_) => panic!("string expressions use the text oracle"),
+        Expr::Term(_) => panic!("the generator draws no term literals"),
         Expr::Call(f, args) => {
             let x = |i: usize| expr(t, a, map, &args[i]);
             let op = match f {

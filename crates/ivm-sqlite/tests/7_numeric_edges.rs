@@ -10,6 +10,7 @@ use support::sqlite_rows;
 
 fn ir() -> Program {
     Program {
+        terms: vec![],
         texts: vec![],
         rels: vec![
             Relation { id: 0, name: "src".into(), cols: vec![Ty::Any, Ty::Int], kind: RelKind::Source },
@@ -19,7 +20,7 @@ fn ir() -> Program {
         nodes: vec![
             Op::Get(0),
             Op::Reduce { input: 0, key: vec![0], aggs: vec![Agg::Count] },
-            Op::Join { inputs: vec![0, 0], equivalences: vec![vec![(0, 0), (1, 0)]] },
+            Op::Join { inputs: vec![0, 0], equivalences: vec![vec![(0, 0), (1, 0)]], project: vec![] },
         ],
         strata: vec![Stratum::Let { id: 1, body: 1 }, Stratum::Let { id: 2, body: 2 }],
         outputs: vec![1, 2],

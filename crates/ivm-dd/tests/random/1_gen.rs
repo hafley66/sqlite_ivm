@@ -10,6 +10,7 @@ pub const DOMAIN: usize = 3;
 /// A no-affinity source exercises every SQLite storage class in one IR program.
 pub fn any_program() -> Program {
     Program {
+        terms: vec![],
         texts: vec![],
         rels: vec![
             Relation { id: 0, name: "mixed_source".into(), cols: vec![Ty::Any, Ty::Int], kind: RelKind::Source },
@@ -22,7 +23,7 @@ pub fn any_program() -> Program {
             Op::Get(0),
             Op::Reduce { input: 0, key: vec![0], aggs: vec![Agg::Count] },
             Op::TopK { input: 0, key: vec![], order: vec![Order { col: 0, desc: false }], limit: 4 },
-            Op::Join { inputs: vec![0, 0], equivalences: vec![vec![(0, 0), (1, 0)]] },
+            Op::Join { inputs: vec![0, 0], equivalences: vec![vec![(0, 0), (1, 0)]], project: vec![] },
             Op::Reduce { input: 0, key: vec![], aggs: vec![Agg::Sum(0)] },
         ],
         strata: vec![Stratum::Let { id: 1, body: 1 }, Stratum::Let { id: 2, body: 2 }, Stratum::Let { id: 3, body: 3 }, Stratum::Let { id: 4, body: 4 }],
@@ -50,6 +51,7 @@ const WIDE: usize = 4;
 pub fn typed_program(rng: &mut Rng) -> Program {
     let descending = rng.chance(50);
     Program {
+        terms: vec![],
         texts: vec!["z".into(), "a".into(), "m".into()],
         rels: vec![
             Relation { id: 0, name: "typed_source".into(), cols: vec![Ty::Text, Ty::Real], kind: RelKind::Source },
@@ -206,7 +208,7 @@ impl Gen<'_> {
             .map(|_| vec![(0, self.rng.below(la) as ColId), (1, self.rng.below(ra) as ColId)])
             .collect();
         let depth = self.depth[l as usize].max(self.depth[r as usize]) + 1;
-        self.push(Op::Join { inputs: vec![l, r], equivalences }, la + ra, depth)
+        self.push(Op::Join { inputs: vec![l, r], equivalences, project: vec![] }, la + ra, depth)
     }
 
     fn antijoin(&mut self, b: usize) -> NodeId {
@@ -303,7 +305,7 @@ pub fn program(rng: &mut Rng) -> Program {
     if derived > 1 && gen.rng.chance(50) {
         outputs.push((sources + gen.rng.below(derived - 1)) as RelId);
     }
-    Program { texts: vec![], rels, nodes: gen.nodes, strata, outputs }
+    Program { terms: vec![], texts: vec![], rels, nodes: gen.nodes, strata, outputs }
 }
 
 /// Linear recursion over finite source keys. A tagged SQL CTE can print either one or two
@@ -329,7 +331,7 @@ fn recursive_program(rng: &mut Rng) -> Program {
         let seed = gen.push(Op::Get(i as RelId), 1, 0);
         let from = gen.push(Op::Get(ids[(i + count - 1) % count]), 1, 0);
         let edges = gen.push(Op::Get(edge), 2, 0);
-        let join = gen.push(Op::Join { inputs: vec![from, edges], equivalences: vec![vec![(0, 0), (1, 0)]] }, 3, 1);
+        let join = gen.push(Op::Join { inputs: vec![from, edges], equivalences: vec![vec![(0, 0), (1, 0)]], project: vec![] }, 3, 1);
         let step = gen.push(Op::Mfp { input: join, filter: vec![], map: vec![], project: vec![2] }, 1, 2);
         bodies.push(gen.push(Op::Union(vec![seed, step]), 1, 3));
     }
@@ -350,7 +352,7 @@ fn recursive_program(rng: &mut Rng) -> Program {
     strata.push(Stratum::Let { id: top_id, body: top });
     let mut outputs = ids;
     outputs.push(top_id);
-    Program { texts: vec![], rels, nodes: gen.nodes, strata, outputs }
+    Program { terms: vec![], texts: vec![], rels, nodes: gen.nodes, strata, outputs }
 }
 
 /// Recursive Mint and Antijoin against a lower-stratum blocker, in either order.
@@ -368,7 +370,7 @@ pub fn recursive_shapes_program(rng: &mut Rng) -> Program {
         Op::Mint { input: 0, functor: 3, args: vec![0] },
         Op::Get(4),
         Op::Get(1),
-        Op::Join { inputs: vec![2, 3], equivalences: vec![vec![(0, 0), (1, 0)]] },
+        Op::Join { inputs: vec![2, 3], equivalences: vec![vec![(0, 0), (1, 0)]], project: vec![] },
         Op::Mfp { input: 4, filter: vec![], map: vec![], project: vec![3] },
         Op::Get(2),
     ];
@@ -386,6 +388,7 @@ pub fn recursive_shapes_program(rng: &mut Rng) -> Program {
     nodes.push(Op::Get(4));
     nodes.push(Op::Mfp { input: 10, filter: vec![], map: vec![], project: vec![0] });
     Program {
+        terms: vec![],
         texts: vec![],
         rels,
         nodes,
@@ -411,12 +414,12 @@ pub fn k5_program() -> Program {
         Op::Get(0),
         Op::Get(3),
         Op::Get(1),
-        Op::Join { inputs: vec![1, 2], equivalences: vec![vec![(0, 0), (1, 0)]] },
+        Op::Join { inputs: vec![1, 2], equivalences: vec![vec![(0, 0), (1, 0)]], project: vec![] },
         Op::Mfp { input: 3, filter: vec![], map: vec![], project: vec![2] },
         Op::Union(vec![0, 4]),
         Op::Get(3),
         Op::Get(2),
-        Op::Join { inputs: vec![6, 7], equivalences: vec![vec![(0, 0), (1, 0)]] },
+        Op::Join { inputs: vec![6, 7], equivalences: vec![vec![(0, 0), (1, 0)]], project: vec![] },
         Op::Mfp { input: 8, filter: vec![], map: vec![], project: vec![0, 2] },
         Op::TopK { input: 9, key: vec![0], order: vec![Order { col: 1, desc: true }], limit: 1 },
         Op::Get(4),
@@ -427,7 +430,7 @@ pub fn k5_program() -> Program {
         Stratum::Let { id: 4, body: 10 },
         Stratum::Let { id: 5, body: 12 },
     ];
-    Program { texts: vec![], rels, nodes, strata, outputs: vec![3, 4, 5] }
+    Program { terms: vec![], texts: vec![], rels, nodes, strata, outputs: vec![3, 4, 5] }
 }
 
 /// 20-50 frontiers of 0-4 changes; an insert only of an absent row, a delete only of a present one.

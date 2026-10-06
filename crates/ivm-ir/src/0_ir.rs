@@ -108,6 +108,27 @@ pub enum Expr {
     Lit(Cell),
     Text(u32),
     Call(Func, Vec<Expr>),
+    /// The id cell of `Program::terms[i]`, interned by the engine at install. Typed `Id`.
+    Term(u32),
+}
+
+/// One argument of a ground term the engine interns at install.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TermArg {
+    /// An earlier entry of `Program::terms`.
+    Term(u32),
+    /// The text cell of `Program::texts[i]`.
+    Text(u32),
+    /// A raw cell (an int, a float's bits, an atom's rank).
+    Raw(Cell),
+}
+
+/// A ground term `functor(args)`: `functor` is a constructor relation; the engine interns it at
+/// install, as `Engine::intern_terms` would, and its constructor rows hold it from the first settle.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TermLit {
+    pub functor: RelId,
+    pub args: Vec<TermArg>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -172,11 +193,13 @@ pub enum Op {
     },
     Union(Vec<NodeId>),
     Negate(NodeId),
-    /// Output columns are the inputs' columns concatenated. Each equivalence class lists
-    /// `(input position, column)` pairs that must be equal.
+    /// Output columns are the inputs' columns concatenated, then `project` of them (empty = all).
+    /// Each equivalence class lists `(input position, column)` pairs that must be equal.
     Join {
         inputs: Vec<NodeId>,
         equivalences: Vec<Vec<(u8, ColId)>>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        project: Vec<ColId>,
     },
     Antijoin {
         l: NodeId,
@@ -250,6 +273,9 @@ pub enum Stratum {
 pub struct Program {
     #[serde(default)]
     pub texts: Vec<String>,
+    /// Ground terms `Expr::Term` reads, each argument term before the term that names it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terms: Vec<TermLit>,
     pub rels: Vec<Relation>,
     pub nodes: Vec<Op>,
     pub strata: Vec<Stratum>,
@@ -368,10 +394,10 @@ impl Program {
             }
             Op::Union(inputs) => types_of(*inputs.first()?)?,
             Op::Negate(input) | Op::Threshold(input) | Op::Delay(input) => types_of(*input)?,
-            Op::Join { inputs, .. } => {
+            Op::Join { inputs, project, .. } => {
                 let mut cols = Vec::new();
                 for input in inputs { cols.extend(types_of(*input)?); }
-                cols
+                if project.is_empty() { cols } else { project.iter().map(|c| cols.get(*c as usize).copied()).collect::<Option<Vec<_>>>()? }
             }
             Op::Antijoin { l, .. } => types_of(*l)?,
             Op::Reduce { input, key, aggs } => {
@@ -405,6 +431,7 @@ fn expr_node_type(expr: &Expr, cols: &[Ty], operands: &[Option<Ty>]) -> Option<T
         Expr::Col(c) => cols.get(*c as usize).copied(),
         Expr::Text(_) | Expr::Call(Func::StrNil, _) => Some(Ty::Text),
         Expr::Lit(_) => Some(Ty::Int),
+        Expr::Term(_) => Some(Ty::Id),
         Expr::Call(Func::Add | Func::Sub, _) => match operands {
             [Some(left), Some(right)] => Some(if *left == Ty::Real || *right == Ty::Real { Ty::Real } else { Ty::Int }),
             _ => None,

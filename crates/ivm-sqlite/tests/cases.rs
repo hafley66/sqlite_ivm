@@ -81,6 +81,7 @@ fn typed_map_filter_settles_and_reattaches() {
         .unwrap();
     conn.execute_batch("INSERT INTO t VALUES (1,10)").unwrap();
     let program = ivm_ir::Program {
+        terms: vec![],
         texts: vec![],
         rels: vec![
             Relation {
@@ -136,6 +137,7 @@ fn typed_map_filter_over_join_uses_join_delta() {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch("CREATE TABLE l(a INTEGER NOT NULL, k INTEGER NOT NULL); CREATE TABLE r(k INTEGER NOT NULL, b INTEGER NOT NULL);").unwrap();
     let program = ivm_ir::Program {
+        terms: vec![],
         texts: vec![],
         rels: vec![
             Relation {
@@ -163,6 +165,7 @@ fn typed_map_filter_over_join_uses_join_delta() {
             Op::Join {
                 inputs: vec![0, 1],
                 equivalences: vec![vec![(0, 1), (1, 0)]],
+                project: vec![],
             },
             Op::Mfp {
                 input: 2,
@@ -241,6 +244,7 @@ fn typed_threshold_over_source_preserves_one_visible_row() {
     conn.execute_batch("CREATE TABLE t(a INTEGER NOT NULL); INSERT INTO t VALUES (7),(7);")
         .unwrap();
     let ir = ivm_ir::Program {
+        terms: vec![],
         texts: vec![],
         rels: vec![
             Relation {

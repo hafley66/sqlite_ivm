@@ -48,6 +48,7 @@ impl Case {
         let mut rng = Rng(seed);
         let args = if rng.chance(50) { vec![0, 1] } else { vec![1, 0] };
         let program = Program {
+            terms: vec![],
             texts: vec![],
             rels: vec![
                 Relation { id: 0, name: "mint_source".into(), cols: vec![Ty::Int, Ty::Int], kind: RelKind::Source },
@@ -66,8 +67,8 @@ impl Case {
                 Op::Mint { input: 0, functor: 1, args },
                 Op::Mint { input: 1, functor: 2, args: vec![2] },
                 Op::Get(1),
-                Op::Join { inputs: vec![1, 3], equivalences: vec![vec![(0, 2), (1, 0)]] },
-                Op::Join { inputs: vec![1, 1], equivalences: vec![] },
+                Op::Join { inputs: vec![1, 3], equivalences: vec![vec![(0, 2), (1, 0)]], project: vec![] },
+                Op::Join { inputs: vec![1, 1], equivalences: vec![], project: vec![] },
                 Op::Mfp { input: 5, filter: vec![Expr::Call(Func::TermLt, vec![Expr::Col(2), Expr::Col(5)])], map: vec![], project: vec![2, 5] },
                 Op::Reduce { input: 1, key: vec![], aggs: vec![Agg::Min(2), Agg::Max(2)] },
                 Op::TopK { input: 1, key: vec![], order: vec![Order { col: 2, desc: false }], limit: 2 },

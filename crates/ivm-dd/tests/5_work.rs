@@ -38,6 +38,7 @@ fn rounds<E: Engine>(depth: usize) -> u64 {
 
 fn mint_program() -> Program {
     Program {
+        terms: vec![],
         rels: vec![
             Relation { id: 0, name: "seed".into(), cols: vec![Ty::Int, Ty::Int], kind: RelKind::Source },
             Relation { id: 1, name: "token".into(), cols: vec![Ty::Id, Ty::Int], kind: RelKind::Constructor },
