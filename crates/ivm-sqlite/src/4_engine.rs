@@ -289,13 +289,6 @@ impl Sqlite {
     fn install_traced(owned: Connection, ir: &Program, shards: usize, mut work: Option<crate::work::WorkLog>) -> Result<Self, EngineError> {
         let db = &owned;
         let shards = attach_limit(db, shards);
-        if ir.outputs.is_empty() {
-            return Err(EngineError::new(
-                Stage::Install,
-                None,
-                ErrorKind::Unsupported("output relation required"),
-            ));
-        }
         crate::terms::install(db, ir).map_err(|e| error(Stage::Install, e))?;
         // One schema read: the tables the host already holds. Every source DDL runs inside the
         // program install savepoint, ahead of the program DDL.
@@ -331,7 +324,10 @@ impl Sqlite {
             }
         }
         let mut programs = Vec::new();
-        if ir.outputs.len() > 1 {
+        if ir.outputs.is_empty() {
+            // No output: no plan; the source tables still take the host's rows.
+            db.execute_batch(&created.ddl).map_err(|e| error(Stage::Install, e))?;
+        } else if ir.outputs.len() > 1 {
             let (bundle, members) = bundled_program(ir)?;
             let relation = bundle.rel(bundle.outputs[0]).expect("bundle output");
             let program =
