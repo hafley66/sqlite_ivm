@@ -55,8 +55,8 @@ fn composed<E: Engine>() -> (Vec<Vec<(Vec<i64>, i64)>>, Vec<u32>, bool) {
 fn composed_parts_settle_apart_and_declared_constructors_intern() {
     for (outs, declared, stable) in [composed::<Dd>(), composed::<Sqlite>()] {
         assert_eq!(outs, vec![vec![(vec![3], 1), (vec![7], 1)], vec![(vec![9], 1)]]);
-        assert_eq!(declared[1], 2, "a constructor the program names keeps its id");
-        assert!(declared[0] > 5, "a new constructor gets an id no program relation holds");
+        assert_eq!(declared[1], 1, "a constructor the program names keeps its id");
+        assert!(declared[0] > 4, "a new constructor gets an id no program relation holds");
         assert!(stable, "one term, one cell");
     }
 }

@@ -243,7 +243,8 @@ fn bundled_program(ir: &Program) -> Result<(Program, Vec<(RelId, usize)>), Engin
     bundle.nodes.push(Op::Union(branches));
     let id = bundle.rels.iter().map(|rel| rel.id).max().unwrap_or(0).checked_add(1)
         .ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("relation id space exhausted")))?;
-    let name = format!("__ivm_bundle_{}", ir.rel(ir.outputs[0]).unwrap().name);
+    // Relation names may hold any text; the bundle's program name is a plain identifier.
+    let name = "__ivm_bundle".to_owned();
     bundle.rels.push(ivm_ir::Relation { id, name, cols: vec![ivm_ir::Ty::Int; width + 1], kind: RelKind::Derived });
     bundle.strata.push(Stratum::Let { id, body });
     bundle.outputs = vec![id];
