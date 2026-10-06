@@ -134,6 +134,7 @@ fn differences(
     }
 }
 fn compare(name: &str, p: &Program, texts: &[String], frontiers: &[Frontier]) -> TestResult<()> {
+    println!("INSTALL {name}");
     let mut dd = Dd::install(p)?;
     let mut duck = DuckDb::install(p)?;
     for text in texts {
@@ -168,14 +169,16 @@ fn compare(name: &str, p: &Program, texts: &[String], frontiers: &[Frontier]) ->
                     let mut seen = BTreeSet::new();
                     for (rel, row, w) in &delta.changes {
                         if *w == 0 || !seen.insert((*rel, row)) {
-                            errors.push(format!(
-                                "{name}/{i}: {label} unconsolidated delta {delta:?}"
-                            ));
+                            let message = format!("{name}/{i}: {label} unconsolidated delta {delta:?}");
+                            println!("ERROR_DIFF {message}");
+                            errors.push(message);
                         }
                     }
                 }
                 if a.tick != b.tick {
-                    errors.push(format!("{name}/{i}: tick {} != {}", a.tick, b.tick));
+                    let message = format!("{name}/{i}: tick {} != {}", a.tick, b.tick);
+                    println!("ERROR_DIFF {message}");
+                    errors.push(message);
                 }
                 differences(
                     &format!("{name}/{i} delta"),
@@ -183,13 +186,17 @@ fn compare(name: &str, p: &Program, texts: &[String], frontiers: &[Frontier]) ->
                     canonical(p, &duck, b.changes)?,
                     &mut errors,
                 );
-                println!("WORK {name}/{i} {:?}", duck.work());
             }
             (Err(a), Err(b)) if a.kind == b.kind => {
-                println!("WORK {name}/{i} rejected {:?} {:?}", b.kind, duck.work());
+                println!("REJECT {name}/{i} {:?}", b.kind);
             }
-            (a, b) => errors.push(format!("{name}/{i}: dd={a:?} duckdb={b:?}")),
+            (a, b) => {
+                let message = format!("{name}/{i}: dd={a:?} duckdb={b:?}");
+                println!("ERROR_DIFF {message}");
+                errors.push(message);
+            },
         }
+        println!("WORK {name}/{i} {:?}", duck.work());
         let snapshots = |engine: &dyn Snapshot| -> TestResult<Vec<(RelId, Row, W)>> {
             let mut rows = Vec::new();
             for rel in &p.outputs {
@@ -323,6 +330,7 @@ fn shared_conformance() -> TestResult<()> {
 }
 #[test]
 fn string_lifecycle_and_rewind() -> TestResult<()> {
+    println!("INSTALL strings");
     let p: Program =
         serde_json::from_str(include_str!("../../ivm-dd/oracle/16_string.program.json"))?;
     let mut dd = Dd::install(&p)?;
@@ -374,6 +382,7 @@ fn string_lifecycle_and_rewind() -> TestResult<()> {
             w: 1,
         }],
     })?;
+    println!("WORK strings/mark_probe {:?}", duck.work());
     duck.rewind()?;
     if duck.snapshot(3)? != before || duck.text(id)?.is_some() {
         errors.push("rewind state differs".into());

@@ -19,6 +19,58 @@ pub fn decl(n: usize) -> String {
         .collect::<Vec<_>>()
         .join(",")
 }
+pub fn bag_select(n: usize, prefix: &str) -> String {
+    if n == 0 {
+        format!("{prefix}unit")
+    } else {
+        cols(n, prefix).join(",")
+    }
+}
+pub fn bag_decl(n: usize) -> String {
+    if n == 0 {
+        "unit BIGINT NOT NULL".into()
+    } else {
+        cols(n, "")
+            .iter()
+            .map(|c| format!("{c} BIGINT NOT NULL"))
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+}
+pub fn counted(table: &str, n: usize) -> String {
+    let cs = cols(n, "").join(",");
+    if n == 0 {
+        format!("SELECT count(*)::BIGINT AS w FROM {table} HAVING count(*)>0")
+    } else {
+        format!("SELECT {cs},count(*)::BIGINT AS w FROM {table} GROUP BY {cs}")
+    }
+}
+pub fn inputs(op: &Op) -> Vec<NodeId> {
+    match op {
+        Op::Get(_) => vec![],
+        Op::Join { inputs, .. } | Op::Union(inputs) => inputs.clone(),
+        Op::Antijoin { l, r, .. } => vec![*l, *r],
+        _ => op.type_inputs().to_vec(),
+    }
+}
+pub fn operator(op: &Op) -> &'static str {
+    match op {
+        Op::Get(_) => "Get",
+        Op::Mfp { .. } => "Mfp",
+        Op::Union(_) => "Union",
+        Op::Negate(_) => "Negate",
+        Op::Threshold(_) => "Threshold",
+        Op::Join { .. } => "Join",
+        Op::Antijoin { .. } => "Antijoin",
+        Op::Reduce { .. } => "Reduce",
+        Op::TopK { .. } => "TopK",
+        Op::Window { .. } => "Window",
+        Op::Mint { .. } => "Mint",
+        Op::Str { .. } => "Str",
+        Op::StrCons { .. } => "StrCons",
+        Op::Delay(_) => "Delay",
+    }
+}
 pub fn consolidate(query: &str, n: usize) -> String {
     let c = cols(n, "");
     let group = if n == 0 {
@@ -144,12 +196,15 @@ pub fn query(
     types: &[Vec<Ty>],
     texts: &[Cell],
     nil: Cell,
+    bag: bool,
 ) -> Result<Option<String>, EngineError> {
     let unsupported = |name| EngineError::new(Stage::Install, None, ErrorKind::Unsupported(name));
     let op = &p.nodes[id as usize];
     let width = types[id as usize].len();
+    let np = if bag { "n" } else { "zn" };
+    let rp = if bag { "r" } else { "zr" };
     let q = match op {
-        Op::Get(r) => format!("SELECT * FROM r{r}"),
+        Op::Get(r) => format!("SELECT * FROM {rp}{r}"),
         Op::Mint { .. } | Op::Str { .. } | Op::StrCons { .. } => return Ok(None),
         Op::Delay(_) => return Err(unsupported("Delay")),
         Op::Mfp {
@@ -183,9 +238,13 @@ pub fn query(
                         .ok_or_else(|| unsupported("Mfp project column"))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            out.push("s.w".into());
+            if !bag {
+                out.push("s.w".into());
+            } else if out.is_empty() {
+                out.push("1::BIGINT AS unit".into());
+            }
             format!(
-                "SELECT {} FROM n{input} s {}",
+                "SELECT {} FROM {np}{input} s {}",
                 out.join(","),
                 if predicates.is_empty() {
                     String::new()
@@ -196,19 +255,22 @@ pub fn query(
         }
         Op::Union(inputs) => inputs
             .iter()
-            .map(|n| format!("SELECT * FROM n{n}"))
+            .map(|n| format!("SELECT * FROM {np}{n}"))
             .collect::<Vec<_>>()
             .join(" UNION ALL "),
         Op::Negate(input) => format!(
-            "SELECT {}-w AS w FROM n{input}",
+            "SELECT {}-w AS w FROM {np}{input}",
             if width == 0 {
                 String::new()
             } else {
                 format!("{},", cols(width, "").join(","))
             }
         ),
+        Op::Threshold(input) if bag => {
+            format!("SELECT DISTINCT {} FROM {np}{input}", bag_select(width, ""))
+        }
         Op::Threshold(input) => format!(
-            "SELECT {}1::BIGINT AS w FROM n{input} WHERE w>0",
+            "SELECT {}1::BIGINT AS w FROM {np}{input} WHERE w>0",
             if width == 0 {
                 String::new()
             } else {
@@ -236,28 +298,21 @@ pub fn query(
                     out.push(format!("{c} AS c{}", out.len()));
                 }
             }
-            out.push(format!(
-                "{} AS w",
-                (0..inputs.len())
-                    .map(|i| format!("s{i}.w"))
-                    .collect::<Vec<_>>()
-                    .join("*")
-            ));
+            if !bag {
+                out.push(format!(
+                    "{} AS w",
+                    (0..inputs.len())
+                        .map(|i| format!("s{i}.w"))
+                        .collect::<Vec<_>>()
+                        .join("*")
+                ));
+            } else if out.is_empty() {
+                out.push("1::BIGINT AS unit".into());
+            }
             let from = inputs
                 .iter()
                 .enumerate()
-                .map(|(i, n)| {
-                    let table = match &p.nodes[*n as usize] {
-                        Op::Get(r)
-                            if p.rel(*r)
-                                .is_some_and(|rel| rel.kind == RelKind::Constructor) =>
-                        {
-                            format!("r{r}")
-                        }
-                        _ => format!("n{n}"),
-                    };
-                    format!("{table} s{i}")
-                })
+                .map(|(i, n)| format!("{np}{n} s{i}"))
                 .collect::<Vec<_>>()
                 .join(" CROSS JOIN ");
             let eq = equivalences
@@ -300,8 +355,19 @@ pub fn query(
                 .zip(rk)
                 .map(|(a, b)| format!("l.c{a}=r.c{b}"))
                 .collect::<Vec<_>>();
-            format!(
-                "SELECT {} FROM n{l} l WHERE NOT EXISTS (SELECT 1 FROM n{r} r WHERE r.w>0{})",
+            if bag {
+                format!(
+                    "SELECT {} FROM {np}{l} l ANTI JOIN {np}{r} r ON {}",
+                    bag_select(width, "l."),
+                    if eq.is_empty() {
+                        "true".into()
+                    } else {
+                        eq.join(" AND ")
+                    }
+                )
+            } else {
+                format!(
+                "SELECT {} FROM {np}{l} l WHERE NOT EXISTS (SELECT 1 FROM {np}{r} r WHERE r.w>0{})",
                 select(width, "l."),
                 if eq.is_empty() {
                     String::new()
@@ -309,6 +375,7 @@ pub fn query(
                     format!(" AND {}", eq.join(" AND "))
                 }
             )
+            }
         }
         Op::Reduce { input, key, aggs } => {
             let ts = &types[*input as usize];
@@ -322,23 +389,51 @@ pub fn query(
                 .collect::<Vec<_>>();
             for agg in aggs {
                 let value = match agg {
-                    Agg::Count => "sum(w)::BIGINT".into(),
-                    Agg::Sum(c) => format!("sum(c{c}::HUGEINT*w)::BIGINT"),
+                    Agg::Count => {
+                        if bag {
+                            "count(*)::BIGINT".into()
+                        } else {
+                            "sum(w)::BIGINT".into()
+                        }
+                    }
+                    Agg::Sum(c) => {
+                        if bag {
+                            format!("sum(c{c})::BIGINT")
+                        } else {
+                            format!("sum(c{c}::HUGEINT*w)::BIGINT")
+                        }
+                    }
                     Agg::Min(c) | Agg::Max(c) => {
                         let fun = if matches!(agg, Agg::Min(_)) {
                             "arg_min"
                         } else {
                             "arg_max"
                         };
-                        format!(
-                            "{fun}(c{c},{}) FILTER (WHERE w>0)",
-                            ordered(ts[*c as usize], &format!("s.c{c}"))?
-                        )
+                        if bag && ts[*c as usize] == Ty::Int {
+                            format!(
+                                "{}(c{c})",
+                                if matches!(agg, Agg::Min(_)) {
+                                    "min"
+                                } else {
+                                    "max"
+                                }
+                            )
+                        } else {
+                            format!(
+                                "{fun}(c{c},{}){}",
+                                ordered(ts[*c as usize], &format!("s.c{c}"))?,
+                                if bag { "" } else { " FILTER (WHERE w>0)" }
+                            )
+                        }
                     }
                 };
                 out.push(format!("{value} AS c{}", out.len()));
             }
-            out.push("1::BIGINT AS w".into());
+            if !bag {
+                out.push("1::BIGINT AS w".into());
+            } else if out.is_empty() {
+                out.push("1::BIGINT AS unit".into());
+            }
             let group = if key.is_empty() {
                 String::new()
             } else {
@@ -351,8 +446,13 @@ pub fn query(
                 )
             };
             format!(
-                "SELECT {} FROM n{input} s {group} HAVING count(*)>0",
-                out.join(",")
+                "SELECT {} FROM {np}{input} s {group}{}",
+                out.join(","),
+                if !bag || key.is_empty() {
+                    " HAVING count(*)>0"
+                } else {
+                    ""
+                }
             )
         }
         Op::TopK {
@@ -363,8 +463,14 @@ pub fn query(
         } => {
             let ts = &types[*input as usize];
             let window = window_spec(ts, key, order, true)?;
+            if bag {
+                return Ok(Some(format!(
+                    "SELECT {} FROM {np}{input} s QUALIFY row_number() OVER ({window})<={limit}",
+                    bag_select(width, "s.")
+                )));
+            }
             let cs = cols(width, "");
-            format!("SELECT {}1::BIGINT AS w FROM (SELECT {}, row_number() OVER ({window}) AS pos FROM n{input} s, LATERAL range(greatest(s.w,0)) copies) ranked WHERE pos<={limit}", if cs.is_empty() { String::new() } else { format!("{},", cs.join(",")) }, select(width,"s."))
+            format!("SELECT {}1::BIGINT AS w FROM (SELECT {}, row_number() OVER ({window}) AS pos FROM {np}{input} s, LATERAL range(greatest(s.w,0)) copies) ranked WHERE pos<={limit}", if cs.is_empty() { String::new() } else { format!("{},", cs.join(",")) }, select(width,"s."))
         }
         Op::Window {
             input,
@@ -397,11 +503,22 @@ pub fn query(
             } else {
                 ""
             };
-            format!("SELECT {}({call} OVER ({spec}{frame}))::BIGINT AS c{}, 1::BIGINT AS w FROM n{input} s, LATERAL range(greatest(s.w,0)) copies", if ts.is_empty() {String::new()} else {format!("{},",cols(ts.len(),"s.").join(","))},ts.len())
+            if bag {
+                return Ok(Some(format!(
+                    "SELECT {}({call} OVER ({spec}{frame}))::BIGINT AS c{} FROM {np}{input} s",
+                    if ts.is_empty() {
+                        String::new()
+                    } else {
+                        format!("{},", cols(ts.len(), "s.").join(","))
+                    },
+                    ts.len()
+                )));
+            }
+            format!("SELECT {}({call} OVER ({spec}{frame}))::BIGINT AS c{}, 1::BIGINT AS w FROM {np}{input} s, LATERAL range(greatest(s.w,0)) copies", if ts.is_empty() {String::new()} else {format!("{},",cols(ts.len(),"s.").join(","))},ts.len())
         }
     };
     Ok(Some(
-        if matches!(op, Op::Get(_) | Op::Negate(_) | Op::Threshold(_)) {
+        if bag || matches!(op, Op::Get(_) | Op::Negate(_) | Op::Threshold(_)) {
             q
         } else {
             consolidate(&q, width)

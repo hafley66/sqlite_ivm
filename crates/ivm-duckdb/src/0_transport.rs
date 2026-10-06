@@ -51,6 +51,7 @@ pub struct Sql {
     pub work: Work,
     serial: u64,
     pub stage: Stage,
+    pub diagnostics: String,
 }
 impl Sql {
     pub fn open() -> Result<Self, EngineError> {
@@ -91,6 +92,7 @@ impl Sql {
             work: Work::default(),
             serial: 0,
             stage: Stage::Install,
+            diagnostics: String::new(),
         };
         sql.configure()?;
         Ok(sql)
@@ -106,7 +108,12 @@ impl Sql {
         self.exec(&format!("LOAD {}", literal(&extension)))?;
         self.exec("SET openivm_disable_daemon=true")?;
         self.exec("SET openivm_cascade_refresh='off'")?;
-        self.exec("SET openivm_skip_empty_deltas=false")?;
+        self.exec("SET openivm_refresh_mode='incremental'")?;
+        self.exec(if matches!(self.stage, Stage::Install) {
+            "SET openivm_profile_refresh=true"
+        } else {
+            "SET openivm_profile_refresh=false"
+        })?;
         self.exec(&format!(
             "SET openivm_files_path={}",
             literal(&self.dir.path().to_string_lossy())
@@ -138,7 +145,7 @@ impl Sql {
         if wal.exists() {
             std::fs::remove_file(wal).map_err(|e| error(self.stage, e))?;
         }
-        let cli = std::env::var("IVM_DUCKDB_CLI").unwrap_or_else(|_| "duckdb".into());
+        let cli = cli()?;
         self.child = Command::new(cli)
             .args(["-unsigned", "-batch", "-json", "-init", "/dev/null"])
             .arg(database)
@@ -175,6 +182,7 @@ impl Sql {
             .and_then(|_| self.stdin.flush())
             .map_err(|e| error(self.stage, e))?;
         let mut json = String::new();
+        let mut warnings = String::new();
         loop {
             let mut line = String::new();
             if self
@@ -184,13 +192,22 @@ impl Sql {
                 == 0
             {
                 let mut details = String::new();
-                let _ = self.stderr.read_to_string(&mut details);
-                return Err(error(self.stage, format!("DuckDB exited: {details}")));
+                if let Err(e) = self.stderr.read_to_string(&mut details) {
+                    details.push_str(&format!("; reading CLI diagnostics failed: {e}"));
+                }
+                return Err(error(
+                    self.stage,
+                    format!("DuckDB exited: {details}\nSQL: {statement}"),
+                ));
             }
             if line.trim_end() == marker {
                 break;
             }
-            json.push_str(&line);
+            if line.starts_with("Warning:") {
+                warnings.push_str(&line);
+            } else {
+                json.push_str(&line);
+            }
         }
         self.stderr
             .seek(SeekFrom::Start(offset))
@@ -199,6 +216,8 @@ impl Sql {
         self.stderr
             .read_to_string(&mut details)
             .map_err(|e| error(self.stage, e))?;
+        details.push_str(&warnings);
+        self.diagnostics = details.clone();
         if details.contains("Error:") || details.contains("Exception:") {
             return Err(error(self.stage, format!("{details}\nSQL: {statement}")));
         }
