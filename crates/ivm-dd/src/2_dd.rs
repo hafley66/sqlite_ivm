@@ -4,7 +4,7 @@ use ivm_ir::*;
 use ivm_engine::*;
 use differential_dataflow::input::{Input, InputSession};
 use differential_dataflow::operators::arrange::{Arranged, TraceAgent};
-use differential_dataflow::trace::implementations::ValSpine;
+use differential_dataflow::trace::implementations::{KeySpine, ValSpine};
 use differential_dataflow::lattice::Lattice;
 use differential_dataflow::operators::iterate::Variable;
 use differential_dataflow::{AsCollection, VecCollection};
@@ -27,6 +27,8 @@ type Coll<'s, T = Time> = VecCollection<'s, T, Row, W>;
 type Inner = Product<Time, u64>;
 /// A collection keyed on some of its columns: `(key, row)`.
 type Keyed<'s, T> = Arranged<'s, TraceAgent<ValSpine<Row, Row, T, W>>>;
+/// The distinct keys of a collection, each with weight 1: an antijoin's right side.
+type KeySet<'s, T> = Arranged<'s, TraceAgent<KeySpine<Row, T, W>>>;
 /// Rows supplied by an arrangement to a hierarchical reduce closure.
 pub type ReduceReadEventBuilder = timely::container::CapacityContainerBuilder<Vec<(Duration, usize)>>;
 type ReduceReadLogger = timely::logging_core::Logger<ReduceReadEventBuilder>;
@@ -140,6 +142,7 @@ where Product<T, u64>: Nest + Timestamp<Summary = Product<<T as Timestamp>::Summ
             texts: rel.texts.clone(),
             terms: rel.terms.clone(),
             keyed: BTreeMap::new(),
+            key_sets: BTreeMap::new(),
             read: BTreeSet::new(),
             types: rel.types.clone(),
             arranged: rel.arranged.clone(),
@@ -227,9 +230,11 @@ pub struct DdRel<'s, T: Nest = Time> {
     texts: Vec<Cell>,
     /// The cell of each `Program::terms` entry, minted at install.
     terms: Vec<Cell>,
-    /// Join inputs arranged once per `(stream, key columns)`; every join reading the same
-    /// stream on the same key shares the arrangement.
-    keyed: BTreeMap<(usize, usize, Vec<ColId>), Keyed<'s, T>>,
+    /// Join and antijoin left inputs arranged once per `(stream, key columns, Any columns)`;
+    /// every join or antijoin reading the same stream on the same key shares the arrangement.
+    keyed: BTreeMap<(usize, usize, Vec<ColId>, Vec<bool>), Keyed<'s, T>>,
+    /// Antijoin right sides: the thresholded key set of a stream, once per `(stream, key columns)`.
+    key_sets: BTreeMap<(usize, usize, Vec<ColId>), KeySet<'s, T>>,
     /// Relations `get` handed a collection for.
     read: BTreeSet<RelId>,
     /// `Program::node_types_memo` answers, shared by every scope of one install.
@@ -253,7 +258,7 @@ struct ArrangeStats {
 impl<'s, T: Nest> DdRel<'s, T> {
     fn keyed(&mut self, c: Coll<'s, T>, key: Vec<ColId>, any: Vec<bool>) -> Keyed<'s, T> {
         let source = *c.inner.name();
-        let id = (source.node, source.port, key.clone());
+        let id = (source.node, source.port, key.clone(), any.clone());
         if let Some(arranged) = self.keyed.get(&id) {
             return arranged.clone();
         }
@@ -488,12 +493,25 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
         self.join_rows(cs, eq, types, Some(project.to_vec()))
     }
 
+    /// `l` minus its semijoin with `r`'s key set: the left side through the `keyed` memo, the
+    /// right side's thresholded key set memoized per `(stream, key)`.
     fn antijoin(&mut self, l: Self::C, r: Self::C, lk: &[ColId], rk: &[ColId]) -> Self::C {
-        let (lk, rk) = (lk.to_vec(), rk.to_vec());
-        let keys = r
-            .map(move |row| cols(&row, &rk))
-            .threshold(|_, w: &W| if *w > 0 { 1 as W } else { 0 });
-        l.map(move |row| (cols(&row, &lk), row)).antijoin(keys).map(|(_, row)| row)
+        let right = *r.inner.name();
+        let id = (right.node, right.port, rk.to_vec());
+        let keys = match self.key_sets.get(&id) {
+            Some(keys) => keys.clone(),
+            None => {
+                let rk = rk.to_vec();
+                let keys = r
+                    .map(move |row| cols(&row, &rk))
+                    .threshold(|_, w: &W| if *w > 0 { 1 as W } else { 0 })
+                    .arrange_by_self();
+                self.key_sets.insert(id, keys.clone());
+                keys
+            }
+        };
+        let left = self.keyed(l.clone(), lk.to_vec(), vec![false; lk.len()]);
+        l.concat(left.join_core(keys, |_, row: &Row, _| Some(row.clone())).negate())
     }
 
     fn reduce(&mut self, c: Self::C, key: &[ColId], aggs: &[Agg], input_types: &[Ty]) -> Self::C {
@@ -1096,7 +1114,7 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
                 constructor_inputs.insert(rel.id, input);
                 sources.insert(rel.id, c);
             }
-            let mut rel = DdRel { scope, rec: None, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone(), constructors: constructors.clone(), interner: interner.clone(), sum_error: sum_error.clone(), texts: texts.clone(), terms, keyed: BTreeMap::new(), read: BTreeSet::new(), types: Rc::default(), arranged: arranged.clone(), limits: Vec::new() };
+            let mut rel = DdRel { scope, rec: None, sources, outputs: Vec::new(), taps: taps.clone(), reduce_reads: reduce_reads.clone(), constructors: constructors.clone(), interner: interner.clone(), sum_error: sum_error.clone(), texts: texts.clone(), terms, keyed: BTreeMap::new(), key_sets: BTreeMap::new(), read: BTreeSet::new(), types: Rc::default(), arranged: arranged.clone(), limits: Vec::new() };
             lower(&program, &mut rel)?;
             // A constructor no operator reads gets no rows: its terms would cost an epoch and drive nothing.
             constructor_inputs.retain(|id, _| rel.read.contains(id));
