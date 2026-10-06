@@ -1,8 +1,9 @@
 //! Several programs as one install. The parts share nothing but the dictionary: a constructor
-//! relation is one relation per name, every other relation belongs to one part.
+//! relation is one relation per name, every other relation belongs to one part. Texts and term
+//! literals are values: equal entries of any parts share one composed entry.
 
 use crate::{Expr, LetRec, Op, Program, RelId, RelKind, Relation, Stratum, TermArg, TermLit, Ty};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 pub struct Composed {
     pub program: Program,
@@ -10,16 +11,16 @@ pub struct Composed {
     pub rels: Vec<BTreeMap<RelId, RelId>>,
 }
 
-/// `expr` with every `Text` index shifted by `base` and every `Term` index by `terms`: post-order
-/// over an explicit stack.
-fn texts(expr: &Expr, base: u32, terms: u32) -> Expr {
+/// `expr` with every `Text` index mapped through `texts` and every `Term` index through `terms`:
+/// post-order over an explicit stack.
+fn texts(expr: &Expr, texts: &[u32], terms: &[u32]) -> Expr {
     enum Step<'e> { Enter(&'e Expr), Build(crate::Func, usize) }
     let mut steps = vec![Step::Enter(expr)];
     let mut done: Vec<Expr> = Vec::new();
     while let Some(step) = steps.pop() {
         match step {
-            Step::Enter(Expr::Text(index)) => done.push(Expr::Text(index + base)),
-            Step::Enter(Expr::Term(index)) => done.push(Expr::Term(index + terms)),
+            Step::Enter(Expr::Text(index)) => done.push(Expr::Text(texts[*index as usize])),
+            Step::Enter(Expr::Term(index)) => done.push(Expr::Term(terms[*index as usize])),
             Step::Enter(Expr::Call(func, args)) => {
                 steps.push(Step::Build(*func, args.len()));
                 steps.extend(args.iter().rev().map(Step::Enter));
@@ -57,6 +58,8 @@ pub fn compose(parts: &[(&str, &Program)]) -> Result<Composed, String> {
     let mut out = Program { texts: Vec::new(), terms: Vec::new(), rels: Vec::new(), nodes: Vec::new(), strata: Vec::new(), outputs: Vec::new() };
     let mut constructors: BTreeMap<String, (RelId, Vec<Ty>)> = BTreeMap::new();
     let mut maps = Vec::with_capacity(parts.len());
+    let mut text_ids: HashMap<String, u32> = HashMap::new();
+    let mut term_ids: HashMap<TermLit, u32> = HashMap::new();
     let mut next: RelId = 0;
     for (prefix, part) in parts {
         let mut map = BTreeMap::new();
@@ -82,9 +85,29 @@ pub fn compose(parts: &[(&str, &Program)]) -> Result<Composed, String> {
             map.insert(rel.id, id);
         }
         let node_base = out.nodes.len() as u32;
-        let text_base = out.texts.len() as u32;
-        let term_base = out.terms.len() as u32;
         let rel = |id: RelId| map[&id];
+        let text_map: Vec<u32> = part.texts.iter().map(|text| {
+            *text_ids.entry(text.clone()).or_insert_with(|| {
+                out.texts.push(text.clone());
+                out.texts.len() as u32 - 1
+            })
+        }).collect();
+        let mut term_map: Vec<u32> = Vec::with_capacity(part.terms.len());
+        for term in &part.terms {
+            let lit = TermLit {
+                functor: rel(term.functor),
+                args: term.args.iter().map(|arg| match arg {
+                    TermArg::Term(index) => TermArg::Term(term_map[*index as usize]),
+                    TermArg::Text(index) => TermArg::Text(text_map[*index as usize]),
+                    TermArg::Raw(cell) => TermArg::Raw(*cell),
+                }).collect(),
+            };
+            let id = *term_ids.entry(lit.clone()).or_insert_with(|| {
+                out.terms.push(lit);
+                out.terms.len() as u32 - 1
+            });
+            term_map.push(id);
+        }
         for op in &part.nodes {
             let n = |id: u32| id + node_base;
             out.nodes.push(match op {
@@ -94,8 +117,8 @@ pub fn compose(parts: &[(&str, &Program)]) -> Result<Composed, String> {
                 Op::Str { input, op, args } => Op::Str { input: n(*input), op: *op, args: args.clone() },
                 Op::Mfp { input, filter, map, project } => Op::Mfp {
                     input: n(*input),
-                    filter: filter.iter().map(|e| texts(e, text_base, term_base)).collect(),
-                    map: map.iter().map(|e| texts(e, text_base, term_base)).collect(),
+                    filter: filter.iter().map(|e| texts(e, &text_map, &term_map)).collect(),
+                    map: map.iter().map(|e| texts(e, &text_map, &term_map)).collect(),
                     project: project.clone(),
                 },
                 Op::Union(inputs) => Op::Union(inputs.iter().map(|i| n(*i)).collect()),
@@ -116,15 +139,6 @@ pub fn compose(parts: &[(&str, &Program)]) -> Result<Composed, String> {
             });
         }
         out.outputs.extend(part.outputs.iter().map(|id| rel(*id)));
-        out.texts.extend(part.texts.iter().cloned());
-        out.terms.extend(part.terms.iter().map(|term| TermLit {
-            functor: rel(term.functor),
-            args: term.args.iter().map(|arg| match arg {
-                TermArg::Term(index) => TermArg::Term(index + term_base),
-                TermArg::Text(index) => TermArg::Text(index + text_base),
-                TermArg::Raw(cell) => TermArg::Raw(*cell),
-            }).collect(),
-        }));
         maps.push(map);
     }
     Ok(Composed { program: out, rels: maps })
