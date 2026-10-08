@@ -1,0 +1,3 @@
+[toolchain]
+# dbsp 0.363 panics rustc 1.97 and 1.98 stable (next trait solver, star_join).
+channel = "nightly-2026-08-29"
