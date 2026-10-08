@@ -1,0 +1,14 @@
+vec	keys=2000000	epochs=64	budget=250000	peak_rss_mb=192	wall_s=0.37	spilled_chunks=0	spilled_records=0	fetched_chunks=0	retained_records=2000000
+col	keys=2000000	epochs=64	budget=250000	peak_rss_mb=330	wall_s=0.76	spilled_chunks=0	spilled_records=0	fetched_chunks=0	retained_records=2000000
+col-file	keys=2000000	epochs=64	budget=250000	peak_rss_mb=219	wall_s=0.81	spilled_chunks=240	spilled_records=1875000	fetched_chunks=0	retained_records=2000000
+vec-row	keys=2000000	epochs=64	budget=250000	peak_rss_mb=598	wall_s=1.07	spilled_chunks=0	spilled_records=0	fetched_chunks=0	retained_records=2000000
+col-row	keys=2000000	epochs=64	budget=250000	peak_rss_mb=606	wall_s=1.23	spilled_chunks=0	spilled_records=0	fetched_chunks=0	retained_records=2000000
+col-row-file	keys=2000000	epochs=64	budget=250000	peak_rss_mb=443	wall_s=1.38	spilled_chunks=240	spilled_records=1875000	fetched_chunks=0	retained_records=2000000
+col-row-sqlite	keys=2000000	epochs=64	budget=250000	peak_rss_mb=499	wall_s=1.47	spilled_chunks=240	spilled_records=1875000	fetched_chunks=0	retained_records=2000000
+vec	keys=8000000	epochs=64	budget=250000	peak_rss_mb=796	wall_s=1.56	spilled_chunks=0	spilled_records=0	fetched_chunks=0	retained_records=8000000
+col	keys=8000000	epochs=64	budget=250000	peak_rss_mb=2117	wall_s=4.15	spilled_chunks=0	spilled_records=0	fetched_chunks=0	retained_records=8000000
+col-file	keys=8000000	epochs=64	budget=250000	peak_rss_mb=962	wall_s=4.70	spilled_chunks=2032	spilled_records=15875000	fetched_chunks=1008	retained_records=8000000
+vec-row	keys=8000000	epochs=64	budget=250000	peak_rss_mb=2250	wall_s=4.66	spilled_chunks=0	spilled_records=0	fetched_chunks=0	retained_records=8000000
+col-row	keys=8000000	epochs=64	budget=250000	peak_rss_mb=3989	wall_s=6.64	spilled_chunks=0	spilled_records=0	fetched_chunks=0	retained_records=8000000
+col-row-file	keys=8000000	epochs=64	budget=250000	peak_rss_mb=1420	wall_s=8.16	spilled_chunks=2032	spilled_records=15875000	fetched_chunks=1008	retained_records=8000000
+col-row-sqlite	keys=8000000	epochs=64	budget=250000	peak_rss_mb=1503	wall_s=8.61	spilled_chunks=2032	spilled_records=15875000	fetched_chunks=1008	retained_records=8000000
