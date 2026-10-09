@@ -101,13 +101,49 @@ fn expr(
     terms: &[Cell],
     nil: Cell,
 ) -> Result<(String, Ty), EngineError> {
-    let bad = || {
-        EngineError::new(
-            Stage::Install,
-            None,
-            ErrorKind::Unsupported("invalid scalar expression"),
-        )
-    };
+    enum Step<'e> {
+        Enter(&'e Expr),
+        Apply(&'e Func, usize),
+    }
+    let mut steps = vec![Step::Enter(e)];
+    let mut done: Vec<(String, Ty)> = Vec::new();
+    while let Some(step) = steps.pop() {
+        match step {
+            Step::Enter(Expr::Call(f, args)) if *f != Func::StrNil => {
+                if args.len() != if *f == Func::Not { 1 } else { 2 } {
+                    return Err(invalid_expression());
+                }
+                steps.push(Step::Apply(f, args.len()));
+                steps.extend(args.iter().rev().map(Step::Enter));
+            }
+            Step::Enter(e) => done.push(leaf(e, columns, types, texts, terms, nil)?),
+            Step::Apply(f, len) => {
+                let a = done.split_off(done.len() - len);
+                done.push(call(f, &a)?);
+            }
+        }
+    }
+    done.pop().ok_or_else(invalid_expression)
+}
+
+fn invalid_expression() -> EngineError {
+    EngineError::new(
+        Stage::Install,
+        None,
+        ErrorKind::Unsupported("invalid scalar expression"),
+    )
+}
+
+/// One scalar expression that is not a call, or `StrNil`.
+fn leaf(
+    e: &Expr,
+    columns: &[String],
+    types: &[Ty],
+    texts: &[Cell],
+    terms: &[Cell],
+    nil: Cell,
+) -> Result<(String, Ty), EngineError> {
+    let bad = invalid_expression;
     Ok(match e {
         Expr::Col(c) => (
             columns.get(*c as usize).ok_or_else(bad)?.clone(),
@@ -125,72 +161,69 @@ fn expr(
             }
             (nil.to_string(), Ty::Text)
         }
-        Expr::Call(f, args) => {
-            if args.len() != if *f == Func::Not { 1 } else { 2 } {
-                return Err(bad());
-            }
-            let a = args
-                .iter()
-                .map(|x| expr(x, columns, types, texts, terms, nil))
-                .collect::<Result<Vec<_>, _>>()?;
-            let (x, xt) = a.first().ok_or_else(bad)?;
-            if *f == Func::Not {
-                return Ok((format!("(({x})=0)::BIGINT"), Ty::Int));
-            }
-            let (y, yt) = a.get(1).ok_or_else(bad)?;
-            let body = match f {
-                Func::Add | Func::Sub => {
-                    if matches!(xt, Ty::Real | Ty::Any) || matches!(yt, Ty::Real | Ty::Any) {
-                        return Err(EngineError::new(
-                            Stage::Install,
-                            None,
-                            ErrorKind::Unsupported("arithmetic Real/Any SQL cell conversion"),
-                        ));
-                    }
-                    let op = if *f == Func::Add { "+" } else { "-" };
-                    return Ok((format!("((((({x})::HUGEINT {op} ({y})::HUGEINT)+9223372036854775808)%18446744073709551616+18446744073709551616)%18446744073709551616-9223372036854775808)::BIGINT"), Ty::Int));
-                }
-                Func::And => format!("({x})<>0 AND ({y})<>0"),
-                Func::Or => format!("({x})<>0 OR ({y})<>0"),
-                _ => {
-                    let op = match f {
-                        Func::Eq => "=",
-                        Func::Ne => "<>",
-                        Func::Lt | Func::TermLt => "<",
-                        Func::Le => "<=",
-                        Func::Gt => ">",
-                        Func::Ge => ">=",
-                        _ => return Err(bad()),
-                    };
-                    if *f == Func::TermLt {
-                        return Ok((
-                            format!("({}<{})::BIGINT", ordered(Ty::Id, x)?, ordered(Ty::Id, y)?),
-                            Ty::Int,
-                        ));
-                    }
-                    let rank = |t: Ty| match t {
-                        Ty::Int | Ty::Real => 1,
-                        Ty::Text => 2,
-                        Ty::Id => 3,
-                        Ty::Any => 4,
-                    };
-                    if rank(*xt) != rank(*yt) {
-                        return Ok((
-                            format!("({} {op} {})::BIGINT", rank(*xt), rank(*yt)),
-                            Ty::Int,
-                        ));
-                    }
-                    let direct = matches!(f, Func::Eq | Func::Ne)
-                        && xt == yt
-                        && !matches!(xt, Ty::Real | Ty::Any);
-                    let left = if direct { x.clone() } else { ordered(*xt, x)? };
-                    let right = if direct { y.clone() } else { ordered(*yt, y)? };
-                    format!("({left}) {op} ({right})")
-                }
-            };
-            (format!("({body})::BIGINT"), Ty::Int)
-        }
+        Expr::Call(..) => return Err(bad()),
     })
+}
+
+/// A call over its arguments' SQL text and types, arity already checked.
+fn call(f: &Func, a: &[(String, Ty)]) -> Result<(String, Ty), EngineError> {
+    let bad = invalid_expression;
+    let (x, xt) = a.first().ok_or_else(bad)?;
+    if *f == Func::Not {
+        return Ok((format!("(({x})=0)::BIGINT"), Ty::Int));
+    }
+    let (y, yt) = a.get(1).ok_or_else(bad)?;
+    let body = match f {
+        Func::Add | Func::Sub => {
+            if matches!(xt, Ty::Real | Ty::Any) || matches!(yt, Ty::Real | Ty::Any) {
+                return Err(EngineError::new(
+                    Stage::Install,
+                    None,
+                    ErrorKind::Unsupported("arithmetic Real/Any SQL cell conversion"),
+                ));
+            }
+            let op = if *f == Func::Add { "+" } else { "-" };
+            return Ok((format!("((((({x})::HUGEINT {op} ({y})::HUGEINT)+9223372036854775808)%18446744073709551616+18446744073709551616)%18446744073709551616-9223372036854775808)::BIGINT"), Ty::Int));
+        }
+        Func::And => format!("({x})<>0 AND ({y})<>0"),
+        Func::Or => format!("({x})<>0 OR ({y})<>0"),
+        _ => {
+            let op = match f {
+                Func::Eq => "=",
+                Func::Ne => "<>",
+                Func::Lt | Func::TermLt => "<",
+                Func::Le => "<=",
+                Func::Gt => ">",
+                Func::Ge => ">=",
+                _ => return Err(bad()),
+            };
+            if *f == Func::TermLt {
+                return Ok((
+                    format!("({}<{})::BIGINT", ordered(Ty::Id, x)?, ordered(Ty::Id, y)?),
+                    Ty::Int,
+                ));
+            }
+            let rank = |t: Ty| match t {
+                Ty::Int | Ty::Real => 1,
+                Ty::Text => 2,
+                Ty::Id => 3,
+                Ty::Any => 4,
+            };
+            if rank(*xt) != rank(*yt) {
+                return Ok((
+                    format!("({} {op} {})::BIGINT", rank(*xt), rank(*yt)),
+                    Ty::Int,
+                ));
+            }
+            let direct = matches!(f, Func::Eq | Func::Ne)
+                && xt == yt
+                && !matches!(xt, Ty::Real | Ty::Any);
+            let left = if direct { x.clone() } else { ordered(*xt, x)? };
+            let right = if direct { y.clone() } else { ordered(*yt, y)? };
+            format!("({left}) {op} ({right})")
+        }
+    };
+    Ok((format!("({body})::BIGINT"), Ty::Int))
 }
 pub fn query(
     p: &Program,
