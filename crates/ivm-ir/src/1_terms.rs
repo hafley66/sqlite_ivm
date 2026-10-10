@@ -69,6 +69,16 @@ impl Interner {
 
     pub fn text(&self, id: Cell) -> Option<&str> { self.by_id.get(&id)?.text.as_deref() }
 
+    /// `mint_text` that keeps `text`'s allocation instead of copying it.
+    pub fn mint_shared_text(&mut self, text: Arc<str>) -> Cell {
+        if let Some(id) = self.by_text.get(&text) { return *id; }
+        let id = self.next.checked_add(1).expect("term ID space exhausted");
+        self.next = id;
+        self.by_text.insert(text.clone(), id);
+        self.by_id.insert(id, Term { functor: Arc::from(""), args: vec![], types: vec![], text: Some(text) });
+        id
+    }
+
     /// Interns a vec of `items` whole: one id and one range of `vec_cells`, no constructor row.
     pub fn mint_vec(&mut self, items: &[Cell]) -> Cell {
         use std::hash::{Hash, Hasher};
