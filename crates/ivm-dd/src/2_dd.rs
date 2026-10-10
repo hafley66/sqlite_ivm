@@ -1077,6 +1077,7 @@ enum Command {
     InternTermBatch(Vec<(RelId, Vec<BatchArg>)>, mpsc::Sender<Result<Vec<Cell>, EngineError>>),
     DeclareConstructors(Vec<(String, Vec<Ty>)>, mpsc::Sender<Vec<RelId>>),
     InternText(String, mpsc::Sender<Cell>),
+    InternTexts(Vec<String>, mpsc::Sender<Vec<Cell>>),
     Text(Cell, mpsc::Sender<Option<String>>),
     VecItems(Cell, mpsc::Sender<Option<Vec<Cell>>>),
     InternAny(AnyValue, mpsc::Sender<Cell>),
@@ -1186,6 +1187,11 @@ impl Engine for Dd {
     fn declare_constructors(&mut self, ctors: &[(String, Vec<Ty>)]) -> Result<Vec<RelId>, EngineError> {
         let (reply, answer) = mpsc::channel();
         self.tx.send(Command::DeclareConstructors(ctors.to_vec(), reply)).map_err(|e| worker_error(Stage::Settle, e))?;
+        answer.recv().map_err(|e| worker_error(Stage::Settle, e))
+    }
+    fn intern_texts(&mut self, texts: &[String]) -> Result<Vec<Cell>, EngineError> {
+        let (reply, answer) = mpsc::channel();
+        self.tx.send(Command::InternTexts(texts.to_vec(), reply)).map_err(|e| worker_error(Stage::Settle, e))?;
         answer.recv().map_err(|e| worker_error(Stage::Settle, e))
     }
     fn intern_text(&mut self, value: &str) -> Result<Cell, EngineError> {
@@ -1525,6 +1531,10 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
                     let _ = reply.send(ids);
                 }
                 Command::InternText(value, reply) => { let _ = reply.send(interner.borrow_mut().mint_text(&value)); }
+                Command::InternTexts(values, reply) => {
+                    let mut dict = interner.borrow_mut();
+                    let _ = reply.send(values.iter().map(|value| dict.mint_text(value)).collect());
+                }
                 Command::Text(id, reply) => { let _ = reply.send(interner.borrow().text(id).map(str::to_owned)); }
                 Command::VecItems(id, reply) => { let _ = reply.send(interner.borrow().vec_items(id).map(<[Cell]>::to_vec)); }
                 Command::InternAny(value, reply) => { let _ = reply.send(interner.borrow_mut().mint_any(&value)); }

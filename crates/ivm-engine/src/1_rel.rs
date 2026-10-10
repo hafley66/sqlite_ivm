@@ -128,6 +128,10 @@ pub trait Engine: Sized {
         functors.iter().map(|functor| self.intern_snapshot(*functor)).collect()
     }
     fn intern_text(&mut self, text: &str) -> Result<Cell, EngineError>;
+    /// `intern_text` of each text, in order; an engine with a worker answers in one round trip.
+    fn intern_texts(&mut self, texts: &[String]) -> Result<Vec<Cell>, EngineError> {
+        texts.iter().map(|text| self.intern_text(text)).collect()
+    }
     /// Interns constructor terms `functor(args)` in order and returns their ids, as a Mint of
     /// the same row would. Each argument is an interned term, a text cell or a raw value.
     /// The constructor's rows hold the new terms from the next settle on.
