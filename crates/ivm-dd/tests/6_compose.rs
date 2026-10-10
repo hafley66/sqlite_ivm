@@ -1,6 +1,6 @@
 //! `ivm_ir::compose` and `Engine::declare_constructors` on both engines.
 
-use ivm_dd::{compose, Dd, Engine, Frontier, Op, Program, RelKind, Relation, SourceChange, Stratum, Ty};
+use ivm_dd::{compose, BatchArg, Dd, Engine, Frontier, Op, Program, RelKind, Relation, SourceChange, Stratum, Ty};
 use ivm_sqlite::Sqlite;
 
 /// `out(x) :- src(x), x > floor`, with a constructor `9:1:f` the program names.
@@ -58,5 +58,35 @@ fn composed_parts_settle_apart_and_declared_constructors_intern() {
         assert_eq!(declared[1], 1, "a constructor the program names keeps its id");
         assert!(declared[0] > 4, "a new constructor gets an id no program relation holds");
         assert!(stable, "one term, one cell");
+    }
+}
+
+/// A cons chain of `length` cells as one `intern_term_batch`, then the same terms again one by one.
+fn chained<E: Engine>(length: usize) -> (Vec<i64>, Vec<i64>, bool) {
+    let mut engine = E::install(&part(0)).unwrap();
+    let cons = engine.declare_constructors(&[("9:2:cons".to_string(), vec![Ty::Id, Ty::Id])]).unwrap()[0];
+    let nil = engine.intern_text("nil").unwrap();
+    let item = engine.intern_text("item").unwrap();
+    let batch: Vec<_> = (0..length)
+        .map(|index| {
+            let tail = if index == 0 { BatchArg::Cell(nil) } else { BatchArg::Earlier(index - 1) };
+            (cons, vec![BatchArg::Cell(item), tail])
+        })
+        .collect();
+    let batched = engine.intern_term_batch(&batch).unwrap();
+    let mut single = Vec::with_capacity(length);
+    for index in 0..length {
+        let tail = if index == 0 { nil } else { single[index - 1] };
+        single.extend(engine.intern_terms(&[(cons, vec![item, tail])]).unwrap());
+    }
+    let forward = engine.intern_term_batch(&[(cons, vec![BatchArg::Cell(item), BatchArg::Earlier(0)])]).is_err();
+    (batched, single, forward)
+}
+
+#[test]
+fn a_cons_chain_interns_as_one_batch_with_the_ids_one_by_one_interning_gives() {
+    for (batched, single, forward) in [chained::<Dd>(20_000), chained::<Sqlite>(2_000)] {
+        assert_eq!(batched, single);
+        assert!(forward, "an argument naming its own or a later index is an error");
     }
 }

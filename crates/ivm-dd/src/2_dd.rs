@@ -1037,6 +1037,7 @@ enum Command {
     InternSnapshot(RelId, mpsc::Sender<Result<Vec<(Row, W)>, EngineError>>),
     InternSnapshots(Vec<RelId>, mpsc::Sender<Result<Vec<Vec<(Row, W)>>, EngineError>>),
     InternTerms(Vec<(RelId, Row)>, mpsc::Sender<Result<Vec<Cell>, EngineError>>),
+    InternTermBatch(Vec<(RelId, Vec<BatchArg>)>, mpsc::Sender<Result<Vec<Cell>, EngineError>>),
     DeclareConstructors(Vec<(String, Vec<Ty>)>, mpsc::Sender<Vec<RelId>>),
     InternText(String, mpsc::Sender<Cell>),
     Text(Cell, mpsc::Sender<Option<String>>),
@@ -1136,6 +1137,12 @@ impl Engine for Dd {
     fn intern_terms(&mut self, terms: &[(RelId, Row)]) -> Result<Vec<Cell>, EngineError> {
         let (reply, answer) = mpsc::channel();
         self.tx.send(Command::InternTerms(terms.to_vec(), reply)).map_err(|e| worker_error(Stage::Settle, e))?;
+        answer.recv().map_err(|e| worker_error(Stage::Settle, e))?
+    }
+    /// One worker round trip: the worker mints in order, so an `Earlier` argument is already minted.
+    fn intern_term_batch(&mut self, terms: &[(RelId, Vec<BatchArg>)]) -> Result<Vec<Cell>, EngineError> {
+        let (reply, answer) = mpsc::channel();
+        self.tx.send(Command::InternTermBatch(terms.to_vec(), reply)).map_err(|e| worker_error(Stage::Settle, e))?;
         answer.recv().map_err(|e| worker_error(Stage::Settle, e))?
     }
     fn declare_constructors(&mut self, ctors: &[(String, Vec<Ty>)]) -> Result<Vec<RelId>, EngineError> {
@@ -1436,6 +1443,23 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
                         }
                         Ok(interner.borrow_mut().mint(name, args, types))
                     }).collect();
+                    let _ = reply.send(answer);
+                }
+                Command::InternTermBatch(terms, reply) => {
+                    let mut given: Vec<Cell> = Vec::with_capacity(terms.len());
+                    let answer = terms.iter().enumerate().try_for_each(|(index, (functor, args))| {
+                        let (name, types) = constructors.get(functor)
+                            .ok_or_else(|| EngineError::new(Stage::Settle, Some(*functor), ErrorKind::UnknownRel(*functor)))?;
+                        if args.len() != types.len() {
+                            return Err(EngineError::new(Stage::Settle, Some(*functor), ErrorKind::Arity { expected: types.len(), actual: args.len() }));
+                        }
+                        if args.iter().any(|arg| matches!(arg, BatchArg::Earlier(earlier) if *earlier >= index)) {
+                            return Err(EngineError::new(Stage::Settle, Some(*functor), ErrorKind::Unsupported("intern_term_batch: argument names a later term")));
+                        }
+                        let row: Row = args.iter().map(|arg| arg.cell(&given)).collect();
+                        given.push(interner.borrow_mut().mint(name, &row, types));
+                        Ok(())
+                    }).map(|()| given);
                     let _ = reply.send(answer);
                 }
                 Command::DeclareConstructors(ctors, reply) => {

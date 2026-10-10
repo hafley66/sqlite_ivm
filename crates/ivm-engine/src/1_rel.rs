@@ -4,6 +4,25 @@ use ivm_ir::*;
 use smallvec::{smallvec, SmallVec};
 use std::fmt;
 
+/// One argument of `Engine::intern_term_batch`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BatchArg {
+    /// An interned term, a text cell or a raw value.
+    Cell(Cell),
+    /// The id the same batch gives its term at this index; the index is below the naming term's.
+    Earlier(usize),
+}
+
+impl BatchArg {
+    /// The cell, reading `Earlier` from the ids the batch has given so far.
+    pub fn cell(&self, given: &[Cell]) -> Cell {
+        match self {
+            BatchArg::Cell(cell) => *cell,
+            BatchArg::Earlier(index) => given[*index],
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Stage {
     Check,
@@ -110,6 +129,40 @@ pub trait Engine: Sized {
     /// the same row would. Each argument is an interned term, a text cell or a raw value.
     /// The constructor's rows hold the new terms from the next settle on.
     fn intern_terms(&mut self, terms: &[(RelId, Row)]) -> Result<Vec<Cell>, EngineError>;
+    /// `intern_terms` over terms whose arguments may name an earlier term of the same batch,
+    /// so a cons chain of any length is one batch. This default calls `intern_terms` once per
+    /// depth; an engine that mints in place overrides it with one call.
+    fn intern_term_batch(&mut self, terms: &[(RelId, Vec<BatchArg>)]) -> Result<Vec<Cell>, EngineError> {
+        let mut depth = Vec::with_capacity(terms.len());
+        for (index, (functor, args)) in terms.iter().enumerate() {
+            let mut level = 0;
+            for arg in args {
+                if let BatchArg::Earlier(earlier) = arg {
+                    if *earlier >= index {
+                        return Err(EngineError::new(Stage::Settle, Some(*functor), ErrorKind::Unsupported("intern_term_batch: argument names a later term")));
+                    }
+                    level = level.max(depth[*earlier] + 1);
+                }
+            }
+            depth.push(level);
+        }
+        let mut cells = vec![0; terms.len()];
+        let levels = depth.iter().copied().max().map_or(0, |deepest| deepest + 1);
+        let mut by_level: Vec<Vec<usize>> = vec![Vec::new(); levels];
+        for (index, level) in depth.iter().enumerate() {
+            by_level[*level].push(index);
+        }
+        for indexes in by_level {
+            let rows: Vec<(RelId, Row)> = indexes
+                .iter()
+                .map(|&index| (terms[index].0, terms[index].1.iter().map(|arg| arg.cell(&cells)).collect()))
+                .collect();
+            for (index, cell) in indexes.into_iter().zip(self.intern_terms(&rows)?) {
+                cells[index] = cell;
+            }
+        }
+        Ok(cells)
+    }
     /// Constructors `(name, argument columns)` no operator reads: one id each (a known name keeps
     /// its own), accepted by `intern_terms` from then on.
     fn declare_constructors(&mut self, ctors: &[(String, Vec<Ty>)]) -> Result<Vec<RelId>, EngineError> {
