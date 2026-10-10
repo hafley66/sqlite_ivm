@@ -67,6 +67,7 @@ pub fn operator(op: &Op) -> &'static str {
         Op::Window { .. } => "Window",
         Op::Mint { .. } => "Mint",
         Op::Str { .. } => "Str",
+        Op::Vec { .. } => "Vec",
         Op::StrCons { .. } => "StrCons",
         Op::Delay(_) => "Delay",
     }
@@ -243,6 +244,7 @@ pub fn query(
         Op::Get(r) => format!("SELECT * FROM {rp}{r}"),
         Op::Mint { .. } | Op::Str { .. } | Op::StrCons { .. } => return Ok(None),
         Op::Delay(_) => return Err(unsupported("Delay")),
+        Op::Vec { .. } => return Err(unsupported("Vec")),
         Op::Mfp {
             input,
             filter,

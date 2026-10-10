@@ -38,7 +38,7 @@ pub(crate) fn rec_inputs(p: &Program, rec: &LetRec) -> BTreeSet<RelId> {
         *seen = true;
         match &p.nodes[index] {
             Op::Get(rel) => { inputs.insert(*rel); }
-            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Mfp { input, .. }
+            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Vec { input, .. } | Op::Mfp { input, .. }
             | Op::Reduce { input, .. } | Op::TopK { input, .. } | Op::Window { input, .. } => pending.push(*input),
             Op::Negate(input) | Op::Threshold(input) | Op::Delay(input) => pending.push(*input),
             Op::Union(nodes) | Op::Join { inputs: nodes, .. } => pending.extend(nodes.iter().copied()),

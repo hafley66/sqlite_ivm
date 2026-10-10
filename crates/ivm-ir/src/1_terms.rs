@@ -23,6 +23,11 @@ pub struct Interner {
     any_by_id: BTreeMap<Cell, AnyValue>,
     next: Cell,
     pending: Vec<(Arc<str>, Row)>,
+    /// Every vec's items end to end; a vec is the range `vec_at` gives its id.
+    vec_cells: Vec<Cell>,
+    vec_at: HashMap<Cell, (usize, usize)>,
+    /// Content hash of a vec's items to the vec ids with that hash, so equal vecs share an id.
+    vec_by_hash: HashMap<u64, Vec<Cell>>,
 }
 
 impl Interner {
@@ -63,6 +68,32 @@ impl Interner {
     }
 
     pub fn text(&self, id: Cell) -> Option<&str> { self.by_id.get(&id)?.text.as_deref() }
+
+    /// Interns a vec of `items` whole: one id and one range of `vec_cells`, no constructor row.
+    pub fn mint_vec(&mut self, items: &[Cell]) -> Cell {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        items.hash(&mut hasher);
+        let hash = hasher.finish();
+        if let Some(same) = self.vec_by_hash.get(&hash) {
+            if let Some(id) = same.iter().find(|id| self.vec_items(**id) == Some(items)) {
+                return *id;
+            }
+        }
+        let id = self.next.checked_add(1).expect("term ID space exhausted");
+        self.next = id;
+        let start = self.vec_cells.len();
+        self.vec_cells.extend_from_slice(items);
+        self.vec_at.insert(id, (start, self.vec_cells.len()));
+        self.vec_by_hash.entry(hash).or_default().push(id);
+        id
+    }
+
+    /// The items of vec `id`, `None` when `id` is not a vec.
+    pub fn vec_items(&self, id: Cell) -> Option<&[Cell]> {
+        let (start, end) = *self.vec_at.get(&id)?;
+        Some(&self.vec_cells[start..end])
+    }
 
     pub fn text_id(&self, text: &str) -> Option<Cell> { self.by_text.get(text).copied() }
 

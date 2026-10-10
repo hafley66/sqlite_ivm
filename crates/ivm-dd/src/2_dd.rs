@@ -64,7 +64,7 @@ fn rec_inputs(p: &Program, rec: &LetRec) -> BTreeSet<RelId> {
         *seen = true;
         match &p.nodes[index] {
             Op::Get(rel) => { inputs.insert(*rel); }
-            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Mfp { input, .. }
+            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Vec { input, .. } | Op::Mfp { input, .. }
             | Op::Reduce { input, .. } | Op::TopK { input, .. } | Op::Window { input, .. } => pending.push(*input),
             Op::Negate(input) | Op::Threshold(input) | Op::Delay(input) => pending.push(*input),
             Op::Union(nodes) | Op::Join { inputs: nodes, .. } => pending.extend(nodes.iter().copied()),
@@ -570,6 +570,43 @@ impl<'s, T: Nest> Rel for DdRel<'s, T> {
         }))
     }
 
+    fn vec_op(&mut self, c: Self::C, op: VecOp, args: &[ColId]) -> Result<Self::C, EngineError> {
+        let expected = match op { VecOp::Build => args.len(), VecOp::Iter | VecOp::Len => 1, VecOp::Get => 2 };
+        if args.len() != expected {
+            return Err(EngineError::new(Stage::Install, None, ErrorKind::Arity { expected, actual: args.len() }));
+        }
+        let columns = args.to_vec();
+        let interner = self.interner.clone();
+        Ok(match op {
+            VecOp::Build => c.map(move |mut row: Row| {
+                let items: Row = columns.iter().map(|column| row[*column as usize]).collect();
+                let id = interner.borrow_mut().mint_vec(&items);
+                row.push(id);
+                row
+            }),
+            VecOp::Iter => c.flat_map(move |row: Row| {
+                let items = interner.borrow().vec_items(row[columns[0] as usize]).map(<[Cell]>::to_vec).unwrap_or_default();
+                items.into_iter().enumerate().map(move |(index, item)| {
+                    let mut out = row.clone();
+                    out.push(index as Cell);
+                    out.push(item);
+                    out
+                }).collect::<Vec<Row>>()
+            }),
+            VecOp::Len => c.flat_map(move |mut row: Row| {
+                let len = interner.borrow().vec_items(row[columns[0] as usize])?.len();
+                row.push(len as Cell);
+                Some(row)
+            }),
+            VecOp::Get => c.flat_map(move |mut row: Row| {
+                let index = usize::try_from(row[columns[1] as usize]).ok()?;
+                let item = *interner.borrow().vec_items(row[columns[0] as usize])?.get(index)?;
+                row.push(item);
+                Some(row)
+            }),
+        })
+    }
+
     fn mfp(&mut self, c: Self::C, filter: &[Expr], map: &[Expr], project: &[ColId], input_types: &[Ty]) -> Self::C {
         let (filter, map, project) = (filter.to_vec(), map.to_vec(), project.to_vec());
         let input_types = input_types.to_vec();
@@ -1041,6 +1078,7 @@ enum Command {
     DeclareConstructors(Vec<(String, Vec<Ty>)>, mpsc::Sender<Vec<RelId>>),
     InternText(String, mpsc::Sender<Cell>),
     Text(Cell, mpsc::Sender<Option<String>>),
+    VecItems(Cell, mpsc::Sender<Option<Vec<Cell>>>),
     InternAny(AnyValue, mpsc::Sender<Cell>),
     AnyValue(Cell, mpsc::Sender<Option<AnyValue>>),
     Stop,
@@ -1158,6 +1196,11 @@ impl Engine for Dd {
     fn text(&self, id: Cell) -> Result<Option<String>, EngineError> {
         let (reply, answer) = mpsc::channel();
         self.tx.send(Command::Text(id, reply)).map_err(|e| worker_error(Stage::Snapshot, e))?;
+        answer.recv().map_err(|e| worker_error(Stage::Snapshot, e))
+    }
+    fn vec_items(&self, id: Cell) -> Result<Option<Vec<Cell>>, EngineError> {
+        let (reply, answer) = mpsc::channel();
+        self.tx.send(Command::VecItems(id, reply)).map_err(|e| worker_error(Stage::Snapshot, e))?;
         answer.recv().map_err(|e| worker_error(Stage::Snapshot, e))
     }
     fn intern_any(&mut self, value: &AnyValue) -> Result<Cell, EngineError> {
@@ -1448,13 +1491,18 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
                 Command::InternTermBatch(terms, reply) => {
                     let mut given: Vec<Cell> = Vec::with_capacity(terms.len());
                     let answer = terms.iter().enumerate().try_for_each(|(index, (functor, args))| {
+                        if args.iter().any(|arg| matches!(arg, BatchArg::Earlier(earlier) if *earlier >= index)) {
+                            return Err(EngineError::new(Stage::Settle, Some(*functor), ErrorKind::Unsupported("intern_term_batch: argument names a later term")));
+                        }
+                        if *functor == VEC_FUNCTOR {
+                            let items: Row = args.iter().map(|arg| arg.cell(&given)).collect();
+                            given.push(interner.borrow_mut().mint_vec(&items));
+                            return Ok(());
+                        }
                         let (name, types) = constructors.get(functor)
                             .ok_or_else(|| EngineError::new(Stage::Settle, Some(*functor), ErrorKind::UnknownRel(*functor)))?;
                         if args.len() != types.len() {
                             return Err(EngineError::new(Stage::Settle, Some(*functor), ErrorKind::Arity { expected: types.len(), actual: args.len() }));
-                        }
-                        if args.iter().any(|arg| matches!(arg, BatchArg::Earlier(earlier) if *earlier >= index)) {
-                            return Err(EngineError::new(Stage::Settle, Some(*functor), ErrorKind::Unsupported("intern_term_batch: argument names a later term")));
                         }
                         let row: Row = args.iter().map(|arg| arg.cell(&given)).collect();
                         given.push(interner.borrow_mut().mint(name, &row, types));
@@ -1478,6 +1526,7 @@ fn worker(program: Program, hook: Option<Hook>, mode: Mode, rx: mpsc::Receiver<C
                 }
                 Command::InternText(value, reply) => { let _ = reply.send(interner.borrow_mut().mint_text(&value)); }
                 Command::Text(id, reply) => { let _ = reply.send(interner.borrow().text(id).map(str::to_owned)); }
+                Command::VecItems(id, reply) => { let _ = reply.send(interner.borrow().vec_items(id).map(<[Cell]>::to_vec)); }
                 Command::InternAny(value, reply) => { let _ = reply.send(interner.borrow_mut().mint_any(&value)); }
                 Command::AnyValue(id, reply) => { let _ = reply.send(interner.borrow().any_value(id).cloned()); }
                 Command::Stop => break,

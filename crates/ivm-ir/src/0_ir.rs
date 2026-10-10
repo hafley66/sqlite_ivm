@@ -137,6 +137,19 @@ pub enum StrMode {
     Decompose { whole: ColId },
 }
 
+/// One op over flat vecs, which the dictionary holds as an item list per id (`Interner::mint_vec`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum VecOp {
+    /// Append the id of the vec whose items are the `args` columns, in order.
+    Build,
+    /// One output row per item of the vec in `args[0]`: append its index, then the item.
+    Iter,
+    /// Append the item count of the vec in `args[0]`.
+    Len,
+    /// Append the item of the vec in `args[0]` at the index in `args[1]`; a miss drops the row.
+    Get,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Agg {
     Count,
@@ -179,6 +192,11 @@ pub enum Op {
     Str {
         input: NodeId,
         op: StrOp,
+        args: Vec<ColId>,
+    },
+    Vec {
+        input: NodeId,
+        op: VecOp,
         args: Vec<ColId>,
     },
     /// Filter, then append `map` columns, then keep `project` (empty = keep all).
@@ -236,7 +254,7 @@ impl Op {
     pub fn type_inputs(&self) -> &[NodeId] {
         match self {
             Op::Get(_) => &[],
-            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Mfp { input, .. }
+            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Vec { input, .. } | Op::Mfp { input, .. }
             | Op::Negate(input) | Op::Threshold(input) | Op::Delay(input) | Op::Reduce { input, .. }
             | Op::TopK { input, .. } | Op::Window { input, .. } | Op::Antijoin { l: input, .. } => std::slice::from_ref(input),
             Op::Union(inputs) => &inputs[..inputs.len().min(1)],
@@ -385,6 +403,16 @@ impl Program {
             Op::Str { input, op, .. } => {
                 let mut cols = types_of(*input)?;
                 match op.out() { Some(StrKind::Text) => cols.push(Ty::Id), Some(StrKind::Int) => cols.push(Ty::Int), None => {} }
+                cols
+            }
+            Op::Vec { input, op, .. } => {
+                let mut cols = types_of(*input)?;
+                match op {
+                    VecOp::Build => cols.push(Ty::Id),
+                    VecOp::Iter => cols.extend([Ty::Int, Ty::Id]),
+                    VecOp::Len => cols.push(Ty::Int),
+                    VecOp::Get => cols.push(Ty::Id),
+                }
                 cols
             }
             Op::Mfp { input, map, project, .. } => {

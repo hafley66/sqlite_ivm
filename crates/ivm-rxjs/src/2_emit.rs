@@ -14,7 +14,7 @@ fn cached() -> &'static str { "shareReplay({ bufferSize: 1, refCount: false })" 
 fn inputs(op: &Op) -> Vec<NodeId> {
     match op {
         Op::Get(_) => vec![],
-        Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Mfp { input, .. }
+        Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Vec { input, .. } | Op::Mfp { input, .. }
         | Op::Reduce { input, .. } | Op::TopK { input, .. } | Op::Window { input, .. } => vec![*input],
         Op::Union(inputs) | Op::Join { inputs, .. } => inputs.clone(),
         Op::Negate(input) | Op::Threshold(input) | Op::Delay(input) => vec![*input],
@@ -113,6 +113,8 @@ fn node_source(program: &Program, id: usize, op: &Op) -> Result<String, String> 
                 &[("INPUT", input.to_string()), ("ACTION", action), ("ID", id.to_string()), ("OLD", old), ("CACHE", cached().into())])
         }
         Op::Str { op, .. } => return Err(format!("string op {} has no rxjs emit", op.name())),
+        Op::Vec { .. } => return Err("vec op has no rxjs emit".into()),
+        Op::Vec { op, .. } => return Err(format!("vec op {op:?} has no rxjs emit")),
         Op::Mfp { input, filter, map, project } => {
             let condition = if filter.is_empty() { "true".into() } else { filter.iter().map(|e| format!("Number({}) !== 0", expression(e, "row"))).collect::<Vec<_>>().join(" && ") };
             let maps = map.iter().map(|e| format!("next.push({});", expression(e, "next"))).collect::<Vec<_>>().join(" ");

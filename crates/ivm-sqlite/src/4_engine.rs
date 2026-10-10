@@ -90,7 +90,7 @@ fn visit_node(ir: &Program, node: NodeId, seen: &mut [bool], relations: &mut Vec
         *slot = true;
         match &ir.nodes[node as usize] {
             Op::Get(id) => relations.push(*id),
-            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Mfp { input, .. }
+            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Vec { input, .. } | Op::Mfp { input, .. }
             | Op::Negate(input) | Op::Reduce { input, .. } | Op::Threshold(input)
             | Op::TopK { input, .. } | Op::Window { input, .. } | Op::Delay(input) => walk.push(*input),
             Op::Union(inputs) | Op::Join { inputs, .. } => walk.extend(inputs.iter().rev()),
@@ -150,7 +150,7 @@ fn output_program(ir: &Program, output: RelId) -> Program {
         };
         match &mut op {
             Op::Get(_) => {}
-            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Mfp { input, .. }
+            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Vec { input, .. } | Op::Mfp { input, .. }
             | Op::Negate(input) | Op::Reduce { input, .. } | Op::Threshold(input)
             | Op::TopK { input, .. } | Op::Window { input, .. } | Op::Delay(input) => rewrite(input),
             Op::Union(inputs) | Op::Join { inputs, .. } => inputs.iter_mut().for_each(&mut rewrite),

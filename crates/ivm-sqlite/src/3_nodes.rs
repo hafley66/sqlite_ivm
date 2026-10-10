@@ -159,7 +159,7 @@ fn nonmonotone(p: &Program, rec: &LetRec) -> bool {
     let inputs = |op: &Op| -> Vec<NodeId> {
         match op {
             Op::Get(_) | Op::Delay(_) => Vec::new(),
-            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Mfp { input, .. }
+            Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Vec { input, .. } | Op::Mfp { input, .. }
             | Op::Negate(input) | Op::Reduce { input, .. } | Op::Threshold(input)
             | Op::TopK { input, .. } | Op::Window { input, .. } => vec![*input],
             Op::Union(inputs) | Op::Join { inputs, .. } => inputs.clone(),

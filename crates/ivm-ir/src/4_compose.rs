@@ -39,7 +39,7 @@ fn texts(expr: &Expr, texts: &[u32], terms: &[u32]) -> Expr {
 fn inputs(op: &Op) -> Vec<NodeId> {
     match op {
         Op::Get(_) => Vec::new(),
-        Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Mfp { input, .. }
+        Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Vec { input, .. } | Op::Mfp { input, .. }
         | Op::Negate(input) | Op::Threshold(input) | Op::Delay(input) | Op::Reduce { input, .. }
         | Op::TopK { input, .. } | Op::Window { input, .. } => vec![*input],
         Op::Union(inputs) | Op::Join { inputs, .. } => inputs.clone(),
@@ -166,6 +166,7 @@ pub fn compose(parts: &[(&str, &Program)]) -> Result<Composed, String> {
                     Op::Mint { input, functor, args } => Op::Mint { input: n(*input), functor: rel(*functor), args: args.clone() },
                     Op::StrCons { input, mode } => Op::StrCons { input: n(*input), mode: mode.clone() },
                     Op::Str { input, op, args } => Op::Str { input: n(*input), op: *op, args: args.clone() },
+                    Op::Vec { input, op, args } => Op::Vec { input: n(*input), op: *op, args: args.clone() },
                     Op::Mfp { input, filter, map, project } => Op::Mfp {
                         input: n(*input),
                         filter: filter.iter().map(|e| texts(e, &text_map, &term_map)).collect(),

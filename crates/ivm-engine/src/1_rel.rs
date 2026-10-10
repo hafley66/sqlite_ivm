@@ -4,6 +4,9 @@ use ivm_ir::*;
 use smallvec::{smallvec, SmallVec};
 use std::fmt;
 
+/// The functor of an `Engine::intern_term_batch` entry that mints a flat vec of its arguments.
+pub const VEC_FUNCTOR: RelId = RelId::MAX;
+
 /// One argument of `Engine::intern_term_batch`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BatchArg {
@@ -170,6 +173,11 @@ pub trait Engine: Sized {
         Err(EngineError::new(Stage::Settle, None, ErrorKind::Unsupported("declare_constructors")))
     }
     fn text(&self, id: Cell) -> Result<Option<String>, EngineError>;
+    /// The items of vec `id` (`Interner::mint_vec`), `None` when `id` is not a vec.
+    fn vec_items(&self, id: Cell) -> Result<Option<Vec<Cell>>, EngineError> {
+        let _ = id;
+        Ok(None)
+    }
     fn intern_any(&mut self, value: &ivm_ir::AnyValue) -> Result<Cell, EngineError>;
     fn any_value(&self, id: Cell) -> Result<ivm_ir::AnyValue, EngineError>;
     /// Whether `mark` and `rewind` are supported. A caller asks before marking and keeps
@@ -195,6 +203,10 @@ pub trait Rel {
     fn mint(&mut self, c: Self::C, functor: RelId, args: &[ColId]) -> Result<Self::C, EngineError>;
     fn str_cons(&mut self, c: Self::C, mode: &StrMode) -> Result<Self::C, EngineError>;
     fn str_op(&mut self, c: Self::C, op: StrOp, args: &[ColId]) -> Result<Self::C, EngineError>;
+    fn vec_op(&mut self, c: Self::C, op: VecOp, args: &[ColId]) -> Result<Self::C, EngineError> {
+        let _ = (c, op, args);
+        Err(EngineError::new(Stage::Install, None, ErrorKind::Unsupported("vec op")))
+    }
     fn mfp(&mut self, c: Self::C, filter: &[Expr], map: &[Expr], project: &[ColId], input_types: &[Ty]) -> Self::C;
     fn union(&mut self, cs: Vec<Self::C>) -> Self::C;
     fn negate(&mut self, c: Self::C) -> Self::C;
@@ -442,7 +454,7 @@ pub fn lowered_inputs<C>(p: &Program, defined: &[(RelId, C)], op: &Op, fuse: boo
     }
     match op {
         Op::Get(_) | Op::Delay(_) => SmallVec::new(),
-        Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Mfp { input, .. }
+        Op::Mint { input, .. } | Op::StrCons { input, .. } | Op::Str { input, .. } | Op::Vec { input, .. } | Op::Mfp { input, .. }
         | Op::Negate(input) | Op::Reduce { input, .. } | Op::Threshold(input)
         | Op::TopK { input, .. } | Op::Window { input, .. } => smallvec![*input],
         Op::Join { inputs, equivalences, .. } => match decoded(p, defined, inputs, equivalences) {
@@ -543,6 +555,7 @@ fn build_node<A: Rel>(
         Op::Mint { functor, args, .. } => a.mint(first(), *functor, args)?,
         Op::StrCons { mode, .. } => a.str_cons(first(), mode)?,
         Op::Str { op, args, .. } => a.str_op(first(), *op, args)?,
+        Op::Vec { op, args, .. } => a.vec_op(first(), *op, args)?,
         Op::Mfp { input, filter, map, project } => {
             let types = a.node_types(p, *input).ok_or_else(|| EngineError::new(Stage::Install, None, ErrorKind::Unsupported("Mfp input types")))?;
             a.mfp(first(), filter, map, project, &types)
