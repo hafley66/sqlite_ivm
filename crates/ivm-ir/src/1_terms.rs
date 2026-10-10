@@ -1,6 +1,8 @@
 use crate::{AnyValue, Cell, Row, Ty};
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use hashbrown::{Equivalent, HashMap, HashSet};
+use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 /// `functor` and `text` are shared: the interner's maps and every copy of a
@@ -13,11 +15,30 @@ pub struct Term {
     pub text: Option<Arc<str>>,
 }
 
+/// `(functor, args)` borrowed: hashes as the owned `(Arc<str>, Row)` key, so a lookup that
+/// finds the term allocates nothing.
+struct KeyRef<'a>(&'a str, &'a [Cell]);
+
+impl Hash for KeyRef<'_> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+        self.1.hash(state);
+    }
+}
+
+impl Equivalent<(Arc<str>, Row)> for KeyRef<'_> {
+    fn equivalent(&self, key: &(Arc<str>, Row)) -> bool {
+        *key.0 == *self.0 && key.1 == self.1
+    }
+}
+
 #[derive(Default)]
 pub struct Interner {
     functors: HashSet<Arc<str>>,
     by_key: HashMap<(Arc<str>, Row), Cell>,
-    by_id: BTreeMap<Cell, Term>,
+    /// Slot `id` holds term `id`: ids are handed out in order, so a vec indexes them.
+    by_id: Vec<Option<Term>>,
+    terms: usize,
     by_text: HashMap<Arc<str>, Cell>,
     by_any: BTreeMap<AnyValue, Cell>,
     any_by_id: BTreeMap<Cell, AnyValue>,
@@ -31,9 +52,21 @@ pub struct Interner {
 }
 
 impl Interner {
-    pub fn len(&self) -> usize { self.by_id.len() + self.any_by_id.len() }
+    pub fn len(&self) -> usize { self.terms + self.any_by_id.len() }
+
+    fn put(&mut self, id: Cell, term: Term) {
+        let slot = usize::try_from(id).expect("term ID is positive");
+        if self.by_id.len() <= slot {
+            self.by_id.resize(slot + 1, None);
+        }
+        self.by_id[slot] = Some(term);
+        self.terms += 1;
+    }
 
     pub fn mint(&mut self, functor: &str, args: &[Cell], types: &[Ty]) -> Cell {
+        if let Some(id) = self.by_key.get(&KeyRef(functor, args)) {
+            return *id;
+        }
         let functor = match self.functors.get(functor) {
             Some(shared) => shared.clone(),
             None => {
@@ -42,14 +75,10 @@ impl Interner {
                 shared
             }
         };
-        let key = (functor.clone(), args.to_vec());
-        if let Some(id) = self.by_key.get(&key) {
-            return *id;
-        }
         let id = self.next.checked_add(1).expect("term ID space exhausted");
         self.next = id;
-        self.by_key.insert(key, id);
-        self.by_id.insert(id, Term { functor: functor.clone(), args: args.to_vec(), types: types.to_vec(), text: None });
+        self.by_key.insert((functor.clone(), args.to_vec()), id);
+        self.put(id, Term { functor: functor.clone(), args: args.to_vec(), types: types.to_vec(), text: None });
         let mut row = vec![id];
         row.extend_from_slice(args);
         self.pending.push((functor, row));
@@ -63,11 +92,11 @@ impl Interner {
         self.next = id;
         let shared: Arc<str> = Arc::from(text);
         self.by_text.insert(shared.clone(), id);
-        self.by_id.insert(id, Term { functor: Arc::from(""), args: vec![], types: vec![], text: Some(shared) });
+        self.put(id, Term { functor: Arc::from(""), args: vec![], types: vec![], text: Some(shared) });
         id
     }
 
-    pub fn text(&self, id: Cell) -> Option<&str> { self.by_id.get(&id)?.text.as_deref() }
+    pub fn text(&self, id: Cell) -> Option<&str> { self.get(id)?.text.as_deref() }
 
     /// `mint_text` that keeps `text`'s allocation instead of copying it.
     pub fn mint_shared_text(&mut self, text: Arc<str>) -> Cell {
@@ -75,7 +104,7 @@ impl Interner {
         let id = self.next.checked_add(1).expect("term ID space exhausted");
         self.next = id;
         self.by_text.insert(text.clone(), id);
-        self.by_id.insert(id, Term { functor: Arc::from(""), args: vec![], types: vec![], text: Some(text) });
+        self.put(id, Term { functor: Arc::from(""), args: vec![], types: vec![], text: Some(text) });
         id
     }
 
@@ -147,12 +176,17 @@ impl Interner {
     }
 
     pub fn get(&self, id: Cell) -> Option<&Term> {
-        self.by_id.get(&id)
+        self.by_id.get(usize::try_from(id).ok()?)?.as_ref()
+    }
+
+    /// Every term with its id, ascending.
+    fn entries(&self) -> impl Iterator<Item = (Cell, &Term)> {
+        self.by_id.iter().enumerate().filter_map(|(id, term)| Some((id as Cell, term.as_ref()?)))
     }
 
     pub fn snapshot(&self, functor: &str) -> Vec<(Row, i64)> {
-        self.by_id.iter().filter(|(_, term)| &*term.functor == functor).map(|(id, term)| {
-            let mut row = vec![*id];
+        self.entries().filter(|(_, term)| &*term.functor == functor).map(|(id, term)| {
+            let mut row = vec![id];
             row.extend(&term.args);
             (row, 1)
         }).collect()
@@ -165,9 +199,9 @@ impl Interner {
             slots.entry(functor).or_default().push(index);
         }
         let mut out = vec![Vec::new(); functors.len()];
-        for (id, term) in &self.by_id {
+        for (id, term) in self.entries() {
             let Some(indices) = slots.get(&*term.functor) else { continue };
-            let mut row = vec![*id];
+            let mut row = vec![id];
             row.extend(&term.args);
             for index in indices {
                 out[*index].push((row.clone(), 1));
@@ -320,7 +354,7 @@ mod tests {
         assert_eq!(terms.mint_text("écho"), later);
         assert_ne!(compound, later);
         assert_eq!(terms.compare(earlier, later), Ordering::Less);
-        assert_eq!((terms.text_id("é"), terms.text_id("cho"), terms.by_id.len()), (None, None, 3));
+        assert_eq!((terms.text_id("é"), terms.text_id("cho"), terms.len()), (None, None, 3));
     }
 
     /// Named budget: bytes of the minted text.
@@ -334,7 +368,7 @@ mod tests {
         let (count, back) = std::thread::Builder::new().stack_size(SMALL_STACK).spawn(move || {
             let mut terms = Interner::default();
             let id = terms.mint_text(&text);
-            (terms.by_id.len(), terms.text(id) == Some(text.as_str()))
+            (terms.len(), terms.text(id) == Some(text.as_str()))
         }).unwrap().join().unwrap();
         assert_eq!((count, back), (1, true));
     }
